@@ -1,0 +1,6 @@
+robot_api_msgs/RunContext context
+string lease_id
+builtin_interfaces/Duration duration
+---
+bool success
+string reason

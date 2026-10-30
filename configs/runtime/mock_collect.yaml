@@ -1,0 +1,18 @@
+schema_version: 1
+robot_profile: profiles/robots/mock_dual_arm_v1/profile.json
+observation_schema: profiles/observations/mock_rgb_joint_v1.json
+action_schema: profiles/actions/mock_joint_position_v1.json
+robot_namespace: /cell_01/robot
+lease_duration_ns: 2000000000
+renew_interval_ns: 500000000
+startup_timeout_s: 20.0
+call_timeout_s: 3.0
+command_timeout_s: 5.0
+command_acceptance_ns: 500000000
+script_targets:
+  - duration_ns: 800000000
+    positions: [0.2, -0.2, 0.15, -0.15, 0.02, 0.02]
+  - duration_ns: 800000000
+    positions: [-0.2, 0.2, -0.15, 0.15, 0.06, 0.06]
+  - duration_ns: 800000000
+    positions: [0.0, 0.0, 0.0, 0.0, 0.04, 0.04]

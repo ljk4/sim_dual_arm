@@ -1,0 +1,154 @@
+// Design draft only. No generated SDK or server is implemented yet.
+// SI joint-position contract; framework-specific processing stays in learning.
+syntax = "proto3";
+package bimanual.policy.v1;
+
+service PolicyService {
+  rpc GetPolicyInfo(GetPolicyInfoRequest) returns (PolicyInfo);
+  rpc OpenSession(OpenSessionRequest) returns (OpenSessionReply);
+  rpc Predict(PredictRequest) returns (PredictReply);
+  rpc ResetSession(ResetSessionRequest) returns (ResetSessionReply);
+  rpc CloseSession(CloseSessionRequest) returns (CloseSessionReply);
+}
+
+// IDs are checked together; a response from an old context cannot be executed.
+message RunContext {
+  string robot_id = 1;
+  string robot_profile_hash = 2;
+  string backend_instance_id = 3;
+  string time_domain_id = 4;
+  uint64 clock_epoch = 5;
+  string episode_id = 6;
+  uint64 control_epoch = 7;
+}
+
+message GetPolicyInfoRequest {
+  string model_bundle_digest = 1;
+}
+
+message PolicyInfo {
+  uint32 protocol_major = 1;
+  string model_bundle_digest = 2;
+  string processor_digest = 3;
+  string observation_schema_hash = 4;
+  string action_schema_hash = 5;
+  string robot_profile_hash = 6;
+  repeated string state_joint_names = 7;
+  repeated string action_joint_names = 8;
+  repeated string required_camera_names = 9;
+  uint64 action_period_ns = 10;
+  bool stateful = 11;
+  bool ready = 12;
+  // v1 accepts only "joint_position"; units are declared in the RobotProfile.
+  string command_space = 13;
+}
+
+message OpenSessionRequest {
+  RunContext context = 1;
+  string model_bundle_digest = 2;
+  string observation_schema_hash = 3;
+  string action_schema_hash = 4;
+  // Canonical JSON validated against the versioned schema, never Python pickle.
+  bytes robot_profile_json = 5;
+  bytes observation_schema_json = 6;
+  bytes action_schema_json = 7;
+  // Idempotency key for session creation; retries must not create duplicates.
+  string open_request_id = 8;
+}
+
+message OpenSessionReply {
+  string session_id = 1;
+  RunContext context = 2;
+  PolicyInfo policy = 3;
+}
+
+message JointSample {
+  uint64 state_seq = 1;
+  int64 captured_at_robot_time_ns = 2;
+  repeated string joint_names = 3;
+  repeated double positions = 4;
+  // Optional measurements: empty, or the same length/order as joint_names.
+  repeated double velocities = 5;
+  repeated double efforts = 6;
+}
+
+enum ImageEncoding {
+  IMAGE_ENCODING_UNSPECIFIED = 0;
+  RAW_RGB8 = 1;
+  PNG_RGB8 = 2;
+  JPEG_RGB8 = 3;
+}
+
+message CameraSample {
+  string camera_name = 1;
+  uint64 frame_seq = 2;
+  int64 captured_at_robot_time_ns = 3;
+  string frame_id = 4;
+  string calibration_digest = 5;
+  uint32 width = 6;
+  uint32 height = 7;
+  ImageEncoding encoding = 8;
+  // RAW_RGB8 is contiguous HWC uint8, exactly width*height*3 bytes.
+  bytes payload = 9;
+}
+
+message Observation {
+  uint64 observation_id = 1;
+  int64 reference_robot_time_ns = 2;
+  JointSample joints = 3;
+  repeated CameraSample cameras = 4;
+  string task_id = 5;
+  string task_text = 6;
+}
+
+message PredictRequest {
+  string session_id = 1;
+  string request_id = 2;
+  RunContext context = 3;
+  Observation observation = 4;
+}
+
+message JointTarget {
+  // Relative to an execution start selected by runtime, not server wall time.
+  // Points must be strictly increasing and have positions.size == joint_names.size.
+  uint64 time_from_start_ns = 1;
+  repeated double positions = 2;
+}
+
+message ActionChunk {
+  repeated string joint_names = 1;
+  repeated JointTarget targets = 2;
+}
+
+message PredictReply {
+  string session_id = 1;
+  string request_id = 2;
+  RunContext context = 3;
+  uint64 observation_id = 4;
+  string model_bundle_digest = 5;
+  ActionChunk action = 6;
+  // A server-local duration only; not an absolute cross-host timestamp.
+  uint64 inference_duration_ns = 7;
+}
+
+message ResetSessionRequest {
+  string session_id = 1;
+  string reset_id = 2;
+  RunContext new_context = 3;
+}
+
+message ResetSessionReply {
+  string session_id = 1;
+  string reset_id = 2;
+  RunContext context = 3;
+  bool ready = 4;
+}
+
+message CloseSessionRequest {
+  string session_id = 1;
+}
+
+message CloseSessionReply {
+  string session_id = 1;
+  bool closed = 2;
+}

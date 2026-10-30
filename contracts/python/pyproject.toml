@@ -1,0 +1,10 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+[project]
+name = "dual-arm-robot-contracts"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["PyYAML>=6,<7", "jsonschema>=4.10,<5"]
+[tool.setuptools.packages.find]
+where = ["src"]

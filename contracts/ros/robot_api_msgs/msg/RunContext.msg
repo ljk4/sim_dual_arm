@@ -1,0 +1,7 @@
+string robot_id
+string robot_profile_hash
+string backend_instance_id
+string time_domain_id
+uint64 clock_epoch
+string episode_id
+uint64 control_epoch

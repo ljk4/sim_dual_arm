@@ -1,0 +1,13 @@
+var/
+.build/
+.git/
+.agents/
+.aws/
+.codex/
+deploy/local/
+**/__pycache__/
+**/.venv/
+**/.pytest_cache/
+**/.ruff_cache/
+.env
+.env.*

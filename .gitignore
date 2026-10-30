@@ -1,0 +1,23 @@
+# Persistent data and experiments: store/backup separately from source control.
+/var/
+
+# Reproducible build and generated SDK outputs.
+/.build/
+
+# Machine-specific deployment bindings and downloaded external checkouts.
+/deploy/local/
+/third_party/src/
+
+# Python environments and caches.
+**/.venv/
+**/__pycache__/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+*.py[cod]
+
+# Keep public environment templates, exclude machine-specific values.
+.env
+.env.*
+!.env.example
+!**/.env.example

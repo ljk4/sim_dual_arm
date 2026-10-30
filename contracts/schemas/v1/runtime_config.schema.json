@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "robot_profile": {
+      "type": "string",
+      "minLength": 1
+    },
+    "observation_schema": {
+      "type": "string",
+      "minLength": 1
+    },
+    "action_schema": {
+      "type": "string",
+      "minLength": 1
+    },
+    "robot_namespace": {
+      "type": "string",
+      "minLength": 1
+    },
+    "lease_duration_ns": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "renew_interval_ns": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "command_acceptance_ns": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "startup_timeout_s": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "call_timeout_s": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "command_timeout_s": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "script_targets": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "duration_ns",
+          "positions"
+        ],
+        "properties": {
+          "duration_ns": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3000000000
+          },
+          "positions": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "robot_profile",
+    "observation_schema",
+    "action_schema",
+    "robot_namespace",
+    "lease_duration_ns",
+    "renew_interval_ns",
+    "command_acceptance_ns",
+    "startup_timeout_s",
+    "call_timeout_s",
+    "command_timeout_s",
+    "script_targets"
+  ]
+}

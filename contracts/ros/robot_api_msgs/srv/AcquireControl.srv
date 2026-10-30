@@ -1,0 +1,7 @@
+robot_api_msgs/RunContext context
+string owner_id
+builtin_interfaces/Duration duration
+---
+bool success
+string reason
+string lease_id

@@ -1,0 +1,9 @@
+uint32 protocol_major
+robot_api_msgs/RunContext context
+string backend_kind
+bool ready
+bool test_only
+string[] joint_names
+string[] joint_units
+string[] camera_names
+string[] capabilities

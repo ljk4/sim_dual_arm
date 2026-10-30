@@ -1,0 +1,37 @@
+# Design example, not an executable Compose or launch configuration.
+design_status: draft
+contract_major: 1
+
+# The semantic profile/schema files will be implemented with the first robot model.
+# They do not contain container addresses, vendor serial numbers or backend type.
+robot_id: cell_01_dual_arm
+robot_profile_id: dual_arm_v1
+observation_schema_id: bimanual_rgb_joint_v1
+action_schema_id: bimanual_joint_position_v1
+
+backend:
+  kind: sim                    # real | sim; exactly one active backend
+  public_namespace: /cell_01/robot
+  ros_domain_id: 42
+  deployment_config_id: gazebo_dual_arm_v1
+  # backend_instance_id and clock_epoch are discovered, not copied into this file.
+
+runtime:
+  control_source: script        # none | script | teleop | policy | replay
+  recording_required: true
+  raw_episode_root: /data/raw
+  # Infer use_sim_time from the active backend and reject inconsistent settings.
+  infer_clock_from_backend: true
+
+policy:
+  protocol: grpc
+  endpoint: learning:50051
+  model_bundle_id: example_act_bundle
+  # Resolve and verify the immutable bundle digest before opening the session.
+  max_inflight_requests: 1
+
+# Switching to a real backend changes backend.kind/deployment_config_id.
+# Addresses may change independently. Semantic profiles stay the same only when
+# real and simulated models represent the same validated robot/action semantics.
+# Limits, rates, deadlines and lease durations require measured/verified profiles;
+# no unverified device-specific defaults are supplied here.

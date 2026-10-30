@@ -1,0 +1,7 @@
+robot_api_msgs/RunContext context
+string lease_id
+string command_id
+uint64 command_seq
+uint64 observation_id
+builtin_interfaces/Time accept_before
+trajectory_msgs/JointTrajectory trajectory

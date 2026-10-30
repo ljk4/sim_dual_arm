@@ -1,0 +1,21 @@
+name: sim-dual-arm-stage2
+services:
+  backend:
+    image: sim-dual-arm/backend-mock:stage2
+    environment: &ros_environment
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-42}
+      ROS_LOCALHOST_ONLY: "0"
+    networks: [robot]
+    stop_grace_period: 5s
+  runtime:
+    image: sim-dual-arm/runtime:stage2
+    environment: *ros_environment
+    depends_on: [backend]
+    networks: [robot]
+    volumes:
+      - stage2-episodes:/data/raw
+    stop_grace_period: 5s
+networks:
+  robot: {}
+volumes:
+  stage2-episodes: {}

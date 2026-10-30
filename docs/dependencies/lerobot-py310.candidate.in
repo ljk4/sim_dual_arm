@@ -1,0 +1,15 @@
+# HISTORICAL CANDIDATE: superseded by the current design in ../docker-dependency-analysis.md.
+# Not an active baseline or deployment lock.
+# Analysis candidate, not a validated deployment lock.
+# Target: CPython 3.10, Linux x86_64. Install only in the isolated ML venv.
+# Keep ROS apt packages and their NumPy/OpenCV outside this environment.
+lerobot==0.4.4
+torch==2.7.1
+torchvision==0.22.1
+torchcodec==0.4.0
+numpy==2.2.6
+opencv-python-headless==4.12.0.88
+
+# Proposed local ROS <-> ML bridge.
+pyzmq>=25,<28
+msgpack>=1,<2

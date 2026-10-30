@@ -1,0 +1,15 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+exclude = [".build", "var", "docs/archive"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/unit"]
+pythonpath = [
+  "contracts/python/src",
+  "libraries/backend_core/src",
+  "components/runtime/ros/dual_arm_runtime",
+]

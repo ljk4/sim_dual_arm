@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "complete": {
+      "type": "boolean"
+    },
+    "test_only": {
+      "const": true
+    },
+    "source": {
+      "const": "mock"
+    },
+    "episode_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "robot_profile_hash": {
+      "type": "string",
+      "minLength": 1
+    },
+    "observation_schema_hash": {
+      "type": "string",
+      "minLength": 1
+    },
+    "action_schema_hash": {
+      "type": "string",
+      "minLength": 1
+    },
+    "started_at_ns": {
+      "type": "integer"
+    },
+    "ended_at_ns": {
+      "type": "integer"
+    },
+    "message_counts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "files": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      }
+    },
+    "failure_reason": {
+      "type": "string"
+    },
+    "configuration": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema_version",
+    "complete",
+    "test_only",
+    "source",
+    "episode_id",
+    "robot_profile_hash",
+    "observation_schema_hash",
+    "action_schema_hash",
+    "started_at_ns",
+    "ended_at_ns",
+    "message_counts",
+    "files",
+    "failure_reason",
+    "configuration"
+  ]
+}

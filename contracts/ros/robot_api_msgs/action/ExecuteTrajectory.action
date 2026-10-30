@@ -1,0 +1,9 @@
+robot_api_msgs/TrajectoryCommand command
+---
+bool success
+string command_id
+string phase
+string reason
+---
+string phase
+sensor_msgs/JointState state

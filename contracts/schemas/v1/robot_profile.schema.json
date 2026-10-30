@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "test_only": {
+      "const": true
+    },
+    "robot_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "profile_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "joints": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "unit": {
+            "enum": [
+              "rad",
+              "m"
+            ]
+          },
+          "min": {
+            "type": "number"
+          },
+          "max": {
+            "type": "number"
+          },
+          "max_velocity": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "initial": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "unit",
+          "min",
+          "max",
+          "max_velocity",
+          "initial"
+        ]
+      }
+    },
+    "camera": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 640
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 480
+        },
+        "frame_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "name",
+        "width",
+        "height",
+        "frame_id"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "test_only",
+    "robot_id",
+    "profile_id",
+    "joints",
+    "camera"
+  ]
+}

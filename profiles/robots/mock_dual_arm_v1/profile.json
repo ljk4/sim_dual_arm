@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "test_only": true,
+  "robot_id": "mock_dual_arm",
+  "profile_id": "mock_dual_arm_v1",
+  "joints": [
+    {
+      "name": "left_j1",
+      "unit": "rad",
+      "min": -1.0,
+      "max": 1.0,
+      "max_velocity": 1.0,
+      "initial": 0.0
+    },
+    {
+      "name": "left_j2",
+      "unit": "rad",
+      "min": -1.0,
+      "max": 1.0,
+      "max_velocity": 1.0,
+      "initial": 0.0
+    },
+    {
+      "name": "right_j1",
+      "unit": "rad",
+      "min": -1.0,
+      "max": 1.0,
+      "max_velocity": 1.0,
+      "initial": 0.0
+    },
+    {
+      "name": "right_j2",
+      "unit": "rad",
+      "min": -1.0,
+      "max": 1.0,
+      "max_velocity": 1.0,
+      "initial": 0.0
+    },
+    {
+      "name": "left_gripper",
+      "unit": "m",
+      "min": 0.0,
+      "max": 0.08,
+      "max_velocity": 0.1,
+      "initial": 0.04
+    },
+    {
+      "name": "right_gripper",
+      "unit": "m",
+      "min": 0.0,
+      "max": 0.08,
+      "max_velocity": 0.1,
+      "initial": 0.04
+    }
+  ],
+  "camera": {
+    "name": "front",
+    "width": 64,
+    "height": 48,
+    "frame_id": "front_optical_frame"
+  }
+}
