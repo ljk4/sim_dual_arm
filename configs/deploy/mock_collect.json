@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "work_deadline_s": 60.0,
+  "command_timeout_s": 30.0,
+  "poll_interval_s": 0.25,
+  "audit_timeout_s": 20.0,
+  "stop_grace_s": 20.0,
+  "cleanup_timeout_s": 20.0,
+  "diagnostic_max_bytes": 262144,
+  "launcher_log_max_bytes": 4194304,
+  "launcher_log_max_event_bytes": 32768,
+  "launcher_log_close_timeout_s": 3.0,
+  "launcher_log_queue_capacity": 256,
+  "min_mock_motion_rad": 0.05
+}

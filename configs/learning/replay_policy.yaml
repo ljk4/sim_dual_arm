@@ -1,0 +1,46 @@
+# Fake Policy RPC service used only by the diagnostic runtime and tests.
+# It injects the typed test provider into the production service layer; it is
+# not a training/evaluation data source and never claims task success.
+service:
+  schema_version: 1
+  bind_address: 0.0.0.0
+  port: 50051
+  max_workers: 8
+  max_message_bytes: 16777216
+  max_sessions: 8
+  max_open_requests: 128
+  max_request_cache: 128
+  predict_deadline_s: 2.0
+  open_deadline_s: 2.0
+  close_deadline_s: 2.0
+  test_only: true
+  protocol_major: 1
+  stateful: true
+  model_bundle_digest: 9f2c67c0c4b0a4f6f5a0d9b6c1f8f0c5c4f3e2d1a0b9c8d7e6f5a4b3c2d1e0f9
+  processor_digest: 1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809
+  observation_schema_hash: 452d8a153ff0f034ce70f8728701a21983c51c602dd407e1c6ba127c9fc120c0
+  action_schema_hash: 93689bc5d071efffd9f700b12aec0fedc9ff458132c8af13c2531114dcb3ca16
+  robot_profile_hash: a95b0f8121fcc9b5636eb8bbe582f86eec4d2b133c7eaf799e90f18c59cb8db8
+  joint_names: [left_joint1, left_joint2, left_joint3, left_joint4, left_joint5, left_joint6, left_joint7, left_gripper_width, right_joint1, right_joint2, right_joint3, right_joint4, right_joint5, right_joint6, right_joint7, right_gripper_width]
+  joint_lower_bounds: [-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973, 0.0, -2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973, 0.0]
+  joint_upper_bounds: [2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973, 0.08, 2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973, 0.08]
+  action_joint_names: [left_joint1, left_joint2, left_joint3, left_joint4, left_joint5, left_joint6, left_joint7, left_gripper_width, right_joint1, right_joint2, right_joint3, right_joint4, right_joint5, right_joint6, right_joint7, right_gripper_width]
+  camera_names: [global, left_wrist, right_wrist]
+  camera_width: 320
+  camera_height: 240
+  action_period_ns: 50000000
+  chunk_size: 60
+  task_id: stack-label-replay
+  task_text: Replay exported applied teacher labels through the same bounded follower; test-only, not ACT.
+  command_space: joint_position
+
+fake:
+  # Test-only 60-point reference replay from an exported teacher label file.
+  # The value is resolved from the environment by fake_provider; it never reads
+  # teacher truth or changes object state.
+  amplitude_rad: 0.01
+  amplitude_m: 0.001
+  latency_s: 0.01
+  fault: none
+  stop_after_predictions: 0
+  replay_labels: env:STACK_REPLAY_LABELS

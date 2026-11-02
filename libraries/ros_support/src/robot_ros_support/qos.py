@@ -9,3 +9,6 @@ INFO_QOS = QoSProfile(
 )
 SENSOR_QOS = QoSProfile(depth=5, reliability=ReliabilityPolicy.BEST_EFFORT)
 EVENT_QOS = QoSProfile(depth=100, reliability=ReliabilityPolicy.RELIABLE)
+
+# Task recording: bounded reliable history, shared explicitly by both endpoints.
+RELIABLE_SENSOR_QOS = QoSProfile(depth=32, reliability=ReliabilityPolicy.RELIABLE)

@@ -1,0 +1,81 @@
+# ACT policy runtime controlled by the independent task judge.
+# The policy still sees only three RGB images plus 16 measured joints; task
+# truth and teacher phases stay in the separate diagnostic channel.
+schema_version: 1
+robot_profile: ../../profiles/robots/panda_stack_learning_v1/profile.json
+observation_schema: ../../profiles/observations/panda_rgb_joint_v1.json
+action_schema: ../../profiles/actions/panda_joint_position_v1.json
+control_constraints: ../simulation/panda_control.yaml
+follower_constraints: ../simulation/panda_follower.yaml
+robot_namespace: /robot
+
+action_source: policy
+
+lease_duration_ns: 2000000000
+renew_interval_ns: 500000000
+command_acceptance_ns: 500000000
+startup_timeout_s: 30.0
+call_timeout_s: 5.0
+command_timeout_s: 8.0
+
+reset:
+  enabled: true
+  seed: 0
+
+observation:
+  reliable: true
+  max_skew_ns: 0
+  max_age_ns: 500000000
+  wall_arrival_timeout_s: 1.5
+  capacity: 32
+
+control:
+  submit_query_retries: 2
+  poll_interval_s: 0.02
+  stop_timeout_s: 8.0
+  terminal_timeout_s: 20.0
+
+policy:
+  # This file is a template for tools/run/stack_once.py, which reads the real
+  # endpoint and bundle/processor digests from the verified 035 bundle and
+  # writes the launchable runtime config.  These placeholders are deliberately
+  # not model identities and a direct launch must fail validation.
+  endpoint: act-policy:50051
+  model_bundle_digest: FROM_VERIFIED_ACT_BUNDLE
+  processor_digest: FROM_VERIFIED_ACT_BUNDLE
+  allow_test_policy: false
+  expected_test_only: false
+  task_id: panda-stack
+  task_text: Pick up the red source cube and place it on the blue target cube.
+  chunk_size: 60
+  action_period_ns: 50000000
+  target_count: 5
+  initial_lead_ns: 250000000
+  max_chunks: 128
+  total_sim_deadline_ns: 30000000000
+  total_wall_deadline_s: 60.0
+  connect_timeout_s: 2.0
+  open_deadline_s: 2.0
+  predict_deadline_s: 2.0
+  close_deadline_s: 2.0
+  max_message_bytes: 16777216
+  poll_interval_s: 0.02
+  termination_mode: task
+  task_stop_margin_s: 1.0
+  task_sim_budget_ns: 30000000000
+
+motions: []
+
+logging:
+  queue_capacity: 256
+  max_event_bytes: 32768
+  max_file_bytes: 8388608
+  max_total_bytes: 268435456
+  close_timeout_s: 3.0
+  flush_interval_s: 0.2
+  console: false
+recording:
+  queue_capacity: 1024
+  max_pending_bytes: 67108864
+  startup_timeout_s: 5.0
+  close_timeout_s: 5.0

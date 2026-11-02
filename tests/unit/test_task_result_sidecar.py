@@ -1,0 +1,52 @@
+from types import SimpleNamespace
+
+from dual_arm_runtime.task_result import task_fact_document, task_result_for_runtime
+from robot_contracts.episodes import TaskOutcome
+
+
+def _fact(state, reason):
+    return SimpleNamespace(
+        state=state,
+        reason=reason,
+        task_epoch=3,
+        state_seq=9,
+        sample_time=SimpleNamespace(sec=1, nanosec=2),
+        task_start_time=SimpleNamespace(sec=1, nanosec=0),
+        first_satisfied_time=SimpleNamespace(sec=2, nanosec=0),
+        completed_time=SimpleNamespace(sec=2, nanosec=500_000_000),
+        stable_elapsed_s=2.0,
+        task_config_digest="config",
+        plan_digest="plan",
+        conditions_passed=True,
+        conditions_bitmask=16383,
+        source_target_normal_force=1.0,
+        target_table_normal_force=1.0,
+        finger_contact_count=0,
+        right_gripper_opening=0.08,
+        right_tcp_distance=0.1,
+    )
+
+
+def test_frozen_task_success_and_timeout_are_independent_dimensions():
+    success = task_result_for_runtime("TASK_SUCCEEDED", _fact("SUCCEEDED", "SUCCESS"))
+    assert success.outcome is TaskOutcome.SUCCEEDED
+    timed = task_result_for_runtime(
+        "TASK_TIMEOUT", _fact("FAILED", "TIMEOUT: task exceeded")
+    )
+    assert timed.outcome is TaskOutcome.TIMED_OUT
+    gate = task_result_for_runtime("TASK_FAILED", _fact("RUNNING", ""))
+    assert gate.outcome is TaskOutcome.NOT_EVALUATED
+    no_fact = task_result_for_runtime("TASK_SUCCEEDED", None)
+    assert no_fact.outcome is TaskOutcome.NOT_EVALUATED
+
+
+def test_sidecar_stays_small_and_has_no_images_or_masks():
+    document = task_fact_document(
+        _fact("SUCCEEDED", "SUCCESS"),
+        task_result_for_runtime("TASK_SUCCEEDED", _fact("SUCCEEDED", "SUCCESS")),
+        action_source="teacher",
+        test_only=False,
+    )
+    assert document["task"]["state"] == "SUCCEEDED"
+    assert document["result"]["outcome"] == "succeeded"
+    assert "images" not in document and "segmentation" not in document

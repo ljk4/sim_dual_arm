@@ -2,7 +2,7 @@
 
 当前实现是 CPU-only 的测试控制与采集链路。mock 后端提供合成关节反馈与 RGB 帧，runtime 通过公共 ROS API 执行脚本目标、同步观测并记录原生 rosbag2/MCAP。所有记录标记 `source=mock`、`test_only=true`，不作为正式示教数据。
 
-2026-10-30 审查确认成功链路仍通过，但发现人工中断、观测身份和控制清理缺口。当前先进行阶段 2R 整改，见 [审查记录](maintainability-review.md)；下文演示命令不代表所有中断/故障路径已覆盖。
+2026-10-30 审查确认成功链路仍通过，但发现人工中断、观测身份和控制清理缺口。R1～R3 已通过 [DSH-001](tasks/dsh-001-result.md)、[DSH-002](tasks/dsh-002-result.md)、[DSH-003](tasks/dsh-003-result.md) 修复并验收；DSH-008 已把结构化事件日志接入 runtime，DSH-009 已把 MCAP 写入移到有界后台队列并改成流式审计/分块哈希，DSH-010 已实现 episode manifest v2 三维结果与人工结束语义，DSH-011/012 已完成 Compose 开发栈与人工命令，DSH-013 已把自动采集统一到 Compose 并写整次运行状态。当前继续职责与阶段 2R 整改，见 [审查记录](maintainability-review.md)。
 
 ## 1. 运行要求
 
@@ -10,9 +10,73 @@
 - 首次构建需要下载 ROS/Python 镜像及 apt/Python 依赖。
 - 本阶段不需要 GPU、真机、宿主机 ROS 或模型权重。
 
-默认入口直接使用 Docker CLI，因此不要求 Compose 插件。`deploy/compose/mock.yaml` 提供可选的 Compose 定义；当前宿主机缺少 Compose 插件，实际容器间验证使用的是 Docker CLI 入口。
+开发与自动采集入口都使用 `deploy/compose/mock.yaml`（自动采集另叠加 `deploy/compose/mock_collect.yaml`）和本机 Compose v5.6.1。两者都不需要宿主机 ROS 或 GPU。
 
-## 2. 构建
+## 2. Compose 开发入口（源码/配置挂载）
+
+开发镜像基于已有的 `sim-dual-arm/ros-base:stage2` 稳定依赖层；该镜像不存在时先执行 `bash tools/build/stage2.sh`（会同时构建发布/测试镜像）。首次构建开发依赖镜像，并按 `contracts/ros` 生成 ROS 接口到 `.build/ros-dev`：
+
+```bash
+bash tools/build/dev.sh
+```
+
+只重建依赖镜像或只重建 ROS 契约：
+
+```bash
+bash tools/build/dev.sh image       # 依赖变化时
+bash tools/build/dev.sh contracts   # contracts/ros 变化时，先停服务
+```
+
+构建输出根 `.build/ros-dev` 首次必须是空目录或尚不存在；builder 在锁内写入 `workspace.json` 归属标记后才清理 `build/install/log`。已有非空且未归属的目录会被拒绝且不删除文件；失败构建保留归属标记和失败产物，可用同一输出根重试。缓存使用 `colcon-home` 和 `/tmp/ros-dev-logs`，不重设 `HOME`。开发镜像直接执行仓库挂载中的开发入口，修改 entrypoint 不需重建镜像；入口的 check/status 诊断写 stderr，应用的 stdout 保持可解析。
+
+使用无需宿主机 ROS 的人工入口启动、查看和操作 mock 开发栈。公共选项必须放在子命令之前，`--run-id` 必须是新的安全路径段：
+
+```bash
+python3 tools/run/mock.py --run-id dev-001 up
+python3 tools/run/mock.py --run-id dev-001 status
+python3 tools/run/mock.py --run-id dev-001 start --task-id mock-script
+# <ID> 是上一条 start 输出的 episode_id
+python3 tools/run/mock.py --run-id dev-001 end --episode-id <ID> --reason OPERATOR_STOP --wait
+python3 tools/run/mock.py --run-id dev-001 start --task-id mock-script --wait
+python3 tools/run/mock.py --run-id dev-001 down
+
+# 查看容器日志仍使用底层转发入口；不会新建 run
+python3 tools/run/dev_compose.py --run-id dev-001 logs -f runtime
+# 只校验 Compose 配置，不创建 run 目录、不启动容器
+python3 tools/run/dev_compose.py --run-id config-check config >/dev/null
+```
+
+主机入口只创建 `var/runs`、`var/data/raw` 等挂载父目录；`<runs-root>/<run-id>` 由 runtime 独占创建。`up` 在项目已有容器时明确拒绝，启动后必须实际观察到 runtime/backend running、runtime 初始 `IDLE` 以及 start/end 服务可发现才算成功；Compose 退出 0 不等于 ready。启动部分失败时只清理经 project/service/run/挂载确认属于本次的容器（移除容器，不删除 bind 产物）。`status` 报告最后发布的状态并复查容器存活；缓存的状态不能证明已退出的进程健康，容器退出时返回实际退出码。当前状态消息没有心跳时间，不能用它推断新鲜时间或终态。
+
+`--timeout` 默认 30 秒，是本条命令从服务发现、RPC 到等待终态的共享 monotonic 期限。`--project`、`--image`、`--build-root`、`--raw-root`、`--runs-root`、`--docker`、`--run-id` 与 `dev_compose.py` 含义相同。操作前会按 Compose project/service 标签、runtime 命令中的 run id、镜像以及源码/build/raw/runs 挂载核对实际容器，不按名字模糊匹配；项目内其他 run、缺失/多个 runtime、旧镜像或不匹配的输出根会被拒绝。
+
+人工 start/end 必须串行操作。`start` 不带 `--wait` 只返回服务已接受的 `PREPARING` ACK 和 episode id；带 `--wait` 只等待该 ACK episode 的 `IDLE/FAULT`，不会把上一个 episode 的终态当成成功。重复的活动 start 由服务拒绝。`end` 必须给出非空 `--episode-id`，先核对最新状态；id 不匹配时不会发送 EndEpisode。成功 ACK 为 `ENDING`，只表示请求被接受，不表示记录已落盘；带 `--wait` 才继续等待该 id 的终态和最终 manifest。EndEpisode 的 wire 不携带 episode id，检查与发送之间存在间隙，因此不能原子地停止并发操作者选定的 episode。
+
+`--wait` 读取的最终 manifest 必须来自 `/data/raw/<run_id>/` 内该 episode，并核对 run/episode id、`schema_version=2` 和 recording/runtime/task 三维结果。缺失、损坏、不完整或 `runtime=failed/interrupted` 时命令非零；正常 `completed` 或人工 `stopped` 且记录完整才作为对应等待操作成功。该 episode 终态为 `FAULT` 时始终非零，即使磁盘上恰好存在完整或 completed 的 manifest，也不会被升格为成功。`task=not_evaluated` 原样返回，不推导任务成功。客户端只读 manifest，不冒充独立 MCAP audit，输出明确 `audit_verified=false`；需要整次运行退出码、日志排空和独立 MCAP audit 汇总时使用第 4 节的自动采集入口。`down` 在归属检查后有界停止指定栈，保留挂载产物，重复执行报告已停止；它不会写全局 `succeeded`。Compose 返回非零时保留 `COMPOSE_DOWN_FAILED`，即使容器已全部消失也不伪装成功。runtime 容器的停止宽限期为 30 秒，正常的 `down` 可能需要超过默认 30 秒的 `--timeout`，例如 `--timeout 60`。
+
+需要执行一次 `--once` 时，仍可使用新的 run id 并覆写 Compose 命令：
+
+```bash
+python3 tools/run/dev_compose.py --run-id dev-once-001 run --rm runtime \
+  python -m dual_arm_runtime.node --project-root /workspace \
+  --config /workspace/configs/runtime/mock_collect.yaml \
+  --output /data/raw/dev-once-001 --run-id dev-once-001 \
+  --runs-output /data/runs --once
+python3 tools/run/dev_compose.py --run-id dev-once-001 down
+```
+
+挂载与产物边界：
+
+| 内容 | 宿主机路径 | 容器路径 | 权限 |
+| --- | --- | --- | --- |
+| 源码、profiles、configs | 仓库根 | `/workspace` | 只读 |
+| 生成契约与 build/install/log | `.build/ros-dev/` | `/opt/ros-dev` | 服务只读；仅 builder 可写 |
+| 原始 MCAP | `var/data/raw/<run_id>/episode-*/` | `/data/raw/<run_id>/` | runtime 写 |
+| resolved、事件日志 | `var/runs/<run_id>/` | `/data/runs/<run_id>/` | runtime 写 |
+
+修改 Python 源码或 YAML 后，用新的 run id 执行 `down` 再 `up` 即可生效，不需要重建镜像；同一 run 目录不能复用。修改 `contracts/ros` 必须先停服务再执行 `dev.sh contracts`。未重建时服务入口会比较源码摘要并拒绝启动，错误信息给出重建命令，不会回退到镜像内的旧 SDK。只有依赖变化才重建 `sim-dual-arm/dev-ros:stage2`。runtime 容器的停止宽限期为 30 s，大于应用 `--shutdown-timeout`（15 s）及日志/记录关闭预算。
+
+## 3. 发布/测试镜像构建
 
 从仓库根执行：
 
@@ -29,41 +93,97 @@ bash tools/build/stage2.sh
 | `sim-dual-arm/runtime:stage2` | 公共接口客户端、episode、观测、MCAP 记录与审计 |
 | `sim-dual-arm/learning:protocol` | 无 ROS 环境中的独立 Policy SDK 生成和导入验证 |
 
-learning 镜像当前只覆盖协议层，不包含训练框架或模型服务。Gazebo 后端和真实设备驱动仍属于后续阶段。
+learning 镜像当前只覆盖协议层，不包含训练框架或模型服务。MuJoCo 后端和真实设备驱动仍属于后续阶段。
 
-## 3. 一次完整的控制采集演示
+## 4. 自动控制采集与整次运行监督
 
 ```bash
+# 默认生成新的 run id 和隔离 Compose 项目
 bash tools/run/mock_collect.sh
+
+# 显式指定项目、run id、挂载根，并先运行公开 backend 探针
+python3 tools/run/mock_collect.py --project collect-demo-01 --run-id demo-01 \
+  --raw-root var/data/raw --runs-root var/runs --probe-backend
 ```
 
-启动器会创建唯一命名的临时网络、数据卷和两个容器：
+`mock_collect.sh` / `mock_collect.py` 只是兼容入口，监督职责在 `tools/run/collect_run.py`。一次调用按顺序完成：
 
-1. mock 后端发布公共 info、关节状态、64×48 RGB 图像及控制服务/action。
-2. runtime 读取配置、校验 profile、获取控制 lease，执行三段 0.8 秒关节目标并持续记录。
-3. 等待对应的 ACCEPTED / STARTED / COMPLETED 事件，停止并释放控制权。
-4. 关闭 MCAP writer，校验样本引用、时间对齐、动作反馈和实际关节变化，写 manifest 并原子提交。
-5. 在单独的离线容器中重新读取和审计记录，将数据导出到宿主机项目目录，最后清理本次创建的容器和网络。
+1. 读取 `configs/deploy/mock_collect.json`，拒绝未知字段、bool 冒充数字、NaN/Inf、非正数和不合理预算；有效值和 SHA-256 写入 `launcher.json`。
+2. 确认 Compose 项目不存在、run/raw 产品未被占用，在 `<runs-root>/.launch/<run-id>/` 独占保存启动证据；`<runs-root>/<run-id>` 仍由 runtime 独占创建，监督者不预建。
+3. 用同一 Compose 组合启动 mock backend 和带 `--once` 的 runtime；`--probe-backend` 会先单独启动 backend 并运行现有公开探针，再启动 runtime，仍在整体期限内且不与正式动作争抢 lease。
+4. 轮询真实容器状态；runtime 自然退出或失败后先读取实际退出码和诊断。runtime 非零、backend 提前退出、整体超时、SIGINT/SIGTERM 都进入有界失败/中断收尾。
+5. runtime 实际退出 0 后，检查本次唯一 runtime 事件日志 `summary.json`：`state=complete`、run/component/instance 身份匹配、attempted/enqueued/written 自洽、所有事件文件存在；目录存在或 `run.finalizing` 不算退出证据。
+6. 在独立、有界的一次性工具容器中调用现有 `dual_arm_runtime.audit`，叠加 `deploy/compose/mock_audit.yaml` 把源码/SDK 和 raw/runs 数据挂载全部覆盖为只读，避免 audit 修改原始记录；audit 必须对应本 run/episode，v2、`recording.complete=true`、`runtime.outcome=completed`、`source=mock`、`test_only=true`、观测/帧非空、三段命令都有真实 terminal、`commands_without_terminal=0`、mock 运动大于 `min_mock_motion_rad`。`task` 原样保持 `not_evaluated`。
+7. 审计完成后由监督者正常停止 backend，记录实际退出码并按 backend 正常值（0 或 SIGTERM 143）检查；137/未知强杀不算正常关闭。最后只按已核对的 runtime/backend/tool ID 移除本次资源，网络仅在确认没有外来端点时删除；同 project label 的其他容器/端点保留并报告 `cleanup.foreign`，不批量 `rm` 或 `remove-orphans`。
 
-成功后输出 `complete: true`、观测/帧/命令数量、关节运动范围和导出路径，例如：
+结果目录：
 
 ```text
-var/runs/sim-dual-arm-check-<id>/episode-<uuid>/
-├── manifest.json
-└── recording/
-    ├── metadata.yaml
-    └── recording_0.mcap
+var/data/raw/<run-id>/
+└── episode-<uuid>/
+    ├── manifest.json
+    └── recording/
+        ├── metadata.yaml
+        └── recording_0.mcap
+
+var/runs/<run-id>/
+├── status.json                 # running -> succeeded/failed/interrupted；原子替换
+├── launcher.json               # 有效配置/哈希、实际镜像 ID、源码摘要、Git HEAD 参考
+├── artifacts/audit.json        # 独立 audit 的完整 JSON（若已执行）
+├── diagnostics/                # 有界 Docker/子进程 tail，截断会记录
+├── resolved/runtime.json
+├── versions.json
+└── logs/
+    ├── launcher/<instance_id>/...
+    └── runtime/<instance_id>/
+        ├── events.000001.jsonl
+        └── summary.json
 ```
 
-默认项目名带随机后缀，输出目录必须尚不存在。需要指定输出时：
+`status.json` 以 `running` 开始，结束后原子写成 `succeeded` / `failed` / `interrupted`，包含阶段、稳定 reason、UTC 起止时间、monotonic 耗时、组件容器 ID 与实际退出码（未知为 `null`）、recording/runtime/task 三维结果、audit 结果与证据路径、关键日志排空、cleanup 结果和附加错误。三维结果优先取自与本次 run 匹配的 v2 manifest：audit/日志/launcher 故障只影响整体状态，不倒改已知的 runtime/recording/task 来源；缺少结果时保留 `unknown`/`null` 或进程退出证据。示例：
 
-```bash
-python3 tools/run/mock_collect.py --output var/runs/my-first-mock
+```json
+{
+  "schema_version": 1,
+  "run_id": "collect-20261030T120000Z-ab12cd",
+  "status": "succeeded",
+  "phase": "finished",
+  "reason": "OK",
+  "exit_code": 0,
+  "components": {
+    "runtime": {"container_id": "...", "exit_code": 0, "running": false},
+    "backend": {"container_id": "...", "exit_code": 143, "running": false, "stopped_by_launcher": true}
+  },
+  "recording": {"complete": true, "episode_id": "episode-..."},
+  "runtime": {"outcome": "completed", "reason": ""},
+  "task": {"outcome": "not_evaluated", "reason": ""},
+  "audit": {"passed": true, "path": "var/runs/<run-id>/artifacts/audit.json"},
+  "logs": {"runtime_drained": true, "launcher_closed": true},
+  "cleanup": {"complete": true}
+}
 ```
 
-只有导出成功后才删除本次新建的数据卷；未能导出时会打印保留的数据卷名。经正常错误收尾的失败记录位于 `.partial-episode-*`，`manifest.complete=false`，不会作为完整 episode 提交。当前信号中断可能来不及生成 manifest，不能将进程退出码 0 单独当作完整记录的依据。
+`succeeded` 只在真实退出 0、独立 audit、runtime/launcher 关键日志关闭和必要 cleanup 检查全部通过后发布；主故障保留，后续停止/日志/清理错误追加到 `errors`，不会被最后一个不相关错误覆盖。`succeeded` 只表示这次 mock 控制采集操作通过，不表示物理任务成功或正式训练数据合格。
 
-## 4. 修改脚本与机器人语义
+退出码：正常 0、失败 1、配置/参数错误 2、整次工作期限超时 124、SIGINT 130、SIGTERM 143。
+
+最坏等待边界由配置给出：默认整次工作墙钟期限 60 s，包含启动、episode 和独立 audit；失败/信号后的停止使用一次共享 `stop_grace_s`（默认 20 s，另加 2 s 命令余量），cleanup 使用一次共享 20 s 上限，launcher 日志 close 3 s；inspect/kill/logs/工具回收都只使用对应剩余预算，不逐步重置。因此一次调用的有界最坏等待约为 60 + 22 + 20 + 3 秒（不含 Docker 命令自身启动开销），任何轮询或重试都不重置 60 s 工作期限。
+
+旧 `--output` 仍保留，但现在明确映射到一个原始数据目录：`--output var/data/raw/my-first-mock` 等价于 `--raw-root var/data/raw --run-id my-first-mock`。该目录必须尚不存在，日志仍单独写到 `var/runs/<run-id>/`。旧的 `--output var/runs/my-first-mock` 会与日志目录冲突而被拒绝，请改用上面的原始数据路径；不再支持的选项不会静默忽略。
+
+runtime 进程仍有部署路径参数：`--run-id`（省略时生成 UUID）和 `--runs-output`（省略时为 `--output` 父目录下的 `runs/`）。进程在控制开始前独占创建 `<runs-output>/<run-id>/`，已有同名目录直接失败。人工查看时可先用 `run_id` 关联 `resolved/runtime.json`、事件里的 `episode_id`、episode manifest 顶层 `run_id` 以及 `configuration.run_context.episode_id`。失败事件使用 `ERROR` 级别和稳定 reason code，正常路径为 `INFO`，信号停止为 `WARNING`，人工结束为 `INFO`。`episode.finished` 和最终 JSON 摘要分别给出 `recording_complete`、`runtime_outcome/runtime_reason` 与 `task_outcome`，不使用含混的顶层 `complete`。日志默认在 `<runs-output>/<run-id>/logs/runtime/`，不写入 episode 的 MCAP 目录。
+
+新记录只有在 `recording.complete=true` 时才从 `.partial-episode-*` 改名为正式 `episode-*`；`runtime=stopped/interrupted/failed` 但记录完整时仍是正式目录，必须继续读 manifest 维度，不能按目录存在推断任务成功。MCAP 排空/原生 writer 关闭超过 `recording.close_timeout_s`、计数不一致、audit 或 hash 失败时保留可识别的 partial，记录维度为 incomplete，不把运行结果伪装成完整记录；此后的流式 audit/hash 仍由 episode worker 执行。失败数据、partial、失败 manifest、控制日志和退出码不会被自动删除或重试成一条成功证据。
+
+runtime 收到 SIGINT/SIGTERM 后继续处理 ROS 通信，等待停止、释放和记录收尾，然后写关闭前的 `run.finalizing`、有界关闭日志并销毁节点，退出码分别为 130/143；正常完成为 0，运行失败为 1。日志 close 失败会把正常退出 0 改成 1，但不覆盖信号的 130/143。close 完成后 stdout 最终摘要给出实际 `exit_code`、`process_outcome` 和 `logging_closed`；`run.finalizing` 不宣称已退出。监督者先给 runtime 机会完成 Stop/Release/MCAP/日志关闭，grace 到期才强杀并记录 137；随后停止 backend。
+
+`/runtime/episode/end` 接受请求后返回 `ENDING`；重复请求幂等，不覆盖第一次原因，也不会启动第二个 finalizer；没有活动 episode 返回 `NO_ACTIVE_EPISODE`。人工结束会停止后续脚本段、独立执行 Stop/Release 并在记录排空后完成收尾，最终 `runtime.outcome=stopped`、`task.outcome=not_evaluated`。正常收尾已开始后的请求仍得到 `ENDING` 确认，但不能倒改已经完成的脚本结果。服务在人工结束后保持可用，下一次 start 会重置结束意图、context、recorder 和结果。
+
+运行程序提供 `--shutdown-timeout`（正数秒，默认 15），限制 worker 收尾；日志 close 另受 `logging.close_timeout_s`（默认 3 秒）限制，MCAP 队列/writer 关闭受 `recording.close_timeout_s`（默认 5 秒）限制，三者是独立上限。worker 收尾超过期限返回 124，日志包含 `SHUTDOWN_TIMEOUT`，保留 partial 目录，可能没有 manifest；该路径不做无界 flush/join，也不销毁 worker 仍使用的资源。IDLE 或尚未创建 recorder 的 PREPARING 中断不会凭空生成记录。ROS 回调只做序列化和有界入队，不等待磁盘；writer 异步失败会在定时路径和下一次命令前被发现，触发停止、拒绝新 episode 并以非零退出，控制 stop/release 仍分别尝试。`recording.close_timeout_s` 只约束关闭队列/原生 writer；之后的离线 audit/hash 不套用该期限，仍受 `--shutdown-timeout` grace 保护。超过 writer startup 预算时控制不会开始。日志 close 失败改变正常退出为 1，SIGINT/SIGTERM 保留 130/143 并在 stderr 记录日志错误。SIGKILL 和断电不承诺日志或 MCAP 完整落盘。
+
+镜像默认直接运行 Python runtime，作为 PID 1 接收 Docker 信号。人工停止容器时为应用留出收尾时间，例如 `docker stop --time 20 <runtime容器名>`；Docker 的外层期限应大于应用的 `--shutdown-timeout`。SIGKILL 和断电不经过这一收尾路径。
+
+## 5. 修改脚本与机器人语义
 
 | 修改内容 | 文件 |
 | --- | --- |
@@ -72,13 +192,50 @@ python3 tools/run/mock_collect.py --output var/runs/my-first-mock
 | 动作空间和关节顺序 | `profiles/actions/mock_joint_position_v1.json` |
 | 三段脚本目标、超时与 lease 参数 | `configs/runtime/mock_collect.yaml` |
 
+`configs/runtime/mock_collect.yaml` 的字段与启动前校验：
+
+| 字段 | 约束 | 说明 |
+| --- | --- | --- |
+| `schema_version` | 固定为 `1` | 运行配置 schema 版本 |
+| `robot_profile` | 非空路径 | 机器人 profile，由项目根解析 |
+| `observation_schema` | 非空路径 | 观测 schema，由项目根解析 |
+| `action_schema` | 非空路径 | 动作 schema，由项目根解析 |
+| `robot_namespace` | 非空字符串 | 后端 ROS 命名空间 |
+| `lease_duration_ns` | 整数，100 ms～10 s（含边界） | 获取及续租的控制 lease 时长 |
+| `renew_interval_ns` | 正整数且小于 `lease_duration_ns` 的一半 | 续租间隔，必须留出 lease 余量 |
+| `command_acceptance_ns` | 正整数 | 命令接收截止时间相对当前时刻的余量 |
+| `startup_timeout_s` | 有限正数 | 等待后端就绪的上限 |
+| `call_timeout_s` | 有限正数 | 单次服务/action 等待上限 |
+| `command_timeout_s` | 有限正数且大于最长脚本段秒数 | 单条轨迹执行等待上限 |
+| `logging` | 可省略对象；字段省略时用默认值 | 进程事件日志预算，不进入 profile/observation/action 语义哈希 |
+| `logging.queue_capacity` | 正整数，默认 256 | 非阻塞事件队列容量 |
+| `logging.max_event_bytes` | 正整数，默认 32768，且 ≤ 单文件上限 | 单事件渲染上限 |
+| `logging.max_file_bytes` | 正整数，默认 8388608，且 ≤ 总预算 | 单个 `events.*.jsonl` 轮转上限 |
+| `logging.max_total_bytes` | 正整数，默认 268435456 | 本进程事件文件总预算 |
+| `logging.close_timeout_s` | 有限正数，默认 3.0 | 日志有界排空/关闭上限 |
+| `logging.flush_interval_s` | 有限正数，默认 0.2 | writer flush/fsync 间隔 |
+| `logging.console` | bool，默认 false | 是否把简洁事件行同时写 stderr |
+| `recording` | 可省略对象；字段省略时用默认值 | MCAP 有界写入预算，不进入 profile/observation/action 语义哈希 |
+| `recording.queue_capacity` | 正整数，默认 1024 | 待写队列条数上限（含正在写的条目） |
+| `recording.max_pending_bytes` | 正整数，默认 67108864（64 MiB） | 已序列化待写/正在写字节上限 |
+| `recording.startup_timeout_s` | 有限正数，默认 5.0 | writer 创建/open/create_topic 就绪上限 |
+| `recording.close_timeout_s` | 有限正数，默认 5.0 | 停止入队后排空并让 writer 自行 close 的上限 |
+| `script_targets` | 1～256 段 | 顺序执行的关节目标 |
+| `script_targets[].duration_ns` | 整数，1 ns～3 s | 该段相对上一目标的执行时长 |
+| `script_targets[].positions` | 数量等于 profile 关节数、有限值且在关节限位内 | 段末关节位置 |
+| 各段平均速度 | `abs(目标 - initial 或上一目标) / 段秒数 <= profile.max_velocity` | 启动前按同一顺序预检 |
+
+运行配置、profile、观测和动作文件仍由 `contracts/schemas/v1` 下的 JSON Schema 校验；配置加载还会拒绝 NaN/Infinity、用 bool 冒充数值、用浮点数冒充纳秒整数，以及非有限的外部观测/动作数值。任何无效 YAML、缺失文件或字段错误都会在启动前以 `ContractError`（`SCHEMA_MISMATCH`）报告，消息包含来源路径和字段或目标索引。后端在执行时仍会独立校验 lease、轨迹维度和速度，运行时不依赖这些预检替代实时校验。
+
+配置在运行时使用 frozen dataclass（`RuntimeRecipe`、`ScriptTarget`、`ObservationSettings`、`ActionSettings`、`LogSettings`、`Configuration`）表达，容器字段为 tuple。`RuntimeRecipe.logging` 是 frozen `LogSettings`；对象或字段缺失时补默认值，bool/整数/有限值和容量关系在启动前校验，错误包含配置路径。`Configuration.snapshot` 每次从规范 JSON 解码并返回独立的 JSON-compatible dict；`recipe.logging` 总是列出实际生效值，旧没有 `logging` 的配置也一样。修改返回值的嵌套 dict/list（包括 profile、recipe 和 positions）不会改变运行配置或下一次快照。recorder 在该快照上补充 `run_id`、`task_id`、`run_context`，并从当前 BackendInfo 显式取得 `source`（`backend_kind`）和 `test_only`，一起写入 manifest；`run_id` 只做关联，不进入 `RunContext` wire schema。
+
 profile 修改后，观测/动作配置必须同步匹配。运行配置不携带真实设备地址；当前 runtime 会拒绝非 mock/test-only 后端，避免把测试脚本直接接到真机。
 
 首次模型仅有左右各两个测试旋转关节与两个虚拟夹爪开度关节，属于接口测试夹具，不代表最终机械臂选型。
 
-源码/配置变化后重新执行构建脚本。契约从唯一来源生成：ROS 类型位于 contracts/ros，Policy proto 位于 contracts/policy/v1；运行时不加载 docs 中的旧迁移占位文件。
+Compose 开发路径下，Python/YAML 变化重启服务即可生效，ROS 契约变化先停服务再执行 `bash tools/build/dev.sh contracts`，依赖变化才重建开发镜像。发布/测试镜像仍使用 `tools/build/stage2.sh`。契约从唯一来源生成：ROS 类型位于 contracts/ros，Policy proto 位于 contracts/policy/v1；运行时不加载 docs 中的旧迁移占位文件。
 
-## 5. 验证命令
+## 6. 验证命令
 
 原生 ROS/MCAP 测试：
 
@@ -87,7 +244,7 @@ docker build --target test -t sim-dual-arm/runtime-test:stage2 -f deploy/docker/
 docker run --rm --network none sim-dual-arm/runtime-test:stage2
 ```
 
-测试包括：轨迹插值、非法维度/数值/限位、命令去重与乱序、过期 lease、停止与控制权交接、观测因果对齐、配置不匹配、MCAP 关联检查、损坏检测与不完整记录保留。
+测试包括：轨迹插值、非法维度/数值/限位、命令去重与乱序、过期 lease、停止与控制权交接、固定身份的观测引用、配置不匹配、MCAP 关联检查、损坏检测、清理故障、episode 生命周期、配置默认值与独占 run 目录、事件 schema/命令关联、两个 episode 共享 run、真实 ROS 子进程信号收尾、日志 writer/emit/close/初始化故障，以及有界队列容量/在写预算/非法输入/序列化失败永久 latch、writer 失败/关闭超时、不可变载荷、慢写盘下 append 与控制续租、异步 writer 失败、重复 finish 拒绝和流式审计内存探针。测试故障注入仅位于 tests，使用 EventLogger/recorder writer 公开边界；正式 runtime 没有测试开关。
 
 构建测试镜像后，还可通过真实 ROS 服务/action 检查后端，再执行完整采集：
 
@@ -95,7 +252,7 @@ docker run --rm --network none sim-dual-arm/runtime-test:stage2
 python3 tools/run/mock_collect.py --probe-backend
 ```
 
-该探针只接受 test-only mock，覆盖陈旧上下文、独占控制权、完整轨迹、重复请求、action 取消、停止保持和释放后的 lease 拒绝。
+该命令先运行公开探针，再执行第 4 节的整次自动采集。探针只接受 test-only mock，覆盖陈旧上下文、独占控制权、完整轨迹、重复请求、action 取消、停止保持和释放后的 lease 拒绝；它在前台完成并释放 lease 后才启动 `--once` runtime，避免与正式动作争抢控制权，且仍受整次工作期限约束。
 
 独立 Python 环境中的 SDK：
 
@@ -115,14 +272,19 @@ uv pip install --python .build/dev-venv/bin/python -r deploy/docker/requirements
 
 本机 pytest 默认只运行不依赖 ROS 的 unit 测试；原生 MCAP 测试在上述 Docker target 中运行。
 
-## 6. 编程与维护约定
+## 7. 编程与维护约定
 
 - 公共数据采用有类型的不可变值；配置验证、协议转换、控制状态、观测整理、记录与审计分别放置。
 - 后端核心不 import ROS/厂商 SDK，runtime 不 import 后端执行实现；ROS 转换辅助库只用于两个 ROS 侧适配器。
-- 目标是 ROS 回调保持非阻塞；mock action 已由 tick 推进并完成 Future，runtime 的 episode 编排在独立工作线程，但同步写盘仍占用 ROS 回调，属于待整改项。
+- 目标是 ROS 回调保持非阻塞；mock action 已由 tick 推进并完成 Future，runtime 的 episode 编排在独立工作线程，recorded 消息在工作线程序列化后进入有界队列，由单独 MCAP writer 线程写盘（DSH-009）。
+- `EpisodeRunner`（`episode.py`）承担一次运行的开始、脚本执行、控制清理与记录收尾：context、worker、stop/shutdown 请求、人工结束意图/首次原因、done、失败汇总、episode ID、recorder 和记录目录都由它持有。`RuntimeNode` 只持有 ROS 实体、backend info/同步观测缓冲、已收到的 terminal event 集合，并负责消息转换；节点现有的 shutdown/worker/done/status/end 入口是显式委派。运行结果由显式的 failure/结束意图/信号状态分类，不搜索 reason 文本。
+- `ControlClient` 独占 acquire/renew/release/stop 服务客户端、轨迹 action 客户端、lease、续租 future/时刻/锁及清理消费状态。episode 通过 `EpisodeIO` 请求等待后端、绑定观测上下文、等待新观测/终止事件、读取机器人时间、发送命令/状态和记录；它不导入 `node`，也不访问节点私有字段。注入 client 的节点只用于创建 ROS 实体和读取节点名。
+- 线程入口：executor 线程运行 ROS 回调（传感器回调经 `EpisodeRunner.record` 序列化并入队当前 recorder、`_publish_observation` 定时检查 recorder 健康、服务、`ControlClient.renew`），信号后主循环继续 spin 帮助完成控制清理；episode worker 运行 `EpisodeRunner` 的准备、等待、acquire/execute、cleanup 和 recorder 收尾（排空后 audit/hash/manifest）；每段命令发送前检查停止事件，in-flight 命令由 Stop/terminal 反馈收尾。每个 recorder 另有一个 MCAP writer 线程独占原生 writer；main 线程只负责 rclpy、executor、信号和 worker 结束后的销毁，worker 未结束不 `destroy_node()`。
+- 锁：`EpisodeRunner` 的 start lock 保护 worker、关闭请求/原因、人工结束意图、活动 episode ID、finishing 标志和启动互斥；recorder lock 保护 context、当前 recorder 与记录目录，append 持锁做已确认不做磁盘 I/O 的序列化/入队，摘除 recorder 后其 `finish()` 在锁外执行；失败汇总的锁只保护 failure 字符串，设置停止 Event 和唤醒 condition 在锁外。队列状态锁只保护 deque/计数，writer 在锁外写盘；close 在锁外等待有界完成。`RuntimeNode._condition` 保护 backend info、最新观测和 terminal 集合，`ControlClient._renew_lock` 保护 lease/续租状态。锁内不做阻塞 RPC、join 或磁盘收尾；关闭 recorder 的是 episode worker。
+- 续租 timer 由节点创建，回调在 executor 线程调用 `ControlClient.renew()`；acquire、execute、停止请求后的等待和 cleanup 由 episode worker 调用。cleanup 先在锁内禁用续租并一次性取走 context/lease/future，再在锁外独立等待续租并尝试 stop/release，回调不持锁阻塞；重复 cleanup 不再发起 RPC。
 - 机器人时间用于源样本与接收截止时间，单调时钟用于 lease、执行插值与调用超时。
-- 不覆盖 rclpy.Node 的内部字段；节点成员采用明确的业务名称，例如 `_run_context`、`_service_clients`。
+- 不覆盖 rclpy.Node 的内部字段；成员采用明确的业务名称，例如 episode 的 `_run_context` 和节点的 `_control`。
 - 错误在协议、线程和 I/O 边界转换为可记录原因；清理失败不把 episode 标为成功。
 - 统一使用 Ruff 的格式、导入排序和静态检查；新增测试围绕可观察的控制与数据行为。
 
-当前控制能力是立即开始、顺序执行的 joint_position 轨迹，支持 lease、停止、取消、幂等命令结果与有限历史。世界复位、完整 Runtime 管理 API、真实标定/TF、策略服务、Gazebo、模型训练和真机控制尚未实现。
+当前控制能力是立即开始、顺序执行的 joint_position 轨迹，支持 lease、停止、取消、幂等命令结果与有限历史。世界复位、完整 Runtime 管理 API、真实标定/TF、策略服务、MuJoCo、模型训练和真机控制尚未实现。

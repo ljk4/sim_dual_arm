@@ -1,6 +1,6 @@
 # 无真机采集与推理的仿真环境设计
 
-更新日期：2026-10-29。本文描述目标 Gazebo 后端。当前 backend-sim Dockerfile 已提供测试专用 mock target，物理场景与 Gazebo 适配节点仍待阶段 4 实现；已运行的 mock 链路见 [阶段 1～2 指南](stage2-quickstart.md)。
+状态更新：2026-10-30。用户已选择 MuJoCo + 双 Panda + 三相机；本轮目标、依赖路线、场景和验收以 [最小仿真学习闭环实施计划](minimal-simulation-loop-plan.md) 为准。本文以下保留 2026-10-29 的 Gazebo 候选分析供追溯，其中“首版/首选”不再代表当前决定，不作为安装或实施指令。公共职责边界仍有效；已运行的 mock 链路见 [阶段 1～2 指南](stage2-quickstart.md)。
 
 ## 1. 仿真环境在系统中的位置
 

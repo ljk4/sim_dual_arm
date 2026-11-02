@@ -13,7 +13,7 @@ backend:
   kind: sim                    # real | sim; exactly one active backend
   public_namespace: /cell_01/robot
   ros_domain_id: 42
-  deployment_config_id: gazebo_dual_arm_v1
+  deployment_config_id: mujoco_dual_panda_stack_v1
   # backend_instance_id and clock_epoch are discovered, not copied into this file.
 
 runtime:

@@ -1,0 +1,13 @@
+string side
+string mode
+bool position_ok
+bool contact_ok
+string contact_object
+bool ambiguous
+float64 target_position_m
+float64 initial_reference_m
+float64 final_reference_m
+float64 measured_position_m
+float64 measured_velocity_m_s
+float64 target_error_m
+robot_api_msgs/NativeFinger[2] fingers

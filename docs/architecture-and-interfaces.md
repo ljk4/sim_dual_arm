@@ -1,13 +1,13 @@
 # 环境边界与通信接口设计 v1
 
-更新日期：2026-10-29。本文为目标接口规范。阶段 1～2 已实现其中的 mock 控制/采集子集和 SDK 生成；运行范围与未实现项见 [使用指南](stage2-quickstart.md)。完整 Policy 服务、物理仿真和真机后端仍待后续实现。
+更新日期：2026-11-02。四环境边界保持；当前MuJoCo原生控制与fake Policy服务已通过真实链路验收，详见[原生后端](native-backend.md)和[连续策略入口](native-policy.md)。本文第4节保留的ExecuteTrajectory描述对应旧mock接口；当前MuJoCo使用显式参考/反馈与SubmitFollower。ACT训练/真实模型provider及真机后端尚未完成。
 
 ## 1. 推荐部署：四类镜像，后端二选一
 
 | 镜像 / 环境 | 拥有的职责 | 主要依赖 | 对外接口 |
 | --- | --- | --- | --- |
 | `backend-real` | 厂商驱动、真实相机、设备标定与时间映射、底层控制器、设备状态与控制保护；将设备适配成公共 Robot API | ROS 2、厂商 SDK、相机 SDK、必要的 ros2_control 插件 | Robot API v1（ROS） |
-| `backend-sim` | Gazebo 场景、物理、虚拟传感器、仿真控制器、时钟与场景复位；实现相同 Robot API | ROS 2、Gazebo、ros_gz、gz_ros2_control、模型资产 | 相同的 Robot API v1（ROS），附加声明的仿真能力 |
+| `backend-sim` | MuJoCo 场景、物理、三相机、仿真控制器、时钟与场景复位；实现相同 Robot API | ROS 2、MuJoCo、Ruckig、可选mink示教、固定模型资产 | 相同的 Robot API v1（ROS），附加声明的仿真能力 |
 | `runtime` | episode 编排、观测同步、示教/策略控制源选择、动作调度、采集记录、模型服务客户端 | ROS 2、公共接口包、gRPC/Protobuf、记录工具；不依赖厂商 SDK 或模型框架 | 消费 Robot API，调用 Policy API，提供 Runtime API，写原始数据 |
 | `learning` | 离线转换、数据检查、训练、模型预处理、模型推理与模型内部状态 | Python、PyTorch、LeRobot/其他框架、数据/视频工具；不依赖 ROS | Policy API v1（gRPC）和版本化文件产物 |
 
@@ -62,6 +62,12 @@ backend 负责物理设备坐标到统一 SI 坐标；learning 负责 SI 特征�
 
 公共 RGB 帧统一为 `rgb8`，由 backend 将相机/Gazebo 原生编码转换为该格式；原始分辨率与内参保持一致。模型所需的裁剪、缩放和归一化仍属于 learning，避免把模型预处理藏进设备适配器。
 
+RobotProfile v2 用有序的具名相机集合描述一路或多路相机；当前双 Panda 绑定为
+`global`、`left_wrist`、`right_wrist`（320×240，各自唯一光学 frame_id 和 SHA256
+标定摘要）。runtime 的订阅、BackendInfo 检查、ObservationIndex 与记录 audit 都使用
+同一完整顺序，不静默取第一路。当前观测仍采用 latest-state/causal-frame 选择规则；
+延迟渲染与精确快照状态配对的完善属于后续物理适配，本阶段不宣称已解决。
+
 相同的 RobotProfile 应用于同一机器人本体及其仿真模型。换成另一种关节结构、标定或动作定义时，要重新校验数据和模型适配；接口可替换不代表已有策略可以跨任意机器人直接使用。
 
 ## 3. 公共契约与模块依赖方向
@@ -70,9 +76,13 @@ backend 负责物理设备坐标到统一 SI 坐标；learning 负责 SI 特征�
 
 - `ros/robot_api_msgs/`：ROS 类型定义和版本约定，backend 与 runtime 共同使用。
 - `policy/v1/policy.proto`：框架无关的推理协议，runtime 与 learning 各自生成 SDK。
-- `schemas/v1/`：RobotProfile、ObservationSchema、ActionSchema、数据/模型 manifest 的结构定义。
+- `schemas/v1/`：历史 RobotProfile、ObservationSchema、ActionSchema、运行配方与数据/模型 manifest 的结构定义。
+- `schemas/v2/`：具名相机集合的 RobotProfile 与 v2 episode manifest；旧 v1 profile 继续按 v1 严格读取。
 
-具体语义实例放在仓库根 `profiles/`，部署地址/设备绑定放 `deploy/`，机器人几何与场景资源放 `assets/`。代码、配置、资源和产物的权威归属见 [目录组织规范](repository-layout.md)。
+具体语义实例放在仓库根 `profiles/`（版本、绑定顺序和相机标定摘要算法见
+[profiles/README.md](../profiles/README.md)），部署地址/设备绑定放 `deploy/`，机器人
+几何与场景资源放 `assets/`。代码、配置、资源和产物的权威归属见
+[目录组织规范](repository-layout.md)。
 
 依赖方向指向公共契约和用途明确的共享库，组件之间不 import 对方实现。两个 backend 可共用 libraries/backend_core 的 lease、上下文校验与事件封装；该库不包含厂商/Gazebo/ML 依赖，runtime 不依赖其执行实现。runtime 不 import LeRobot 或厂商驱动，learning 不 import `rclpy`。契约中不传递 Python pickle、Torch Tensor 对象或 Gazebo 内部对象。
 
@@ -86,18 +96,22 @@ backend 负责物理设备坐标到统一 SI 坐标；learning 负责 SI 特征�
 
 | 接口 | 方式 / 类型草案 | 方向与主要内容 |
 | --- | --- | --- |
-| `~/info` | topic，`BackendInfo` | backend → runtime：协议版本、robot/profile/schema 哈希、实例 UUID、时钟域/epoch、就绪状态、可用传感器与控制/复位能力 |
+| `~/info` | topic，`BackendInfo` | backend → runtime：协议版本、robot/profile/schema 哈希、实例 UUID、时钟域/epoch、就绪状态、可用传感器与控制/复位能力；`protocol_major=1`，DSH-019 mock 声明 `command_query` / `command_feedback_v1` |
 | `~/state` | topic，`RobotState` | backend → runtime：实例/epoch、递增 state_seq、采样时间、标准 `sensor_msgs/JointState`、有效性、驱动状态和故障 |
 | `~/cameras/<id>/frame` | topic，`CameraFrame` | backend → runtime：实例/epoch、frame_seq、源时间、标准 `sensor_msgs/Image` 与 `CameraInfo`、标定版本 |
 | `/tf`、`/tf_static` | 标准 ROS TF | backend 发布公共坐标树；runtime 按当前 profile 的 frame ID 使用 |
 | `~/acquire_control` | service，`AcquireControl` | runtime → backend：runtime 实例与 episode；返回唯一 lease ID、有效时长和接受的控制模式 |
 | `~/renew_control`、`~/release_control` | service | 续约或释放当前 lease，backend 以本地单调时钟判断过期 |
 | `~/execute_trajectory` | action，`ExecuteTrajectory` | runtime → backend：上下文、lease、command ID/序号、有效期、标准 `JointTrajectory`；返回接受/拒绝、进度和终态 |
-| `~/command_events` | topic，`CommandEvent` | backend → runtime/recorder：递增 event_seq、command ID、接受/开始/完成/取消/失败、原因、接受的轨迹及可提供的控制目标反馈 |
+| `~/command_events` | topic，`CommandEvent` | backend → runtime/recorder：递增 event_seq、command ID、接受/开始/完成/取消/失败、原因、接受的轨迹及事件发生时的机器人时间 |
+| `~/command_feedback` | topic，`CommandStatus` | backend → runtime/recorder：每 tick 的参考/测量位置、`reference-measured`、progress、`execution_clock`/`interpolation_version`、robot clock 采样时间；活跃期间周期发布，terminal 至少一次 |
+| `~/query_command` | service，`QueryCommand` | runtime → backend：按完整原 context + command ID 读取只读快照；未知/被逐出返回 `RESULT_EXPIRED`，错误 context 返回 `STALE_CONTEXT` |
 | `~/stop` | service，`Stop` | 取消待执行命令，进入后端已声明的停止/保持行为；返回实际处理状态和原因 |
 | `~/reset_world` | 可选 action，`ResetWorld` | 仅有对应 capability 时可调用：复位场景/物体/初始关节状态，返回新 clock_epoch 和就绪状态 |
 
 ROS 图像、关节状态和轨迹使用标准载荷，外层只增加实例、epoch 和序号等上下文。这些字段用于区分重启和复位前后的迟到数据；不能只靠重复的图像时间戳判断所属 episode。供 RViz 等工具使用的标准原生输出可另外发布，但采集与策略使用公共契约输出。
+
+`CommandStatus` 的 accepted/started/sample 时间均来自后端机器人时钟；`elapsed` 是生成本次参考的实际执行时长，其时钟由 `execution_clock` 声明（mock 为 `steady`，后续物理可为 `robot`），不能假定 `elapsed = sample - started`。`interpolation_version` 当前为 `linear_v1`，审计按它和实际接受轨迹逐样本重建参考与 progress。数组顺序必须与 command 的 joint_names 一致。mock 以单调墙钟推进插值，`reference_positions` 与合成 `measured_positions` 相同，因此它只证明协议、时钟和记录接线，不证明物理跟踪；物理后端仍应保留参考/测量分离。查询是只读操作，不推进插值、不续租、不产生事件，也不能把查询到的 COMPLETED 改写成丢失的 action 结果。runtime 的 `ControlClient.query_command` 必须由调用者显式传入期望 joint_names，并对查询意图/成功使用关键日志（日志故障向上传播）；服务错误仍保留原错误。backend 声明 `command_feedback_v1` 时，episode 末尾的同一个有界 terminal 等待同时要求该命令的 terminal event 和已验证反馈入队，避免 recorder 在 feedback 到达前关闭；旧 backend 不具备该能力时沿原 event 规则。
 
 `ExecuteTrajectory` 的 request 上下文至少包含：`backend_instance_id`、`clock_epoch`、`episode_id`、`control_epoch`、`lease_id`、`command_id`、`command_seq`、`robot_profile_hash`、`observation_id`、`accept_before_robot_time`。该截止时间表示最晚接受命令的机器人时间；执行时长由轨迹 horizon 限制，lease 过期则取消剩余执行。backend 检查过期、乱序、重复、lease、模式和限位；首版超出允许范围直接拒绝，不静默改变目标。runtime 主动进行的限速/转换必须记录转换后的命令。
 
@@ -113,7 +127,7 @@ lease 绑定 runtime 实例、episode、control_epoch 和控制模式。相同 l
 | --- | --- | --- |
 | info / 能力 | reliable + transient_local，depth=1 | 新订阅者获得当前描述；实例变化立即使旧缓存失效 |
 | 关节与相机数据 | best_effort + volatile，小队列 | 优先新鲜样本；记录 seq 缺口和缺帧，不无限堆积 |
-| command_events / episode 事件 | reliable + volatile，有界队列 | recorder 启动并订阅就绪后才开启 episode，缺失事件报告数据不完整 |
+| command_events / command_feedback / episode 事件 | reliable + volatile，有界队列 | recorder 启动并订阅就绪后才开启 episode；feedback 按 sample_time 记录，反馈异常报告数据不完整；v2缺terminal事件诊断与运行故障分别报告 |
 | service / action | ROS 对应的 reliable 配置 | 请求有业务 ID 与超时；传输可靠不等于执行恰好一次 |
 | TF / clock | 遵循 ROS/桥接的对应 profile | 首次联调验证发布/订阅 QoS 兼容 |
 
@@ -138,11 +152,11 @@ lease 绑定 runtime 实例、episode、control_epoch 和控制模式。相同 l
 - `robot_profile_hash`、`backend_instance_id`、`time_domain_id`、`clock_epoch`、`episode_id`、`control_epoch`。
 - 单调递增的 `observation_id`，参考时间，以及每个状态/相机样本自身的源时间与序号。
 - 按声明顺序排列的关节位置；速度/力矩只有设备提供且 schema 声明时才使用，缺失不填零冒充测量值。
-- 有名称和标定版本的 RGB 帧；任务 ID / 文本作为可选任务条件。
+- 按 profile 声明顺序排列的具名 RGB 帧，各自带源时间、frame_seq、光学 frame_id 和标定版本；任务 ID / 文本作为可选任务条件。
 
 首版传连续 RGB8 二进制数据，并携带宽、高和时间信息；必要时协商 PNG/JPEG，深度不走有损 JPEG。模型特定的裁剪、缩放、归一化在 learning 内完成，并与训练共用。双方配置最大 RPC 载荷和有界队列，超出明确拒绝。
 
-响应是 `joint_position` 动作块：`joint_names`、多个 `positions` 向量和各点 `time_from_start_ns`，不是设备 SDK 命令。runtime 验证维度、名称、数值、观测年龄和上下文，按当前机器人时间安排起点，再向 backend 下发。learning 不选择厂商控制器，不直接操作相机或执行动作。
+响应是 `joint_position` 动作块：`joint_names`、多个 `positions` 向量和各点 `time_from_observation_ns`（相对原 Observation 的机器人时间），不是设备 SDK 命令。runtime 验证维度、名称、数值、观测年龄和上下文，按当前机器人时间安排起点，再向 backend 下发。learning 不选择厂商控制器，不直接操作相机或执行动作。
 
 首版一个 episode 只有一个模型 session 和一个在途预测。`request_id` 用于有界去重，模型有状态时重试不能额外推进历史；服务应返回已缓存结果或明确失败。RPC 超时或取消后 GPU 计算可能仍然完成，runtime 必须丢弃其迟到结果。模型 ID 和预处理绑定在 session 中，不能在 episode 中静默换权重。
 
@@ -164,7 +178,7 @@ Policy API 使用标准 gRPC status 表达通信/调用结果，并在约定的�
 | 接口 | 方式 | 主要内容 |
 | --- | --- | --- |
 | `/runtime/episode/start` | service | task、记录配置；返回 episode ID 和准备/启动结果 |
-| `/runtime/episode/end` | service | 当前只接受结束原因并返回 ENDING 确认；最终状态由 status/manifest 确认。任务标签与完整结束结果待补充 |
+| `/runtime/episode/end` | service | 接受一次人工结束意图并返回 ENDING 确认；重复请求幂等且不覆盖首次原因，无活动 episode 返回 NO_ACTIVE_EPISODE。最终记录/运行/任务结果读 manifest 与结构化 episode 事件，不在 status wire 中新增成功字段 |
 | `/runtime/control/select_source` | service | `none / script / teleop / policy / replay`，切换前停旧源、更新 control_epoch 与 lease |
 | `/runtime/episode/reset` | action | 编排停止、记录结束、模型清理与可用的后端复位能力 |
 | `/runtime/status` | topic | episode 阶段、当前控制源、记录状态、模块就绪与故障 |
@@ -172,9 +186,9 @@ Policy API 使用标准 gRPC status 表达通信/调用结果，并在约定的�
 | `/runtime/control/commands` | topic | 候选动作、来源、对应 observation/request、最终发送的命令与 ID |
 | `/runtime/policy_events` | topic | 模型绑定、请求/响应动作、延迟、丢弃原因、错误与 reset 事件 |
 
-episode 阶段（IDLE/PREPARING/ACTIVE/ENDING/FAULT）、控制源和记录状态分别表示，允许“策略推理同时记录”。recording 为必需的采集任务遇到写盘故障时，episode 标记失败并按任务策略停止；推理反馈和 backend 看门狗不等待写盘线程。事件有序号与有界缓冲，缺失/溢出会进入完整性报告；日志发布和写盘不阻塞底层伺服循环。
+episode 阶段（IDLE/PREPARING/ACTIVE/ENDING/FAULT）、控制源和记录状态分别表示，允许“策略推理同时记录”。`RuntimeStatus.phase` 继续只表达生命周期和故障阶段，不扩展 wire 字段；episode manifest v2 的 `recording`、`runtime`、`task` 三个对象分别表示记录完整性、运行结局（completed/stopped/interrupted/failed）和任务标签（当前一律 not_evaluated）。recording 为必需的采集任务遇到写盘故障时，episode 标记失败并按任务策略停止；合法人工结束或信号不因自身把完整记录判成损坏。推理反馈和 backend 看门狗不等待写盘线程。事件有序号与有界缓冲，缺失/溢出会进入完整性报告；日志发布和写盘不阻塞底层伺服循环。
 
-以上是目标行为。当前 mock 实现仍在 ROS 回调内同步写盘，提前 EndEpisode 会按失败收尾，信号退出也存在未完成收尾的缺口；改进项见 [可维护性审查](maintainability-review.md)。
+当前 mock 已实现上述 v2 结果分类、人工 EndEpisode 意图、记录完整性独立发布和离线 inspect 版本分支；信号/故障路径仍按 DSH-003/009 的退出码与 partial 语义处理。S1d 的 Compose 启动/状态命令和整个 run 监督尚未完成，不能把当前 mock 链路视为真实堆叠闭环。
 
 ## 7. 控制权、时间与状态转换
 
@@ -205,7 +219,7 @@ backend 只接受有效 lease 下的命令；runtime 中只有 executor 持有�
 
 | 产物 | 必需内容 |
 | --- | --- |
-| 原始 episode | MCAP、episode ID、source=real/simulation、profile/schema/calibration 版本、时钟信息、任务与标签、原始 state/frame、候选/发送动作、后端 command_events、缺帧/写盘报告 |
+| 原始 episode | MCAP、episode ID、source=real/simulation、profile/schema/calibration 版本、时钟信息、任务与标签、原始 state/frame、候选/发送动作、后端 command_events/command_feedback、缺帧/写盘报告 |
 | 转换后数据集 | 数据 schema、特征/动作名称与单位、同步/动作对齐/图像处理配置、原始 episode 引用与哈希、转换器版本、统计量和划分规则 |
 | 模型包 | 权重、框架版本/代码版本、输入/动作 schema、预处理/反归一化、RobotProfile 绑定、标定要求、训练数据 manifest 引用、支持的控制模式与频率 |
 

@@ -1,0 +1,21 @@
+# Audit-only overlay: the one-off tool container must never modify raw data or
+# the host runs tree.  Paths match mock.yaml so Compose merges by target.
+services:
+  runtime:
+    volumes:
+      - type: bind
+        source: ${DEV_REPO_ROOT:-.}
+        target: /workspace
+        read_only: true
+      - type: bind
+        source: ${DEV_BUILD_ROOT:-.build/ros-dev}
+        target: /opt/ros-dev
+        read_only: true
+      - type: bind
+        source: ${DEV_RAW_ROOT:-var/data/raw}
+        target: /data/raw
+        read_only: true
+      - type: bind
+        source: ${DEV_RUNS_ROOT:-var/runs}
+        target: /data/runs
+        read_only: true

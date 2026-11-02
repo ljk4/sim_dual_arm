@@ -1,0 +1,177 @@
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+import pytest
+
+mujoco = pytest.importorskip("mujoco")
+np = pytest.importorskip("numpy")
+
+ROOT = Path(__file__).resolve().parents[2]
+SIM_SRC = ROOT / "components/backend_sim/src"
+if str(SIM_SRC) not in sys.path:
+    sys.path.insert(0, str(SIM_SRC))
+
+from robot_backend_sim import check_scene, rendering, visibility  # noqa: E402
+from robot_backend_sim.rendering import SceneRenderer, SceneRenderError  # noqa: E402
+from robot_backend_sim.scene import build_scene  # noqa: E402
+from robot_backend_sim.scene_config import load_scene_config  # noqa: E402
+
+CONFIG_PATH = ROOT / "configs/simulation/panda_stack.yaml"
+CHECK_PATH = ROOT / "configs/simulation/scene_check.yaml"
+ASSETS_ROOT = Path(os.environ.get("SIM_ASSETS_ROOT", ROOT / "third_party/src/mujoco_menagerie"))
+SUMMARY_PATH = Path(os.environ.get("SIM_ASSET_SUMMARY", ROOT / ".build/assets/panda.json"))
+SOURCE_PATH = Path(os.environ.get("SIM_ASSET_SOURCE", ROOT / "third_party/panda-source.json"))
+
+
+@pytest.fixture(scope="module")
+def scene_config():
+    return load_scene_config(CONFIG_PATH)
+
+
+@pytest.fixture(scope="module")
+def scene(scene_config):
+    return build_scene(
+        scene_config,
+        assets_root=ASSETS_ROOT,
+        summary_path=SUMMARY_PATH,
+        source_path=SOURCE_PATH,
+    )
+
+
+@pytest.fixture(scope="module")
+def renderer(scene, scene_config):
+    first = scene_config.cameras[0]
+    renderer = SceneRenderer(
+        scene.model,
+        [camera.name for camera in scene_config.cameras],
+        width=first.width,
+        height=first.height,
+    )
+    yield renderer
+    renderer.close()
+
+
+def test_rgb_and_segmentation_come_from_one_immutable_snapshot(scene, renderer):
+    scene.reset(11)
+    snapshot = renderer.capture(scene.data)
+    original_state = snapshot.state.copy()
+    scene_state = {
+        "qpos": scene.data.qpos.copy(),
+        "qvel": scene.data.qvel.copy(),
+        "time": float(scene.data.time),
+    }
+
+    rgb_before = renderer.render_rgb(snapshot)
+    segmentation = renderer.render_segmentation(snapshot)
+    rgb_after = renderer.render_rgb(snapshot)
+
+    assert snapshot.state.flags.writeable is False
+    assert set(rgb_before) == {"global", "left_wrist", "right_wrist"}
+    assert set(segmentation) == set(rgb_before)
+    for camera, image in rgb_before.items():
+        assert image.dtype == np.uint8
+        assert image.shape == (240, 320, 3)
+        assert image.flags.writeable is False
+        assert segmentation[camera].shape == (240, 320, 2)
+        assert segmentation[camera].dtype.kind in ("i", "u")
+        np.testing.assert_array_equal(image, rgb_after[camera])
+
+    # Rendering only touched the renderer's private data.
+    np.testing.assert_array_equal(scene.data.qpos, scene_state["qpos"])
+    np.testing.assert_array_equal(scene.data.qvel, scene_state["qvel"])
+    assert scene.data.time == scene_state["time"]
+
+    # The old snapshot is independent of the physics data's latest reset.
+    scene.reset(23)
+    np.testing.assert_array_equal(snapshot.state, original_state)
+
+    check = visibility.load_check_config(CHECK_PATH, scene.config)
+    geom_ids = {obj.name: scene.model.geom(f"{obj.name}_geom").id for obj in scene.config.objects}
+    counts = {
+        camera: {
+            obj: visibility.count_visible_pixels(segmentation[camera], geom_id)
+            for obj, geom_id in geom_ids.items()
+        }
+        for camera in segmentation
+    }
+    assert counts["global"]["source"] > 0
+    assert counts["global"]["target"] > 0
+    assert check.threshold("global", "source") == 64
+
+
+def test_snapshot_time_matches_native_state_and_mismatch_is_rejected(scene, renderer):
+    scene.reset(11)
+    scene.data.time = 3.5
+    mujoco.mj_forward(scene.model, scene.data)
+    snapshot = renderer.capture(scene.data)
+
+    assert snapshot.state[0] == pytest.approx(3.5)
+    assert snapshot.sim_time == snapshot.state[0]
+    derived = renderer.derive_snapshot(snapshot, {})
+    assert derived.state[0] == pytest.approx(3.5)
+    assert derived.sim_time == derived.state[0]
+
+    tampered = snapshot.state.copy()
+    tampered[0] = 0.0
+    with pytest.raises(ValueError, match="TIME"):
+        rendering.Snapshot(state=tampered, sim_time=3.5)
+    accepted = rendering.Snapshot(state=tampered, sim_time=0.0)
+    assert accepted.sim_time == accepted.state[0] == 0.0
+    scene.reset(11)
+
+
+def test_full_check_entry_with_one_real_layout(tmp_path, monkeypatch):
+    real_build_layouts = visibility.build_layouts
+    monkeypatch.setattr(
+        visibility,
+        "build_layouts",
+        lambda config, scene: real_build_layouts(config, scene)[:1],
+    )
+    arguments = check_scene.SceneCheckArguments(
+        assets_root=ASSETS_ROOT,
+        summary=SUMMARY_PATH,
+        source=SOURCE_PATH,
+        scene_config=CONFIG_PATH,
+        check_config=CHECK_PATH,
+        report_root=tmp_path / "reports",
+        run_id="native-one-layout",
+        packages=ROOT / "deploy/docker/sim-packages.json",
+    )
+
+    code = check_scene.run(arguments)
+
+    report = json.loads((arguments.report_root / arguments.run_id / "report.json").read_text())
+    assert code == 0
+    assert report["status"] == "succeeded"
+    assert report["kind"] == "scene"
+    assert report["logs_closed"] is True
+    assert report["layout_summary"]["count"] == 1
+    assert report["layout_summary"]["passed"] == 1
+    assert len(report["layouts"]) == 1
+    assert report["throughput"]["measured_groups"] == 20
+    assert report["gl"]["nvidia"] is True
+    layout = report["layouts"][0]
+    assert set(layout["rgb"]) == {"global", "left_wrist", "right_wrist"}
+    for relative in layout["rgb"].values():
+        assert (arguments.report_root / arguments.run_id / relative).is_file()
+    assert (arguments.report_root / arguments.run_id / report["artifact"]).is_file()
+
+
+def test_close_is_idempotent_and_render_after_close_is_clear(scene, scene_config):
+    first = scene_config.cameras[0]
+    renderer = SceneRenderer(
+        scene.model,
+        [camera.name for camera in scene_config.cameras],
+        width=first.width,
+        height=first.height,
+    )
+    scene.reset(11)
+    snapshot = renderer.capture(scene.data)
+    renderer.close()
+    renderer.close()
+    with pytest.raises(SceneRenderError, match="render called after close"):
+        renderer.render_rgb(snapshot)

@@ -1,0 +1,8 @@
+robot_api_msgs/RunContext context
+string lease_id
+bool has_start
+int64 start_sim_time_ns
+---
+bool success
+string reason
+robot_api_msgs/ReferenceAnchor anchor

@@ -9,6 +9,19 @@ startup_timeout_s: 20.0
 call_timeout_s: 3.0
 command_timeout_s: 5.0
 command_acceptance_ns: 500000000
+logging:
+  queue_capacity: 256
+  max_event_bytes: 32768
+  max_file_bytes: 8388608
+  max_total_bytes: 268435456
+  close_timeout_s: 3.0
+  flush_interval_s: 0.2
+  console: false
+recording:
+  queue_capacity: 1024
+  max_pending_bytes: 67108864
+  startup_timeout_s: 5.0
+  close_timeout_s: 5.0
 script_targets:
   - duration_ns: 800000000
     positions: [0.2, -0.2, 0.15, -0.15, 0.02, 0.02]

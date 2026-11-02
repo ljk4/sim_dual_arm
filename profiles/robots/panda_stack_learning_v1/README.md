@@ -1,0 +1,5 @@
+# 学习任务的相机标定变体
+
+关节顺序、单位、硬限位和其他相机继承panda_stack_v1的基线内容；此文件显式保存独立profile，便于数据和模型按摘要锁定。右腕FOV为68度，声明见right_wrist_calibration.json，摘要由camera_declared_description/semantic_hash生成。
+
+对应场景configs/simulation/panda_stack_learning.yaml只改右腕视场，机械几何和物理与panda_stack.yaml一致。相机变化会改变profile digest；旧数据保留其manifest内profile快照，禁止混用。关节或其他相机变动需同步两个profile并通过变体一致性测试。

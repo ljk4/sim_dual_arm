@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "package": "ruckig",
+  "version": "0.15.3",
+  "license": "MIT",
+  "source_url": "https://github.com/pantor/ruckig/tree/v0.15.3",
+  "sdist_sha256": "48f68535080a594e45275201896c3a71123ac4a64c668eb3cf10b8bc42f34183",
+  "runtime_requirements": "deploy/docker/ruckig-requirements.lock",
+  "build_requirements": "deploy/docker/ruckig-build-requirements.lock",
+  "python_abi": "cp312",
+  "architecture": "linux_x86_64",
+  "build_constraints": [
+    "scikit-build-core==0.9.10",
+    "nanobind==2.4.0",
+    "cmake==3.31.6",
+    "ninja==1.11.1.3"
+  ],
+  "reference_preflight_wheel_sha256": "f8ddcdfbae3284b5367b22391b9f1fe30e9353b87b8d25a7a0eaf3f114a7e005",
+  "note": "The reference preflight wheel is not used by the image; follower-dev builds the locked sdist and records the actual wheel SHA in build.json."
+}

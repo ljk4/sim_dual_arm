@@ -1,0 +1,10 @@
+robot_api_msgs/RunContext context
+uint64 event_seq
+string command_id
+uint64 command_seq
+uint64 observation_id
+bool is_chunk
+uint64 chunk_seq
+string phase
+string reason
+int64 sim_time_ns

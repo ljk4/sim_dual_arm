@@ -10,6 +10,10 @@ from pathlib import Path
 
 def generate(root: Path, output: Path) -> None:
     source = root / "contracts/policy/v1/policy.proto"
+    # A previous SDK must never be mistaken for this source revision.
+    for stale in (output / "dual_arm_policy", output / "_proto"):
+        if stale.exists():
+            shutil.rmtree(stale)
     staging = output / "_proto/dual_arm_policy/v1"
     staging.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(source, staging / "policy.proto")

@@ -1,0 +1,7 @@
+robot_api_msgs/RunContext context
+string lease_id
+uint64 seed
+---
+bool success
+string reason
+robot_api_msgs/RunContext new_context

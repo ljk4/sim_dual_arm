@@ -1,0 +1,94 @@
+# Diagnostic native runtime.  Paths are relative to this file; SI units use
+# seconds for durations/timeouts and nanoseconds for clock/lease fields.
+schema_version: 1
+robot_profile: ../../profiles/robots/panda_stack_v1/profile.json
+observation_schema: ../../profiles/observations/panda_rgb_joint_v1.json
+action_schema: ../../profiles/actions/panda_joint_position_v1.json
+control_constraints: ../simulation/panda_control.yaml
+robot_namespace: /robot
+
+# A DSH-027 backend lease is 0.1..10 s.  Renewal is driven by the executor
+# timer and never by the episode worker's command wait.
+lease_duration_ns: 2000000000
+renew_interval_ns: 500000000
+command_acceptance_ns: 500000000
+startup_timeout_s: 30.0
+call_timeout_s: 5.0
+command_timeout_s: 8.0
+
+# S3 uses exactly one diagnostic seed.  Batch seed assignment belongs to a
+# later, separate batch configuration.
+reset:
+  enabled: true
+  seed: 0
+
+observation:
+  # Exact capture pairs state_seq == every frame_seq and all four stamps equal.
+  max_skew_ns: 0
+  max_age_ns: 500000000
+  # A frozen simulation clock must not keep an old capture "fresh" forever.
+  wall_arrival_timeout_s: 1.5
+  capacity: 32
+
+control:
+  # A submit timeout/OUTCOME_UNKNOWN keeps its command_id and queries it.
+  submit_query_retries: 2
+  poll_interval_s: 0.02
+  stop_timeout_s: 8.0
+  terminal_timeout_s: 12.0
+
+# One diagnostic motion out and back.  Every entry has a full 16-D target and
+# duration; these are not a continuous ACT policy.
+motions:
+  - name: diagnostic-out
+    duration_ns: 1000000000
+    positions:
+      - 0.08
+      - 0.0
+      - 0.0
+      - -1.57079
+      - 0.0
+      - 1.57079
+      - -0.7853
+      - 0.06
+      - -0.08
+      - 0.0
+      - 0.0
+      - -1.57079
+      - 0.0
+      - 1.57079
+      - -0.7853
+      - 0.06
+  - name: diagnostic-back
+    duration_ns: 1000000000
+    positions:
+      - 0.0
+      - 0.0
+      - 0.0
+      - -1.57079
+      - 0.0
+      - 1.57079
+      - -0.7853
+      - 0.08
+      - 0.0
+      - 0.0
+      - 0.0
+      - -1.57079
+      - 0.0
+      - 1.57079
+      - -0.7853
+      - 0.08
+
+logging:
+  queue_capacity: 256
+  max_event_bytes: 32768
+  max_file_bytes: 8388608
+  max_total_bytes: 268435456
+  close_timeout_s: 3.0
+  flush_interval_s: 0.2
+  console: false
+recording:
+  queue_capacity: 1024
+  max_pending_bytes: 67108864
+  startup_timeout_s: 5.0
+  close_timeout_s: 5.0

@@ -2,9 +2,11 @@
 
 审查日期：2026-10-30。范围是当前源码、配置、Docker 入口、测试和已有规划。本文是本次审查记录与整改清单；操作命令仍以 [使用指南](stage2-quickstart.md) 为准，公共职责仍以 [接口设计](architecture-and-interfaces.md) 为准。
 
+后续状态：用户已建立 Git 基线 `c2c3e93`，下文“尚无 Git 仓库”是审查当时的历史状态。R2、R3、R1 已分别通过 [DSH-001](tasks/dsh-001-result.md)、[DSH-002](tasks/dsh-002-result.md)、[DSH-003](tasks/dsh-003-result.md) 修复并独立验收。DSH-004～DSH-010 随后完成类型配置、职责拆分、日志、写盘/审计和人工结束语义；[DSH-011](tasks/dsh-011-result.md) 完成 Compose 开发挂载，[DSH-012](tasks/dsh-012-result.md) 完成人工命令，[DSH-013](tasks/dsh-013-result.md) 完成整次运行监督。S1 已验收，[DSH-014](tasks/dsh-014-result.md) 已验证独立仿真依赖/资产与 NVIDIA EGL；完整物理闭环尚未完成，最新状态见 [执行记录](simulation-loop-progress.md)。
+
 结论：四类环境的职责划分和仓库顶层分类可以保留。当前实现适合作为短时 mock 联调基线，但应先完成一次收尾行为修正与小范围职责拆分，再进入阶段 3。主要负担来自 runtime 的职责集中、mock 假设进入公共实现，以及文档与实际入口不一致。单纯减少目录层数或增加注释无法解决这些问题。
 
-本轮只更新审查与规划文档，没有修改运行代码、移动业务文件或实现阶段 3。下列源码问题仍待修复。
+最初审查轮只更新文档；下文保留当时发现与建议。后续源码修复状态以上方说明和各任务结果为准，阶段 3 尚未开始。
 
 ## 1. 已执行的验证
 
@@ -26,6 +28,8 @@
 
 ### R1 · P1：人工中断绕过 episode 收尾（已复现）
 
+当前状态：已修复，包含实际 Docker PID 1 信号路径；过程、验收和限制见 [DSH-003 结果](tasks/dsh-003-result.md)。下文保留原问题。
+
 位置：[node.py](../components/runtime/ros/dual_arm_runtime/dual_arm_runtime/node.py)，`_start`、`main`（审查时第 357、529～536 行）。episode 线程是 daemon；主线程接到中断后直接销毁 executor/node，没有等待 worker 完成停止、释放控制权和记录提交。
 
 复现：订阅到第一条动作后等待 0.15 秒，向 runtime 子进程发送 SIGINT。进程返回 0，输出目录只有 `.partial-episode-*/recording/recording_0.mcap`，没有 metadata.yaml 和 manifest.json。人工无法从退出码判断记录未完成，也没有结构化的中断原因。
@@ -35,6 +39,8 @@
 验收：在 PREPARING、动作执行中和记录收尾时分别中断；不会将不完整运行报告为成功；可写存储上的记录保留失败原因；无活跃 worker 访问已销毁 ROS 对象。SIGKILL/断电恢复是另外的问题。
 
 ### R2 · P1：同一个 observation ID 的内容会变化（已复现）
+
+当前状态：已修复，验收和改动范围见 [DSH-001 结果](tasks/dsh-001-result.md)。以下为原问题与修复要求。
 
 位置：[observation.py](../components/runtime/ros/dual_arm_runtime/dual_arm_runtime/observation.py)，`assemble`；[node.py](../components/runtime/ros/dual_arm_runtime/dual_arm_runtime/node.py)，`_publish_observation`。
 
@@ -48,6 +54,8 @@ runtime 仅在 ID 变化时发布/记录 ObservationIndex，却每次更新 `_la
 
 ### R3 · P1：续租清理失败阻止后续停止尝试（故障注入复现）
 
+当前状态：已修复，独立清理、错误聚合与回归证据见 [DSH-002 结果](tasks/dsh-002-result.md)。下文保留原问题。
+
 位置：[node.py](../components/runtime/ros/dual_arm_runtime/dual_arm_runtime/node.py)，`_cleanup_control`（审查时第 481～509 行）。等待已有续租、stop 和 release 共用一个 try；第一步超时就跳过其余步骤，随后清空本地 lease。
 
 故障注入将 `_wait_future` 设为抛出 CALL_TIMEOUT，实际调用的控制服务列表为空。后端仍有 lease 到期保护，但客户端没有主动尝试停止，也难以区分哪些清理步骤成功。
@@ -59,6 +67,8 @@ runtime 仅在 ID 变化时发布/记录 ObservationIndex，却每次更新 `_la
 ## 3. 职责与可读性问题
 
 ### R4 · P2：RuntimeNode 同时拥有过多生命周期
+
+当前状态：已通过 [DSH-005](tasks/dsh-005-result.md) 和 [DSH-006](tasks/dsh-006-result.md) 提取控制客户端与 episode 生命周期并验收。node 保留 ROS 接线、观测同步和进程入口；下文保留原问题与拆分依据。
 
 位置：[node.py](../components/runtime/ros/dual_arm_runtime/dual_arm_runtime/node.py)，542 行。行数本身不是判据；问题是 ROS 注册、跨线程状态、续租、服务等待、episode、脚本动作、记录和退出都由同一对象管理。一次修改很容易跨越多个责任。
 
@@ -79,6 +89,8 @@ runtime 仅在 ID 变化时发布/记录 ObservationIndex，却每次更新 `_la
 
 ### R5 · P2：同步写盘阻塞 ROS 回调，审计占用随整段数据增长
 
+当前状态：已由 [DSH-009](tasks/dsh-009-result.md) 修复并验收；下文保留原问题证据。队列和原生writer关闭有明确预算，后续audit/hash仍在episode worker中；整个episode墙钟监督已由 [DSH-013](tasks/dsh-013-result.md) 的自动采集启动器覆盖。
+
 位置：[node.py](../components/runtime/ros/dual_arm_runtime/dual_arm_runtime/node.py) 的 `_record`、SingleThreadedExecutor；[recording.py](../components/runtime/ros/dual_arm_runtime/dual_arm_runtime/recording.py) 的 `append`、文件哈希；[audit.py](../components/runtime/ros/dual_arm_runtime/dual_arm_runtime/audit.py) 的 `states/frames`。
 
 传感器回调直接序列化并写 MCAP，续租定时器在同一个 executor 上运行。慢写盘会延迟续租和状态接收；“回调保持非阻塞”的维护约定尚未落实。离线审计又保留所有完整图像对象，并通过 `read_bytes()` 整文件计算哈希。
@@ -88,6 +100,8 @@ runtime 仅在 ID 变化时发布/记录 ObservationIndex，却每次更新 `_la
 建议有界写入队列和单一 writer 所有者，明确溢出与排空失败行为；审计只保留引用检查需要的元数据，文件哈希按块读取。低层 lease 看门狗继续独立存在。先增加一次慢写盘行为验证，再选择队列大小，不预先引入消息中间件。
 
 ### R6 · P2：通用名称下包含 mock 专属规则
+
+当前状态：记录来源、三维结果和generic audit已由[DSH-010](tasks/dsh-010-result.md)修复；历史v1按旧规则读。BackendEngine仍是明确的mock实现，第二后端的共用规则提取留S3，不解除当前接入guard。下文保留原问题证据。
 
 位置：[engine.py](../libraries/backend_core/src/robot_backend_core/engine.py)、[recording.py](../components/runtime/ros/dual_arm_runtime/dual_arm_runtime/recording.py)、[audit.py](../components/runtime/ros/dual_arm_runtime/dual_arm_runtime/audit.py)、[manifest schema](../contracts/schemas/v1/episode_manifest.schema.json)。
 
@@ -99,6 +113,8 @@ runtime 仅在 ID 变化时发布/记录 ObservationIndex，却每次更新 `_la
 
 ### R7 · P2：内部配置仍是可变字典，验证规则不一致
 
+当前状态：已由 [DSH-004](tasks/dsh-004-result.md) 修复并验收；下文保留原问题证据。
+
 位置：[configuration.py](../components/runtime/ros/dual_arm_runtime/dual_arm_runtime/configuration.py)、[runtime schema](../contracts/schemas/v1/runtime_config.schema.json)、[engine.py](../libraries/backend_core/src/robot_backend_core/engine.py)。
 
 Configuration 虽然 frozen，内部 recipe/observation/action/snapshot 仍是可变 dict；业务代码散布字符串键和隐式约束。复现中 lease=30 ms、renew=10 ms 可以通过配置加载，后端 acquire 却规定 lease 至少 100 ms。脚本限位/有限值等也主要延迟到动作执行时检查。
@@ -106,6 +122,8 @@ Configuration 虽然 frozen，内部 recipe/observation/action/snapshot 仍是�
 建议保留 JSON Schema 验证外部文件，将已验证配置转换成少量有类型的 dataclass；在启动前检查已知参数冲突，错误包含文件/字段和原因。结构规则、机器人限位和后端能力分别有清晰权威来源。依赖当前测量状态的执行检查仍留在后端。
 
 ### R8 · P2：人工操作入口和结束语义不完整
+
+当前状态：[DSH-010](tasks/dsh-010-result.md)已验收人工结束分类、幂等请求和停止后终止反馈；[DSH-011](tasks/dsh-011-result.md)已验收 Compose 开发入口；[DSH-012](tasks/dsh-012-result.md)已验收人工 CLI；[DSH-013](tasks/dsh-013-run-supervision.md)已把自动采集统一到 Compose，并汇总退出码、日志排空和独立 audit 到 `status.json`。下文保留原问题证据。
 
 位置：[node.py](../components/runtime/ros/dual_arm_runtime/dual_arm_runtime/node.py) 的 `_end_service`、[EndEpisode.srv](../contracts/ros/robot_api_msgs/srv/EndEpisode.srv)、[启动器](../tools/run/mock_collect.py)。
 
@@ -127,7 +145,7 @@ EndEpisode 只确认进入 ENDING，不能表示已经落盘；它目前总把�
 | `profiles/` | 保留机器人/模型语义；说明时间同步阈值影响观测语义，与运行超时的归属不同 |
 | `configs/` | 当前真正使用的配方只有 `runtime/mock_collect.yaml`；先保持这一条加载路径清晰 |
 | `deploy/examples/sim_collect.yaml` | 设计示例，没有解析器；不能通过编辑它改变当前演示。之后有实际部署解析需求时再实现多层覆盖 |
-| `tools/` | 保留薄构建/启动入口；Docker CLI 当前为主路径。Compose 在验证和维护需求明确前作为可选路径 |
+| `tools/` | 保留薄构建/启动入口；DSH-011 已验收 Compose 开发路径。DSH-013 已把旧自动演示改为 Compose 薄入口，监督职责集中在 `collect_run.py`，不再维护第二套容器/卷导出流程 |
 | `tests/` | 当前集中在根目录合理，明确 unit/integration/doubles；不立即迁移到每个组件。将来拆独立发布项目时再评估 |
 | `assets/`、`third_party/`、未实现组件 | 有实际文件才建立，不按目标树预建空目录 |
 | `docs/` | 区分已实现操作、目标设计、历史材料和一次性审查；当前状态与命令不要多处独立维护 |

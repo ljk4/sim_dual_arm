@@ -1,0 +1,35 @@
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_source_proto_has_fixed_observation_time_and_policy_metadata():
+    text = (ROOT / "contracts/policy/v1/policy.proto").read_text()
+    assert "time_from_observation_ns = 1;" in text
+    assert "time_from_start_ns" not in text
+    assert "uint32 chunk_size = 14;" in text
+    assert "bool test_only = 15;" in text
+    assert "action_period_ns = 10;" in text
+    for name in (
+        "left_joint1",
+        "left_joint7",
+        "left_gripper_width",
+        "right_joint1",
+        "right_joint7",
+        "right_gripper_width",
+    ):
+        assert name in text
+
+
+def test_generated_sdk_matches_the_new_contract_when_available():
+    pb2 = pytest.importorskip("dual_arm_policy.v1.policy_pb2")
+    assert pb2.DESCRIPTOR.package == "bimanual.policy.v1"
+    target = pb2.JointTarget.DESCRIPTOR.fields_by_name
+    assert target["time_from_observation_ns"].number == 1
+    assert "time_from_start_ns" not in target
+    info = pb2.PolicyInfo.DESCRIPTOR.fields_by_name
+    assert info["chunk_size"].number == 14
+    assert info["test_only"].number == 15
+    assert info["action_period_ns"].number == 10

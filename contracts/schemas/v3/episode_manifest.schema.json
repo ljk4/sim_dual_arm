@@ -1,0 +1,222 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 3
+    },
+    "episode_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source": {
+      "type": "string",
+      "minLength": 1
+    },
+    "test_only": {
+      "type": "boolean"
+    },
+    "robot_profile_hash": {
+      "type": "string",
+      "minLength": 1
+    },
+    "observation_schema_hash": {
+      "type": "string",
+      "minLength": 1
+    },
+    "action_schema_hash": {
+      "type": "string",
+      "minLength": 1
+    },
+    "started_at_ns": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "ended_at_ns": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "message_counts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "files": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      }
+    },
+    "recording": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "complete": {
+          "type": "boolean"
+        },
+        "failure_reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "complete",
+        "failure_reason"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "complete": {
+                "const": true
+              }
+            },
+            "required": [
+              "complete"
+            ]
+          },
+          "then": {
+            "properties": {
+              "failure_reason": {
+                "const": ""
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "complete": {
+                "const": false
+              }
+            },
+            "required": [
+              "complete"
+            ]
+          },
+          "then": {
+            "properties": {
+              "failure_reason": {
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "enum": [
+            "completed",
+            "stopped",
+            "interrupted",
+            "failed"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome",
+        "reason"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "completed"
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          },
+          "then": {
+            "properties": {
+              "reason": {
+                "const": ""
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "enum": [
+                  "stopped",
+                  "interrupted",
+                  "failed"
+                ]
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          },
+          "then": {
+            "properties": {
+              "reason": {
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "enum": [
+            "not_evaluated",
+            "succeeded",
+            "failed"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome",
+        "reason"
+      ]
+    },
+    "configuration": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema_version",
+    "episode_id",
+    "run_id",
+    "source",
+    "test_only",
+    "robot_profile_hash",
+    "observation_schema_hash",
+    "action_schema_hash",
+    "started_at_ns",
+    "ended_at_ns",
+    "message_counts",
+    "files",
+    "recording",
+    "runtime",
+    "task",
+    "configuration"
+  ]
+}

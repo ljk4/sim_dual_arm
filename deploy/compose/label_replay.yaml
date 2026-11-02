@@ -1,0 +1,10 @@
+# Test-only applied-reference source, mounted independently of repository location.
+services:
+  fake-policy:
+    environment:
+      STACK_REPLAY_LABELS: /replay/labels.json
+    volumes:
+      - type: bind
+        source: ${STACK_REPLAY_LABELS_HOST:?explicit replay source is required}
+        target: /replay/labels.json
+        read_only: true

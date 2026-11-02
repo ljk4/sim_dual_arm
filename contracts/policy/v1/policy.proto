@@ -1,5 +1,7 @@
-// Design draft only. No generated SDK or server is implemented yet.
-// SI joint-position contract; framework-specific processing stays in learning.
+// Policy API v1.  Joint positions are SI radians for arm joints and metres for
+// each total gripper opening, in the fixed RobotProfile joint order.  A real
+// service is configured with the same 16-joint state/action order and the
+// three RGB camera order; this file intentionally declares no framework.
 syntax = "proto3";
 package bimanual.policy.v1;
 
@@ -33,14 +35,20 @@ message PolicyInfo {
   string observation_schema_hash = 4;
   string action_schema_hash = 5;
   string robot_profile_hash = 6;
+  // Complete state/action order.  The fixed S3 order is
+  // left_joint1..left_joint7, left_gripper_width, right_joint1..right_joint7,
+  // right_gripper_width.  Arm units are rad/rad/s, gripper units are m/m/s.
   repeated string state_joint_names = 7;
   repeated string action_joint_names = 8;
   repeated string required_camera_names = 9;
+  // The fixed diagnostic period is 50 ms (20 Hz) and chunk_size is 60 points.
   uint64 action_period_ns = 10;
   bool stateful = 11;
   bool ready = 12;
   // v1 accepts only "joint_position"; units are declared in the RobotProfile.
   string command_space = 13;
+  uint32 chunk_size = 14;
+  bool test_only = 15;
 }
 
 message OpenSessionRequest {
@@ -68,6 +76,7 @@ message JointSample {
   repeated string joint_names = 3;
   repeated double positions = 4;
   // Optional measurements: empty, or the same length/order as joint_names.
+  // No object truth, teacher phase or task-evaluator value is transmitted.
   repeated double velocities = 5;
   repeated double efforts = 6;
 }
@@ -94,8 +103,10 @@ message CameraSample {
 
 message Observation {
   uint64 observation_id = 1;
+  // All JointTarget times are relative to this exact robot time.
   int64 reference_robot_time_ns = 2;
   JointSample joints = 3;
+  // Exactly the configured three RGB cameras, in profile order.
   repeated CameraSample cameras = 4;
   string task_id = 5;
   string task_text = 6;
@@ -109,9 +120,9 @@ message PredictRequest {
 }
 
 message JointTarget {
-  // Relative to an execution start selected by runtime, not server wall time.
-  // Points must be strictly increasing and have positions.size == joint_names.size.
-  uint64 time_from_start_ns = 1;
+  // Relative to the original Observation.reference_robot_time_ns.  Points are
+  // strictly increasing with a uniform action_period_ns step.
+  uint64 time_from_observation_ns = 1;
   repeated double positions = 2;
 }
 

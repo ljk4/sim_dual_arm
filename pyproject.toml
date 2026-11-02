@@ -11,5 +11,8 @@ testpaths = ["tests/unit"]
 pythonpath = [
   "contracts/python/src",
   "libraries/backend_core/src",
+  "libraries/run_logging/src",
   "components/runtime/ros/dual_arm_runtime",
+  "components/learning/src",
+  "tests/doubles/policy",
 ]

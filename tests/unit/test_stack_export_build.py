@@ -1,0 +1,96 @@
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+from robot_contracts.profiles import load_profile
+
+_TOOLS = Path(__file__).resolve().parents[2] / "tools/run"
+if str(_TOOLS) not in sys.path:
+    sys.path.insert(0, str(_TOOLS))
+
+import stack_export  # noqa: E402
+
+PROFILE = load_profile(
+    Path(__file__).resolve().parents[2] / "profiles/robots/panda_stack_v1/profile.json",
+    Path(__file__).resolve().parents[2] / "contracts/schemas",
+)
+
+
+class _Reference:
+    def __init__(self, start, end):
+        self.start_sim_time_ns = start
+        self.end_sim_time_ns = end
+        self.request = SimpleNamespace(observation_time_ns=start)
+
+    def applied_sample_at(self, sim_time_ns, profile):
+        return SimpleNamespace(
+            applied_positions=(0.04,) * 16,
+            sampled_positions=(0.041,) * 16,
+            sampled_velocities=(0.0,) * 16,
+        )
+
+
+def _stamp(seconds):
+    return SimpleNamespace(sec=seconds // 1_000_000_000, nanosec=seconds % 1_000_000_000)
+
+
+def _state(sequence, time_ns):
+    return SimpleNamespace(
+        state_seq=sequence,
+        stamp=_stamp(time_ns),
+        joints=SimpleNamespace(position=[0.0] * 16, velocity=[0.0] * 16),
+    )
+
+
+def _frame(sequence, time_ns):
+    return SimpleNamespace(
+        frame_seq=sequence,
+        image=SimpleNamespace(header=SimpleNamespace(stamp=_stamp(time_ns))),
+    )
+
+
+def test_rebuilds_20hz_frames_with_4hz_raw_predictions():
+    cameras = ("global", "left_wrist", "right_wrist")
+    states = {}
+    frames = {}
+    for index in range(52):
+        sequence = index + 1
+        time_ns = 1_000_000_000 + index * 50_000_000
+        states[sequence] = _state(sequence, time_ns)
+        for camera in cameras:
+            frames[(camera, sequence)] = _frame(sequence, time_ns)
+    references = {}
+    chunk_events = {}
+    requests = {}
+    for chunk in range(1, 9):
+        start = 1_000_000_000 + (chunk - 1) * 250_000_000
+        references[("command", chunk)] = _Reference(start, start + 250_000_000)
+        chunk_events[("command", chunk)] = {
+            "STARTED": start + 10_000_000,
+            "RETIRED": start + 250_000_000,
+        }
+        source_observation = 1 + (chunk - 1) * 5
+        times = tuple((i + 1) * 50_000_000 for i in range(60))
+        requests[source_observation] = (
+            "command",
+            chunk,
+            times,
+            tuple((0.1,) * 16 for _ in times),
+        )
+    metadata = {
+        "states": states,
+        "frames": frames,
+        "indices": {},
+        "requests": requests,
+        "references": references,
+        "chunk_events": chunk_events,
+        "brakes": [],
+        "camera_names": cameras,
+    }
+    rows, raw, summary, times, frame_map = stack_export._build(metadata, cameras, [], 700, PROFILE)
+    assert len(rows) > 30
+    assert summary["rejected"]["missing_raw_block"] == 0
+    assert len(raw) == 8
+    assert len(frame_map) == 52
+    assert rows[0]["capture_source"] == "state_rebuild"
+    assert rows[0]["raw_source_observation_id"] in {1, 6, 11, 16, 21, 26, 31, 36}

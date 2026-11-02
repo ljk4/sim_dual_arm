@@ -1,0 +1,81 @@
+# Overlay: merge native_backend.yaml + native_runtime.yaml + this file.  It adds
+# one ROS-free/GPU-free fake Policy RPC service, a private network inherited
+# from the same Compose project, read-only source/config/SDK mounts and a
+# writable data/log root.  The fake provider is injected into the production
+# service layer; it is test_only and never represents formal demonstration data.
+name: ${NATIVE_PROJECT:-sim-dual-arm-native}
+
+services:
+  fake-policy:
+    image: ${NATIVE_POLICY_IMAGE:-sim-dual-arm/learning:policy-dev}
+    user: "${NATIVE_UID:-1000}:${NATIVE_GID:-1000}"
+    working_dir: /workspace
+    environment:
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONPATH: /opt/policy-sdk:/workspace/components/learning/src:/workspace/tests/doubles/policy:/workspace/libraries/run_logging/src
+      POLICY_CONFIG_CONTAINER: "${NATIVE_POLICY_CONFIG_CONTAINER:-/workspace/configs/learning/fake_policy.yaml}"
+      STACK_REPLAY_LABELS: "${STACK_REPLAY_LABELS:-}"
+    volumes:
+      - type: bind
+        source: ${NATIVE_REPO_ROOT:?repository root is required}
+        target: /workspace
+        read_only: true
+      - type: bind
+        source: ${NATIVE_POLICY_SDK_ROOT:?generated Policy SDK is required}
+        target: /opt/policy-sdk
+        read_only: true
+      - type: bind
+        source: ${NATIVE_DATA_ROOT:?writable data root is required}
+        target: /data
+    command:
+      - python
+      - -m
+      - run_fake
+      - --config
+      - "${NATIVE_POLICY_CONFIG_CONTAINER:-/workspace/configs/learning/fake_policy.yaml}"
+      - --log-directory
+      - /data/policy-log
+      - --run-id
+      - "${NATIVE_RUN_ID}"
+    networks: [native]
+    stop_grace_period: 10s
+    restart: "no"
+
+  native-runtime:
+    environment:
+      PYTHONPATH: /opt/policy-sdk:/workspace/components/learning/src
+      NATIVE_RUNTIME_CONFIG_CONTAINER: "${NATIVE_RUNTIME_CONFIG_CONTAINER:-/workspace/configs/runtime/native_policy.yaml}"
+    volumes:
+      - type: bind
+        source: ${NATIVE_POLICY_SDK_ROOT:?generated Policy SDK is required}
+        target: /opt/policy-sdk
+        read_only: true
+    command:
+      - python3
+      - -m
+      - dual_arm_runtime.native_node
+      - --project-root
+      - /workspace
+      - --config
+      - "${NATIVE_RUNTIME_CONFIG_CONTAINER:-/workspace/configs/runtime/native_policy.yaml}"
+      - --output
+      - "/data/raw/${NATIVE_RUN_ID}"
+      - --run-id
+      - "${NATIVE_RUN_ID}"
+      - --runs-output
+      - /data/runs
+      - --shutdown-timeout
+      - "20"
+      - --once
+    depends_on:
+      native-backend:
+        condition: service_started
+      fake-policy:
+        condition: service_started
+    networks: [native]
+    stop_grace_period: 30s
+    restart: "no"
+
+networks:
+  native: {}

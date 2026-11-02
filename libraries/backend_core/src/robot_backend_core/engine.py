@@ -7,7 +7,14 @@ import threading
 import uuid
 from dataclasses import dataclass
 
-from robot_contracts.models import ContractError, RobotProfile, RunContext, Trajectory
+from robot_contracts.control import check_generation
+from robot_contracts.models import (
+    CommandStatus,
+    ContractError,
+    RobotProfile,
+    RunContext,
+    Trajectory,
+)
 
 TERMINAL_PHASES = frozenset({"COMPLETED", "CANCELED", "FAILED"})
 
@@ -19,16 +26,26 @@ class Event:
     command: Trajectory
     phase: str
     reason: str
+    stamp_ns: int
 
 
 @dataclass
 class Execution:
+    """Internal mutable execution state never exposed outside the engine lock."""
+
     command: Trajectory
     fingerprint: str
-    started_at_ns: int
+    steady_started_at_ns: int
     initial_positions: tuple[float, ...]
+    accepted_at_ns: int
+    started_at_ns: int
+    sample_time_ns: int
+    reference_positions: tuple[float, ...]
+    measured_positions: tuple[float, ...]
     phase: str = "STARTED"
     reason: str = ""
+    elapsed_ns: int = 0
+    progress: float = 0.0
 
 
 class BackendEngine:
@@ -62,20 +79,19 @@ class BackendEngine:
             return self.context, self.positions
 
     def _check_generation(self, context: RunContext) -> None:
-        expected = self.context
-        for name in (
-            "robot_id",
-            "robot_profile_hash",
-            "backend_instance_id",
-            "time_domain_id",
-            "clock_epoch",
-        ):
-            if getattr(context, name) != getattr(expected, name):
-                raise ContractError("STALE_CONTEXT", name)
+        check_generation(context, self.context)
 
-    def acquire(self, context: RunContext, owner: str, duration_ns: int, now_ns: int) -> str:
+    def acquire(
+        self,
+        context: RunContext,
+        owner: str,
+        duration_ns: int,
+        now_ns: int,
+        *,
+        robot_now_ns: int | None = None,
+    ) -> str:
         with self._lock:
-            self.expire(now_ns)
+            self.expire(now_ns, robot_now_ns)
             self._check_generation(context)
             if self._lease_id:
                 raise ContractError("CONTROL_BUSY")
@@ -90,43 +106,76 @@ class BackendEngine:
             self._highest_sequence = 0
             return self._lease_id
 
-    def _check_lease(self, context: RunContext, lease_id: str, now_ns: int) -> None:
-        self.expire(now_ns)
+    def _check_lease(
+        self,
+        context: RunContext,
+        lease_id: str,
+        now_ns: int,
+        robot_now_ns: int | None = None,
+    ) -> None:
+        self.expire(now_ns, robot_now_ns)
         self._check_generation(context)
         if context != self.context:
             raise ContractError("STALE_CONTEXT", "Episode or control epoch")
         if not self._lease_id or lease_id != self._lease_id:
             raise ContractError("LEASE_EXPIRED")
 
-    def renew(self, context: RunContext, lease_id: str, duration_ns: int, now_ns: int) -> None:
+    def renew(
+        self,
+        context: RunContext,
+        lease_id: str,
+        duration_ns: int,
+        now_ns: int,
+        *,
+        robot_now_ns: int | None = None,
+    ) -> None:
         with self._lock:
-            self._check_lease(context, lease_id, now_ns)
+            self._check_lease(context, lease_id, now_ns, robot_now_ns)
             if not 100_000_000 <= duration_ns <= 10_000_000_000:
                 raise ContractError("INVALID_LEASE_DURATION")
             self._lease_until_ns = now_ns + duration_ns
 
-    def release(self, context: RunContext, lease_id: str, now_ns: int) -> None:
+    def release(
+        self,
+        context: RunContext,
+        lease_id: str,
+        now_ns: int,
+        *,
+        robot_now_ns: int | None = None,
+    ) -> None:
         with self._lock:
-            self._check_lease(context, lease_id, now_ns)
-            self._stop("CONTROL_RELEASED")
+            self._check_lease(context, lease_id, now_ns, robot_now_ns)
+            self._stop("CONTROL_RELEASED", robot_now_ns if robot_now_ns is not None else now_ns)
             self._lease_id = ""
             self._owner = ""
 
-    def expire(self, now_ns: int) -> None:
+    def expire(self, now_ns: int, robot_now_ns: int | None = None) -> None:
+        """Expire by monotonic/wall time even when the robot clock is frozen."""
         with self._lock:
             if self._lease_id and now_ns >= self._lease_until_ns:
-                self._stop("LEASE_EXPIRED")
+                self._stop("LEASE_EXPIRED", robot_now_ns if robot_now_ns is not None else now_ns)
                 self._lease_id = ""
                 self._owner = ""
 
-    def stop(self, context: RunContext, lease_id: str, now_ns: int, reason: str) -> None:
+    def stop(
+        self,
+        context: RunContext,
+        lease_id: str,
+        now_ns: int,
+        reason: str,
+        *,
+        robot_now_ns: int | None = None,
+    ) -> None:
         with self._lock:
-            self._check_lease(context, lease_id, now_ns)
-            self._stop(reason or "STOP_REQUESTED")
+            self._check_lease(context, lease_id, now_ns, robot_now_ns)
+            self._stop(
+                reason or "STOP_REQUESTED",
+                robot_now_ns if robot_now_ns is not None else now_ns,
+            )
 
-    def _stop(self, reason: str) -> None:
+    def _stop(self, reason: str, robot_now_ns: int) -> None:
         if self._active is not None:
-            self._finish("CANCELED", reason)
+            self._finish("CANCELED", reason, robot_now_ns)
 
     def cancel(
         self,
@@ -134,11 +183,17 @@ class BackendEngine:
         lease_id: str,
         command_id: str,
         now_ns: int,
+        *,
+        robot_now_ns: int | None = None,
     ) -> None:
         with self._lock:
-            self._check_lease(context, lease_id, now_ns)
+            self._check_lease(context, lease_id, now_ns, robot_now_ns)
             if self._active is not None and self._active.command.command_id == command_id:
-                self._finish("CANCELED", "CANCEL_REQUESTED")
+                self._finish(
+                    "CANCELED",
+                    "CANCEL_REQUESTED",
+                    robot_now_ns if robot_now_ns is not None else now_ns,
+                )
 
     @staticmethod
     def _fingerprint(command: Trajectory) -> str:
@@ -183,7 +238,7 @@ class BackendEngine:
 
     def submit(self, command: Trajectory, robot_now_ns: int, steady_now_ns: int) -> Execution:
         with self._lock:
-            self._check_lease(command.context, command.lease_id, steady_now_ns)
+            self._check_lease(command.context, command.lease_id, steady_now_ns, robot_now_ns)
             try:
                 fingerprint = self._fingerprint(command)
             except ValueError as error:
@@ -203,36 +258,78 @@ class BackendEngine:
             if len(self._events) > 1021:
                 raise ContractError("EVENT_QUEUE_FULL", "Consumer must drain events")
             self._highest_sequence = command.command_seq
-            execution = Execution(command, fingerprint, steady_now_ns, self.positions)
+            accepted_at = max(0, robot_now_ns)
+            execution = Execution(
+                command,
+                fingerprint,
+                steady_now_ns,
+                self.positions,
+                accepted_at,
+                accepted_at,
+                accepted_at,
+                self.positions,
+                self.positions,
+            )
             self._history[command.command_id] = execution
             self._active = execution
-            self._emit(execution, "ACCEPTED", "")
-            self._emit(execution, "STARTED", "")
+            self._emit(execution, "ACCEPTED", "", accepted_at)
+            self._emit(execution, "STARTED", "", accepted_at)
             while len(self._history) > self._max_history:
                 del self._history[next(iter(self._history))]
             return execution
 
-    def tick(self, steady_now_ns: int) -> None:
+    @staticmethod
+    def _interpolate(
+        execution: Execution,
+        steady_elapsed_ns: int,
+    ) -> tuple[tuple[float, ...], bool]:
+        elapsed = max(0, steady_elapsed_ns)
+        start_time, start = 0, execution.initial_positions
+        for target in execution.command.targets:
+            if elapsed < target.time_ns:
+                fraction = (elapsed - start_time) / (target.time_ns - start_time)
+                return (
+                    tuple(
+                        left + fraction * (right - left)
+                        for left, right in zip(start, target.positions, strict=True)
+                    ),
+                    False,
+                )
+            start_time, start = target.time_ns, target.positions
+        return execution.command.targets[-1].positions, True
+
+    def _sample(
+        self,
+        execution: Execution,
+        positions: tuple[float, ...],
+        robot_now_ns: int,
+        execution_elapsed_ns: int,
+        progress: float,
+    ) -> None:
+        self.positions = positions
+        execution.reference_positions = positions
+        execution.measured_positions = positions
+        execution.sample_time_ns = max(execution.started_at_ns, robot_now_ns)
+        execution.elapsed_ns = max(0, execution_elapsed_ns)
+        execution.progress = min(1.0, max(0.0, progress))
+
+    def tick(self, steady_now_ns: int, robot_now_ns: int | None = None) -> None:
+        """Advance interpolation by steady time; sample times use the robot clock."""
+        robot_time = steady_now_ns if robot_now_ns is None else robot_now_ns
         with self._lock:
-            self.expire(steady_now_ns)
+            self.expire(steady_now_ns, robot_time)
             execution = self._active
             if execution is None:
                 return
-            elapsed = max(0, steady_now_ns - execution.started_at_ns)
-            start_time, start = 0, execution.initial_positions
-            for target in execution.command.targets:
-                if elapsed < target.time_ns:
-                    fraction = (elapsed - start_time) / (target.time_ns - start_time)
-                    self.positions = tuple(
-                        left + fraction * (right - left)
-                        for left, right in zip(start, target.positions, strict=True)
-                    )
-                    return
-                start_time, start = target.time_ns, target.positions
-            self.positions = execution.command.targets[-1].positions
-            self._finish("COMPLETED", "")
+            elapsed = max(0, steady_now_ns - execution.steady_started_at_ns)
+            positions, finished = self._interpolate(execution, elapsed)
+            horizon = execution.command.targets[-1].time_ns
+            progress = 1.0 if finished or horizon <= 0 else elapsed / horizon
+            self._sample(execution, positions, robot_time, elapsed, progress)
+            if finished:
+                self._finish("COMPLETED", "", robot_time)
 
-    def _emit(self, execution: Execution, phase: str, reason: str) -> None:
+    def _emit(self, execution: Execution, phase: str, reason: str, stamp_ns: int) -> None:
         self._event_sequence += 1
         self._events.append(
             Event(
@@ -241,15 +338,68 @@ class BackendEngine:
                 execution.command,
                 phase,
                 reason,
+                stamp_ns,
             )
         )
 
-    def _finish(self, phase: str, reason: str) -> None:
+    def _finish(self, phase: str, reason: str, robot_now_ns: int) -> None:
         execution = self._active
         if execution is not None:
             execution.phase, execution.reason = phase, reason
-            self._emit(execution, phase, reason)
+            # Terminal samples retain the last actually generated reference and
+            # its execution duration.  A stop that arrives between ticks must not
+            # pretend another motion sample happened; only the robot event time
+            # advances.
+            execution.sample_time_ns = max(execution.sample_time_ns, robot_now_ns)
+            if phase == "COMPLETED":
+                execution.progress = 1.0
+            self._emit(execution, phase, reason, execution.sample_time_ns)
             self._active = None
+
+    def _status(self, execution: Execution) -> CommandStatus:
+        return CommandStatus(
+            context=execution.command.context,
+            command_id=execution.command.command_id,
+            command_seq=execution.command.command_seq,
+            observation_id=execution.command.observation_id,
+            phase=execution.phase,
+            reason=execution.reason,
+            sample_time_ns=execution.sample_time_ns,
+            accepted_at_ns=execution.accepted_at_ns,
+            started_at_ns=execution.started_at_ns,
+            elapsed_ns=execution.elapsed_ns,
+            execution_clock="steady",
+            interpolation_version="linear_v1",
+            joint_names=execution.command.joint_names,
+            initial_positions=execution.initial_positions,
+            reference_positions=execution.reference_positions,
+            measured_positions=execution.measured_positions,
+            tracking_error=tuple(
+                reference - measured
+                for reference, measured in zip(
+                    execution.reference_positions,
+                    execution.measured_positions,
+                    strict=True,
+                )
+            ),
+            progress=execution.progress,
+        )
+
+    def active_status(self) -> CommandStatus | None:
+        """Return the current active snapshot without advancing any state."""
+        with self._lock:
+            return None if self._active is None else self._status(self._active)
+
+    def query_command(self, context: RunContext, command_id: str) -> CommandStatus:
+        """Read one original-context snapshot; never ticks, renews or emits events."""
+        with self._lock:
+            self._check_generation(context)
+            execution = self._history.get(command_id)
+            if execution is None:
+                raise ContractError("RESULT_EXPIRED", command_id)
+            if execution.command.context != context:
+                raise ContractError("STALE_CONTEXT", "command identity")
+            return self._status(execution)
 
     def drain_events(self) -> list[Event]:
         with self._lock:

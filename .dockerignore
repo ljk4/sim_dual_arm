@@ -5,6 +5,7 @@ var/
 .aws/
 .codex/
 deploy/local/
+/third_party/src/
 **/__pycache__/
 **/.venv/
 **/.pytest_cache/

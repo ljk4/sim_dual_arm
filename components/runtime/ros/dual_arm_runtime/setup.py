@@ -14,6 +14,7 @@ setup(
     entry_points={
         "console_scripts": [
             "runtime = dual_arm_runtime.node:main",
+            "native_runtime = dual_arm_runtime.native_node:main",
             "inspect_episode = dual_arm_runtime.audit:main",
         ]
     },

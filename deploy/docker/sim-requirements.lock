@@ -1,0 +1,18 @@
+# Resolved for CPython 3.12 / Linux x86_64 against sim-dual-arm/ros-base:stage2.
+# Generated from the recorded pip dry-run report; do not replace with floating ranges.
+--only-binary=:all:
+absl-py==2.5.1 --hash=sha256:721200f2f0e9960f2ca9dc3a2a706b201f5f75d812c158f059cbbe29eeafbdb8
+daqp==0.10.3 --hash=sha256:eed3bbc147cc74b0022806d9cfbb1f5a9ad3ad9d1fd22c4b27baac85e6ed947c
+etils==1.14.0 --hash=sha256:b5df7341f54dbe1405a4450b2741207b4a8c279780402b45f87202b94dfc52b4
+fsspec==2026.9.0 --hash=sha256:8dd6e646e99ea382bd85f97a45e6b526a442d79423a7dc673f1e2756d05fcb5f
+glfw==2.11.0 --hash=sha256:76484fae4a4ef0f778a05e02422ecbe6960ae23039087fe2e0ad9742ab8c7bbe
+mink==1.3.0 --hash=sha256:5c31a4e3a43eb7d544d7803a2af36ca703d8b933189251d3f37cc2117b23e1ff
+mujoco==3.17.0 --hash=sha256:42371356efe53a5f5f73ed03fcb967bdf04048017f80e2fca01e71a360e42da2
+numpy==1.26.4 --hash=sha256:675d61ffbfa78604709862923189bad94014bef562cc35cf61d3a07bba02a7ed
+pillow==13.0.0 --hash=sha256:42d63be3af4f9b951b199b0a9d23365d37ab14687e6d77b74940432c8515c4ca
+PyOpenGL==3.1.10 --hash=sha256:794a943daced39300879e4e47bd94525280685f42dbb5a998d336cfff151d74f
+qpsolvers==4.13.0 --hash=sha256:7f23759a3d8835fa14b2c9eb4ba971188fde0c1460589f45897b00a75776eef7
+scipy==1.17.1 --hash=sha256:02ae3b274fde71c5e92ac4d54bc06c42d80e399fec704383dcd99b301df37458
+typing_extensions==4.16.0 --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8
+websockets==17.3 --hash=sha256:a7f391838e8adcf1f2fe71561d9e5a9f74ea7ffa5052eb2db329aac677383136
+zipp==4.1.2 --hash=sha256:b30cb6cd253122169c47de245ca24a86bac2a5d3802ba15bf7ba6414eb9e144d

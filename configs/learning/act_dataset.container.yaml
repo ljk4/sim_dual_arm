@@ -1,0 +1,38 @@
+# DSH-035: 034 export -> two independent LeRobot datasets.
+# This file is the single conversion/feature contract.  Paths are project-relative.
+schema_version: 1
+fps: 20
+chunk_size: 60
+action_lead_ns: 50000000
+state_dim: 16
+camera_names: [global, left_wrist, right_wrist]
+camera_width: 320
+camera_height: 240
+task_text: "Pick up the red source cube and place it on the blue target cube."
+profile: /workspace/profiles/robots/panda_stack_learning_v1/profile.json
+select: /data/formal-select.json
+output_root: /output/dataset
+cache_root: /output/cache
+# The campaign writes each accepted export at <attempt>/stack/<run>/export.
+attempt_export_glob: "stack/*/export"
+verify_png_pixels: true
+require_quality: true
+expected:
+  formal_episodes: 50
+  training_episodes: 45
+  validation_episodes: 5
+  # Zero-based positions in the first 50 qualified successes.
+  validation_positions: [9, 19, 29, 39, 49]
+lerobot:
+  source_revision: 7e241bd630a3719a56157a497ce5d08f244784f1
+  source_archive_sha256: 710397ad753090743c1aadf04b2bd40584fbca8448b1409131138172913c8a0c
+  rgb_encoder:
+    vcodec: h264
+    g: 2
+    crf: 18
+    preset: veryfast
+  video_backend: torchcodec
+  video_files_size_mb: 256
+  data_files_size_mb: 256
+  encoder_threads: 1
+  image_writer_threads: 0

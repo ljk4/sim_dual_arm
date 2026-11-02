@@ -1,0 +1,749 @@
+from __future__ import annotations
+
+import copy
+import importlib.util
+import json
+import math
+import sys
+from dataclasses import replace
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+import yaml
+
+ROOT = Path(__file__).resolve().parents[2]
+SIM_SRC = ROOT / "components/backend_sim/src"
+if str(SIM_SRC) not in sys.path:
+    sys.path.insert(0, str(SIM_SRC))
+
+from robot_backend_sim import check_scene, visibility  # noqa: E402
+from robot_backend_sim.scene_config import load_scene_config  # noqa: E402
+
+SCENE_CONFIG = ROOT / "configs/simulation/panda_stack.yaml"
+CHECK_CONFIG = ROOT / "configs/simulation/scene_check.yaml"
+
+
+def load_tool(name: str, relative: str):
+    path = ROOT / relative
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+sim_check = load_tool("dsh016_sim_check", "tools/run/sim_check.py")
+
+
+def write_yaml(tmp_path: Path, document: dict) -> Path:
+    path = tmp_path / "scene_check.yaml"
+    path.write_text(yaml.safe_dump(document), encoding="utf-8")
+    return path
+
+
+def default_document() -> dict:
+    return yaml.safe_load(CHECK_CONFIG.read_text(encoding="utf-8"))
+
+
+def scene_config():
+    return load_scene_config(SCENE_CONFIG)
+
+
+def mutated(tmp_path: Path, mutate) -> Path:
+    document = copy.deepcopy(default_document())
+    mutate(document)
+    return write_yaml(tmp_path, document)
+
+
+def set_value(*path, value):
+    def mutate(document):
+        target = document
+        for key in path[:-1]:
+            target = target[key]
+        target[path[-1]] = value
+
+    return mutate
+
+
+def test_default_check_config_is_typed_frozen_and_cross_checked():
+    config = visibility.load_check_config(CHECK_CONFIG, scene_config())
+
+    assert config.schema_version == 1
+    assert config.seeds == (11, 23, 37)
+    assert config.camera_names == ("global", "left_wrist", "right_wrist")
+    assert config.object_names == ("source", "target")
+    assert config.boundary_layout_count == 64
+    assert config.layout_count == 67
+    assert config.threshold("global", "source") == 64
+    assert config.threshold("left_wrist", "target") == 32
+    assert config.throughput.warmup_groups == 3
+    assert config.throughput.measure_groups == 20
+    assert config.camera_resolutions["right_wrist"] == (320, 240)
+
+    with pytest.raises(TypeError):
+        config.min_visible_pixels["global"]["source"] = 1  # type: ignore[index]
+    with pytest.raises((AttributeError, TypeError)):
+        config.seeds = (1,)  # type: ignore[misc]
+
+
+def test_boundary_layouts_cover_both_objects_jointly_and_within_domains():
+    scene = scene_config()
+    config = visibility.load_check_config(CHECK_CONFIG, scene)
+    layouts = visibility.build_layouts(config, scene)
+
+    assert len(layouts) == 67
+    seeds = [layout for layout in layouts if layout.kind == "seed"]
+    boundaries = [layout for layout in layouts if layout.kind == "boundary"]
+    assert [layout.layout_id for layout in seeds] == ["seed-11", "seed-23", "seed-37"]
+    assert len(boundaries) == 64
+    assert [layout.layout_id for layout in boundaries[:2]] == ["boundary-000", "boundary-001"]
+
+    by_name = {obj.name: obj for obj in scene.objects}
+    combinations: dict[str, set[tuple[float, float, float]]] = {name: set() for name in by_name}
+    for layout in boundaries:
+        assert tuple(placement.name for placement in layout.placements) == ("source", "target")
+        for placement in layout.placements:
+            obj = by_name[placement.name]
+            assert abs(placement.x - obj.nominal_xy[0]) == pytest.approx(obj.randomization.xy_m)
+            assert abs(placement.y - obj.nominal_xy[1]) == pytest.approx(obj.randomization.xy_m)
+            assert abs(placement.yaw_deg) == pytest.approx(obj.randomization.yaw_deg)
+            combinations[placement.name].add(
+                (
+                    round(placement.x - obj.nominal_xy[0], 9),
+                    round(placement.y - obj.nominal_xy[1], 9),
+                    placement.yaw_deg,
+                )
+            )
+    for obj in scene.objects:
+        assert len(combinations[obj.name]) == 8
+
+    # Independence: with source fixed, target still visits all eight corners.
+    source_fixed = [
+        layout for layout in boundaries if layout.placements[0] == boundaries[0].placements[0]
+    ]
+    assert len(source_fixed) == 8
+    assert len({layout.placements[1] for layout in source_fixed}) == 8
+
+
+@pytest.mark.parametrize(
+    ("mutate", "field"),
+    [
+        (set_value("schema_version", value=2), "schema_version"),
+        (set_value("seeds", value=[]), "seeds"),
+        (set_value("seeds", value=[1, 1]), "seeds[1]"),
+        (set_value("seeds", value=[True]), "seeds[0]"),
+        (set_value("boundary_xy_corners", value=[[-1, -1]]), "boundary_xy_corners"),
+        (
+            set_value("boundary_xy_corners", value=[[-1, -1], [-1, 1], [1, -1], [1, 2]]),
+            "boundary_xy_corners[3][1]",
+        ),
+        (
+            set_value("boundary_xy_corners", value=[[-1, -1], [-1, 1], [1, -1], [1, -1]]),
+            "boundary_xy_corners[3]",
+        ),
+        (set_value("boundary_yaw_signs", value=[-1, -1]), "boundary_yaw_signs[1]"),
+        (set_value("max_layouts", value=10), "max_layouts"),
+        (set_value("max_layouts", value=101), "max_layouts"),
+        (set_value("throughput", "measure_groups", value=0), "throughput.measure_groups"),
+        (set_value("throughput", "warmup_groups", value=True), "throughput.warmup_groups"),
+    ],
+)
+def test_check_config_rejects_invalid_typed_values(tmp_path, mutate, field):
+    path = mutated(tmp_path, mutate)
+    with pytest.raises(visibility.SceneCheckConfigError) as caught:
+        visibility.load_check_config(path, scene_config())
+    assert caught.value.field == field
+    assert str(path) in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [True, 0, -1, math.nan, math.inf, 320 * 240 + 1, 10**30],
+)
+def test_thresholds_reject_bool_zero_negative_nonfinite_and_huge(tmp_path, value):
+    path = mutated(tmp_path, set_value("min_visible_pixels", "global", "source", value=value))
+    with pytest.raises(visibility.SceneCheckConfigError) as caught:
+        visibility.load_check_config(path, scene_config())
+    assert caught.value.field == "min_visible_pixels.global.source"
+
+
+def test_threshold_names_must_match_scene_cameras_and_objects(tmp_path):
+    unknown_camera = mutated(tmp_path, set_value("min_visible_pixels", "overhead", value={}))
+    with pytest.raises(visibility.SceneCheckConfigError) as caught:
+        visibility.load_check_config(unknown_camera, scene_config())
+    assert caught.value.field == "min_visible_pixels"
+
+    duplicate_object = mutated(
+        tmp_path,
+        set_value("min_visible_pixels", "global", value={"source": 64, "target": 64, "other": 1}),
+    )
+    with pytest.raises(visibility.SceneCheckConfigError) as caught:
+        visibility.load_check_config(duplicate_object, scene_config())
+    assert caught.value.field == "min_visible_pixels.global"
+
+    missing_object = mutated(
+        tmp_path,
+        set_value("min_visible_pixels", "global", value={"source": 64}),
+    )
+    with pytest.raises(visibility.SceneCheckConfigError) as caught:
+        visibility.load_check_config(missing_object, scene_config())
+    assert caught.value.field == "min_visible_pixels.global"
+
+
+def test_unknown_and_duplicate_yaml_keys_are_rejected(tmp_path):
+    path = mutated(tmp_path, set_value("unexpected", value=1))
+    with pytest.raises(visibility.SceneCheckConfigError) as caught:
+        visibility.load_check_config(path, scene_config())
+    assert caught.value.field == "unexpected"
+
+    duplicate = tmp_path / "duplicate.yaml"
+    duplicate.write_text(
+        CHECK_CONFIG.read_text(encoding="utf-8") + "\nseeds: [1]\n", encoding="utf-8"
+    )
+    with pytest.raises(visibility.SceneCheckConfigError, match="duplicate key"):
+        visibility.load_check_config(duplicate, scene_config())
+
+
+def test_pixel_count_uses_exact_objid_and_objtype_not_colors():
+    segmentation = [
+        [[7, visibility.GEOM_OBJECT_TYPE], [7, visibility.GEOM_OBJECT_TYPE], [8, 5]],
+        [[7, 1], [4, 2], [7, visibility.GEOM_OBJECT_TYPE]],
+    ]
+    assert visibility.count_visible_pixels(segmentation, 7) == 3
+    assert visibility.count_visible_pixels(segmentation, 8) == 1
+    assert visibility.count_visible_pixels(segmentation, 4) == 0
+
+    with pytest.raises(visibility.VisibilityError, match=r"shape .*2\)|2-channel"):
+        visibility.count_visible_pixels([[[1, 2, 3]]], 1)
+    with pytest.raises(visibility.VisibilityError, match="integers"):
+        visibility.count_visible_pixels([[[1.0, 5.0]]], 1)
+
+
+def test_zero_pixels_fails_a_camera_and_layout():
+    layout = visibility.LayoutSpec("seed-1", "seed", 1, ())
+    segmentation = [
+        [[0, 0], [0, 0], [0, 0]],
+        [[0, 0], [0, 0], [0, 0]],
+    ]
+    thresholds = {
+        camera: {"source": 1, "target": 1} for camera in ("global", "left_wrist", "right_wrist")
+    }
+    result = visibility.summarize_layout(
+        layout,
+        {camera: segmentation for camera in thresholds},
+        {"source": 100, "target": 101},
+        thresholds,
+        {camera: (3, 2) for camera in thresholds},
+    )
+    assert result.total_pixels == 0
+    assert result.minimum_margin == -1
+    assert result.passed is False
+    assert all(camera.passed is False for camera in result.cameras)
+
+
+def test_contact_sheet_uses_first_and_worst_layouts(tmp_path):
+    from PIL import Image
+
+    config = visibility.load_check_config(CHECK_CONFIG, scene_config())
+    run_dir = tmp_path / "run"
+    results = []
+    for index, (layout_id, total) in enumerate((("seed-11", 300), ("boundary-007", 40))):
+        rgb = {}
+        for camera in config.camera_names:
+            path = run_dir / "artifacts/layouts" / layout_id / f"{camera}.png"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            Image.new("RGB", (8, 6), (index * 40, 20, 30)).save(path)
+            rgb[camera] = path.relative_to(run_dir).as_posix()
+        results.append(
+            {
+                "layout_id": layout_id,
+                "kind": "seed" if index == 0 else "boundary",
+                "total_pixels": total,
+                "minimum_margin": total - 100,
+                "passed": True,
+                "rgb": rgb,
+            }
+        )
+    selected = check_scene._select_contact_layouts(results)
+    assert [item["layout_id"] for item in selected] == ["seed-11", "boundary-007"]
+
+    relative = check_scene._write_contact_sheet(run_dir, results, config)
+    assert relative == "artifacts/contact_sheet.png"
+    sheet = run_dir / relative
+    assert sheet.is_file()
+    with Image.open(sheet) as image:
+        assert image.width > 8 * 3
+        assert image.height > 6 * 2
+
+
+class _TestRGB:
+    """Minimal array-interface object so Pillow runs without numpy on the host."""
+
+    def __init__(self, width: int, height: int, color: tuple[int, int, int]) -> None:
+        self.width = width
+        self.height = height
+        self._data = bytes(color) * (width * height)
+
+    @property
+    def __array_interface__(self):
+        return {
+            "shape": (self.height, self.width, 3),
+            "typestr": "|u1",
+            "strides": (self.width * 3, 3, 1),
+            "version": 3,
+        }
+
+    def tobytes(self) -> bytes:
+        return self._data
+
+
+def test_save_rgb_images_writes_three_real_pngs_and_protects_layout_directory(tmp_path):
+    from PIL import Image
+
+    run_dir = tmp_path / "run"
+    layout = visibility.LayoutSpec("seed-11", "seed", 11, ())
+    rgb = {
+        camera: _TestRGB(40 + index, 30, (10 + index, 20, 30))
+        for index, camera in enumerate(("global", "left_wrist", "right_wrist"))
+    }
+
+    paths = check_scene._save_rgb_images(run_dir, layout, rgb)
+
+    assert set(paths) == set(rgb)
+    for index, camera in enumerate(rgb):
+        path = run_dir / paths[camera]
+        assert path.is_file()
+        with Image.open(path) as image:
+            assert image.format == "PNG"
+            assert image.size == (40 + index, 30)
+    before = {camera: (run_dir / path).read_bytes() for camera, path in paths.items()}
+
+    with pytest.raises(check_scene.SceneCheckFailure) as caught:
+        check_scene._save_rgb_images(run_dir, layout, rgb)
+    assert caught.value.reason == "artifact_path_exists"
+    assert {camera: (run_dir / path).read_bytes() for camera, path in paths.items()} == before
+
+
+def test_save_rgb_images_write_error_is_artifact_write_failed(tmp_path, monkeypatch):
+    from PIL import Image
+
+    run_dir = tmp_path / "run"
+    layout = visibility.LayoutSpec("seed-11", "seed", 11, ())
+    rgb = {camera: _TestRGB(8, 6, (1, 2, 3)) for camera in ("global", "left_wrist")}
+
+    def fail_save(*_args, **_kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(Image.Image, "save", fail_save)
+    with pytest.raises(check_scene.SceneCheckFailure) as caught:
+        check_scene._save_rgb_images(run_dir, layout, rgb)
+    assert caught.value.reason == "artifact_write_failed"
+    assert "disk full" in caught.value.message
+
+
+def test_contact_sheet_write_error_has_clear_reason(tmp_path, monkeypatch):
+    from PIL import Image
+
+    config = visibility.load_check_config(CHECK_CONFIG, scene_config())
+    run_dir = tmp_path / "run"
+    layout = visibility.LayoutSpec("seed-11", "seed", 11, ())
+    paths = check_scene._save_rgb_images(
+        run_dir,
+        layout,
+        {camera: _TestRGB(8, 6, (9, 8, 7)) for camera in config.camera_names},
+    )
+    results = [
+        {
+            "layout_id": "seed-11",
+            "kind": "seed",
+            "total_pixels": 300,
+            "minimum_margin": 100,
+            "passed": True,
+            "rgb": paths,
+        }
+    ]
+
+    def fail_save(*_args, **_kwargs):
+        raise OSError("sheet disk full")
+
+    monkeypatch.setattr(Image.Image, "save", fail_save)
+    with pytest.raises(check_scene.SceneCheckFailure) as caught:
+        check_scene._write_contact_sheet(run_dir, results, config)
+    assert caught.value.reason == "contact_sheet_write_failed"
+    assert "sheet disk full" in caught.value.message
+
+
+def test_yaw_quaternion_is_normalized_and_has_both_signs():
+    for yaw in (-10.0, 0.0, 10.0):
+        quaternion = visibility.yaw_quaternion(yaw)
+        assert sum(value * value for value in quaternion) == pytest.approx(1.0)
+    assert visibility.yaw_quaternion(-10.0)[3] < 0
+    assert visibility.yaw_quaternion(10.0)[3] > 0
+
+
+def check_arguments(tmp_path: Path) -> check_scene.SceneCheckArguments:
+    for name in ("assets", "reports"):
+        (tmp_path / name).mkdir()
+    summary = tmp_path / "summary.json"
+    summary.write_text("{}")
+    source = tmp_path / "source.json"
+    source.write_text("{}")
+    return check_scene.SceneCheckArguments(
+        assets_root=tmp_path / "assets",
+        summary=summary,
+        source=source,
+        scene_config=SCENE_CONFIG,
+        check_config=CHECK_CONFIG,
+        report_root=tmp_path / "reports",
+        run_id="scene-test",
+    )
+
+
+class FakeLogger:
+    def __init__(self, directory: Path, *, fail_close: bool = False) -> None:
+        self.directory = directory
+        self.instance_id = directory.name
+        self.fail_close = fail_close
+        self.events: list[str] = []
+
+    def emit(self, event, **_kwargs) -> bool:
+        self.directory.mkdir(parents=True, exist_ok=True)
+        self.events.append(event)
+        return True
+
+    def check_health(self) -> None:
+        return None
+
+    def close(self) -> None:
+        if self.fail_close:
+            raise RuntimeError("close boom")
+
+
+class FakeModel:
+    nq = 32
+    nv = 30
+    nu = 16
+    ncam = 3
+    ngeom = 20
+    nkey = 0
+
+    def __init__(self) -> None:
+        self.vis = SimpleNamespace(global_=SimpleNamespace(offwidth=320, offheight=240))
+
+    def geom(self, name: str):
+        return SimpleNamespace(id={"source_geom": 100, "target_geom": 101}[name])
+
+    def camera(self, name: str):
+        return SimpleNamespace(id={"global": 0, "left_wrist": 1, "right_wrist": 2}[name])
+
+
+class FakeScene:
+    def __init__(self) -> None:
+        self.model = FakeModel()
+        self.indices = SimpleNamespace(object_free_joint_qpos={"source": 7, "target": 14})
+        self.data = SimpleNamespace(qpos=[0.0] * 32)
+        self.reset(11)
+
+    def reset(self, seed: int) -> None:
+        qpos = [0.0] * 32
+        qpos[7:14] = [0.20 + seed / 1000, 0.55, 0.77, 1.0, 0.0, 0.0, 0.0]
+        qpos[14:21] = [0.36, 0.55, 0.78, 1.0, 0.0, 0.0, 0.0]
+        self.data.qpos = qpos
+
+
+class FakeRenderer:
+    def __init__(self, *, fail_close: bool = False) -> None:
+        self.gl_info = SimpleNamespace(
+            vendor="NVIDIA Corporation", renderer="fake", version="4.6", nvidia=True
+        )
+        self.camera_names = ("global", "left_wrist", "right_wrist")
+        self.width = 320
+        self.height = 240
+        self.fail_close = fail_close
+        self.closed = False
+
+    def capture(self, _data):
+        return object()
+
+    def derive_snapshot(self, _base, _updates):
+        return object()
+
+    def render_rgb(self, _snapshot):
+        return {camera: None for camera in self.camera_names}
+
+    def render_segmentation(self, _snapshot):
+        return {camera: None for camera in self.camera_names}
+
+    def close(self) -> None:
+        self.closed = True
+        if self.fail_close:
+            raise RuntimeError("renderer close boom")
+
+
+def fake_summary(layout, _segmentation, geom_ids, thresholds, resolutions):
+    cameras = []
+    for camera, objects in thresholds.items():
+        items = tuple(
+            visibility.ObjectVisibility(
+                object=name,
+                geom_id=geom_ids[name],
+                pixels=thresholds[camera][name],
+                threshold=thresholds[camera][name],
+                passed=True,
+            )
+            for name in objects
+        )
+        width, height = resolutions[camera]
+        cameras.append(
+            visibility.CameraVisibility(
+                camera=camera,
+                width=width,
+                height=height,
+                objects=items,
+                total_pixels=sum(item.pixels for item in items),
+                passed=True,
+            )
+        )
+    total = sum(camera.total_pixels for camera in cameras)
+    return visibility.LayoutVisibility(
+        layout_id=layout.layout_id,
+        kind=layout.kind,
+        cameras=tuple(cameras),
+        total_pixels=total,
+        minimum_margin=0,
+        passed=True,
+    )
+
+
+def install_success_fakes(monkeypatch, tmp_path, *, renderer=None):
+    renderer = renderer or FakeRenderer()
+    monkeypatch.setattr(
+        check_scene.probe_environment,
+        "check_dependencies",
+        lambda _path: {"python": {"version": "3.12"}, "packages": {}, "imports": {}},
+    )
+    monkeypatch.setattr(check_scene.probe_environment, "_verify_mounted_source", lambda *a: None)
+    monkeypatch.setattr(
+        check_scene,
+        "_load_asset_provenance",
+        lambda _arguments: {
+            "description": {},
+            "summary": {
+                "commit": "a" * 40,
+                "file_count": 1,
+                "total_sha256": "b" * 64,
+            },
+        },
+    )
+    monkeypatch.setattr(check_scene, "_build_scene", lambda _arguments, _config: FakeScene())
+    monkeypatch.setattr(check_scene, "_make_renderer", lambda _scene, _config: renderer)
+    monkeypatch.setattr(check_scene.visibility, "summarize_layout", fake_summary)
+    monkeypatch.setattr(
+        check_scene,
+        "_save_rgb_images",
+        lambda _run_dir, layout, _rgb: {
+            camera: f"artifacts/layouts/{layout.layout_id}/{camera}.png"
+            for camera in renderer.camera_names
+        },
+    )
+    monkeypatch.setattr(
+        check_scene,
+        "_write_contact_sheet",
+        lambda *_args: "artifacts/contact_sheet.png",
+    )
+    return renderer
+
+
+def test_run_success_publishes_report_after_logger_close(tmp_path, monkeypatch):
+    arguments = check_arguments(tmp_path)
+    renderer = install_success_fakes(monkeypatch, tmp_path)
+    logger = FakeLogger(arguments.report_root / arguments.run_id / "logs")
+    monkeypatch.setattr(check_scene, "_open_logger", lambda *_args: logger)
+
+    code = check_scene.run(arguments)
+
+    report = json.loads((arguments.report_root / arguments.run_id / "report.json").read_text())
+    assert code == 0
+    assert report["status"] == "succeeded"
+    assert report["exit_code"] == 0
+    assert report["kind"] == "scene"
+    assert report["logs_closed"] is True
+    assert report["artifact"] == "artifacts/contact_sheet.png"
+    assert report["layout_summary"] == {
+        "count": 67,
+        "passed": 67,
+        "failed": 0,
+        "boundary_count": 64,
+        "seed_count": 3,
+    }
+    assert report["throughput"]["measured_groups"] == 20
+    assert len(report["layouts"]) == 67
+    assert renderer.closed is True
+    assert logger.events[-1] == "checks_finished"
+    assert not any("complete" in event or "success" in event for event in logger.events)
+
+
+@pytest.mark.parametrize("failure", ["renderer", "logger"])
+def test_close_failures_turn_success_into_nonzero_exit(tmp_path, monkeypatch, failure):
+    arguments = check_arguments(tmp_path)
+    renderer = install_success_fakes(
+        monkeypatch, tmp_path, renderer=FakeRenderer(fail_close=failure == "renderer")
+    )
+
+    logger = FakeLogger(
+        arguments.report_root / arguments.run_id / "logs",
+        fail_close=failure == "logger",
+    )
+    monkeypatch.setattr(check_scene, "_open_logger", lambda *_args: logger)
+
+    code = check_scene.run(arguments)
+
+    report = json.loads((arguments.report_root / arguments.run_id / "report.json").read_text())
+    assert code == 1
+    assert report["status"] == "failed"
+    assert report["reason"] == f"{failure}_close_failed"
+    assert renderer.closed is True
+    if failure == "logger":
+        assert report["logs_closed"] is False
+    else:
+        assert report["logs_closed"] is True
+
+
+def test_report_write_failure_is_nonzero_and_loud(tmp_path, monkeypatch, capsys):
+    arguments = check_arguments(tmp_path)
+    bad_scene = tmp_path / "bad_scene.yaml"
+    bad_scene.write_text("physics: [\n", encoding="utf-8")
+    arguments = replace(arguments, scene_config=bad_scene)
+    logger = FakeLogger(arguments.report_root / arguments.run_id / "logs")
+    monkeypatch.setattr(check_scene, "_open_logger", lambda *_args: logger)
+    monkeypatch.setattr(
+        check_scene,
+        "_write_json_atomic",
+        lambda *_args: (_ for _ in ()).throw(OSError("disk full")),
+    )
+
+    code = check_scene.run(arguments)
+
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "report_write_failed" in captured.err
+    assert "disk full" in captured.err
+
+
+def test_run_refuses_an_existing_run_directory_before_starting(tmp_path):
+    arguments = check_arguments(tmp_path)
+    (arguments.report_root / arguments.run_id).mkdir()
+    with pytest.raises(check_scene.SceneCheckUsageError, match="already exists"):
+        check_scene.run(arguments)
+
+
+def test_host_check_mode_defaults_and_scene_command_are_fixed(tmp_path):
+    build_root = tmp_path / "build"
+    assets_root = tmp_path / "assets"
+    for directory in (build_root, assets_root):
+        directory.mkdir()
+    summary = tmp_path / "summary.json"
+    summary.write_text("{}")
+    base = [
+        "--build-root",
+        str(build_root),
+        "--assets-root",
+        str(assets_root),
+        "--summary",
+        str(summary),
+        "--report-root",
+        str(tmp_path / "reports"),
+        "--run-id",
+        "scene-entry",
+    ]
+
+    environment = sim_check.parse_arguments(base)
+    assert environment.check == "environment"
+    assert environment.scene_config == ROOT / "configs/simulation/panda_stack.yaml"
+    assert environment.check_config == ROOT / "configs/simulation/scene_check.yaml"
+    environment_argv = sim_check.compose_argv(environment)
+    assert environment_argv[-1] == "sim-check"
+    assert not any("check_scene" in item for item in environment_argv)
+    assert sim_check.compose_environment(environment)["SIM_SCENE_CONFIG"] == str(
+        environment.scene_config
+    )
+
+    scene = sim_check.parse_arguments(
+        [
+            *base,
+            "--check",
+            "scene",
+            "--scene-config",
+            str(SCENE_CONFIG),
+            "--check-config",
+            str(CHECK_CONFIG),
+        ]
+    )
+    scene_argv = sim_check.compose_argv(scene)
+    assert scene_argv[-1] == "scene-entry"
+    assert "robot_backend_sim.check_scene" in scene_argv
+    assert "/sim-configs/panda_stack.yaml" in scene_argv
+    assert "/sim-configs/scene_check.yaml" in scene_argv
+    assert not any("probe_environment" in item for item in scene_argv)
+    assert scene_argv.count("--run-id") == 1
+
+
+def host_report(tmp_path: Path, run_id: str, *, kind: str | None) -> Path:
+    report_dir = tmp_path / "reports" / run_id
+    artifact = report_dir / "artifacts/contact_sheet.png"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_bytes(b"png")
+    document = {
+        "run_id": run_id,
+        "status": "succeeded",
+        "exit_code": 0,
+        "logs_closed": True,
+        "artifact": "artifacts/contact_sheet.png",
+    }
+    if kind is not None:
+        document["kind"] = kind
+    report = report_dir / "report.json"
+    report.write_text(json.dumps(document))
+    return report
+
+
+def test_host_report_verification_requires_scene_kind(tmp_path):
+    missing = host_report(tmp_path, "scene-a", kind=None)
+    assert (
+        sim_check.verify_report(missing, run_id="scene-a", process_exit=0, kind="scene")[1]
+        == "report_kind_mismatch"
+    )
+    scene = host_report(tmp_path, "scene-b", kind="scene")
+    assert sim_check.verify_report(scene, run_id="scene-b", process_exit=0, kind="scene")[:2] == (
+        "succeeded",
+        "",
+    )
+
+
+def test_compose_contract_mounts_both_configs_read_only():
+    document = yaml.safe_load((ROOT / "deploy/compose/sim_check.yaml").read_text())
+    volumes = {volume["target"]: volume for volume in document["services"]["sim-check"]["volumes"]}
+    for target in ("/sim-configs/panda_stack.yaml", "/sim-configs/scene_check.yaml"):
+        assert volumes[target]["read_only"] is True
+    assert volumes["/sim-reports"].get("read_only", False) is False
+
+
+def test_python_source_manifest_tracks_code_and_is_independent_of_mount_location(tmp_path):
+    first = tmp_path / "host-package"
+    second = tmp_path / "container-package"
+    first.mkdir()
+    second.mkdir()
+    for directory in (first, second):
+        (directory / "a.py").write_text("VALUE = 1\n")
+        (directory / "b.py").write_text("OTHER = 2\n")
+    original = check_scene._python_source_manifest(first)
+    assert original["sha256"] == check_scene._python_source_manifest(second)["sha256"]
+    (first / "preview.png").write_bytes(b"diagnostic image")
+    assert check_scene._python_source_manifest(first)["sha256"] == original["sha256"]
+    (first / "b.py").write_text("OTHER = 3\n")
+    changed = check_scene._python_source_manifest(first)
+    assert changed["sha256"] != original["sha256"]
+    assert changed["files"]["a.py"] == original["files"]["a.py"]
+    assert changed["files"]["b.py"] != original["files"]["b.py"]

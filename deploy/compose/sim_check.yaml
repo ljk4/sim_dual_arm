@@ -1,0 +1,76 @@
+# One-shot MuJoCo environment check.  Source, generated SDK/workspace, assets
+# and the asset summary are read-only; only the report run directory is writable.
+# This file starts no robot backend, runtime or training service.
+name: ${SIM_COMPOSE_PROJECT:-sim-dual-arm-sim-check}
+
+services:
+  sim-check:
+    image: ${SIM_IMAGE:-sim-dual-arm/backend-sim:mujoco-dev}
+    user: "${SIM_UID:-1000}:${SIM_GID:-1000}"
+    working_dir: /workspace
+    runtime: nvidia
+    gpus: all
+    network_mode: none
+    environment:
+      DEV_REPO_ROOT: /workspace
+      DEV_ROS_ROOT: /opt/ros-dev
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      # The mounted component source wins; never forward a host PYTHONPATH.
+      PYTHONPATH: /workspace/components/backend_sim/src
+      NVIDIA_VISIBLE_DEVICES: all
+      MUJOCO_GL: egl
+      PYOPENGL_PLATFORM: egl
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility,graphics
+      SIM_RUN_ID: "${SIM_RUN_ID:?run id is required; use tools/run/sim_check.py}"
+      SIM_REPORT_ROOT: /sim-reports
+    volumes:
+      - type: bind
+        source: ${SIM_REPO_ROOT:?repository root is required}
+        target: /workspace
+        read_only: true
+      - type: bind
+        source: ${SIM_BUILD_ROOT:?generated ROS workspace is required}
+        target: /opt/ros-dev
+        read_only: true
+      - type: bind
+        source: ${SIM_ASSETS_ROOT:?pinned asset checkout is required}
+        target: /sim-assets
+        read_only: true
+      - type: bind
+        source: ${SIM_ASSET_SUMMARY:?asset summary is required}
+        target: /sim-assets-summary/panda.json
+        read_only: true
+      - type: bind
+        source: ${SIM_SCENE_CONFIG:?scene config is required}
+        target: /sim-configs/panda_stack.yaml
+        read_only: true
+      - type: bind
+        source: ${SIM_CHECK_CONFIG:?check config is required}
+        target: /sim-configs/scene_check.yaml
+        read_only: true
+      - type: bind
+        source: ${SIM_KINEMATICS_CONFIG:?kinematics config is required}
+        target: /sim-configs/kinematics_check.yaml
+        read_only: true
+      - type: bind
+        source: ${SIM_REPORT_ROOT:?report root is required}
+        target: /sim-reports
+    command:
+      - python
+      - -m
+      - robot_backend_sim.probe_environment
+      - --assets-root
+      - /sim-assets
+      - --summary
+      - /sim-assets-summary/panda.json
+      - --source
+      - /workspace/third_party/panda-source.json
+      - --packages
+      - /workspace/deploy/docker/sim-packages.json
+      - --report-root
+      - /sim-reports
+      - --run-id
+      - "${SIM_RUN_ID:?run id is required; use tools/run/sim_check.py}"
+    restart: "no"
+    stop_grace_period: 10s

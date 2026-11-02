@@ -1,0 +1,34 @@
+# Bounded target-follower parameters.  This is a following budget, not a
+# relaxation of the robot profile's joint position/velocity hard limits.
+# Joint names follow robot_backend_sim.motion_config.CONTROL_JOINT_NAMES.
+joint_names:
+  - left_joint1
+  - left_joint2
+  - left_joint3
+  - left_joint4
+  - left_joint5
+  - left_joint6
+  - left_joint7
+  - left_gripper_width
+  - right_joint1
+  - right_joint2
+  - right_joint3
+  - right_joint4
+  - right_joint5
+  - right_joint6
+  - right_joint7
+  - right_gripper_width
+
+# Five selected predictions per execution window (0.25 s at 20 Hz).
+target_count: 5
+
+# Continuous maximum distance between the actual reference and the
+# piecewise-linear raw target: 0.15 rad for arm joints, 0.02 m for each total
+# gripper opening.  These values do not widen any robot joint hard limit.
+max_target_deviations:
+  [0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 0.02,
+   0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 0.02]
+
+# A final reference may extend past the last selected prediction to reach the
+# target at zero velocity, but never beyond three seconds in total.
+max_terminal_tail_duration_s: 3.0
