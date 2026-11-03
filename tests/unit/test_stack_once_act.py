@@ -2,6 +2,7 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -152,3 +153,45 @@ def test_act_runtime_has_its_own_readonly_policy_sdk_mount():
     document = yaml.safe_load((ROOT / "deploy/compose/native_act_policy.yaml").read_text())
     volumes = document["services"]["native-runtime"]["volumes"]
     assert any(item["target"] == "/opt/policy-sdk" and item["read_only"] for item in volumes)
+
+
+def test_explicit_backend_recipe_is_used_and_mismatch_fails_before_launch(tmp_path):
+    template = ROOT / "configs/simulation/backend_stack_inference.yaml"
+    document = yaml.safe_load(template.read_text())
+    for name in ("profile", "schemas", "scene", "control", "stream", "follower", "task"):
+        document["robot"][name] = str((template.parent / document["robot"][name]).resolve())
+    document["queues"]["owner"] = 17
+    custom = tmp_path / "backend.yaml"
+    custom.write_text(yaml.safe_dump(document))
+    _, backend, _, _ = stack_once.generate_inputs(
+        ROOT / "configs/runtime/native_task_act.yaml", 30000, "custom-backend",
+        backend_template=custom, generated_root=tmp_path / "generated",
+    )
+    assert yaml.safe_load(backend.read_text())["queues"]["owner"] == 17
+
+    document["robot"]["follower"] = str(ROOT / "configs/simulation/missing-follower.yaml")
+    custom.write_text(yaml.safe_dump(document))
+    with pytest.raises(ValueError, match="same follower configuration"):
+        stack_once.generate_inputs(
+            ROOT / "configs/runtime/native_task_act.yaml", 30000, "mismatch",
+            backend_template=custom, generated_root=tmp_path / "rejected",
+        )
+    assert not (tmp_path / "rejected").exists()
+
+
+def test_fast_act_recipe_requires_and_uses_the_matching_backend(tmp_path):
+    recipe = ROOT / "configs/runtime/native_task_act_fast.yaml"
+    with pytest.raises(ValueError, match="same follower configuration"):
+        stack_once.generate_inputs(recipe, 30000, "wrong-pair", generated_root=tmp_path)
+    settings = load_act_settings(ROOT / "configs/learning/act_policy.yaml")
+    runtime, backend, _, _ = stack_once.generate_inputs(
+        recipe, 30000, "fast-pair", settings=settings, contract=contract(settings),
+        backend_template=ROOT / "configs/simulation/backend_stack_act.yaml",
+        generated_root=tmp_path,
+    )
+    runtime_doc = yaml.safe_load(runtime.read_text())
+    backend_doc = yaml.safe_load(backend.read_text())
+    assert runtime_doc["policy"]["target_count"] == 2
+    assert runtime_doc["follower_constraints"] == backend_doc["robot"]["follower"]
+    assert backend_doc["robot"]["task_mode"] == "inference"
+    assert backend_doc["limits"]["chunk_history"] == 512

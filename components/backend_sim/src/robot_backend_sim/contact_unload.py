@@ -4,6 +4,10 @@ from dataclasses import dataclass
 
 from .contacts import GripperContactEvidence
 
+# Shared with motion's closing-contact classification: a reference velocity this
+# close to zero is numerical standstill, not a measured opening command.
+REFERENCE_VELOCITY_ATOL_M_S = 1e-9
+
 
 @dataclass(slots=True)
 class ContactUnload:
@@ -27,14 +31,14 @@ class ContactUnload:
     ) -> bool:
         if timeout_ns <= 0:
             return False
-        if closing_contact_ok and reference_velocity <= 1e-9:
+        if closing_contact_ok and reference_velocity <= REFERENCE_VELOCITY_ATOL_M_S:
             # A new genuinely closing command may arm another release. Merely
             # pausing an expired release cannot replenish its time budget.
-            if not self.used or reference_velocity < -1e-9:
+            if not self.used or reference_velocity < -REFERENCE_VELOCITY_ATOL_M_S:
                 self.object_name = contact.candidate_object
                 self.started_ns = None
                 self.used = False
-        if reference_velocity <= 1e-9 or self.object_name is None:
+        if reference_velocity <= REFERENCE_VELOCITY_ATOL_M_S or self.object_name is None:
             return False
         if not self.used:
             self.started_ns = now_ns

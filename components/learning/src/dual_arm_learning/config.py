@@ -524,6 +524,7 @@ class TrainingConfig:
     checkpoint: CheckpointSpec
     logging: LoggingSpec
     dataset: DatasetConfig = field(default=None)  # type: ignore[assignment]
+    sample_filter: Path | None = None
     schema_version: int = 1
 
     def __post_init__(self) -> None:
@@ -634,6 +635,7 @@ def parse_training_config(
             "train_dir",
             "validation_dir",
             "verify_hashes",
+            "sample_filter",
         },
         "data",
     )
@@ -738,6 +740,12 @@ def parse_training_config(
         "logging",
     )
     mode = text(require(value, "mode", "<training>"), "mode")
+    sample_filter_value = data.get("sample_filter")
+    sample_filter = (
+        None
+        if sample_filter_value is None
+        else root / path_value(sample_filter_value, "data.sample_filter")
+    )
     config = TrainingConfig(
         project_root=root,
         source=Path(source),
@@ -879,6 +887,7 @@ def parse_training_config(
             console=boolean(require(logging_value, "console", "logging"), "logging.console"),
         ),
         dataset=dataset,
+        sample_filter=sample_filter,
     )
     if config.budget.limit_seconds > 14400.0:
         raise ConfigError("budget.limit_seconds", "task training budget is capped at 14400 s")

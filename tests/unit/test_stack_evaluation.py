@@ -455,3 +455,144 @@ def test_later_control_failure_does_not_erase_real_act_execution(tmp_path):
     assert row["closed_loop"] is True
     assert row["success"] is False
     assert row["run_success"] is False
+
+
+def _write_backend_events(attempt: Path, *events: dict) -> Path:
+    path = attempt / "stack/run/run/log/events.000001.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "\n".join(json.dumps(event) for event in events) + "\n", encoding="utf-8"
+    )
+    return path
+
+
+def _make_control_failure(attempt: Path) -> None:
+    path = attempt / "manifest.json"
+    manifest = json.loads(path.read_text())
+    manifest["runtime"] = {"outcome": "failed", "reason": "FOLLOWER_DEVIATION_EXCEEDED"}
+    _write(path, manifest)
+    path = attempt / "task_result.json"
+    task = json.loads(path.read_text())
+    task["result"] = {"outcome": "failed", "reason": "CONTROL_FAILED"}
+    _write(path, task)
+
+
+def test_backend_rejection_detail_is_machine_readable_and_preferred(tmp_path):
+    root, config_path = campaign(tmp_path)
+    attempt = make_attempt(root)
+    _make_control_failure(attempt)
+    _write_backend_events(
+        attempt,
+        {
+            "schema_version": 1,
+            "component": "native_backend",
+            "instance_id": "backend-1",
+            "event_seq": 10,
+            "event": "backend.submit_follower",
+            "reason": "FOLLOWER_DEVIATION_EXCEEDED",
+            "message": "rejected",
+            "command_id": "cmd-7",
+            "fields": {"mode": "FOLLOWER", "has_reference": False},
+        },
+        {
+            "schema_version": 1,
+            "component": "native_backend",
+            "instance_id": "backend-1",
+            "event_seq": 11,
+            "event": "backend.submit_follower.rejected",
+            "reason": "FOLLOWER_DEVIATION_EXCEEDED",
+            "message": (
+                "axis 'right_joint7' maximum target deviation 0.1504 "
+                "exceeds configured 0.15"
+            ),
+            "command_id": "cmd-7",
+            "request_id": "request-7",
+            "fields": {},
+        },
+    )
+    _reserve(root, attempt)
+    report = _report(root, config_path, "backend-rejection-report")
+    row = report["attempts"][0]
+    assert report["summary"]["denominator"] == 20
+    assert report["summary"]["act_executed"] == 1
+    assert report["summary"]["closed_loop"] == 1
+    assert report["summary"]["success"] == 0
+    assert row["act_executed"] is True
+    assert row["closed_loop"] is True
+    assert row["success"] is False
+    assert row["failure_type"] == "TASK_FAILED"
+    assert len(row["controller_rejections"]) == 2
+    first, detailed = row["controller_rejections"]
+    assert first["reason"] == "FOLLOWER_DEVIATION_EXCEEDED"
+    assert first["message"] == "rejected"
+    assert first["command_id"] == "cmd-7"
+    assert first["event_seq"] == 10
+    assert first["path"].endswith("events.000001.jsonl")
+    assert detailed["message"].startswith("axis 'right_joint7'")
+    assert detailed["command_id"] == "cmd-7"
+    assert detailed["request_id"] == "request-7"
+    assert row["failure_detail"].startswith("FOLLOWER_DEVIATION_EXCEEDED: axis")
+    assert "right_joint7" in row["failure_detail"]
+    assert "0.1504" in row["failure_detail"]
+    assert "0.15" in row["failure_detail"]
+
+
+def test_missing_or_corrupt_backend_log_keeps_report_semantics(tmp_path):
+    root, config_path = campaign(tmp_path)
+    attempt = make_attempt(root)
+    _make_control_failure(attempt)
+    _reserve(root, attempt)
+    missing = _report(root, config_path, "missing-backend-report")["attempts"][0]
+    assert missing["controller_rejections"] == []
+    assert missing["failure_detail"] == "FOLLOWER_DEVIATION_EXCEEDED"
+    assert missing["act_executed"] is True
+    assert missing["closed_loop"] is True
+    assert missing["success"] is False
+    assert missing["failure_type"] == "TASK_FAILED"
+
+    path = attempt / "stack/run/run/log/events.000001.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('not json\n{"event": "backend.submit_follower.rejected"\n', encoding="utf-8")
+    corrupt = _report(root, config_path, "corrupt-backend-report")["attempts"][0]
+    assert corrupt["controller_rejections"] == []
+    assert corrupt["failure_detail"] == "FOLLOWER_DEVIATION_EXCEEDED"
+    assert corrupt["act_executed"] is True
+    assert corrupt["closed_loop"] is True
+    assert corrupt["success"] is False
+    assert corrupt["failure_type"] == "TASK_FAILED"
+
+
+def test_runtime_timing_failure_is_not_hidden_by_launcher_exit(tmp_path):
+    root, config_path = campaign(tmp_path)
+    attempt = make_attempt(root)
+    _make_control_failure(attempt)
+    manifest = json.loads((attempt / "manifest.json").read_text())
+    manifest["runtime"]["reason"] = "CHUNK_LATE: follower submit rejected"
+    _write(attempt / "manifest.json", manifest)
+    launch = json.loads((attempt / "launch_result.json").read_text())
+    launch["launcher_exit_code"] = launch["exit_code"] = 1
+    _write(attempt / "launch_result.json", launch)
+    _reserve(root, attempt)
+    row = _report(root, config_path, "late-report")["attempts"][0]
+    assert row["failure_detail"] == "CHUNK_LATE: follower submit rejected"
+    assert row["act_executed"] is True
+    assert row["success"] is False
+
+
+def test_recorded_task_failure_is_complete_evidence(tmp_path):
+    root, config_path = campaign(tmp_path)
+    attempt = make_attempt(root)
+    _make_control_failure(attempt)
+    _reserve(root, attempt)
+    row = _report(root, config_path, "failed-task-evidence-report")["attempts"][0]
+    assert row["task_outcome"] == "failed"
+    assert row["success"] is False
+    assert "TASK_EVIDENCE_MISSING:outcome" not in row["issues"]
+
+    path = attempt / "task_result.json"
+    task = json.loads(path.read_text())
+    del task["result"]["outcome"]
+    _write(path, task)
+    missing = _report(root, config_path, "missing-task-outcome-report")["attempts"][0]
+    assert missing["success"] is False
+    assert "TASK_EVIDENCE_MISSING:outcome" in missing["issues"]

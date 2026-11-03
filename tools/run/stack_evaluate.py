@@ -30,6 +30,12 @@ import stack_campaign  # noqa: E402
 
 CAMERA_ORDER = ("global", "left_wrist", "right_wrist")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_AXIS_NAME = re.compile(r"\b(?:left|right)_(?:joint[1-7]|gripper_width)\b")
+_NUMBER = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?")
+_BACKEND_REJECT_EVENTS = frozenset(
+    {"backend.submit.rejected", "backend.submit_follower.rejected"}
+)
+_BACKEND_SUBMIT_EVENTS = frozenset({"backend.submit", "backend.submit_follower"})
 
 
 def _digest(value: object) -> str:
@@ -64,6 +70,110 @@ def _events(directory: Path) -> list[dict[str, Any]]:
             if isinstance(event, dict):
                 result.append(event)
     return result
+
+
+def _backend_rejection_events(attempt: Path) -> list[tuple[Path, dict[str, Any]]]:
+    """Return only the backend's own structured submit-rejection events.
+
+    Backend logs live under the attempt's backend run directory, but the exact
+    run-id nesting is deployment-owned.  Searching the attempt for jsonl event
+    files and then filtering by logger component/event name keeps this reader
+    independent of that nesting.  Unreadable files and malformed lines are
+    ignored: a damaged log must not prevent the evaluation report from being
+    produced, and no axis is inferred without an explicit backend message.
+    """
+    result: list[tuple[Path, dict[str, Any]]] = []
+    seen: set[Path] = set()
+    for path in sorted(attempt.rglob("events.*.jsonl")):
+        try:
+            resolved = path.resolve()
+        except OSError:
+            resolved = path
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        try:
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            text = line.strip()
+            if not text.startswith("{"):
+                continue
+            try:
+                event = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(event, dict):
+                continue
+            name = str(event.get("event") or "")
+            if (
+                event.get("component") != "native_backend"
+                and not name.startswith("backend.")
+            ):
+                continue
+            if name in _BACKEND_REJECT_EVENTS:
+                result.append((path, event))
+            elif name in _BACKEND_SUBMIT_EVENTS and str(
+                event.get("message") or ""
+            ).lower() == "rejected":
+                result.append((path, event))
+    return result
+
+
+def _controller_rejections(attempt: Path) -> list[dict[str, Any]]:
+    """Project backend rejections to a bounded, machine-readable record list."""
+    result: list[dict[str, Any]] = []
+    for path, event in _backend_rejection_events(attempt):
+        fields = event.get("fields")
+        if not isinstance(fields, dict):
+            fields = {}
+        record: dict[str, Any] = {
+            "reason": str(event.get("reason") or ""),
+            "message": str(event.get("message") or ""),
+            "event": str(event.get("event") or ""),
+            "path": str(path),
+        }
+        for key in ("command_id", "request_id"):
+            value = event.get(key) or fields.get(key)
+            if isinstance(value, str) and value:
+                record[key] = value
+        for key in ("event_seq", "sim_time_ns"):
+            value = event.get(key)
+            if isinstance(value, int) and not isinstance(value, bool):
+                record[key] = value
+        for key in ("component", "instance_id"):
+            value = event.get(key)
+            if isinstance(value, str) and value:
+                record[key] = value
+        result.append(record)
+    return result
+
+
+def _backend_failure_detail(rejections: list[dict[str, Any]]) -> str:
+    """Prefer an axis/numeric backend reason over the generic submit error."""
+    if not rejections:
+        return ""
+
+    def score(record: dict[str, Any]) -> int:
+        detail = f"{record.get('reason', '')} {record.get('message', '')}"
+        value = 0
+        if _AXIS_NAME.search(detail):
+            value += 4
+        if "axis" in detail.lower():
+            value += 2
+        if _NUMBER.search(detail):
+            value += 1
+        return value
+
+    best = max(rejections, key=score)
+    if score(best) < 2:
+        return ""
+    reason = str(best.get("reason") or "")
+    message = str(best.get("message") or "")
+    if reason and message and reason not in message:
+        return f"{reason}: {message}"
+    return message or reason
 
 
 def _prediction_metrics(directory: Path) -> dict[str, Any]:
@@ -190,6 +300,7 @@ def _metric_for_seed(
         "wall_seconds": None,
         "failure_type": "",
         "failure_detail": "",
+        "controller_rejections": [],
         "recording_path": "",
         "preview_video": "",
         "preview_keyframes": [],
@@ -206,6 +317,7 @@ def _metric_for_seed(
         result["failure_type"] = "MISSING_ATTEMPT_DIRECTORY"
         result["failure_detail"] = str(attempt)
         return result
+    result["controller_rejections"] = _controller_rejections(attempt)
     launch = _json(attempt / "launch_result.json")
     manifest = _json(attempt / "manifest.json")
     task = _json(attempt / "task_result.json")
@@ -497,7 +609,7 @@ def _metric_for_seed(
             missing_task.append("test_only")
         if result["task_action_source"] != "policy":
             missing_task.append("action_source")
-        if result["task_outcome"] != "succeeded":
+        if not result["task_outcome"]:
             missing_task.append("outcome")
         if not result["task_evidence"]:
             missing_task.append("task_fact")
@@ -533,6 +645,12 @@ def _metric_for_seed(
         result["failure_type"] = "LAUNCH_FAILED"
     else:
         result["failure_type"] = ""
+    backend_detail = _backend_failure_detail(result["controller_rejections"])
+    if backend_detail and not result["success"]:
+        result["failure_detail"] = backend_detail
+    elif result["runtime_reason"] and result["runtime_outcome"] not in {"stopped", "completed"}:
+        # A controller failure is more actionable than the launcher's exit 1.
+        result["failure_detail"] = result["runtime_reason"]
     if not result["failure_detail"]:
         result["failure_detail"] = (
             result.get("runtime_reason")
@@ -700,7 +818,7 @@ def _markdown(metrics: list[dict[str, Any]], summary: dict[str, Any]) -> str:
         f"- credible ACT executions: {summary['act_executed']}",
         f"- closed loop: {summary['closed_loop']}",
         f"- physical task success: {summary['task_success']}",
-        f"- fixed-20 physical success (ACT + task): {summary['success']}",
+        f"- physical success (ACT + task): {summary['success']}",
         f"- full run success (also runtime/recording/quality/launch): {summary['run_success']}",
         f"- quality qualified: {summary['quality_qualified']}",
         f"- ACT evidence incomplete: {summary['act_evidence_incomplete']}",

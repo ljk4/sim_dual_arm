@@ -43,6 +43,14 @@ FOLLOWER = load_follower_config(ROOT / "configs/simulation/panda_follower.yaml")
 BASE = PROFILE.initial_positions
 JOINT_COUNT = len(BASE)
 
+_TINY_BRAKE_START_P = 0.010250677416454232
+_TINY_BRAKE_START_V = 0.04000000000000001
+_TINY_BRAKE_DURATION = 2.2013877787807815e-14
+_TINY_BRAKE_ACCEL = -0.5
+_TINY_BRAKE_TARGET = 0.01665229386424162
+_TINY_BRAKE_MAIN_P = 0.010250677416455113
+_TINY_BRAKE_MAIN_V = 0.039999999999989
+
 
 def smoothstep(fraction: float) -> float:
     value = min(max(fraction, 0.0), 1.0)
@@ -82,6 +90,55 @@ def calculate_trajectory(
     result = ruckig.Ruckig(count).calculate(inp, trajectory)
     assert int(result) >= 0
     return trajectory
+
+
+def calculate_tiny_brake_trajectory(target_position):
+    inp = ruckig.InputParameter(1)
+    inp.current_position = [_TINY_BRAKE_START_P]
+    inp.current_velocity = [_TINY_BRAKE_START_V]
+    inp.current_acceleration = [0.0]
+    inp.target_position = [target_position]
+    inp.target_velocity = [0.0]
+    inp.target_acceleration = [0.0]
+    inp.max_velocity = [0.04]
+    inp.max_acceleration = [0.5]
+    inp.max_jerk = [math.inf]
+    inp.minimum_duration = 0.5
+    trajectory = ruckig.Trajectory(1)
+    result = ruckig.Ruckig(1).calculate(inp, trajectory)
+    assert int(result) >= 0
+    return trajectory
+
+
+def make_tiny_brake_profile(
+    *,
+    duration=_TINY_BRAKE_DURATION,
+    times=(_TINY_BRAKE_DURATION, 0.0),
+    brake_p=(_TINY_BRAKE_START_P, 0.0),
+    brake_v=(_TINY_BRAKE_START_V, 0.0),
+    brake_a=(_TINY_BRAKE_ACCEL, 0.0),
+    brake_j=(0.0, 0.0),
+    main_p=_TINY_BRAKE_MAIN_P,
+    main_v=_TINY_BRAKE_MAIN_V,
+):
+    "A typed public-profile fixture for invalid brake-prefix cases."
+    brake = SimpleNamespace(
+        duration=duration,
+        t=list(times),
+        p=list(brake_p),
+        v=list(brake_v),
+        a=list(brake_a),
+        j=list(brake_j),
+    )
+    main = SimpleNamespace(
+        t=[0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        p=[main_p] * 8,
+        v=[main_v] * 8,
+        a=[0.0] * 8,
+        j=[0.0] * 7,
+        brake=brake,
+    )
+    return SimpleNamespace(duration=0.5, profiles=((main,),))
 
 
 def make_source_targets(
@@ -219,6 +276,31 @@ def assert_export_matches_ruckig(trajectory, exported, duration_ns):
     assert max_velocity_error < 5e-9
     assert max_acceleration_error < 5e-9
     return max_position_error, max_velocity_error, max_acceleration_error
+
+
+def assert_export_pv_matches_ruckig(trajectory, exported, duration_ns):
+    boundaries = set()
+    elapsed = 0
+    for segment in exported.plan.segments:
+        elapsed += segment.duration_ns
+        boundaries.add(elapsed)
+    sample_times = {0, duration_ns}
+    sample_times.update(boundaries)
+    sample_times.update(range(0, duration_ns + 1, 2_000_000))
+    max_position_error = 0.0
+    max_velocity_error = 0.0
+    for elapsed_ns in sorted(sample_times):
+        sample = exported.plan.sample_interval(elapsed_ns)
+        position, velocity, _ = trajectory.at_time(elapsed_ns / 1_000_000_000)
+        max_position_error = max(
+            max_position_error, abs(sample.positions[0] - position[0])
+        )
+        max_velocity_error = max(
+            max_velocity_error, abs(sample.velocities[0] - velocity[0])
+        )
+    assert max_position_error < 5e-9
+    assert max_velocity_error < 5e-9
+    return max_position_error, max_velocity_error
 
 
 @pytest.mark.parametrize(
@@ -377,6 +459,95 @@ def test_export_rejects_unsupported_public_structures():
     braking_section = SimpleNamespace(duration=0.1, profiles=((braking_phase,),))
     with pytest.raises(ContractError):
         export_ruckig_reference(braking_section, ("j0",))
+
+
+@pytest.mark.parametrize("target_position", (_TINY_BRAKE_TARGET, 0.03))
+def test_export_folds_real_subnanosecond_brake_prefix(target_position):
+    trajectory = calculate_tiny_brake_trajectory(target_position)
+    brake = trajectory.profiles[0][0].brake
+    assert 0.0 < brake.duration < 0.5e-9
+    assert list(brake.t)[1] == 0.0
+    assert list(brake.j)[0] == 0.0
+    full_ns = round(trajectory.duration * 1_000_000_000)
+
+    for truncate_ns in (full_ns, 250_000_000):
+        exported = export_ruckig_reference(
+            trajectory,
+            ("j0",),
+            truncate_ns=truncate_ns,
+        )
+        assert exported.profile_duration_ns == full_ns
+        assert exported.plan.duration_ns == truncate_ns
+        sample = exported.plan.sample_interval(0)
+        assert sample.positions[0] == brake.p[0]
+        assert sample.velocities[0] == brake.v[0]
+        max_position_error, max_velocity_error = assert_export_pv_matches_ruckig(
+            trajectory,
+            exported,
+            truncate_ns,
+        )
+        assert max_position_error < 5e-9
+        assert max_velocity_error < 5e-9
+
+
+def test_export_tiny_brake_fixture_ignores_uninitialized_padding():
+    profile = make_tiny_brake_profile(
+        brake_p=(_TINY_BRAKE_START_P, math.nan),
+        brake_v=(_TINY_BRAKE_START_V, math.nan),
+        brake_a=(_TINY_BRAKE_ACCEL, math.nan),
+        brake_j=(0.0, math.nan),
+    )
+    exported = export_ruckig_reference(profile, ("j0",), truncate_ns=500_000_000)
+    sample = exported.plan.sample_interval(0)
+    assert sample.positions[0] == _TINY_BRAKE_START_P
+    assert sample.velocities[0] == _TINY_BRAKE_START_V
+
+
+def test_export_zero_brake_prefix_does_not_read_padding():
+    profile = make_tiny_brake_profile(
+        duration=0.0,
+        times=(0.0, 0.0),
+        brake_p=(math.nan, math.nan),
+        brake_v=(math.nan, math.nan),
+        brake_a=(math.nan, math.nan),
+        brake_j=(math.nan, math.nan),
+    )
+    exported = export_ruckig_reference(profile, ("j0",), truncate_ns=500_000_000)
+    sample = exported.plan.sample_interval(0)
+    assert sample.positions[0] == _TINY_BRAKE_MAIN_P
+    assert sample.velocities[0] == _TINY_BRAKE_MAIN_V
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    (
+        {"duration": 1e-9, "times": (1e-9, 0.0)},
+        {
+            "duration": -_TINY_BRAKE_DURATION,
+            "times": (-_TINY_BRAKE_DURATION, 0.0),
+        },
+        {"duration": math.nan},
+        {"times": (_TINY_BRAKE_DURATION, math.nan)},
+        {"brake_j": (1.0, 0.0)},
+        {"brake_p": (_TINY_BRAKE_START_P,)},
+        {"times": (_TINY_BRAKE_DURATION,)},
+        {"brake_v": (1e6, 0.0)},
+        {"brake_p": (1.0, 0.0)},
+        {
+            "duration": _TINY_BRAKE_DURATION + 1e-15,
+            "times": (_TINY_BRAKE_DURATION, 1e-15),
+        },
+        {"times": (_TINY_BRAKE_DURATION + 1e-15, 0.0)},
+    ),
+)
+def test_export_rejects_invalid_brake_prefixes(overrides):
+    with pytest.raises(ContractError) as caught:
+        export_ruckig_reference(
+            make_tiny_brake_profile(**overrides),
+            ("j0",),
+            truncate_ns=500_000_000,
+        )
+    assert caught.value.reason == "INVALID_RUCKIG_EXPORT"
 
 
 def counterexample_window(lead_ms: int = 250) -> ActionWindow:

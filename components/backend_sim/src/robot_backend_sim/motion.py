@@ -33,7 +33,7 @@ from robot_contracts.reference import (
 from .braking import BrakingPlan, plan_braking
 from .chunk_plan import PreparedChunk
 from .chunk_types import PreparedStreamChunk, chunk_kind
-from .contact_unload import ContactUnload
+from .contact_unload import REFERENCE_VELOCITY_ATOL_M_S, ContactUnload
 from .contacts import (
     GripperCompletion,
     GripperContactEvidence,
@@ -1688,7 +1688,10 @@ class NativeMotion:
                 finger_speed_max_m_s=self._config.finger_velocity_max_m_s,
                 contact=contact,
             )
-            closing_contact = completion.contact_ok and reference.velocities[index] <= 0.0
+            closing_contact = (
+                completion.contact_ok
+                and reference.velocities[index] <= REFERENCE_VELOCITY_ATOL_M_S
+            )
             if closing_contact:
                 constrained.add(index)
             timeout_ns = (

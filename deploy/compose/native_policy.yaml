@@ -8,6 +8,7 @@ name: ${NATIVE_PROJECT:-sim-dual-arm-native}
 services:
   fake-policy:
     image: ${NATIVE_POLICY_IMAGE:-sim-dual-arm/learning:policy-dev}
+    entrypoint: ["bash", "/workspace/deploy/docker/entrypoints/policy.sh"]
     user: "${NATIVE_UID:-1000}:${NATIVE_GID:-1000}"
     working_dir: /workspace
     environment:

@@ -5,6 +5,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
+DOCKER="${DEV_DOCKER:-docker}"
 IMAGE="${DEV_IMAGE:-sim-dual-arm/dev-ros:stage2}"
 BASE_IMAGE="${DEV_ROS_BASE_IMAGE:-sim-dual-arm/ros-base:stage2}"
 BUILD_ROOT="${DEV_BUILD_ROOT:-$ROOT/.build/ros-dev}"
@@ -13,7 +14,7 @@ export DEV_IMAGE="$IMAGE"
 export DEV_BUILD_ROOT="$BUILD_ROOT"
 
 build_image() {
-  docker build \
+  "$DOCKER" build \
     --build-arg "ROS_BASE_IMAGE=$BASE_IMAGE" \
     -t "$IMAGE" \
     -f deploy/docker/dev/Dockerfile \

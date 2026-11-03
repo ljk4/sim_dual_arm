@@ -28,6 +28,10 @@ from dual_arm_runtime.run_logging import EventSink, emit_best_effort
 
 __all__ = ["PrepareFact", "StackTaskClient", "TeacherChunkFact"]
 
+# Upper bound on one interruptible wait slice.  The prepare retry cadence remains
+# the configured poll interval; this only bounds stop/shutdown detection latency.
+_CANCEL_CHECK_S = 0.05
+
 
 @dataclass(frozen=True, slots=True)
 class PrepareFact:
@@ -132,36 +136,148 @@ class StackTaskClient:
         lease_id: str,
         seed: int,
     ) -> PrepareFact:
-        response = self._call(
-            "prepare",
-            PrepareStackTask.Request(
-                context=context_message(context),
-                episode_id=episode_id,
-                request_id=request_id,
-                lease_id=lease_id,
-                seed=seed,
-            ),
+        started = time.monotonic()
+        deadline = started + self._timeouts["prepare"]
+        request = PrepareStackTask.Request(
+            context=context_message(context),
+            episode_id=episode_id,
+            request_id=request_id,
+            lease_id=lease_id,
+            seed=seed,
         )
-        fact = PrepareFact(
-            int(response.task_epoch),
-            str(response.task_config_digest),
-            str(response.plan_digest),
-            str(response.prepare_kind),
-            float(response.planned_duration_s),
-            int(response.key_pose_count),
-            int(response.collision_segment_count),
-            float(response.ik_max_position_error_m),
-            float(response.ik_max_orientation_error_rad),
-        )
-        if not fact.plan_digest or not fact.task_config_digest:
-            raise ContractError("INVALID_TASK_PREPARE", "prepare fact has no digest")
-        if fact.prepare_kind not in {"teacher", "evaluation_only"}:
-            raise ContractError(
-                "INVALID_TASK_PREPARE", f"unknown prepare_kind {fact.prepare_kind!r}"
+        attempts = 0
+        waiting_logged = False
+        last_rejection: ContractError | None = None
+        while True:
+            attempts += 1
+            try:
+                response = self._call("prepare", request, deadline=deadline)
+            except ContractError as error:
+                if error.reason == "TASK_NOT_QUIESCENT":
+                    last_rejection = error
+                elif error.reason == "CALL_TIMEOUT" and last_rejection is not None:
+                    # The shared deadline expired while the retry RPC was in
+                    # flight; keep the last quiescence rejection as the cause.
+                    self._prepare_timeout(
+                        attempts=attempts,
+                        started=started,
+                        last_rejection=last_rejection,
+                        request_id=request_id,
+                    )
+                else:
+                    raise
+                if time.monotonic() >= deadline:
+                    self._prepare_timeout(
+                        attempts=attempts,
+                        started=started,
+                        last_rejection=last_rejection,
+                        request_id=request_id,
+                    )
+                if not waiting_logged:
+                    # One entry per prepare call, not one per poll interval.
+                    self.emit(
+                        "native.task.prepare_waiting",
+                        reason="TASK_NOT_QUIESCENT",
+                        message="stack task prepare waiting for a still robot",
+                        fields={
+                            "request_id": request_id,
+                            "episode_id": episode_id,
+                            "attempt": attempts,
+                            "prepare_timeout_s": self._timeouts["prepare"],
+                            "poll_interval_s": self._poll_interval_s,
+                        },
+                    )
+                    waiting_logged = True
+                self._wait_before_retry(deadline)
+                if time.monotonic() >= deadline:
+                    self._prepare_timeout(
+                        attempts=attempts,
+                        started=started,
+                        last_rejection=last_rejection,
+                        request_id=request_id,
+                    )
+                continue
+            fact = PrepareFact(
+                int(response.task_epoch),
+                str(response.task_config_digest),
+                str(response.plan_digest),
+                str(response.prepare_kind),
+                float(response.planned_duration_s),
+                int(response.key_pose_count),
+                int(response.collision_segment_count),
+                float(response.ik_max_position_error_m),
+                float(response.ik_max_orientation_error_rad),
             )
-        with self._lock:
-            self.prepare_fact = fact
-        return fact
+            if not fact.plan_digest or not fact.task_config_digest:
+                raise ContractError("INVALID_TASK_PREPARE", "prepare fact has no digest")
+            if fact.prepare_kind not in {"teacher", "evaluation_only"}:
+                raise ContractError(
+                    "INVALID_TASK_PREPARE", f"unknown prepare_kind {fact.prepare_kind!r}"
+                )
+            if waiting_logged:
+                self.emit(
+                    "native.task.prepare_succeeded",
+                    message="stack task prepare succeeded after quiescence wait",
+                    fields={
+                        "request_id": request_id,
+                        "attempts": attempts,
+                        "elapsed_s": time.monotonic() - started,
+                        "last_rejection": (
+                            last_rejection.reason if last_rejection is not None else ""
+                        ),
+                    },
+                )
+            with self._lock:
+                self.prepare_fact = fact
+            return fact
+
+    def _wait_before_retry(self, deadline: float) -> None:
+        """Sleep one retry interval, bounded by the shared prepare deadline."""
+        retry_at = min(time.monotonic() + self._poll_interval_s, deadline)
+        while True:
+            now = time.monotonic()
+            if now >= retry_at:
+                return
+            if not rclpy.ok():
+                raise ContractError(
+                    "EPISODE_STOPPED", "stack task prepare during shutdown"
+                )
+            if self._stop.is_set():
+                raise ContractError("EPISODE_STOPPED", "stack task prepare stopped")
+            # The retry cadence stays _poll_interval_s; short slices only make
+            # stop/shutdown checks responsive when the interval is long.
+            pause = min(retry_at - now, _CANCEL_CHECK_S)
+            if pause <= 0.0:
+                return
+            if self._stop.wait(pause):
+                raise ContractError("EPISODE_STOPPED", "stack task prepare stopped")
+
+    def _prepare_timeout(
+        self,
+        *,
+        attempts: int,
+        started: float,
+        last_rejection: ContractError,
+        request_id: str,
+    ) -> None:
+        elapsed = time.monotonic() - started
+        self.emit(
+            "native.task.prepare_timeout",
+            level="WARNING",
+            reason="PREPARE_TIMEOUT",
+            message="stack task prepare budget expired while waiting for quiescence",
+            fields={
+                "request_id": request_id,
+                "attempts": attempts,
+                "elapsed_s": elapsed,
+                "last_rejection": last_rejection.reason,
+            },
+        )
+        raise ContractError(
+            "PREPARE_TIMEOUT",
+            f"stack task prepare budget expired after {attempts} attempts "
+            f"in {elapsed:.3f}s; last rejection: {last_rejection.reason}",
+        ) from last_rejection
 
     def start(
         self,
@@ -278,13 +394,32 @@ class StackTaskClient:
             self.frozen_state = state
         return state
 
-    def _call(self, name: str, request: object):
+    def _call(self, name: str, request: object, *, deadline: float | None = None):
         client = self._clients[name]
-        timeout = self._timeouts[name]
-        if not client.wait_for_service(timeout_sec=self._call_timeout_s):
-            raise ContractError("NOT_READY", f"stack task service {name}")
+        if deadline is None:
+            if not client.wait_for_service(timeout_sec=self._call_timeout_s):
+                raise ContractError("NOT_READY", f"stack task service {name}")
+            deadline = time.monotonic() + self._timeouts[name]
+        else:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0.0:
+                raise ContractError("CALL_TIMEOUT", f"stack task {name}")
+            if not client.wait_for_service(
+                timeout_sec=min(remaining, self._call_timeout_s)
+            ):
+                raise ContractError("NOT_READY", f"stack task service {name}")
+            if time.monotonic() >= deadline:
+                raise ContractError("CALL_TIMEOUT", f"stack task {name}")
         future: Future = client.call_async(request)
-        deadline = time.monotonic() + timeout
+        completed = threading.Event()
+
+        def wake(_future: Future) -> None:
+            # Executor callbacks only signal; they never spin, log or clean up.
+            completed.set()
+
+        future.add_done_callback(wake)
+        if future.done():
+            completed.set()
         while not future.done():
             if time.monotonic() > deadline:
                 future.cancel()
@@ -294,7 +429,9 @@ class StackTaskClient:
             if self._stop.is_set() and name in {"prepare", "start", "chunk"}:
                 future.cancel()
                 raise ContractError("EPISODE_STOPPED", f"stack task {name} stopped")
-            time.sleep(self._poll_interval_s)
+            # poll_interval bounds only stop/deadline checks; an ACK wakes us sooner.
+            remaining = deadline - time.monotonic()
+            completed.wait(min(self._poll_interval_s, max(0.0, remaining)))
         try:
             response = future.result()
         except Exception as error:

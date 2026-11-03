@@ -1,4 +1,5 @@
 import dataclasses
+import hashlib
 import json
 import os
 import subprocess
@@ -27,6 +28,7 @@ from dual_arm_learning.act_provider import (  # noqa: E402
     load_act_provider,
 )
 from dual_arm_learning.act_service import build_policy_config  # noqa: E402
+from dual_arm_learning.act_temporal import PERIOD_NS  # noqa: E402
 from dual_arm_learning.policy_server import PolicyServer  # noqa: E402
 from dual_arm_learning.policy_service import PolicyService  # noqa: E402
 from dual_arm_learning.policy_types import (  # noqa: E402
@@ -110,6 +112,51 @@ class RecordingModel:
         if self.mode == "shape":
             return np.zeros((59, 16), dtype=np.float32)
         return np.full((60, 16), float(self.calls), dtype=np.float32)
+
+
+class TemporalChunkModel:
+    """Valid arm blocks with a small per-call offset and an optional bad call."""
+
+    device = "cpu"
+
+    def __init__(self, base, invalid_at=None):
+        self.base = np.asarray(base, dtype=np.float64)
+        self.calls = 0
+        self.invalid_at = invalid_at
+
+    def predict(self, images, state):
+        del images, state
+        self.calls += 1
+        result = np.tile(self.base, (60, 1))
+        result[:, 0] += 0.01 * self.calls
+        if self.calls == self.invalid_at:
+            result[:, 0] = 3.5
+        return result.astype(np.float32)
+
+
+def temporal_base(contract):
+    result = np.asarray(
+        [joint["initial"] for joint in contract.profile["joints"]], dtype=np.float64
+    )
+    result[7] = result[15] = 0.09
+    return result
+
+
+def build_temporal_provider(bundle, contract, model, directory, *, coeff=0.01):
+    config = build_policy_config(settings_for(bundle), contract)
+    provider = ActProvider(
+        config,
+        contract,
+        model,
+        gripper_max_correction_m=0.03,
+        temporal_ensemble_coeff=coeff,
+        prediction_directory=directory,
+    )
+    return config, provider
+
+
+def artifact_path(directory, identity):
+    return Path(directory) / (hashlib.sha256(identity.encode()).hexdigest() + ".npz")
 
 
 def profile_documents():
@@ -511,3 +558,118 @@ def test_startup_failure_leaves_structured_artifact(tmp_path):
     assert payload["stage"] == "contract"
     assert payload["error_type"] == "ActContractError"
     assert payload["bundle"].endswith("missing-bundle")
+
+
+def test_temporal_ensemble_is_off_by_default(bundle, contract):
+    model = RecordingModel()
+    config, provider = build_provider(bundle, contract, model)
+    summary = provider.summary()
+    assert summary["temporal_ensemble"] is False
+    assert summary["temporal_ensemble_coeff"] is None
+    assert load_act_settings(CONFIG).temporal_ensemble_coeff is None
+
+
+def test_temporal_ensemble_fuses_admitted_history_and_records_npz(
+    bundle, contract, tmp_path
+):
+    model = TemporalChunkModel(temporal_base(contract))
+    directory = tmp_path / "predictions"
+    config, provider = build_temporal_provider(bundle, contract, model, directory)
+    assert provider.summary()["temporal_ensemble"] is True
+    assert provider.summary()["temporal_ensemble_coeff"] == pytest.approx(0.01)
+
+    provider.open("s1", context(config), "o1", *profile_documents())
+    first = provider.predict(
+        "s1", "p1", context(config), observation(config, contract, 1, 1_000_000_000)
+    )
+    assert len(first.targets) == 60
+    second = provider.predict(
+        "s1", "p2", context(config), observation(config, contract, 2, 1_100_000_000)
+    )
+
+    executed = np.asarray([target.positions for target in second.targets])
+    with np.load(artifact_path(directory, "s1:p2"), allow_pickle=False) as stored:
+        raw = stored["raw_act"]
+        admitted = stored["admitted"]
+        np.testing.assert_allclose(raw[:, 7], 0.09)
+        np.testing.assert_allclose(raw[:, 15], 0.09)
+        np.testing.assert_allclose(admitted[:, 7], 0.08)
+        np.testing.assert_allclose(admitted[:, 15], 0.08)
+        np.testing.assert_allclose(stored["correction"], admitted - raw)
+        np.testing.assert_array_equal(stored["execution_targets"], executed)
+        np.testing.assert_array_equal(stored["ensemble_counts"][:58], 2)
+        np.testing.assert_array_equal(stored["ensemble_counts"][58:], 1)
+        np.testing.assert_array_equal(stored["history_observation_ids"], [1])
+        np.testing.assert_array_equal(
+            stored["history_observation_time_ns"], [1_000_000_000]
+        )
+
+    weight = np.exp(0.01 * (2 * PERIOD_NS) / PERIOD_NS)
+    base = temporal_base(contract)
+    expected = (weight * (base[0] + 0.02) + (base[0] + 0.03)) / (1.0 + weight)
+    assert executed[0, 0] == pytest.approx(expected)
+    # Every joint uses the same rule; dimensions without a disagreement stay put.
+    assert executed[0, 1] == pytest.approx(base[1], abs=1e-6)
+
+    with pytest.raises(PolicyError, match="temporal ensemble"):
+        provider.predict(
+            "s1",
+            "p3",
+            context(config),
+            observation(config, contract, 3, 1_000_000_000),
+        )
+
+
+def test_temporal_history_is_per_session_and_reset_discards_it(bundle, contract, tmp_path):
+    model = TemporalChunkModel(temporal_base(contract))
+    directory = tmp_path / "predictions"
+    config, provider = build_temporal_provider(bundle, contract, model, directory)
+    provider.open("s1", context(config), "o1", *profile_documents())
+    provider.open("s2", context(config), "o2", *profile_documents())
+    provider.predict(
+        "s1", "a1", context(config), observation(config, contract, 1, 1_000_000_000)
+    )
+    provider.predict(
+        "s2", "b1", context(config), observation(config, contract, 1, 1_000_000_000)
+    )
+    with np.load(artifact_path(directory, "s2:b1"), allow_pickle=False) as stored:
+        np.testing.assert_array_equal(stored["ensemble_counts"], 1)
+
+    provider.reset("s1", "r1", context(config, clock_epoch=2, control_epoch=2))
+    provider.predict(
+        "s1",
+        "a2",
+        context(config, clock_epoch=2, control_epoch=2),
+        observation(config, contract, 1, 2_000_000_000),
+    )
+    with np.load(artifact_path(directory, "s1:a2"), allow_pickle=False) as stored:
+        np.testing.assert_array_equal(stored["ensemble_counts"], 1)
+        assert stored["history_observation_ids"].size == 0
+
+
+def test_rejected_raw_is_not_hidden_or_added_to_temporal_history(bundle, contract, tmp_path):
+    model = TemporalChunkModel(temporal_base(contract), invalid_at=3)
+    directory = tmp_path / "predictions"
+    config, provider = build_temporal_provider(bundle, contract, model, directory)
+    provider.open("s1", context(config), "o1", *profile_documents())
+    provider.predict(
+        "s1", "p1", context(config), observation(config, contract, 1, 1_000_000_000)
+    )
+    with pytest.raises(PolicyError, match="hard limits"):
+        provider.predict(
+            "s1", "p2", context(config), observation(config, contract, 2, 1_100_000_000)
+        )
+    with np.load(artifact_path(directory, "s1:p2"), allow_pickle=False) as stored:
+        assert not bool(stored["accepted"])
+        assert "execution_targets" not in stored.files
+
+    provider.predict(
+        "s1", "p3", context(config), observation(config, contract, 3, 1_200_000_000)
+    )
+    with np.load(artifact_path(directory, "s1:p3"), allow_pickle=False) as stored:
+        np.testing.assert_array_equal(stored["ensemble_counts"][:56], 2)
+        np.testing.assert_array_equal(stored["ensemble_counts"][56:], 1)
+        np.testing.assert_array_equal(stored["history_observation_ids"], [1])
+        np.testing.assert_array_equal(
+            stored["history_observation_time_ns"], [1_000_000_000]
+        )

@@ -47,11 +47,17 @@ def load_checkpoint(path: Path) -> dict[str, Any]:
 def training_binding(config: TrainingConfig) -> dict[str, Any]:
     """Bind CLI overrides and the accepted dataset, as well as YAML bytes."""
     effective = json.loads(json.dumps(asdict(config), default=str))
-    return {
+    if config.sample_filter is None:
+        # Preserve the exact pre-filter binding so old checkpoints still resume.
+        effective.pop("sample_filter", None)
+    binding: dict[str, Any] = {
         "effective_configuration": effective,
         "effective_configuration_sha256": canonical_hash(effective),
         "dataset_manifest_sha256": file_sha256(config.data_root / config.manifest_name),
     }
+    if config.sample_filter is not None:
+        binding["sample_filter_sha256"] = file_sha256(config.sample_filter)
+    return binding
 
 
 def validate_checkpoint_binding(checkpoint: dict[str, Any], config: TrainingConfig) -> None:

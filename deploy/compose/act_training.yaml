@@ -1,0 +1,98 @@
+# DSH-041 one-shot ACT batch16 / 20K training job.
+#
+# This file starts one GPU training container only. It does not build an image,
+# start a robot/simulation service, publish a port, or join a network. All
+# inputs are read-only bind mounts; /output is the only writable bind mount.
+# The existing image also declares an unused anonymous /data volume.
+# The trainer runs in the foreground and exits when training stops, so
+# `restart: "no"` is intentional.
+name: "${TRAIN_PROJECT:?TRAIN_PROJECT is required}"
+
+services:
+  train:
+    image: ${TRAIN_IMAGE:-sim-dual-arm/learning:act-dev}
+    user: "${TRAIN_UID:-1000}:${TRAIN_GID:-1000}"
+    working_dir: /workspace
+    runtime: nvidia
+    gpus: all
+    network_mode: none
+    shm_size: 1gb
+    # Tensor IPC needs more descriptors than Docker's default soft limit (1024).
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    restart: "no"
+    stop_grace_period: 60s
+    # Use the already verified local image; never pull or rebuild implicitly.
+    pull_policy: never
+    environment:
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      # Offline trainer: no Hub, dataset download, W&B or other network use.
+      HF_HUB_OFFLINE: "1"
+      HF_DATASETS_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      # Keep the trainer's cache inside the writable /output mount and aligned
+      # with cache_root in the training YAML.
+      LEARNING_CACHE_ROOT: /output/cache/hf
+      HF_HOME: /output/cache/hf
+      PYTHONPATH: /workspace/components/learning/src:/workspace/libraries/run_logging/src:/opt/lerobot/src
+      LEARNING_SOURCE: /opt/lerobot/src
+      # Bound OpenMP/MKL CPU parallelism; decoder-specific limits are separate.
+      OMP_NUM_THREADS: "4"
+      MKL_NUM_THREADS: "4"
+      CUBLAS_WORKSPACE_CONFIG: ":4096:8"
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    volumes:
+      - type: bind
+        source: ${TRAIN_SOURCE_ROOT:?frozen source worktree is required}
+        target: /workspace
+        read_only: true
+      - type: bind
+        source: ${TRAIN_DATA_ROOT:?accepted 45/5 dataset root is required}
+        target: /learning-data
+        read_only: true
+      - type: bind
+        source: ${TRAIN_SOURCE_DATA_ROOT:?accepted source campaign root is required}
+        target: /source-data
+        read_only: true
+      - type: bind
+        source: ${TRAIN_LEARNING_SOURCE:?pinned LeRobot source is required}
+        target: /opt/lerobot
+        read_only: true
+      - type: bind
+        source: ${TRAIN_VENV:?verified host learning venv is required}
+        target: /opt/host-learning-venv
+        read_only: true
+      - type: bind
+        source: ${TRAIN_WEIGHTS:?read-only ResNet weight root is required}
+        target: /learning-cache
+        read_only: true
+      - type: bind
+        source: ${TRAIN_CONFIG:?frozen training YAML is required}
+        target: /training-config.yaml
+        read_only: true
+      - type: bind
+        source: ${TRAIN_FILTER:?frozen container-bound sample filter is required}
+        target: /training-filter.json
+        read_only: true
+      - type: bind
+        # Shared var/learning: old budget ledger, cache and new experiments.
+        source: ${TRAIN_OUTPUT_ROOT:?shared writable output root is required}
+        target: /output
+        read_only: false
+    command:
+      - python
+      - tools/run/learning.py
+      - --project-root
+      - /workspace
+      - train
+      - --config
+      - /training-config.yaml
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

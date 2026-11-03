@@ -46,6 +46,7 @@ _POLICY_DEFAULTS = {
     "close_deadline_s": 2.0,
     "max_message_bytes": 16_777_216,
     "poll_interval_s": 0.02,
+    "startup_settle_sim_ns": 0,
     "termination_mode": "finite_chunks",
     "task_stop_margin_s": 1.0,
     "task_sim_budget_ns": 30_000_000_000,
@@ -187,6 +188,7 @@ class NativePolicy:
     termination_mode: str = "finite_chunks"
     task_stop_margin_s: float = 1.0
     task_sim_budget_ns: int = 30_000_000_000
+    startup_settle_sim_ns: int = 0
 
 
 @dataclass(frozen=True)
@@ -589,6 +591,10 @@ def _build_policy(
             if value not in _TERMINATION_MODES:
                 raise _error(f"{location}.policy.{name}", f"must be one of {_TERMINATION_MODES}")
             values[name] = value
+        elif name == "startup_settle_sim_ns":
+            values[name] = _integer(
+                raw.get(name, default), f"{location}.policy.{name}", 0, 5_000_000_000
+            )
         elif name.endswith("_s") or name == "total_wall_deadline_s":
             values[name] = _number(
                 raw.get(name, default), f"{location}.policy.{name}", positive=True
@@ -606,8 +612,8 @@ def _build_policy(
         raise _error(f"{location}.policy.action_period_ns", "must be 50000000")
     if values["target_count"] != follower.target_count:
         raise _error(f"{location}.policy.target_count", "must equal the follower target_count")
-    if values["target_count"] != 5:
-        raise _error(f"{location}.policy.target_count", "must be 5 for the diagnostic stream")
+    # The selection window is the follower's 2..128 bound.  _validate_stream_budget
+    # below proves the task budget is covered by max_chunks at the chosen count.
     _validate_stream_budget(values, f"{location}.policy", chunk_size=60, period_ns=50_000_000)
     return NativePolicy(
         endpoint=endpoint,

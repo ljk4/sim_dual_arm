@@ -27,6 +27,13 @@ def test_only_grippers_are_admitted_and_raw_is_preserved(tmp_path: Path):
     with np.load(path, allow_pickle=False) as stored:
         np.testing.assert_array_equal(stored["raw_act"], raw)
         np.testing.assert_array_equal(stored["admitted"], result.positions)
+        assert set(stored.files) == {
+            "raw_act",
+            "admitted",
+            "correction",
+            "accepted",
+            "reason",
+        }
     assert size > 0
     raw[:, 15] = -0.0301
     assert not admit_grippers(raw, NAMES, LOWER, UPPER, 0.03).accepted
@@ -36,3 +43,29 @@ def test_only_grippers_are_admitted_and_raw_is_preserved(tmp_path: Path):
     assert not result.accepted and result.positions[0, 0] == raw[0, 0]
     with pytest.raises(ValueError, match="byte budget"):
         save_prediction(tmp_path, "too-big", raw, result, bytes_used=0, max_bytes=1)
+
+
+def test_optional_temporal_arrays_are_saved_in_the_same_artifact(tmp_path: Path):
+    raw = np.zeros((60, 16), dtype=np.float32)
+    result = admit_grippers(raw, NAMES, LOWER, UPPER, 0.03)
+    execution = np.full((60, 16), 0.25, dtype=np.float64)
+    counts = np.arange(60, dtype=np.int64) % 4 + 1
+    path, _ = save_prediction(
+        tmp_path,
+        "session:temporal",
+        raw,
+        result,
+        bytes_used=0,
+        max_bytes=100000,
+        execution_targets=execution,
+        ensemble_counts=counts,
+        history_observation_ids=np.asarray([1, 2], dtype=np.int64),
+        history_observation_time_ns=np.asarray([10, 20], dtype=np.int64),
+    )
+    with np.load(path, allow_pickle=False) as stored:
+        np.testing.assert_array_equal(stored["raw_act"], raw)
+        np.testing.assert_array_equal(stored["admitted"], result.positions)
+        np.testing.assert_array_equal(stored["execution_targets"], execution)
+        np.testing.assert_array_equal(stored["ensemble_counts"], counts)
+        np.testing.assert_array_equal(stored["history_observation_ids"], [1, 2])
+        np.testing.assert_array_equal(stored["history_observation_time_ns"], [10, 20])

@@ -1,45 +1,20 @@
-# Learning image targets
+# Learning 镜像
 
-| Target | Purpose |
+| Target | 用途 |
 | --- | --- |
-| `protocol`, `policy` | Existing ROS-free Policy protocol/fake-service checks; unchanged. |
-| `act-system` | Ubuntu 24.04 Python 3.12, FFmpeg, libpython3.12 and libgomp runtime layer. |
-| `act-deps` | Rebuilds the pinned 94-package environment from `../learning-requirements.lock` using hashes. |
-| `act` | Cross-machine entry; source, pinned LeRobot, weights and data are read-only mounts, output is RW. |
-| `act-dev` | This-machine entry; mounts the already verified host venv read-only instead of reinstalling 94 packages. |
+| `protocol`、`policy` | ROS-free 协议/fake 服务依赖；源码和 SDK 都必须挂载。 |
+| `act-system` | Ubuntu 24.04 Python 3.12、FFmpeg、libpython3.12 和 libgomp 运行层。 |
+| `act-deps` | 按 `../learning-requirements.lock` 重建固定 94 包环境。 |
+| `act` | 跨机器入口；源码、固定 LeRobot、权重和数据只读挂载，输出可写。 |
+| `act-dev` | 本机入口；只读挂载已校验的宿主 venv，不重复安装 94 包。 |
 
-The default `act-system` base is `ubuntu:24.04` so the file is portable. A
-machine with the verified probe image can build with:
+默认 `act-system` 使用 `ubuntu:24.04`，便于移植；本机可用已验证的 system-probe
+镜像作为 `ACT_SYSTEM_IMAGE`。LeRobot 版本/来源在 `../learning-source.json` 固定，
+许可随上游保留；容器离线，训练不下载 backbone 或写 Hub/W&B。
 
-```bash
-docker build --target act-dev \
-  --build-arg ACT_SYSTEM_IMAGE=sim-dual-arm/learning:system-probe-20261101-v3 \
-  -f deploy/docker/learning/Dockerfile -t sim-dual-arm/learning:act-dev .
-```
+Policy SDK 由 `bash tools/build/policy_sdk.sh` 生成到宿主构建目录。运行时挂载
+仓库到 `/workspace:ro`、SDK 到 `/opt/policy-sdk:ro`；入口先校验当前 proto 摘要和
+实际模块来源。缺少挂载、SDK 过期或导入回退均拒绝，不能依赖镜像内旧版本。
+fake/ACT Compose 均显式选用此校验入口；ACT 训练入口保持独立，不要求 Policy SDK。
 
-The verified probe image ID is
-`sha256:5546a1acc44e5e6d0581903fe37bec311996429498bca8826008f2305c43ffac`.
-Do not copy a host virtualenv whose ABI is unknown; use the lock.
-
-Development mounts (all except output are read-only):
-
-```bash
-docker run --rm --gpus all --network none \
-  -e LEARNING_CACHE_ROOT=/output/cache \
-  -v "$PWD":/workspace:ro \
-  -v /home/ljk/work/sim_dual_arm/third_party/src/lerobot-act-v0.6.1:/opt/lerobot:ro \
-  -v /home/ljk/work/sim_dual_arm/.build/cache:/opt/learning-cache:ro \
-  -v /home/ljk/work/sim_dual_arm/.build/learning-dev-venv:/opt/host-learning-venv:ro \
-  -v /path/to/learning-data:/data:ro \
-  -v /path/to/learning-output:/output:rw \
-  sim-dual-arm/learning:act-dev \
-  python tools/run/learning.py --project-root /workspace \
-    train --config /workspace/configs/learning/act_training.container.yaml
-```
-
-The container is offline; the trainer never downloads a backbone or logs to a
-Hub/W&B service. The task budget ledger, report and checkpoints belong under the
-RW `/output` mount; the HF cache is `/output/cache`. The container configs bind
-data/select to `/data` and writable output to `/output`.
-
-For another machine, build `--target act` with its own tag to rebuild the locked dependencies inside the container; `act-dev` requires the exact verified venv mount. Accepted source-export references must also be mounted read-only at their recorded paths (prefer the stable `/source-data` mapping).
+目录导航：[上级目录](../README.md)。

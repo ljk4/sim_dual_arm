@@ -35,9 +35,31 @@ def admit_grippers(raw, names, lower, upper, max_correction_m: float) -> Admissi
 
 
 def save_prediction(
-    directory: Path, identity: str, raw, decision: Admission, *, bytes_used: int, max_bytes: int
+    directory: Path,
+    identity: str,
+    raw,
+    decision: Admission,
+    *,
+    bytes_used: int,
+    max_bytes: int,
+    execution_targets=None,
+    ensemble_counts=None,
+    history_observation_ids=None,
+    history_observation_time_ns=None,
 ) -> tuple[Path, int]:
-    """Atomically save raw/admitted arrays; never put tensors in ordinary logs."""
+    """Atomically save raw/admitted arrays; never put tensors in ordinary logs.
+
+    The four ensemble arrays are optional so a disabled feature keeps the exact
+    historical artifact contents.  When supplied they are written in the same
+    compressed artifact, never as a second copy or a log payload.
+    """
+    extras = {
+        "execution_targets": execution_targets,
+        "ensemble_counts": ensemble_counts,
+        "history_observation_ids": history_observation_ids,
+        "history_observation_time_ns": history_observation_time_ns,
+    }
+    saved_extras = {name: np.asarray(value) for name, value in extras.items() if value is not None}
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / (hashlib.sha256(identity.encode()).hexdigest() + ".npz")
     temporary = path.with_suffix(".tmp")
@@ -52,6 +74,7 @@ def save_prediction(
                 correction=decision.correction,
                 accepted=decision.accepted,
                 reason=decision.reason,
+                **saved_extras,
             )
             stream.flush()
             os.fsync(stream.fileno())

@@ -11,6 +11,7 @@ services:
     image: ${NATIVE_ACT_IMAGE:-sim-dual-arm/learning:act-dev}
     user: "${NATIVE_UID:-1000}:${NATIVE_GID:-1000}"
     working_dir: /workspace
+    entrypoint: ["bash", "/workspace/deploy/docker/entrypoints/policy.sh"]
     runtime: nvidia
     gpus: all
     environment:

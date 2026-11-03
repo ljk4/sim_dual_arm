@@ -167,6 +167,7 @@ def main(argv: list[str] | None = None) -> int:
             contract=contract,
             device=settings.device,
             gripper_max_correction_m=settings.gripper_max_correction_m,
+            temporal_ensemble_coeff=settings.temporal_ensemble_coeff,
             prediction_directory=args.log_directory / "predictions",
             prediction_max_bytes=int(settings.logging.get("max_total_bytes", 268435456)),
         )

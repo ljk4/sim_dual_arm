@@ -62,6 +62,7 @@ class ActSettings:
     task_text: str
     logging: dict[str, Any]
     gripper_max_correction_m: float = 0.0
+    temporal_ensemble_coeff: float | None = None
 
 
 @dataclass(frozen=True)
@@ -738,6 +739,7 @@ _MODEL_FIELDS = {
     "device",
     "require_formal",
     "gripper_max_correction_m",
+    "temporal_ensemble_coeff",
 }
 _SERVICE_FIELDS = {
     "bind_address",
@@ -803,6 +805,11 @@ def load_act_settings(path: str | Path) -> ActSettings:
     )
     if not 0.0 <= gripper_limit <= 0.03:
         raise ActContractError("model.gripper_max_correction_m: must be in [0, 0.03] m")
+    temporal_coeff = model.get("temporal_ensemble_coeff")
+    if temporal_coeff is not None:
+        temporal_coeff = _number(temporal_coeff, "model.temporal_ensemble_coeff")
+        if not 0.0 <= temporal_coeff <= 1.0:
+            raise ActContractError("model.temporal_ensemble_coeff: must be in [0, 1]")
     logging = _mapping(root.get("logging", {}), "logging")
     _reject_non_finite(logging, "logging")
 
@@ -847,6 +854,7 @@ def load_act_settings(path: str | Path) -> ActSettings:
         task_text=_text(_required(service, "task_text", "service"), "service.task_text"),
         logging=dict(logging),
         gripper_max_correction_m=gripper_limit,
+        temporal_ensemble_coeff=temporal_coeff,
     )
     if settings.test_only:
         raise ActContractError("service.test_only: the ACT deployment cannot be a test-only policy")

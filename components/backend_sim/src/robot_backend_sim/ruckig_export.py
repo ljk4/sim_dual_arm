@@ -90,7 +90,89 @@ def _phase_state(piece: _Phase, local_s: float) -> tuple[float, float, float, fl
     return p, v, a, j
 
 
-def _phase_pieces(profile: object, axis: int) -> tuple[list[_Phase], float]:
+def _fold_tiny_brake_prefix(
+    profile: object,
+    axis: int,
+    main_p: float,
+    main_v: float,
+) -> tuple[float, float] | None:
+    """Validate a sub-nanosecond second-order brake and return its start state.
+
+    Ruckig can emit a brake prefix solely because the incoming velocity exceeds
+    ``max_velocity`` by one floating-point rounding step.  Such a prefix has no
+    representable nanosecond duration, but it still carries the anchor state.
+    Only that exact shape is folded: a non-empty first phase with zero jerk,
+    an empty second phase, and a duration that rounds to zero nanoseconds.
+    A real, representable brake remains unsupported.
+    """
+    brake = getattr(profile, "brake", None)
+    if brake is None:
+        return None
+    location = f"profiles[{axis}].brake"
+    try:
+        duration = _finite(brake.duration, f"{location}.duration")
+        times = tuple(
+            _finite(value, f"{location}.t[{index}]")
+            for index, value in enumerate(brake.t)
+        )
+    except (AttributeError, TypeError, ValueError) as error:
+        raise _invalid(f"{location}: cannot read the public brake profile") from error
+    if duration == 0.0 and all(value == 0.0 for value in times):
+        return None
+    if duration < 0.0 or any(value < 0.0 for value in times):
+        raise _invalid(f"{location}: brake duration and phase times must not be negative")
+    if len(times) != 2:
+        raise _invalid(f"{location}.t: expected the two-phase public brake profile")
+    if not math.isclose(
+        duration,
+        times[0] + times[1],
+        rel_tol=1e-12,
+        abs_tol=0.0,
+    ):
+        raise _invalid(f"{location}: duration does not match the brake phase times")
+    if times[0] <= 0.0:
+        raise _invalid(f"{location}: only a non-empty first brake phase is supported")
+    if times[1] != 0.0:
+        raise _invalid(f"{location}: the second brake phase must be empty")
+    if _round_ns(duration, f"{location}.duration") != 0:
+        raise _invalid(
+            f"{location}: a representable nonzero brake prefix is not supported",
+        )
+
+    values: dict[str, tuple[float, ...]] = {}
+    for name in ("p", "v", "a", "j"):
+        try:
+            array = tuple(float(value) for value in getattr(brake, name))
+        except (AttributeError, TypeError, ValueError) as error:
+            raise _invalid(f"{location}.{name}: cannot read the public brake array") from error
+        if len(array) != 2:
+            raise _invalid(f"{location}.{name}: expected two public brake entries")
+        if not math.isfinite(array[0]):
+            raise _invalid(f"{location}.{name}[0]: must be finite")
+        values[name] = array
+    if values["j"][0] != 0.0:
+        raise _invalid(f"{location}.j[0]: the folded first brake phase must have zero jerk")
+
+    start_p, start_v = values["p"][0], values["v"][0]
+    acceleration = values["a"][0]
+    phase_s = times[0]
+    end_p = start_p + start_v * phase_s + 0.5 * acceleration * phase_s * phase_s
+    end_v = start_v + acceleration * phase_s
+    if abs(end_p - start_p) > _BOUNDARY_ATOL:
+        raise _invalid(f"{location}: brake prefix changes position by more than the tolerance")
+    if abs(end_v - start_v) > _BOUNDARY_ATOL:
+        raise _invalid(f"{location}: brake prefix changes velocity by more than the tolerance")
+    if abs(end_p - main_p) > _BOUNDARY_ATOL:
+        raise _invalid(f"{location}: brake prefix does not meet the main profile position")
+    if abs(end_v - main_v) > _BOUNDARY_ATOL:
+        raise _invalid(f"{location}: brake prefix does not meet the main profile velocity")
+    return start_p, start_v
+
+
+def _phase_pieces(
+    profile: object,
+    axis: int,
+) -> tuple[list[_Phase], float, tuple[float, float] | None]:
     try:
         times = tuple(float(value) for value in profile.t)  # type: ignore[attr-defined]
         positions = tuple(float(value) for value in profile.p)  # type: ignore[attr-defined]
@@ -122,20 +204,7 @@ def _phase_pieces(profile: object, axis: int) -> tuple[list[_Phase], float]:
         if not math.isfinite(value):
             raise _invalid(f"profiles[{axis}].t[{index}]: must be finite")
 
-    brake = getattr(profile, "brake", None)
-    if brake is not None:
-        try:
-            brake_duration = float(brake.duration)
-            brake_times = tuple(float(value) for value in brake.t)
-        except (AttributeError, TypeError, ValueError) as error:
-            raise _invalid(
-                f"profiles[{axis}].brake: cannot read the public brake profile",
-            ) from error
-        if brake_duration != 0.0 or any(value != 0.0 for value in brake_times):
-            raise _invalid(
-                f"profiles[{axis}].brake: nonzero brake profiles are not supported "
-                "by the second-order main-profile export",
-            )
+    brake_start = _fold_tiny_brake_prefix(profile, axis, positions[0], velocities[0])
 
     pieces: list[_Phase] = []
     cumulative_s = 0.0
@@ -175,7 +244,7 @@ def _phase_pieces(profile: object, axis: int) -> tuple[list[_Phase], float]:
             raise _invalid(f"profiles[{axis}]: position discontinuity at a phase boundary")
         if not math.isclose(end_v, current.v, rel_tol=1e-9, abs_tol=1e-9):
             raise _invalid(f"profiles[{axis}]: velocity discontinuity at a phase boundary")
-    return pieces, cumulative_s
+    return pieces, cumulative_s, brake_start
 
 
 def _assign_ns(pieces: list[_Phase], total_ns: int, axis: int) -> list[_Phase]:
@@ -263,7 +332,7 @@ def export_ruckig_reference(
 
     axis_pieces: list[list[_Phase]] = []
     for axis in range(len(names)):
-        pieces, cumulative_s = _phase_pieces(section[axis], axis)
+        pieces, cumulative_s, brake_start = _phase_pieces(section[axis], axis)
         if not pieces:
             # A truly static axis can be represented as one hold phase at its
             # public initial value.
@@ -300,6 +369,20 @@ def export_ruckig_reference(
         assigned = _assign_ns(pieces, profile_duration_ns, axis)
         if not assigned:
             raise _invalid(f"profiles[0][{axis}]: no positive-duration phase")
+        if brake_start is not None:
+            first = assigned[0]
+            # The folded prefix occupies no nanosecond, so the first effective
+            # exported phase starts at the folded anchor state.
+            assigned[0] = _Phase(
+                start_s=0.0,
+                end_s=first.end_s - first.start_s,
+                start_ns=first.start_ns,
+                end_ns=first.end_ns,
+                p=brake_start[0],
+                v=brake_start[1],
+                a=first.a,
+                j=first.j,
+            )
         if assigned[-1].end_ns < profile_duration_ns:
             last = assigned[-1]
             assigned[-1] = _Phase(

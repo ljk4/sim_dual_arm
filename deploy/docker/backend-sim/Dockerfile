@@ -1,4 +1,3 @@
-ARG ROS_BASE_IMAGE=sim-dual-arm/ros-base:stage2
 ARG SIM_BASE_IMAGE=sim-dual-arm/dev-ros:stage2
 
 # Stable simulation dependency layer.  It contains only the pinned wheel set
@@ -23,48 +22,9 @@ COPY deploy/docker/sim-packages.json /opt/sim/sim-packages.json
 RUN pip install --no-cache-dir --require-hashes -r /opt/sim/sim-requirements.lock
 
 # Keep provenance in the image without embedding a fabricated image ID.
-RUN python - <<'PY'
-import importlib.metadata
-import json
-import platform
-import subprocess
-import sys
-
-packages = json.load(open("/opt/sim/sim-packages.json", encoding="utf-8"))["packages"]
-installed = {}
-for entry in packages:
-    try:
-        installed[entry["name"]] = importlib.metadata.version(entry["name"])
-    except importlib.metadata.PackageNotFoundError:
-        installed[entry["name"]] = None
-graphics = subprocess.run(
-    [
-        "dpkg-query",
-        "-W",
-        "-f=${Package}=${Version}\n",
-        "libegl1",
-        "libgl1",
-        "libopengl0",
-        "libglvnd0",
-    ],
-    check=True,
-    capture_output=True,
-    text=True,
-).stdout.splitlines()
-document = {
-    "schema_version": 1,
-    "python": {
-        "implementation": platform.python_implementation(),
-        "version": platform.python_version(),
-        "executable": sys.executable,
-    },
-    "packages": installed,
-    "graphics": dict(line.split("=", 1) for line in graphics),
-}
-with open("/opt/sim/versions.json", "w", encoding="utf-8") as stream:
-    json.dump(document, stream, indent=2, sort_keys=True)
-    stream.write("\n")
-PY
+RUN --mount=type=bind,source=tools/build,target=/build-tools,readonly \
+    python /build-tools/image_metadata.py sim \
+    --packages /opt/sim/sim-packages.json --output /opt/sim/versions.json
 
 # Independent reproducible builder for the locked Ruckig Community source.
 # It installs only the pinned build toolchain, builds the locked sdist with
@@ -91,48 +51,10 @@ RUN pip install --no-cache-dir --require-hashes -r /opt/ruckig-build/ruckig-buil
 RUN pip wheel --no-cache-dir --no-build-isolation --no-deps --require-hashes \
     -r /opt/ruckig-build/ruckig-requirements.lock \
     --wheel-dir /opt/ruckig-wheel
-RUN mkdir -p /opt/ruckig-provenance && python - <<'PY'
-import glob
-import hashlib
-import importlib.metadata
-import json
-import os
-import platform
-
-source = json.load(open("/opt/ruckig-build/ruckig-source.json", encoding="utf-8"))
-wheels = glob.glob("/opt/ruckig-wheel/*.whl")
-assert len(wheels) == 1, wheels
-wheel = wheels[0]
-sha = hashlib.sha256(open(wheel, "rb").read()).hexdigest()
-locks = {}
-for name in ("ruckig-requirements.lock", "ruckig-build-requirements.lock"):
-    path = os.path.join("/opt/ruckig-build", name)
-    locks[name] = hashlib.sha256(open(path, "rb").read()).hexdigest()
-tools = {}
-for name in ("scikit-build-core", "nanobind", "cmake", "ninja", "packaging", "pathspec"):
-    tools[name] = importlib.metadata.version(name)
-document = {
-    "schema_version": 1,
-    "package": source["package"],
-    "version": source["version"],
-    "license": source["license"],
-    "source_url": source["source_url"],
-    "sdist_sha256": source["sdist_sha256"],
-    "wheel_file": os.path.basename(wheel),
-    "wheel_sha256": sha,
-    "wheel_bytes": os.path.getsize(wheel),
-    "python": {
-        "implementation": platform.python_implementation(),
-        "version": platform.python_version(),
-        "executable": os.path.realpath(os.sys.executable),
-    },
-    "build_tools": tools,
-    "requirements_sha256": locks,
-}
-with open("/opt/ruckig-provenance/build.json", "w", encoding="utf-8") as stream:
-    json.dump(document, stream, indent=2, sort_keys=True)
-    stream.write("\n")
-PY
+RUN --mount=type=bind,source=tools/build,target=/build-tools,readonly \
+    python /build-tools/image_metadata.py ruckig-build \
+    --source /opt/ruckig-build/ruckig-source.json --wheel-dir /opt/ruckig-wheel \
+    --lock-dir /opt/ruckig-build --output /opt/ruckig-provenance/build.json
 
 # Follower runtime layer: start from the accepted MuJoCo layer, copy only the
 # generated wheel and its provenance, and install it without an index or build
@@ -142,30 +64,12 @@ FROM mujoco-dev AS follower-dev
 COPY --from=ruckig-builder /opt/ruckig-wheel /opt/ruckig-wheel
 COPY --from=ruckig-builder /opt/ruckig-provenance /opt/ruckig-provenance
 RUN pip install --no-cache-dir --no-index --no-deps /opt/ruckig-wheel/ruckig-0.15.3-*.whl
-RUN python - <<'PY'
-import importlib.metadata
-import json
-import ruckig
+RUN --mount=type=bind,source=tools/build,target=/build-tools,readonly \
+    python /build-tools/image_metadata.py ruckig-check \
+    --provenance /opt/ruckig-provenance/build.json
 
-provenance = json.load(open("/opt/ruckig-provenance/build.json", encoding="utf-8"))
-version = importlib.metadata.version("ruckig")
-assert version == provenance["version"], (version, provenance["version"])
-print(f"follower-dev ruckig {version} {provenance['wheel_sha256']}")
-PY
-
-# Original CPU mock image target.  Keep it as the default target so existing
-# stage2 builds and the mock backend behaviour are unchanged.
-FROM ${ROS_BASE_IMAGE} AS mock
-COPY contracts /workspace/contracts
-COPY libraries/backend_core /workspace/libraries/backend_core
-COPY libraries/ros_support /workspace/libraries/ros_support
-COPY tools /workspace/tools
-COPY profiles /workspace/profiles
-COPY tests/doubles/ros /workspace/tests/doubles/ros
-RUN pip install --no-build-isolation --no-deps \
-    ./contracts/python ./libraries/backend_core ./libraries/ros_support
-RUN source /opt/ros/jazzy/setup.bash && python tools/build/ros_workspace.py --log-base /tmp/colcon-log build \
-    --base-paths contracts/ros tests/doubles/ros \
-    --build-base /tmp/colcon-build --install-base /opt/project/install \
-    --event-handlers console_direct+
-CMD ["ros2", "run", "mock_robot_backend", "mock_backend", "--profile", "/workspace/profiles/robots/mock_dual_arm_v1/profile.json", "--schemas", "/workspace/contracts/schemas/v1"]
+# Source-mounted CPU mock target. The inherited dev entrypoint verifies the
+# mounted ROS SDK and imports runtime/backend modules from /workspace.
+FROM ${SIM_BASE_IMAGE} AS mock
+WORKDIR /workspace
+CMD ["python", "-m", "mock_robot_backend.node", "--profile", "/workspace/profiles/robots/mock_dual_arm_v1/profile.json", "--schemas", "/workspace/contracts/schemas/v1"]

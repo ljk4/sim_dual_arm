@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
+import yaml
 from act_fixtures import (
     ACTION,
     OBSERVATION,
@@ -9,7 +10,13 @@ from act_fixtures import (
     make_act_bundle,
     reseal_bundle,
 )
-from dual_arm_learning.act_contract import ActContractError, resolve_act_contract
+from dual_arm_learning.act_contract import (
+    ActContractError,
+    load_act_settings,
+    resolve_act_contract,
+)
+
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def resolve(bundle: Path, *, require_formal: bool = False):
@@ -105,3 +112,20 @@ def test_contract_rejects_temporal_ensemble_and_wrong_schema(tmp_path):
             action_schema_path=ACTION,
             require_formal=False,
         )
+
+
+def test_temporal_ensemble_setting_is_optional_and_strictly_bounded(tmp_path):
+    default = load_act_settings(ROOT / "configs/learning/act_policy.yaml")
+    assert default.temporal_ensemble_coeff is None
+    temporal = load_act_settings(ROOT / "configs/learning/act_policy_temporal.yaml")
+    assert temporal.temporal_ensemble_coeff == pytest.approx(0.01)
+
+    document = yaml.safe_load(
+        (ROOT / "configs/learning/act_policy.yaml").read_text(encoding="utf-8")
+    )
+    for index, value in enumerate((True, float("nan"), float("inf"), -0.01, 1.01, "0.1")):
+        document["model"]["temporal_ensemble_coeff"] = value
+        path = tmp_path / f"temporal-{index}.yaml"
+        path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+        with pytest.raises(ActContractError, match="temporal_ensemble_coeff"):
+            load_act_settings(path)

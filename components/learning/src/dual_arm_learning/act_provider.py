@@ -20,6 +20,7 @@ from typing import Any, Protocol
 import numpy as np
 
 from .act_contract import ActContract
+from .act_temporal import EnsembleResult, TemporalEnsemble, validate_coefficient
 from .policy_config import PolicyServiceConfig
 from .policy_types import (
     PolicyError,
@@ -65,6 +66,7 @@ class _Session:
     lock: threading.Lock = field(default_factory=threading.Lock)
     last_observation_id: int = 0
     predictions: int = 0
+    ensemble: TemporalEnsemble | None = None
 
 
 def _vram_peak_mib() -> float | None:
@@ -124,6 +126,7 @@ class ActProvider:
         *,
         load_seconds: float = 0.0,
         gripper_max_correction_m: float = 0.0,
+        temporal_ensemble_coeff: float | None = None,
         prediction_directory: Path | None = None,
         prediction_max_bytes: int = 268435456,
     ) -> None:
@@ -134,13 +137,20 @@ class ActProvider:
         self.warmup_seconds = 0.0
         self.warmup_shape: tuple[int, ...] | None = None
         self.gripper_max_correction_m = gripper_max_correction_m
+        self.temporal_ensemble_coeff = (
+            None
+            if temporal_ensemble_coeff is None
+            else validate_coefficient(temporal_ensemble_coeff)
+        )
         self.prediction_directory = prediction_directory
         self.prediction_max_bytes = prediction_max_bytes
         self._prediction_bytes = 0
         if not 0.0 <= gripper_max_correction_m <= 0.03:
             raise ValueError("gripper admission must be in [0, 0.03] m")
-        if gripper_max_correction_m and prediction_directory is None:
-            raise ValueError("gripper admission requires original prediction artifacts")
+        if (
+            gripper_max_correction_m or self.temporal_ensemble_coeff is not None
+        ) and prediction_directory is None:
+            raise ValueError("gripper admission/temporal ensembling requires prediction artifacts")
         self._log: Any = None
         self._ready = False
         self._sessions: dict[str, _Session] = {}
@@ -217,7 +227,8 @@ class ActProvider:
                 "warmup_seconds": round(self.warmup_seconds, 6),
                 "warmup_shape": list(self.warmup_shape or ()),
                 "ready": self._ready,
-                "temporal_ensemble": False,
+                "temporal_ensemble": self.temporal_ensemble_coeff is not None,
+                "temporal_ensemble_coeff": self.temporal_ensemble_coeff,
                 "predict_api": "predict_action_chunk",
                 "vram_peak_mib": _vram_peak_mib(),
                 "predictions": self._predictions,
@@ -313,7 +324,12 @@ class ActProvider:
         with self._sessions_lock:
             if session_id in self._sessions:
                 raise PolicyError("INVALID_REQUEST", "ACT session already exists")
-            self._sessions[session_id] = _Session(context=context)
+            ensemble = (
+                TemporalEnsemble(self.temporal_ensemble_coeff)
+                if self.temporal_ensemble_coeff is not None
+                else None
+            )
+            self._sessions[session_id] = _Session(context=context, ensemble=ensemble)
         self._emit(
             "act.session.opened",
             episode_id=context.episode_id if _SAFE_ID.fullmatch(context.episode_id) else "",
@@ -381,7 +397,10 @@ class ActProvider:
                     observation_id=observation.observation_id,
                 )
                 raise PolicyError("INVALID_PREDICTION", "ACT model returned non-finite actions")
-            if self.gripper_max_correction_m:
+            ensemble_enabled = self.temporal_ensemble_coeff is not None
+            ensemble_result = None
+            decision = None
+            if self.gripper_max_correction_m or ensemble_enabled:
                 from .act_admission import admit_grippers, save_prediction
 
                 decision = admit_grippers(
@@ -391,6 +410,20 @@ class ActProvider:
                     self.config.joint_upper_bounds,
                     self.gripper_max_correction_m,
                 )
+                if decision.accepted and ensemble_enabled:
+                    ensemble_result = self._preview_ensemble(
+                        session, observation, decision.positions
+                    )
+                extras = {}
+                if ensemble_result is not None:
+                    extras = {
+                        "execution_targets": ensemble_result.targets,
+                        "ensemble_counts": ensemble_result.counts,
+                        "history_observation_ids": ensemble_result.history_observation_ids,
+                        "history_observation_time_ns": (
+                            ensemble_result.history_observation_time_ns
+                        ),
+                    }
                 artifact, size = save_prediction(
                     self.prediction_directory,
                     session_id + ":" + request_id,
@@ -398,6 +431,7 @@ class ActProvider:
                     decision,
                     bytes_used=self._prediction_bytes,
                     max_bytes=self.prediction_max_bytes,
+                    **extras,
                 )
                 self._prediction_bytes += size
                 self._emit(
@@ -408,10 +442,17 @@ class ActProvider:
                     artifact=str(artifact),
                     corrected_scalars=int(np.count_nonzero(decision.correction)),
                     max_correction_m=float(np.max(np.abs(decision.correction))),
+                    temporal_ensemble=ensemble_enabled,
+                    temporal_ensemble_coeff=self.temporal_ensemble_coeff,
+                    ensemble_history_sources=(
+                        0
+                        if ensemble_result is None
+                        else int(ensemble_result.history_observation_ids.size)
+                    ),
                 )
                 if not decision.accepted:
                     raise PolicyError("INVALID_PREDICTION", decision.reason)
-                output = decision.positions
+                output = decision.positions if ensemble_result is None else ensemble_result.targets
             period = self.config.action_period_ns
             targets = tuple(
                 ProviderTarget(
@@ -444,7 +485,30 @@ class ActProvider:
                 model_latency_ns=model_elapsed,
                 vram_peak_mib=_vram_peak_mib(),
                 predictions=session.predictions,
+                temporal_ensemble=ensemble_enabled,
+                temporal_ensemble_coeff=self.temporal_ensemble_coeff,
+                ensemble_max_sources=(
+                    0 if ensemble_result is None else int(ensemble_result.counts.max())
+                ),
+                ensemble_history_sources=(
+                    0
+                    if ensemble_result is None
+                    else int(ensemble_result.history_observation_ids.size)
+                ),
             )
+            if ensemble_result is not None:
+                # History is committed only after artifact, logs and deadline
+                # succeeded; a rejected call can never poison later predictions.
+                try:
+                    session.ensemble.commit(
+                        observation.reference_robot_time_ns,
+                        observation.observation_id,
+                        decision.positions,
+                    )
+                except ValueError as error:
+                    raise PolicyError(
+                        "INVALID_OBSERVATION", f"temporal ensemble commit: {error}"
+                    ) from error
             return ProviderPrediction(
                 joint_names=self.config.action_joint_names,
                 targets=targets,
@@ -455,6 +519,30 @@ class ActProvider:
                 request_id=request_id,
                 observation_id=observation.observation_id,
             )
+
+    def _preview_ensemble(
+        self,
+        session: _Session,
+        observation: ProviderObservation,
+        admitted: np.ndarray,
+    ) -> EnsembleResult:
+        """Validate absolute observation time and fuse without committing."""
+        if session.ensemble is None:  # pragma: no cover - constructor invariant
+            raise PolicyError("PROVIDER_ERROR", "ACT temporal ensemble state is missing")
+        try:
+            return session.ensemble.preview(
+                observation.reference_robot_time_ns,
+                observation.observation_id,
+                admitted,
+            )
+        except ValueError as error:
+            self._emit(
+                "act.predict.rejected",
+                reason="INVALID_OBSERVATION",
+                detail="temporal_ensemble",
+                observation_id=observation.observation_id,
+            )
+            raise PolicyError("INVALID_OBSERVATION", f"temporal ensemble: {error}") from error
 
     def _decode(self, cameras: tuple[ProviderCameraSample, ...]) -> dict[str, np.ndarray]:
         if tuple(camera.camera_name for camera in cameras) != self.config.camera_names:
@@ -485,6 +573,8 @@ class ActProvider:
             session.context = context
             session.last_observation_id = 0
             session.predictions = 0
+            if session.ensemble is not None:
+                session.ensemble.reset()
         self._emit(
             "act.session.reset",
             episode_id=context.episode_id if _SAFE_ID.fullmatch(context.episode_id) else "",
@@ -516,6 +606,7 @@ def load_act_provider(
     contract: ActContract,
     device: str,
     gripper_max_correction_m: float = 0.0,
+    temporal_ensemble_coeff: float | None = None,
     prediction_directory: Path | None = None,
     prediction_max_bytes: int = 268435456,
 ) -> ActProvider:
@@ -539,6 +630,7 @@ def load_act_provider(
         model,
         load_seconds=time.monotonic() - started,
         gripper_max_correction_m=gripper_max_correction_m,
+        temporal_ensemble_coeff=temporal_ensemble_coeff,
         prediction_directory=prediction_directory,
         prediction_max_bytes=prediction_max_bytes,
     )

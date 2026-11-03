@@ -18,9 +18,10 @@ from typing import Any
 
 import numpy as np
 
-from .checkpoints import CHECKPOINT_FORMAT, load_checkpoint
+from .checkpoints import CHECKPOINT_FORMAT, load_checkpoint, training_binding
 from .config import TrainingConfig
 from .dataset import canonical_hash, configure_local_caches, tree_hashes
+from .sample_filter import load_filter_mask
 from .training import BUNDLE_FORMAT, build_act_config, verify_dataset_manifest
 
 
@@ -238,6 +239,11 @@ def export_bundle(
         raise BundleError("checkpoint configuration hash does not match the training YAML")
     if not isinstance(checkpoint.get("model"), dict):
         raise BundleError("checkpoint has no model state dictionary")
+    sample_filter = None
+    if config.sample_filter is not None:
+        sample_filter = load_filter_mask(config.sample_filter)
+        if checkpoint.get("training_binding") != training_binding(config):
+            raise BundleError("checkpoint was not trained with this sample filter")
 
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     output_dir.mkdir(parents=True, exist_ok=False)
@@ -275,6 +281,8 @@ def export_bundle(
     dataset_manifest_path = dataset_root / config.manifest_name
     shutil.copy2(dataset_manifest_path, metadata / "dataset_manifest.json")
     shutil.copy2(config.source, metadata / "training_config.yaml")
+    if sample_filter is not None:
+        _write_json(metadata / "sample_filter.json", sample_filter.document)
     stats_document = _json(processors / "train_stats_summary.json")
     _write_json(metadata / "train_stats_summary.json", stats_document)
     _write_json(
@@ -349,6 +357,27 @@ def export_bundle(
     files = tree_hashes(output_dir)
     model_sha = files["model.safetensors"]["sha256"]
     processor_digest = _processor_digest(output_dir / "processors")
+    dataset_record: dict[str, Any] = {
+        "manifest": "metadata/dataset_manifest.json",
+        "manifest_sha256": files["metadata/dataset_manifest.json"]["sha256"],
+        "train_episodes": 45 if not audit.synthetic else len(audit.train_episodes),
+        "validation_episodes": 5 if not audit.synthetic else len(audit.validation_episodes),
+        "training_global_indices": list(audit.training_global_indices),
+        "validation_global_indices": list(audit.validation_global_indices),
+        "synthetic": bool(audit.synthetic),
+        "seed": config.seed,
+        "split": "45train/5validation",
+        "stats_source": "processors/train_stats_summary.json",
+    }
+    if sample_filter is not None:
+        dataset_record["sample_filter"] = {
+            "path": "metadata/sample_filter.json",
+            "sha256": files["metadata/sample_filter.json"]["sha256"],
+            "digest": sample_filter.digest,
+            "source_frames": sample_filter.source_frames,
+            "eligible_frames": len(sample_filter.eligible_indices),
+            "excluded_frames": sample_filter.excluded_frames,
+        }
     manifest = {
         "format": BUNDLE_FORMAT,
         "created_wall_time_ns": time.time_ns(),
@@ -363,18 +392,7 @@ def export_bundle(
             "path": "config.json",
             "sha256": files["config.json"]["sha256"],
         },
-        "dataset": {
-            "manifest": "metadata/dataset_manifest.json",
-            "manifest_sha256": files["metadata/dataset_manifest.json"]["sha256"],
-            "train_episodes": 45 if not audit.synthetic else len(audit.train_episodes),
-            "validation_episodes": 5 if not audit.synthetic else len(audit.validation_episodes),
-            "training_global_indices": list(audit.training_global_indices),
-            "validation_global_indices": list(audit.validation_global_indices),
-            "synthetic": bool(audit.synthetic),
-            "seed": config.seed,
-            "split": "45train/5validation",
-            "stats_source": "processors/train_stats_summary.json",
-        },
+        "dataset": dataset_record,
         "profile": {
             "path": "metadata/profile.json",
             "sha256": files["metadata/profile.json"]["sha256"],

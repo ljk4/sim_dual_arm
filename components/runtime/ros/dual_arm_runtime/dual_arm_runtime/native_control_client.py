@@ -843,12 +843,23 @@ class NativeControlClient:
 
     def _wait_future(self, future: Future, timeout: float, *, abort_on_stop: bool = True) -> object:
         deadline = time.monotonic() + timeout
+        completed = threading.Event()
+
+        def wake(_future: Future) -> None:
+            # Executor callbacks only signal; they never spin, log or clean up.
+            completed.set()
+
+        future.add_done_callback(wake)
+        if future.done():
+            completed.set()
         while not future.done():
             if time.monotonic() > deadline:
                 raise ContractError("CALL_TIMEOUT")
             if not rclpy.ok() or (abort_on_stop and self._stop_requested.is_set()):
                 raise ContractError("EPISODE_STOPPED")
-            time.sleep(self._recipe.control.poll_interval_s)
+            # poll_interval bounds only stop/deadline checks; an ACK wakes us sooner.
+            remaining = deadline - time.monotonic()
+            completed.wait(min(self._recipe.control.poll_interval_s, max(0.0, remaining)))
         return future.result()
 
     def _call(

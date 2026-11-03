@@ -1,7 +1,7 @@
 """Typed target-source boundary shared by policy and program-teacher streams.
 
 The continuous stream core owns capture cadence, the fixed anchor, the
-60x16/50 ms/5-point window and the single SubmitFollower identity.  A source
+60x16/50 ms prediction, configured selection window and SubmitFollower identity.  A source
 only turns one exact capture into one complete raw prediction; it never
 submits a command, writes physics or invents a target clock.
 """

@@ -14,7 +14,7 @@ import random
 import signal
 import time
 import uuid
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -25,6 +25,7 @@ from .budget import BudgetExceeded, BudgetLedger, BudgetTicket
 from .checkpoints import load_checkpoint, save_checkpoint, validate_checkpoint_binding
 from .config import TrainingConfig
 from .dataset import canonical_hash, configure_local_caches, file_sha256, tree_hashes
+from .sample_filter import SampleFilterMask, load_filter_mask
 
 BUNDLE_FORMAT = "dual-arm-act-bundle-v1"
 
@@ -234,6 +235,19 @@ def verify_dataset_manifest(
     )
 
 
+def _sample_filter(config: TrainingConfig, audit: DatasetAudit) -> SampleFilterMask | None:
+    if config.sample_filter is None:
+        return None
+    if config.mode != "full":
+        raise TrainingError("data.sample_filter is only supported by full training")
+    mask = load_filter_mask(config.sample_filter)
+    if mask.document["dataset"]["manifest"]["sha256"] != audit.manifest_sha256:
+        raise TrainingError("sample filter was generated from a different dataset manifest")
+    if mask.source_frames != audit.train_frames:
+        raise TrainingError("sample filter source frame count differs from the training split")
+    return mask
+
+
 def masked_l1(prediction: Any, target: Any, action_is_pad: Any) -> tuple[Any, int]:
     """Return masked L1 in normalized space and the number of valid scalars."""
     import torch
@@ -383,13 +397,23 @@ def _collate(processed: list[dict[str, Any]]) -> dict[str, Any]:
     return result
 
 
-def _loader(dataset: Any, config: TrainingConfig, *, training: bool) -> Any:
-    from torch.utils.data import DataLoader
+def _loader(
+    dataset: Any,
+    config: TrainingConfig,
+    *,
+    training: bool,
+    indices: Sequence[int] | None = None,
+) -> Any:
+    from torch.utils.data import DataLoader, SubsetRandomSampler
 
+    if indices is not None and not training:
+        raise TrainingError("a sample filter can only restrict the training loader")
+    sampler = None if indices is None else SubsetRandomSampler(list(indices))
     return DataLoader(
         dataset,
         batch_size=config.batch_size,
-        shuffle=training,
+        shuffle=training and sampler is None,
+        sampler=sampler,
         num_workers=config.num_workers,
         collate_fn=list,
         persistent_workers=config.num_workers > 0,
@@ -586,6 +610,7 @@ def _report(
     errors: list[str],
     peak_alloc: float,
     peak_reserved: float,
+    sample_filter: SampleFilterMask | None = None,
 ) -> dict[str, Any]:
     return {
         "format": "dual-arm-act-training-report-v1",
@@ -611,6 +636,7 @@ def _report(
         },
         "checkpoints": save_records,
         "errors": errors,
+        "sample_filter": None if sample_filter is None else sample_filter.summary(),
         "limits": [
             "model selection uses validation masked L1 only",
             "physical stacking success is measured by the supervised campaign, not this loss",
@@ -634,6 +660,7 @@ def train(
     audit = verify_dataset_manifest(
         config, allow_synthetic=allow_synthetic, require_full=config.mode == "full"
     )
+    sample_filter = _sample_filter(config, audit)
     checkpoint: dict[str, Any] | None = None
     if resume_run is not None:
         run_root = resume_run.resolve()
@@ -723,6 +750,11 @@ def train(
             train_episodes = tuple(train_episodes)
         validation_episodes = tuple(range(len(audit.validation_episodes)))
         train_dataset = _dataset(config, audit.train_root, train_episodes, training=True)
+        if sample_filter is not None:
+            if len(train_dataset) != sample_filter.source_frames:
+                raise TrainingError("filtered training dataset size differs from the sample filter")
+            if max(sample_filter.eligible_indices) >= len(train_dataset):
+                raise TrainingError("sample filter contains an out-of-range anchor")
         if mode.validation:
             validation_dataset = _dataset(
                 config, audit.validation_root, validation_episodes, training=False
@@ -754,8 +786,16 @@ def train(
         _emit(
             logger,
             "training.model_ready",
+            batch_size=config.batch_size,
             loaded_backbone_tensors=loaded_backbone,
             train_frames=len(train_dataset),
+            train_source_frames=len(train_dataset),
+            train_eligible_frames=(
+                len(train_dataset) if sample_filter is None else len(sample_filter.eligible_indices)
+            ),
+            train_excluded_frames=(0 if sample_filter is None else sample_filter.excluded_frames),
+            sample_filter_digest=("" if sample_filter is None else sample_filter.digest),
+            sample_filter_sha256=("" if sample_filter is None else sample_filter.file_sha256),
             validation_frames=0 if validation_dataset is None else len(validation_dataset),
             train_episodes=len(audit.train_episodes)
             if train_episodes is None
@@ -764,7 +804,12 @@ def train(
             parameters=sum(parameter.numel() for parameter in policy.parameters()),
             resumed=checkpoint is not None,
         )
-        loader = _loader(train_dataset, config, training=True)
+        loader = _loader(
+            train_dataset,
+            config,
+            training=True,
+            indices=None if sample_filter is None else sample_filter.eligible_indices,
+        )
         iterator: Iterator[Any] = iter(loader)
         policy.train()
 
@@ -964,6 +1009,7 @@ def train(
             errors=errors,
             peak_alloc=peak_alloc,
             peak_reserved=peak_reserved,
+            sample_filter=sample_filter,
         )
         try:
             payload = json.dumps(report, indent=2, allow_nan=False, default=str) + "\n"

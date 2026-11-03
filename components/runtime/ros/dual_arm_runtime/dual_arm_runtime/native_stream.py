@@ -221,7 +221,7 @@ class PolicyTargetSource:
 
 
 class ContinuousStreamRunner:
-    """Run one continuous 60x16/50 ms/5-point stream until its configured end."""
+    """Run a continuous 60x16/50 ms stream with the configured selection window."""
 
     def __init__(
         self,
@@ -654,9 +654,100 @@ class PolicyStreamRunner(ContinuousStreamRunner):
 
     def run(self) -> None:
         try:
+            self._startup_settle()
             super().run()
         except _TaskComplete:
             pass
+
+    def _startup_settle(self) -> None:
+        """Discard captures until the configured simulation interval has elapsed.
+
+        The wait is deliberately before ``source.begin`` so it cannot consume the
+        task's 30 s budget.  It still uses the stream's bounded observation wait,
+        stop flag and wall deadlines, and leaves ``last_observation_id`` at the
+        final settled capture so the first ACT prediction can only use a newer one.
+        """
+        settle_ns = self.policy.startup_settle_sim_ns
+        if settle_ns == 0:
+            return
+        deadline = min(
+            self._wall_deadline,
+            self.clock() + self.configuration.recipe.startup_timeout_s,
+        )
+        observation = self._wait_startup_observation(deadline)
+        first_observation_id = observation.observation_id
+        first_stamp_ns = observation.stamp_ns
+        last_stamp_ns = first_stamp_ns
+        self._emit(
+            "native.policy.startup_settle.started",
+            reason="STARTUP_SETTLE_STARTED",
+            context=EventContext(
+                episode_id=self.episode_id,
+                clock_epoch=self.context.clock_epoch,
+                sim_time_ns=first_stamp_ns,
+            ),
+            fields={
+                "configured_sim_ns": settle_ns,
+                "observation_id": first_observation_id,
+                "stamp_ns": first_stamp_ns,
+            },
+        )
+        observations = 1
+        while last_stamp_ns - first_stamp_ns < settle_ns:
+            previous_stamp_ns = last_stamp_ns
+            observation = self._wait_startup_observation(deadline)
+            if observation.stamp_ns < previous_stamp_ns:
+                raise ContractError(
+                    "STREAM_OBSERVATION_REGRESSION",
+                    "startup settle observed simulation time going backwards",
+                )
+            last_stamp_ns = observation.stamp_ns
+            observations += 1
+        self._emit(
+            "native.policy.startup_settle.completed",
+            reason="STARTUP_SETTLE_COMPLETED",
+            context=EventContext(
+                episode_id=self.episode_id,
+                clock_epoch=self.context.clock_epoch,
+                sim_time_ns=last_stamp_ns,
+            ),
+            fields={
+                "configured_sim_ns": settle_ns,
+                "actual_sim_ns": last_stamp_ns - first_stamp_ns,
+                "first_observation_id": first_observation_id,
+                "first_stamp_ns": first_stamp_ns,
+                "last_observation_id": observation.observation_id,
+                "last_stamp_ns": last_stamp_ns,
+                "observations": observations,
+            },
+        )
+
+    def _wait_startup_observation(self, deadline: float) -> ExactObservation:
+        self._check_stop()
+        remaining = deadline - self.clock()
+        if remaining <= 0:
+            raise ContractError(
+                "STREAM_STARTUP_TIMEOUT",
+                "startup settle exceeded startup_timeout_s",
+            )
+        observation = self.io.wait_observation(
+            self.last_observation_id,
+            min(self.configuration.recipe.call_timeout_s, remaining),
+            self.stop_requested,
+        )
+        self._check_stop()
+        if observation.context != self.context:
+            raise ContractError(
+                "STREAM_CONTEXT_MISMATCH",
+                "startup observation context differs",
+            )
+        if observation.observation_id <= self.last_observation_id:
+            raise ContractError(
+                "STREAM_OBSERVATION_MISMATCH",
+                "startup observation is not newer than the settled capture",
+            )
+        self.last_observation_id = observation.observation_id
+        return observation
 
 
 __all__ = [

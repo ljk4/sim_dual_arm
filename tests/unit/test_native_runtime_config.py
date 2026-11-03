@@ -129,3 +129,61 @@ def test_policy_max_chunks_can_cover_a_120_chunk_task(tmp_path):
     path = write(tmp_path / "over", value, absolute=False)
     with pytest.raises(ContractError, match="max_chunks"):
         load_native_configuration(path, ROOT)
+
+
+def policy_document():
+    return yaml.safe_load(
+        (ROOT / "configs/runtime/native_policy.yaml").read_text(encoding="utf-8")
+    )
+
+
+def write_policy(tmp_path, value):
+    base = ROOT / "configs/runtime/native_policy.yaml"
+    for field in (
+        "robot_profile",
+        "observation_schema",
+        "action_schema",
+        "control_constraints",
+        "follower_constraints",
+    ):
+        value[field] = str((base.parent / value[field]).resolve())
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    path = tmp_path / "native_policy.yaml"
+    path.write_text(yaml.safe_dump(value), encoding="utf-8")
+    return path
+
+
+def test_policy_startup_settle_defaults_to_disabled():
+    configuration = load_native_configuration(
+        ROOT / "configs/runtime/native_policy.yaml", ROOT
+    )
+    assert configuration.recipe.policy.startup_settle_sim_ns == 0
+    assert configuration.snapshot["recipe"]["policy"]["startup_settle_sim_ns"] == 0
+
+
+@pytest.mark.parametrize("value", [0, 2_000_000_000, 5_000_000_000])
+def test_policy_startup_settle_accepts_zero_to_five_seconds(tmp_path, value):
+    document = policy_document()
+    document["policy"]["startup_settle_sim_ns"] = value
+    configuration = load_native_configuration(write_policy(tmp_path, document), ROOT)
+    assert configuration.recipe.policy.startup_settle_sim_ns == value
+    assert (
+        configuration.snapshot["recipe"]["policy"]["startup_settle_sim_ns"] == value
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        (-1, "must be within"),
+        (True, "must be an integer"),
+        (1.5, "must be an integer"),
+        ("1000", "must be an integer"),
+        (5_000_000_001, "must be within"),
+    ],
+)
+def test_policy_startup_settle_rejects_invalid_values(tmp_path, value, message):
+    document = policy_document()
+    document["policy"]["startup_settle_sim_ns"] = value
+    with pytest.raises(ContractError, match=f"startup_settle_sim_ns: {message}"):
+        load_native_configuration(write_policy(tmp_path, document), ROOT)

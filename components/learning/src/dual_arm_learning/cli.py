@@ -14,6 +14,12 @@ from .bundle import BundleError, export_bundle, load_bundle
 from .checkpoints import CheckpointError
 from .config import ConfigError, load_dataset_config, load_training_config
 from .dataset import ExportError, convert
+from .sample_filter import (
+    FilterError,
+    build_filter_manifest,
+    load_filter_mask,
+    write_filter_manifest,
+)
 from .training import TrainingError, train, verify_dataset_manifest
 
 
@@ -55,6 +61,14 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--max-steps", type=int, default=None)
     train_parser.add_argument("--data-root", type=Path, default=None)
     train_parser.add_argument("--allow-synthetic", action="store_true")
+
+    filter_parser = sub.add_parser(
+        "filter-anchors", help="write an auditable static-anchor sampling mask"
+    )
+    filter_parser.add_argument("--config", type=Path, required=True)
+    filter_parser.add_argument("--dataset-root", type=Path, required=True)
+    filter_parser.add_argument("--select", type=Path, required=True)
+    filter_parser.add_argument("--output", type=Path, required=True)
 
     verify_parser = sub.add_parser("verify-data", help="check 45/5 split, hashes and source files")
     verify_parser.add_argument(
@@ -166,6 +180,34 @@ def main(argv: Sequence[str] | None = None) -> int:
                 }
             )
             return 0
+        if args.command == "filter-anchors":
+            rule = args.config if args.config.is_absolute() else root / args.config
+            dataset_root = (
+                args.dataset_root if args.dataset_root.is_absolute() else root / args.dataset_root
+            )
+            select = args.select if args.select.is_absolute() else root / args.select
+            output = args.output if args.output.is_absolute() else root / args.output
+            document = build_filter_manifest(
+                rule_path=rule, dataset_root=dataset_root, select_path=select
+            )
+            target = write_filter_manifest(document, output)
+            mask = load_filter_mask(target)
+            training = document["training"]
+            _print(
+                {
+                    "status": "complete",
+                    "output": str(target),
+                    "filter_digest": mask.digest,
+                    "mask_sha256": mask.file_sha256,
+                    "training_source_frames": mask.source_frames,
+                    "training_eligible_frames": len(mask.eligible_indices),
+                    "training_excluded_frames": mask.excluded_frames,
+                    "training_reduction_ratio": training["reduction_ratio"],
+                    "validation_filtered": document["validation"]["filtered"],
+                    "validation_frames": document["validation"]["kept_frames"],
+                }
+            )
+            return 0
         if args.command == "verify-data":
             config = _training_config(args)
             audit = verify_dataset_manifest(
@@ -228,6 +270,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (
         ConfigError,
         ExportError,
+        FilterError,
         TrainingError,
         BundleError,
         BudgetError,

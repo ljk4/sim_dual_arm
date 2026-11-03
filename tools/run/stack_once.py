@@ -116,17 +116,25 @@ def generate_inputs(
     settings: ActSettings | None = None,
     contract: ActContract | None = None,
     act_template: Path | None = None,
+    backend_template: Path | None = None,
     generated_root: Path | None = None,
 ) -> tuple[Path, Path, Path | None, str]:
     """Resolve source-relative paths before moving a configuration file."""
     runtime = yaml.safe_load(recipe.read_text())
     source = runtime["action_source"]
-    backend_source = (
+    backend_source = backend_template or (
         ROOT
         / "configs/simulation"
         / ("backend_stack_teacher.yaml" if source == "teacher" else "backend_stack_inference.yaml")
     )
     backend = yaml.safe_load(backend_source.read_text())
+    runtime_follower = runtime.get("follower_constraints")
+    backend_follower = backend["robot"].get("follower")
+    if runtime_follower and backend_follower:
+        runtime_path = (recipe.parent / runtime_follower).resolve()
+        backend_path = (backend_source.parent / backend_follower).resolve()
+        if runtime_path != backend_path:
+            raise ValueError("runtime and backend must use the same follower configuration")
     for field in ("profile", "schemas", "scene", "control", "stream", "follower", "task"):
         if backend["robot"].get(field):
             backend["robot"][field] = container_path(
@@ -379,6 +387,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--campaign-config", type=Path, default=ROOT / "configs/experiments/stack_campaign.yaml"
     )
+    parser.add_argument(
+        "--backend-config", type=Path,
+        help="explicit backend recipe; its follower must match the runtime recipe",
+    )
     parser.add_argument("--seed", type=int, default=os.environ.get("STACK_SEED"))
     parser.add_argument("--run-id", default=os.environ.get("STACK_RUN_ID"))
     parser.add_argument("--episode-id", default=os.environ.get("STACK_EPISODE_ID"))
@@ -464,6 +476,7 @@ def main(argv: list[str] | None = None) -> int:
         settings=settings,
         contract=contract,
         act_template=args.act_policy_config.resolve(),
+        backend_template=None if args.backend_config is None else args.backend_config.resolve(),
     )
     del runtime, backend
     output = args.output.resolve()
