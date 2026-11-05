@@ -1,3 +1,19 @@
+# 中文参数说明（维护时优先阅读本段）
+# design_status：示例设计状态，draft 表示草稿。
+# contract_major：公共契约主版本。
+# robot_id/robot_profile_id/observation_schema_id/action_schema_id：机器人及接口语义标识。
+# backend.kind：后端类型，real 或 sim。
+# backend.public_namespace：公共 ROS 命名空间。
+# backend.ros_domain_id：ROS domain id。
+# backend.deployment_config_id：具体部署配置标识。
+# runtime.control_source：控制来源，none/script/teleop/policy/replay。
+# runtime.recording_required：是否强制录制。
+# runtime.raw_episode_root：原始 episode 根目录。
+# runtime.infer_clock_from_backend：是否从后端推导仿真时钟并拒绝不一致配置。
+# policy.protocol/endpoint：Policy 协议和 gRPC 地址。
+# policy.model_bundle_id：模型 bundle 标识。
+# policy.max_inflight_requests：最大并发推理请求数。
+
 # Design example, not an executable Compose or launch configuration.
 design_status: draft
 contract_major: 1

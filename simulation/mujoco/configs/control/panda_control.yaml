@@ -1,3 +1,15 @@
+# 中文参数说明（维护时优先阅读本段）
+# joint_names：16 个控制轴固定顺序，两臂各 7 关节 + 1 个夹爪开度。
+# max_accelerations：各轴最大加速度；臂 rad/s^2，夹爪 m/s^2。
+# position_tolerances：参考与实测位置的容差；臂 rad，夹爪 m。
+# velocity_tolerances：参考与实测速度的容差；臂 rad/s，夹爪 m/s。
+# stable_duration_s：完成和停止判定所需连续稳定时间，单位 s。
+# settle_timeout_s：参考轨迹结束后等待稳定的最长时间，单位 s。
+# motion_wall_timeout_s：单次运动墙钟超时，单位 s。
+# stop_wall_timeout_s：停止/制动墙钟超时，单位 s。
+# contact_force_min_n：单指与同一物体接触所需最小法向力，单位 N。
+# finger_velocity_max_m_s：接触完成判定允许的最大单指滑动速度，单位 m/s。
+
 # Native no-ROS motion controller parameters.  SI units only:
 # rad, m, s, rad/s, m/s, rad/s^2, m/s^2, N.
 # Joint position/velocity hard limits come from the accepted robot profile and

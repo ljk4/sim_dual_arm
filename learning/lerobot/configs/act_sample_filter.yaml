@@ -1,3 +1,14 @@
+# 中文参数说明（维护时优先阅读本段）
+# schema_version：过滤器配置版本。
+# fps/chunk_size：数据采样频率和动作块长度。
+# right_arm.joint_indices：参与静止判断的右臂关节索引。
+# right_arm.max_step_rad：相邻帧允许最大关节变化，单位 rad。
+# right_arm.max_velocity_rad_s：静止判断最大关节速度，单位 rad/s。
+# grippers.joint_indices：两个夹爪开度索引。
+# grippers.max_step_m/max_velocity_m_s：夹爪静止判断阈值，单位 m 和 m/s。
+# static_runs.*：连续静止段最小帧数、边缘保留帧、内部采样步长、阶段/片段边界保留帧和最少保留帧数。
+# phase_gate.*：允许的阶段集合和跟踪质量门限。
+
 # DSH-040: down-sample only redundant static *training query anchors*.
 # This is not a physical success test and never rewrites source rows/videos.
 schema_version: 1

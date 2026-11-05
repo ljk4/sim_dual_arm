@@ -1,3 +1,21 @@
+# 中文参数说明（维护时优先阅读本段）
+# model.bundle：ACT bundle 根目录。
+# model.profile/observation_schema/action_schema：机器人、观测和动作契约文件。
+# model.device：推理设备，cuda 或 cpu。
+# model.require_formal：是否拒绝 synthetic/teacher/test 等非正式数据来源。
+# model.gripper_max_correction_m：夹爪原始动作允许的最大修正量，单位 m。
+# model.temporal_ensemble_coeff：时间融合系数；正值保留更多旧预测，未设置则关闭。
+# service.bind_address/port：gRPC 监听地址和端口。
+# service.max_workers：gRPC 工作线程数。
+# service.max_message_bytes：单条 gRPC 消息大小上限。
+# service.max_sessions/max_open_requests/max_request_cache：会话和请求缓存上限。
+# service.predict_deadline_s/open_deadline_s/close_deadline_s：各 RPC 超时，单位 s。
+# service.test_only：是否仅用于测试。
+# service.protocol_major：Policy 协议主版本。
+# service.stateful：策略是否为有状态会话。
+# service.task_id/task_text：任务身份和文本。
+# logging.*：Policy 服务事件日志容量、文件大小和刷新设置。
+
 # Named, ROS-free ACT Policy service.
 #
 # This file intentionally contains no model/processor/profile/schema digests:

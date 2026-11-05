@@ -1,3 +1,22 @@
+# 中文参数说明（维护时优先阅读本段）
+# schema_version：数据集转换配置版本。
+# fps：训练数据采样频率，单位 Hz。
+# chunk_size：每条训练样本的未来动作点数。
+# action_lead_ns：动作标签相对观测的提前量，单位 ns。
+# state_dim：输入/输出状态维数，当前为 16。
+# camera_names：三路相机固定顺序。
+# camera_width/camera_height：图像尺寸，单位像素。
+# task_text：训练任务文本。
+# profile：机器人 profile 路径。
+# select：campaign select 生成的 50 条合格 episode 清单。
+# output_root：LeRobot 数据集输出根目录。
+# cache_root：离线 HuggingFace/数据集缓存目录。
+# attempt_export_glob：从每个 attempt 定位 export 目录的 glob。
+# verify_png_pixels：是否逐帧校验 PNG 内容。
+# require_quality：是否要求 quality.json 合格。
+# expected.*：期望的正式、训练、验证 episode 数和验证集位置。
+# lerobot.*：固定源码版本、视频编码器、容量和线程配置。
+
 # DSH-035: 034 export -> two independent LeRobot datasets.
 # This file is the single conversion/feature contract.  Paths are project-relative.
 schema_version: 1

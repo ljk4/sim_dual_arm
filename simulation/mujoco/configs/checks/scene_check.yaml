@@ -1,3 +1,15 @@
+# 中文参数说明（维护时优先阅读本段）
+# ik.*：逆运动学求解步长、迭代次数、位置/姿态容差、代价权重、阻尼和求解器。
+# clearance.*：最小净空、碰撞检测距离、关节采样步长、单段/总采样上限。
+# targets.*：抓取、抬升、放置、退开等关键位姿高度和放置净空。
+# visibility.rules：每个相机/物体/阶段的最小可见像素规则；required 会门禁，record_only 仅记录。
+# budgets.*：布局数量、PNG 证据总字节数和报告大小上限。
+# seeds：普通布局种子列表。
+# boundary_xy_corners/boundary_yaw_signs：物体随机域边界布局的 XY 角和 yaw 符号。
+# min_visible_pixels：每个相机/物体的最小可见像素。
+# max_layouts：普通种子加边界布局的总上限。
+# throughput.*：渲染吞吐测试的预热组数和测量组数。
+
 # DSH-016 static scene visibility check parameters.
 # Names must match simulation/mujoco/configs/scene/panda_stack.yaml exactly.
 schema_version: 1

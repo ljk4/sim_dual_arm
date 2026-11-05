@@ -1,3 +1,12 @@
+# 中文参数说明（维护时优先阅读本段）
+# initial_lead_s：首个动作块相对观测的初始提前量，单位 s。
+# min_lead_s：动作交接允许的最小提前量，单位 s。
+# max_observation_age_s：动作块可接受的最大观测年龄，单位 s。
+# stream_wall_timeout_s：整个动作块流的墙钟超时，单位 s。
+# progress_wall_timeout_s：无进展超时，单位 s。
+# tracking_timeout_s：实测跟踪持续超差的触发时间，单位 s。
+# contact_unload_timeout_s：夹持释放过渡的最长时间，单位 s；仅任务流使用。
+
 # Continuous native chunk-stream parameters.  SI units only: seconds.
 # Loaded separately from panda_control.yaml so the accepted per-motion file
 # does not gain new required keys.  All values convert to positive integer ns.

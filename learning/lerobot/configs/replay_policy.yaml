@@ -1,3 +1,16 @@
+# 中文参数说明（维护时优先阅读本段）
+# service.*：gRPC 服务监听、并发、会话缓存、RPC 超时、协议版本和测试标记。
+# service.model_bundle_digest/processor_digest：测试用固定摘要。
+# service.observation_schema_hash/action_schema_hash/robot_profile_hash：接口语义摘要。
+# service.joint_names/joint_lower_bounds/joint_upper_bounds：16 轴顺序和范围。
+# service.action_joint_names：动作轴顺序。
+# service.camera_names/camera_width/camera_height：三路相机定义。
+# service.action_period_ns/chunk_size：动作周期和块长度。
+# service.task_id/task_text：label replay 测试任务身份。
+# service.command_space：动作空间。
+# fake.amplitude_rad/amplitude_m/latency_s/fault/stop_after_predictions：测试 provider 参数。
+# fake.replay_labels：导出的教师 applied labels 路径，来自环境变量。
+
 # Fake Policy RPC service used only by the diagnostic runtime and tests.
 # It injects the typed test provider into the production service layer; it is
 # not a training/evaluation data source and never claims task success.

@@ -1,3 +1,29 @@
+# 中文参数说明（维护时优先阅读本段）
+# robot.namespace：ROS 命名空间。
+# robot.profile：机器人 profile 路径。
+# robot.schemas：contracts/schemas 路径。
+# robot.scene：场景 YAML，定义物理、物体、相机和复位位姿。
+# robot.control：运动控制器参数。
+# robot.stream：连续动作块流超时参数。
+# robot.follower：受限跟随器参数。
+# robot.task：任务成功判定与教师参数。
+# robot.render_quality.enabled：是否在同一次渲染快照上统计可见像素质量。
+# robot.velocity_feedforward：是否启用参考速度前馈，不改变硬限位。
+# robot.reliable_sensors：是否使用可靠传感器 QoS。
+# robot.task_mode：teacher 表示程序示教，inference 表示无教师推理。
+# run.seed：默认场景复位种子；prepare 会用命令行 seed 覆盖。
+# run.capture_hz：完整状态/三路图像快照频率，单位 Hz。
+# run.realtime_speed：仿真时间相对墙钟速度，1.0 为实时，0.5 为半速。
+# run.max_catchup_steps：单次主循环最多追赶的物理步数。
+# queues.owner/planner/render_snapshots/render_outputs/captures/events/feedback/accepted_references/follower_references：各线程间有界队列容量。
+# limits.planner_health_s：规划线程健康超时，单位 s。
+# limits.renderer_health_s：渲染线程健康超时，单位 s。
+# limits.request_timeout_s：请求等待超时，单位 s。
+# limits.shutdown_s：优雅关闭预算，单位 s。
+# limits.command_history：命令历史容量。
+# limits.chunk_history：动作块历史容量。
+# logging.*：事件日志队列、单条/单文件/总大小、关闭超时、刷新间隔、控制台开关。
+
 # Runnable native ROS backend.  This file owns deployment choices only; the
 # referenced scene/control/stream/profile files remain the single sources of
 # physics, controller and calibration parameters.  Every path is relative to

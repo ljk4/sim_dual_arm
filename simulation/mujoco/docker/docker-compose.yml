@@ -1,3 +1,12 @@
+# 中文参数说明（维护时优先阅读本段）
+# name：Compose 项目名；与 runtime/learning 共用。
+# services.simulation.image/build：仿真镜像和构建上下文。
+# user/working_dir/init/restart/stop_grace_period：容器运行身份、目录和生命周期。
+# runtime/gpus：NVIDIA 容器运行时和 GPU 请求。
+# env_file：仿真环境变量文件。
+# environment：X11 DISPLAY 和 XAUTHORITY，仅 viewer 使用。
+# volumes：源码、契约、profile、依赖、数据、ROS SDK 及 X11 socket 挂载。
+# networks：接入 ros 网络。
 # Run docker compose from this directory.
 name: sim-dual-arm
 

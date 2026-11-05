@@ -1,296 +1,509 @@
 # sim_dual_arm
 
-面向双臂机器人的仿真数据采集、ACT 训练与策略执行项目。以 MuJoCo 双 Panda
-堆叠任务作为首个场景，验证从程序示教到学习策略闭环的完整过程，并为后续
-切换真机保留统一的机器人接口。
+面向双臂机器人的仿真数据采集、ACT 训练与策略执行项目。当前使用 MuJoCo 双 Panda
+堆叠任务，验证从程序示教到 ACT 策略闭环的完整流程。
 
-目前已接通采集、训练、推理和反馈链路，并完成一次真实堆叠回归；跨场景可靠性、
-真机驱动和双臂协作仍待验证。最新阶段统一维护在[总目标与当前阶段](docs/project-status.md)。
+完整闭环包含两部分：
 
-## 系统组成
+1. 数据采集
+2. 训练与推理
 
-```mermaid
-flowchart LR
-    B[MuJoCo 后端 / 后续真机后端] <-->|ROS 2 Robot API| R[runtime：观测、控制与录制]
-    R <-->|gRPC Policy API| P[ACT 推理服务]
-    R --> D[原始记录与合格数据集]
-    D --> T[ACT 训练]
-    T --> M[模型包]
-    M --> P
+以下所有宿主机命令都从 `sim_dual_arm` 仓库根目录执行。
+
+## 1. 获取代码
+
+含义：把仓库克隆到本地。
+
+```bash
+git clone https://github.com/ljk4/sim_dual_arm.git
 ```
 
-| 部分 | 责任 | 主要位置 |
-| --- | --- | --- |
-| simulation | MuJoCo 物理步进、传感器、执行参考、实测反馈、任务判定和程序示教 | `simulation/mujoco/` |
-| runtime | 固定身份的观测、控制会话、动作块 ACK/接续、录制、审计与导出 | `runtime/ros2/` |
-| learning | 数据转换、ACT 训练、模型包和 ROS-free Policy 服务 | `learning/lerobot/` |
-| hardware | 真机统一 Robot API 边界；驱动尚未实现 | `hardware/` |
-| contracts | 公共 ROS/Policy 接口、数据格式和语义校验 | `contracts/` |
+含义：进入仓库根目录；后续命令默认都在这里执行。
 
-真机接入时替换机器人后端，应用仍使用同一 Robot API。当前物理执行使用 MuJoCo +
-Panda；CPU mock 只验证软件链路，mock 记录不作为正式训练数据。真机驱动、相机和
-硬件在环尚未实现，边界见 [hardware/README.md](hardware/README.md)，不提供假驱动或
-空框架。学习侧当前固定为 LeRobot ACT；替换其他学习框架时保持 Policy API、三路
-RGB + 16 维实测输入和 60×16 位置动作块语义，不改运行端对具体模型的依赖。
+```bash
+cd sim_dual_arm
+```
 
-## 环境与目录
+含义：确认当前位于仓库根目录。
 
-当前 ROS 侧以 Ubuntu 24.04 / ROS 2 Jazzy / Python 3.12 为基线；学习侧直接继承
-官方 `huggingface/lerobot-gpu:latest`。ROS 与机器学习环境分开，
-镜像只装依赖，源码、配置、SDK、资产、数据和模型通过挂载提供。
+```bash
+pwd
+```
 
-| 目录 | 内容 |
-| --- | --- |
-| `simulation/`、`hardware/`、`runtime/`、`learning/` | 仿真、真机边界、运行和学习实现；各自持有源码、配置、`docker/` 与 `scripts/` |
-| `libraries/` | 有明确调用方的共享实现 |
-| `contracts/`、`profiles/` | 接口定义、机器人关节/相机/动作语义 |
-| `infrastructure/` | 公共 Docker 文件、容器内构建/SDK 工具和公开示例 |
-| `tests/` | 单元、集成测试和测试替身 |
-| `docs/` | 目标、规范、功能说明、重要实践与阶段历史 |
-| `third_party/` | 固定的外部来源；下载源码在忽略的 `src/` 下 |
-| `var/` | 数据、实验、模型、台账与运行日志，不进 Git |
-| `.build/` | 构建、SDK、开发环境与隔离工作树，不进 Git |
+## 2. 数据采集
 
-维护前阅读[项目规范](docs/standards.md)。各目录 README 说明本地职责和入口。
+### 2.1 构建并启动 runtime 容器
 
-## 一次完整闭环
+含义：构建 runtime 镜像。
 
-完整流程只包含两部分：**数据采集** 与 **训练/推理**。三个服务分别长期运行：
-仿真端负责环境和 Robot API，学习端负责训练与 Policy 服务，运行端负责观测、控制、
-录制和重复运行。下面的终端 A/B/C/D 可分别保持打开。
+```bash
+docker compose -f runtime/ros2/docker/docker-compose.yml build
+```
 
-### 一、数据采集
+含义：后台启动 runtime 容器。
 
-#### 1. 准备运行端 SDK（终端 A）
+```bash
+docker compose -f runtime/ros2/docker/docker-compose.yml up -d
+```
 
-~~~bash
-cd /path/to/sim_dual_arm/runtime/ros2/docker
-docker compose build
-docker compose up -d
-docker compose exec runtime bash
+含义：进入 runtime 容器，后续 runtime/SDK 命令在这个终端执行。
+
+```bash
+docker compose -f runtime/ros2/docker/docker-compose.yml exec runtime bash
+```
+
+### 2.2 生成运行端 SDK
+
+含义：生成仿真端需要的 ROS SDK。
+
+```bash
+cd /workspace
 runtime/ros2/scripts/run.sh build-ros-sdk
+```
+
+含义：生成学习端 Policy SDK，供 runtime 校验 Policy 服务配置。
+
+```bash
 runtime/ros2/scripts/run.sh build-policy-sdk
-~~~
+```
 
-#### 2. 启动程序示教后端（终端 B）
+### 2.3 构建并启动 simulation 容器
 
-~~~bash
-cd /path/to/sim_dual_arm/simulation/mujoco/docker
-docker compose build
-docker compose up -d
-docker compose exec simulation bash
+含义：在宿主机新终端进入仓库根目录。
+
+```bash
+cd sim_dual_arm
+```
+
+含义：构建 simulation 镜像。
+
+```bash
+docker compose -f simulation/mujoco/docker/docker-compose.yml build
+```
+
+含义：后台启动 simulation 容器。
+
+```bash
+docker compose -f simulation/mujoco/docker/docker-compose.yml up -d
+```
+
+含义：进入 simulation 容器，后续仿真命令在这个终端执行。
+
+```bash
+docker compose -f simulation/mujoco/docker/docker-compose.yml exec simulation bash
+```
+
+### 2.4 准备并启动程序示教后端
+
+含义：进入 simulation 容器的工作目录。
+
+```bash
+cd /app
+```
+
+含义：从教师模板生成 teacher backend 配置；输出目录只能新建一次。
+
+```bash
 scripts/run.sh prepare --template /app/configs/backend/backend_stack_teacher.yaml --seed 0 --run-id teacher-backend --output /data/prepared/teacher-backend
+```
+
+含义：前台启动教师后端，保持运行。
+
+```bash
 scripts/run.sh backend --config /data/prepared/teacher-backend/backend.yaml --run-id teacher-backend
-~~~
+```
 
-#### 3. 打开实时 MuJoCo 可视化（终端 D，可选）
+### 2.5 打开实时 MuJoCo 可视化（可选）
 
-仿真 Compose 会自动读取宿主图形会话中的 `DISPLAY` 和 `XAUTHORITY`，正常桌面环境
-不需要手动执行 `export` 或 `echo`。如果 viewer 报 X11 权限错误，在宿主执行一次
-`xhost +SI:localuser:$(id -un)` 后重试。
+含义：在宿主机新终端进入 simulation 容器。
 
-~~~bash
-cd /path/to/sim_dual_arm/simulation/mujoco/docker
-docker compose exec simulation bash
+```bash
+docker compose -f simulation/mujoco/docker/docker-compose.yml exec simulation bash
+```
 
-# 与终端 B 使用同一个 backend.yaml
+含义：启动 viewer；它只读取后端完整物理快照，不参与控制。
+
+```bash
+cd /app
 scripts/run.sh viewer --config /data/prepared/teacher-backend/backend.yaml
-~~~
+```
 
-viewer 是独立进程，只订阅 `/robot/visualization/mujoco_state` 的完整物理快照，
-不参与控制、物理步进和采集判定。关闭窗口或 `Ctrl-C` 不会停止终端 B 的后端。
+viewer 使用的是仿真端 X11 显示。正常图形桌面环境下 Compose 会自动读取宿主
+`DISPLAY` 和 `XAUTHORITY`。若报 X11 权限错误，在宿主机执行：
 
-#### 4. 采集 50 条合格数据（终端 A）
+```bash
+xhost +SI:localuser:$(id -un)
+```
 
-每次尝试由台账分配 seed；示教运行、录制、导出和质量判定都在容器内完成。循环在获得
-50 条合格 episode 后结束。
+### 2.6 开始采集
 
-~~~bash
+含义：回到 runtime 容器终端，创建采集台账目录。
+
+```bash
 mkdir -p /data/campaigns/panda_stack_v1
-until runtime/ros2/scripts/run.sh campaign select > /data/campaigns/panda_stack_v1/formal-select.json; do
-  runtime/ros2/scripts/run.sh campaign run --purpose formal --mode teacher -- python3 /workspace/runtime/ros2/scripts/collect_stack_attempt.py || exit 1
-done
-~~~
+```
 
-采集结束后，在终端 B 按 `Ctrl-C` 停止示教后端。
+含义：查看当前采集预算和成功数量。
 
-### 二、训练与推理
+```bash
+runtime/ros2/scripts/run.sh campaign status
+```
 
-#### 1. 转换、训练并生成模型包与 Policy 服务配置（终端 C）
+含义：运行一次正式的教师采集。每次执行只尝试一局，失败也计入台账。
 
-~~~bash
-cd /path/to/sim_dual_arm/learning/lerobot/docker
-docker compose build
-docker compose up -d
-docker compose exec learning bash
-set -e -o pipefail
+```bash
+runtime/ros2/scripts/run.sh campaign run --purpose formal --mode teacher -- python3 /workspace/runtime/ros2/scripts/collect_stack_attempt.py
+```
+
+含义：重复运行上一行，直到台账中累计 50 条合格正式 episode。
+
+```bash
+runtime/ros2/scripts/run.sh campaign status
+```
+
+含义：从已完成的合格尝试中选出 45 条训练、5 条验证，并生成
+`formal-select.json`。
+
+```bash
+runtime/ros2/scripts/run.sh campaign select > /data/campaigns/panda_stack_v1/formal-select.json
+```
+
+采集完成后，在教师后端终端按 `Ctrl-C` 停止 backend。
+
+## 3. 训练与推理
+
+### 3.1 构建并启动 learning 容器
+
+含义：在宿主机新终端进入仓库根目录。
+
+```bash
+cd sim_dual_arm
+```
+
+含义：构建 learning 镜像。
+
+```bash
+docker compose -f learning/lerobot/docker/docker-compose.yml build
+```
+
+含义：后台启动 learning 容器。
+
+```bash
+docker compose -f learning/lerobot/docker/docker-compose.yml up -d
+```
+
+含义：进入 learning 容器，后续训练和 Policy 命令在这个终端执行。
+
+```bash
+docker compose -f learning/lerobot/docker/docker-compose.yml exec learning bash
+```
+
+### 3.2 转换数据
+
+含义：进入 learning 容器的工作目录。
+
+```bash
+cd /workspace
+```
+
+含义：把采集导出的合格 episode 转成 45/5 的 LeRobot 训练和验证数据集。
+
+```bash
 learning/lerobot/scripts/run.sh convert
-TRAIN_RUN=$(learning/lerobot/scripts/run.sh train --mode full | python3 -c 'import json,sys; print(json.load(sys.stdin)["run_dir"])')
-learning/lerobot/scripts/run.sh bundle --mode full --run "$TRAIN_RUN" --output /data/learning/bundles/stack-act
-learning/lerobot/scripts/run.sh prepare-policy --template /workspace/learning/lerobot/configs/act_policy_temporal.yaml --bundle /data/learning/bundles/stack-act --run-id infer-5k-server --output /data/prepared/infer-5k-server/policy
-~~~
+```
 
-`prepare-policy` 会生成后续必需的：
+转换会再次校验 manifest、时间对齐、动作标签、图像、质量和哈希。转换输出位于：
 
 ```text
-/data/prepared/infer-5k-server/policy/policy.yaml
-/data/prepared/infer-5k-server/policy/policy_binding.json
+/data/learning/panda_stack_learning_v1
 ```
 
-输出目录只能创建一次；更换 bundle 或重做配置时使用新的 `--run-id`，不要覆盖已存在的目录。
+### 3.3 训练 ACT
 
-#### 2. 启动无示教任务后端（终端 B）
+含义：运行 full 模式训练，终端最后会输出包含 `run_dir` 的 JSON。
 
-~~~bash
-# simulation 容器内
+```bash
+learning/lerobot/scripts/run.sh train --mode full
+```
+
+从输出中记录 `run_dir`，例如：
+
+```text
+/data/learning/runs/full-20261105T061827Z-1227723
+```
+
+含义：把上一步输出的 `run_dir` 写入当前 shell 变量。
+
+```bash
+TRAIN_RUN=/data/learning/runs/full-20261105T061827Z-1227723
+```
+
+### 3.4 导出模型包
+
+含义：把训练 run 导出为可部署的 ACT bundle。
+
+```bash
+learning/lerobot/scripts/run.sh bundle --mode full --run "$TRAIN_RUN" --output /data/learning/bundles/stack-act
+```
+
+### 3.5 生成 Policy 服务配置
+
+含义：校验 bundle，并生成 `policy.yaml`、`policy_binding.json` 和 `act_contract.json`。
+
+```bash
+learning/lerobot/scripts/run.sh prepare-policy --template /workspace/learning/lerobot/configs/act_policy_temporal.yaml --bundle /data/learning/bundles/stack-act --run-id infer-5k-server --output /data/prepared/infer-5k-server/policy
+```
+
+该命令每套 bundle 只执行一次。输出目录已存在时不要重复覆盖；需要新配置时使用新的
+`--run-id`。
+
+### 3.6 准备并启动推理后端
+
+含义：回到 simulation 容器，从推理模板生成 backend 配置。
+
+```bash
 scripts/run.sh prepare --template /app/configs/backend/backend_stack_act_chunked.yaml --seed 20001 --run-id infer-5k-server --output /data/prepared/infer-5k-server/simulation
+```
+
+含义：前台启动无示教任务后端，保持运行。
+
+```bash
 scripts/run.sh backend --config /data/prepared/infer-5k-server/simulation/backend.yaml --run-id infer-5k-server
-~~~
+```
 
-#### 3. 打开实时可视化（终端 D）
+### 3.7 打开推理实时可视化（可选）
 
-~~~bash
-# 新的 simulation 容器终端
+含义：在宿主机新终端进入 simulation 容器并启动 viewer。
+
+```bash
+docker compose -f simulation/mujoco/docker/docker-compose.yml exec simulation bash
+```
+
+```bash
+cd /app
 scripts/run.sh viewer --config /data/prepared/infer-5k-server/simulation/backend.yaml
-~~~
+```
 
-viewer 使用与推理后端相同的场景和配置，显示机器人、物体和任务执行的实时状态。
+### 3.8 启动 Policy 推理服务
 
-#### 4. 启动 Policy 推理服务（终端 C）
+含义：回到 learning 容器。Policy 服务的日志目录必须不存在，每次重启使用新目录。
 
-Policy 服务的日志目录必须不存在。每次重启服务时生成新目录；启动前先确认
-`/data/prepared/infer-5k-server/policy/policy.yaml` 已存在。
-
-~~~bash
-# learning 容器内
+```bash
 POLICY_LOG="/data/logs/infer-5k-server-policy-$(date +%Y%m%dT%H%M%SZ)"
+```
+
+含义：确认本次日志目录尚不存在。
+
+```bash
 test ! -e "$POLICY_LOG"
+```
 
-learning/lerobot/scripts/run.sh policy \
-  --config /data/prepared/infer-5k-server/policy/policy.yaml \
-  --run-id infer-5k-server \
-  --log-directory "$POLICY_LOG"
-~~~
+含义：前台启动 Policy 服务，保持运行。
 
-服务加载模型需要十几秒。可在另一个 learning 容器终端检查就绪事件：
+```bash
+learning/lerobot/scripts/run.sh policy --config /data/prepared/infer-5k-server/policy/policy.yaml --run-id infer-5k-server --log-directory "$POLICY_LOG"
+```
 
-~~~bash
+含义：在另一个 learning 容器终端确认服务已就绪。
+
+```bash
 grep -R '"event":"policy.ready"' /data/logs/infer-5k-server-policy-* 2>/dev/null | tail -5
-~~~
+```
 
-看到 `policy.ready` 后，再执行下一节的 runtime 交互命令。
+### 3.9 准备 runtime 运行配置
 
-#### 5. 准备运行端配置（终端 A，仅一次）
+含义：回到 runtime 容器，确认 Policy binding 已生成。
 
-~~~bash
-# runtime 容器内
+```bash
 test -f /data/prepared/infer-5k-server/policy/policy_binding.json
+```
 
-runtime/ros2/scripts/run.sh prepare \
-  --template /workspace/runtime/ros2/configs/native_task_act_chunked.yaml \
-  --policy-binding /data/prepared/infer-5k-server/policy/policy_binding.json \
-  --seed 20001 \
-  --run-id infer-5k-server \
-  --output /data/prepared/infer-5k-server/runtime
-~~~
+含义：把 Policy binding 和 runtime 模板组合成 runtime 配置。
 
-该命令只执行一次；正常运行阶段复用生成的
+```bash
+runtime/ros2/scripts/run.sh prepare --template /workspace/runtime/ros2/configs/native_task_act_chunked.yaml --policy-binding /data/prepared/infer-5k-server/policy/policy_binding.json --seed 20001 --run-id infer-5k-server --output /data/prepared/infer-5k-server/runtime
+```
+
+该命令只执行一次；后续任务复用生成的
 `/data/prepared/infer-5k-server/runtime/runtime.yaml`。
 
-#### 6. 交互式运行推理（终端 A，每次任务重新执行）
+### 3.10 交互式运行 ACT
 
-每个任务重新运行一次 `interactive`。脚本会自动生成唯一的 `run-id`、`episode-id`
-和原始记录目录，并在 `y` 后通过 `StartEpisode` 发送环境复位指令：
+含义：启动一次 runtime，输入 `y` 后复原环境并执行一局。
 
-- MuJoCo 后端：机器人回 home，夹爪复位，物体位置和堆叠任务状态复位。
-- 真机后端：只将机器人复原到 home，不复位外部环境。
-
-~~~bash
+```bash
 runtime/ros2/scripts/run.sh interactive --config /data/prepared/infer-5k-server/runtime/runtime.yaml --seed 20001
-~~~
+```
 
-提示：
+终端会显示：
 
-~~~text
+```text
 输入 y 复原环境并开始本次任务，其他键取消:
-~~~
+```
 
-输入 `y` 后执行一局。任务结束后进程保持 IDLE 并打印 episode 结果和录像目录，
-按 `Ctrl-C` 结束本次 runtime。同一仿真后端和 Policy 服务可继续复用；下一次任务
-只需重新执行：
+任务结束后进程保持 IDLE，并打印 episode 结果和录像目录。按 `Ctrl-C` 结束本次
+runtime。
 
-~~~bash
+含义：下一次任务使用新的 seed，重新执行 interactive。
+
+```bash
 runtime/ros2/scripts/run.sh interactive --config /data/prepared/infer-5k-server/runtime/runtime.yaml --seed 20002
-~~~
+```
 
-不要复用同一个手工 `run-id` 或 `episode-id`；interactive 自动生成的 ID 已避免
-`FileExistsError` 和 `REQUEST_ID_CONFLICT`。失败记录和旧录像保留，不覆盖。
+仿真端复位包括机器人、夹爪、物体和任务状态；真机后端只需要复位机器人到 home，
+不复位外部环境。
 
+不要复用同一个手工 `run-id` 或 `episode-id`。`interactive` 会自动生成唯一身份，
+避免 `FileExistsError`、`REQUEST_ID_CONFLICT` 和录制目录冲突。
 
-## 常见问题
+## 4. 配置位置与修改后的操作
 
-### `policy.yaml: No such file or directory`
+不要直接编辑 `/data/prepared/...` 下生成的 `backend.yaml`、`runtime.yaml` 或
+`policy.yaml`。它们是某次运行的身份快照，后续校验和审计都以生成时内容为准。
+需要修改时，改仓库中的源模板，再重新生成新的运行配置。
 
-说明只准备了 simulation/runtime，没有执行 `prepare-policy`。在 learning 容器补执行：
+### 4.1 配置依赖关系
 
-~~~bash
-cd /workspace
-learning/lerobot/scripts/run.sh prepare-policy \
-  --template /workspace/learning/lerobot/configs/act_policy_temporal.yaml \
-  --bundle /data/learning/bundles/stack-act \
-  --run-id infer-5k-server \
-  --output /data/prepared/infer-5k-server/policy
-~~~
+```text
+learning bundle
+  + learning/lerobot/configs/act_policy_temporal.yaml
+  -> learning prepare-policy
+  -> /data/prepared/<run-id>/policy/policy.yaml
+  -> /data/prepared/<run-id>/policy/policy_binding.json
 
-如果输出目录已存在，说明已经生成过，直接检查其中的 `policy.yaml` 和
-`policy_binding.json`，不要重复覆盖。
+policy_binding.json
+  + runtime/ros2/configs/native_task_act_chunked.yaml
+  -> runtime prepare
+  -> /data/prepared/<run-id>/runtime/runtime.yaml
 
-### `FileExistsError: /data/logs/<name>`
+simulation backend 模板
+  + simulation/mujoco/configs/scene/*
+  + simulation/mujoco/configs/control/*
+  -> simulation prepare
+  -> /data/prepared/<run-id>/simulation/backend.yaml
+```
 
-Policy 服务的日志目录只能创建一次。重新启动服务时换一个新的时间戳目录：
+### 4.2 源配置所在位置
 
-~~~bash
+| 要修改的内容 | 源配置文件 | 改完后需要做什么 |
+| --- | --- | --- |
+| 数据采集后端模板 | `simulation/mujoco/configs/backend/backend_stack_teacher.yaml` | 重新执行 simulation `prepare`，然后用新配置重启 backend |
+| 推理后端模板 | `simulation/mujoco/configs/backend/backend_stack_act_chunked.yaml` | 重新执行 simulation `prepare`，然后重启推理 backend 和 viewer |
+| 场景、物体、相机 | `simulation/mujoco/configs/scene/panda_stack_learning.yaml` | 重新执行 simulation `prepare`，重启 backend 和 viewer；旧数据不要与新场景混训 |
+| 任务成功阈值 | `simulation/mujoco/configs/scene/panda_stack_task.yaml` | 重新执行 simulation `prepare`，重启 backend；旧任务结果仍按生成时的 digest 保留 |
+| 物理控制限值、容差 | `simulation/mujoco/configs/control/panda_control.yaml` | 同时重新执行 simulation `prepare` 和 runtime `prepare`，重启 backend 与 runtime |
+| chunk stream 超时 | `simulation/mujoco/configs/control/panda_task_stream.yaml` | 重新执行 simulation `prepare`，重启 backend |
+| follower 窗口和偏差预算 | `simulation/mujoco/configs/control/panda_follower_act_chunked.yaml` | 同时重新执行 simulation `prepare` 和 runtime `prepare`，重启 backend 与 runtime |
+| runtime 策略模板 | `runtime/ros2/configs/native_task_act_chunked.yaml` | 重新执行 runtime `prepare`，重启 runtime |
+| 数采 runtime 模板 | `runtime/ros2/configs/native_teacher.yaml` | 下一次 `campaign run` 会重新生成该 attempt 的 runtime 配置，无需手工 prepare |
+| Policy 服务模板 | `learning/lerobot/configs/act_policy_temporal.yaml` | 重新执行 learning `prepare-policy`，再用新 binding 重新执行 runtime `prepare`，重启 Policy 服务和 runtime |
+| 训练参数 | `learning/lerobot/configs/act_training.container.yaml` | 下一次 `train` 使用新参数；训练后重新 bundle、prepare-policy、runtime prepare |
+| 数据转换、划分、质量规则 | `learning/lerobot/configs/act_dataset.container.yaml` | 重新执行 `convert`；已有数据集目录不会覆盖，需使用新的输出目录或 run-id |
+| 模型 bundle | `/data/learning/bundles/<bundle>` | 重新执行 learning `prepare-policy`，再重新执行 runtime `prepare`，重启 Policy 服务和 runtime |
+| ROS 消息或服务定义 | `contracts/ros/robot_api_msgs/` | 重建 ROS SDK 和 Policy SDK，重启三端；动作/观测语义变化时还需要重新采集和训练 |
+| 机器人 profile、观测/动作 schema | `profiles/` | 重建 SDK，重新校验模型、训练数据和 runtime；通常需要重新训练 |
+
+### 4.3 几个容易遗漏的联动
+
+**修改 follower 的 `target_count`**
+
+必须同时检查两处：
+
+- `simulation/mujoco/configs/control/panda_follower_act_chunked.yaml` 的 `target_count`
+- `runtime/ros2/configs/native_task_act_chunked.yaml` 的 `policy.target_count`
+
+两处不一致会导致 runtime 或 backend 校验失败。修改后重新执行 simulation 和 runtime
+两个 `prepare`，并重启 backend 和 runtime。
+
+**修改 `panda_control.yaml`**
+
+这个文件同时被 backend 和 runtime 引用。只重新生成 backend 配置是不够的，必须同时
+重新生成 runtime 配置。通常还需要重启三端中的 backend 和 runtime。
+
+**更换 Policy bundle**
+
+只需重新执行 `learning prepare-policy` 和 runtime `prepare`，然后重启 Policy 服务和
+runtime。backend、场景和 viewer 不需要因为换模型而重启。
+
+**修改 seed**
+
+推理时可以直接通过 interactive 覆盖：
+
+```bash
+runtime/ros2/scripts/run.sh interactive --config /data/prepared/infer-5k-server/runtime/runtime.yaml --seed 20002
+```
+
+这种情况不需要重新执行 runtime `prepare`。如果修改的是 backend 模板里的默认 seed，
+则重新执行 simulation `prepare`。
+
+### 4.4 通用规则
+
+1. 先生成到新的输出目录，不要覆盖旧配置。
+2. 生成目录已存在时，使用新的 `--run-id` 或新的 `--output`。
+3. `learning prepare-policy` 和 runtime `prepare` 的 `--run-id` 必须一致。
+4. 修改配置后，先重启对应后端/服务，再运行 `interactive`。
+5. viewer 读取的是启动时传入的 `backend.yaml`；backend 换配置后，viewer 也要用新配置重启。
+6. 旧 `/data/raw`、`/data/prepared` 和 `/data/logs` 保留用于审计，不要为了重跑而覆盖。
+
+## 5. 常见问题
+
+### 5.1 `policy.yaml: No such file or directory`
+
+说明缺少 `prepare-policy` 产物。重新执行：
+
+```bash
+learning/lerobot/scripts/run.sh prepare-policy --template /workspace/learning/lerobot/configs/act_policy_temporal.yaml --bundle /data/learning/bundles/stack-act --run-id infer-5k-server --output /data/prepared/infer-5k-server/policy
+```
+
+如果输出目录已经存在，先检查其中的 `policy.yaml` 和 `policy_binding.json`，不要覆盖。
+
+### 5.2 `FileExistsError: /data/logs/<name>`
+
+Policy 服务日志目录只能创建一次。使用新的时间戳目录：
+
+```bash
 POLICY_LOG="/data/logs/infer-5k-server-policy-$(date +%Y%m%dT%H%M%SZ)"
-learning/lerobot/scripts/run.sh policy \
-  --config /data/prepared/infer-5k-server/policy/policy.yaml \
-  --run-id infer-5k-server \
-  --log-directory "$POLICY_LOG"
-~~~
+```
 
-只在确认旧目录只是失败启动记录时才手工删除它；不要删除成功服务的日志目录。
+```bash
+learning/lerobot/scripts/run.sh policy --config /data/prepared/infer-5k-server/policy/policy.yaml --run-id infer-5k-server --log-directory "$POLICY_LOG"
+```
 
-### `Failed to add port to server: ... 0.0.0.0:50051`
+### 5.3 `Failed to add port to server: ... 0.0.0.0:50051`
 
-表示 Policy 端口已被占用，通常是上一次服务没有退出。检查并停止旧进程：
+端口 `50051` 已被占用，通常是旧的 Policy 服务没有退出。
 
-~~~bash
+含义：查找残留服务进程。
+
+```bash
 ps -eo pid,cmd | grep '[d]ual_arm_learning.act_service'
+```
+
+含义：停止查到的旧进程，把 `<PID>` 替换成实际进程号。
+
+```bash
 kill -TERM <PID>
-sleep 2
+```
+
+含义：确认端口已经释放；没有输出表示空闲。
+
+```bash
 ss -ltnp | grep 50051
-~~~
+```
 
-`ss` 没有输出表示端口已释放。随后使用新的 `--log-directory` 重新启动服务。
+然后使用新的 `--log-directory` 重新启动 Policy 服务。
 
-### viewer 报 X11 权限错误
+### 5.4 viewer 报 X11 权限错误
 
-仿真 Compose 会自动读取宿主图形会话的 `DISPLAY` 和 `XAUTHORITY`。若仍无法连接，
-在宿主机执行：
+含义：授权当前宿主用户访问 X11。
 
-~~~bash
+```bash
 xhost +SI:localuser:$(id -un)
-~~~
+```
 
-然后重新打开 viewer。无图形环境的宿主仍可运行 backend 和推理，只是不能使用 viewer。
+无图形环境的宿主仍可运行 backend、采集和推理，只是不能显示 viewer。
 
-### `FileExistsError`、`REQUEST_ID_CONFLICT` 或录制目录冲突
+### 5.5 `FileExistsError`、`REQUEST_ID_CONFLICT` 或录制目录冲突
 
-不要复用同一个手工 `run-id`、`episode-id` 或输出目录。推理运行时使用：
-
-~~~bash
-runtime/ros2/scripts/run.sh interactive \
-  --config /data/prepared/infer-5k-server/runtime/runtime.yaml \
-  --seed 20002
-~~~
-
-`interactive` 会自动生成唯一身份；失败记录和旧录像保留，不覆盖。
+不要复用旧的 `run-id`、`episode-id` 或输出目录。推理时直接使用 `interactive`
+自动生成唯一身份；失败记录和录像保留，不覆盖。
