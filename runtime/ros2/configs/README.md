@@ -16,6 +16,6 @@ teacher 运行。`native_replay.yaml`、`replay_policy.yaml` 只保留测试回�
 `native_task_act_chunked.yaml` 是当前通过一次真实堆叠回归的实验配方：0.5s 执行窗口、
 任务开始前 2s 仿真稳定等待；与 `backend_stack_act_chunked.yaml` 和学习侧
 `act_policy_temporal.yaml` 成套使用。成功记录与适用边界见
-[DSH-048](../../../docs/history/dsh-048.md)，新运行仍须单独分配 campaign 种子和次数。
+[DSH-048](../../../docs/history/README.md#dsh-048)，新运行仍须单独分配 campaign 种子和次数。
 
 目录导航：[上级目录](../README.md)。

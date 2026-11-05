@@ -9,6 +9,6 @@
 - `observations/`、`actions/`：观测和动作绑定，顺序必须与 profile 完全一致。
 
 profile 不包含主机路径或后端类型；改变关节/相机语义必须形成新摘要，不能沿用旧
-hash。历史细节见 [DSH-018](../docs/history/dsh-018.md)。
+hash。历史细节见 [DSH-018](../docs/history/README.md#dsh-018)。
 
 目录导航：[上级目录](../README.md)。

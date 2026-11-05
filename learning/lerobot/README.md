@@ -14,6 +14,6 @@ ROS-free 的 ACT 策略服务、协议适配、bundle/checkpoint 校验、数据
 配置在 `configs/`，镜像/Compose 在 `docker/`；数据、模型和缓存属于运行产物，
 不提交。学习环境不挂 ROS，也不导入 runtime。当前阶段见
 [项目状态](../../docs/project-status.md)，实现历史见
-[DSH-035](../../docs/history/dsh-035.md)、[DSH-036](../../docs/history/dsh-036.md)。
+[DSH-035](../../docs/history/README.md#dsh-035)、[DSH-036](../../docs/history/README.md#dsh-036)。
 
 目录导航：[上级目录](../README.md)。

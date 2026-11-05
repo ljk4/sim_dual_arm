@@ -16,6 +16,6 @@ Linux x86_64。Docker 构建直接校验并安装该二进制产物。
 升级版本或更换 Python/CPU/系统平台时，需要生成并验证匹配的新 wheel，同步更新
 `provenance.json`、`requirements.lock` 和 Dockerfile 的 COPY 路径。平台不匹配时
 构建失败，不自动退回源码编译。产物生成记录见
-[DSH-056](../../../../docs/history/dsh-056.md)。
+[DSH-056](../../../../docs/history/README.md#dsh-056)。
 
 目录导航：[上级目录](../README.md)。

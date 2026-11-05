@@ -9,6 +9,6 @@ Runtime 不导入 backend 物理实现，也不训练模型。容器内统一入
 `campaign`、`evaluate`、`test`；配置在 `configs/`，空闲环境在
 `docker/docker-compose.yml`。宿主进入 `docker/` 后用 `docker compose exec runtime bash`，
 不运行本目录 Python。
-接口边界见[DSH-000 接口材料](../../docs/history/dsh-000.md#src-docs-architecture-and-interfaces-md)。
+接口边界见[DSH-000 接口材料](../../docs/history/README.md#dsh-000)。
 
 目录导航：[上级目录](../README.md)。

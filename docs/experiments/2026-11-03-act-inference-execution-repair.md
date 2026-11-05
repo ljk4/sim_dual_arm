@@ -2,7 +2,7 @@
 
 收录日期：2026-11-03。收录依据：用户本次主动提出“总结此次修复发现的问题和修复方法，看看能否写入经验部分”，按此次修复范围整理。
 
-相关阶段：[DSH-045](../history/dsh-045.md)～[DSH-051](../history/dsh-051.md)，最终验收集中在 [DSH-048](../history/dsh-048.md)。本篇提炼判断方法与适用边界，完整执行过程仍由阶段历史维护。
+相关阶段：[DSH-045](../history/README.md#dsh-045)～[DSH-051](../history/README.md#dsh-051)，最终验收集中在 [DSH-048](../history/README.md#dsh-048)。本篇提炼判断方法与适用边界，压缩后的阶段结论见历史总览。
 
 ## 1. 结论与适用范围
 
@@ -50,7 +50,7 @@
 
 **可复用经验：**同时检查完整预测、被选中的时间窗口、插值后的参考和实测运动。模型预测长度、执行窗口、查询频率和控制周期必须分别记录。不要仅凭视频、单个首点或验证 loss 判断模型是否静止。
 
-**证据边界：**离线比较复用了旧 anchor，没有重新推进物理；不能代替新闭环，也不能证明 0.5 秒在其他模型和任务中最优。详见 [DSH-045](../history/dsh-045.md) 和 [窗口对照](../../.build/reports/dsh-045/window-probe.json)。
+**证据边界：**离线比较复用了旧 anchor，没有重新推进物理；不能代替新闭环，也不能证明 0.5 秒在其他模型和任务中最优。详见 [DSH-045](../history/README.md#dsh-045) 和 [窗口对照](../../.build/reports/dsh-045/window-probe.json)。
 
 ### 3.2 新旧预测切换不连续，缩短窗口也未必解决
 
@@ -67,7 +67,7 @@ weight = exp(coeff * (t - s) / P)
 
 **可复用经验：**异步查询的间隔可能超过一个动作周期，融合须按绝对执行时刻对齐，不能直接平均同一数组下标。保留历史观测身份和融合贡献数，防止平滑后无法解释动作来源。
 
-详见 [DSH-047](../history/dsh-047.md)、[融合实现](../../learning/lerobot/src/dual_arm_learning/act_temporal.py) 和 [同一失败请求的融合对照](../../.build/reports/dsh-045/ensemble-probe-30401.json)。该离线通过不单独证明物理成功。
+详见 [DSH-047](../history/README.md#dsh-047)、[融合实现](../../learning/lerobot/src/dual_arm_learning/act_temporal.py) 和 [同一失败请求的融合对照](../../.build/reports/dsh-045/ensemble-probe-30401.json)。该离线通过不单独证明物理成功。
 
 ### 3.3 reset 完成不等于任务可准备，也不等于适合立即推理
 
@@ -78,7 +78,7 @@ weight = exp(coeff * (t - s) / P)
 
 **可复用经验：**把接口准备条件和策略输入稳定条件分开。优先根据明确反馈重试；必须等待时，说明用仿真钟还是墙钟、是否占任务预算、如何取新帧和响应取消。不要用无限重试隐藏故障。
 
-2 秒是本场景验证过的配方，不是普适常数，也未证明是最短必要时间。详见 [DSH-046](../history/dsh-046.md)、[DSH-049](../history/dsh-049.md) 和 [静置采样数学检查](../../.build/reports/dsh-048/rest-math.json)。
+2 秒是本场景验证过的配方，不是普适常数，也未证明是最短必要时间。详见 [DSH-046](../history/README.md#dsh-046)、[DSH-049](../history/README.md#dsh-049) 和 [静置采样数学检查](../../.build/reports/dsh-048/rest-math.json)。
 
 ### 3.4 策略目标与执行参考的偏差预算，需要单独识别和决策
 
@@ -86,7 +86,7 @@ weight = exp(coeff * (t - s) / P)
 
 这是一项实际工程取舍，不是浮点修复。机器人硬位置范围、速度／加速度限制、实测跟踪检查、ACK 和成功判定没有随之放宽。
 
-**可复用经验：**看到“超差”先确认比较的是哪两个量。预测准入、目标与参考偏差、参考与实测误差具有不同含义，不能用同一个“大容差”处理。此次参数仍属于仿真实验配方，不直接迁移到真机。决定与证据见 [DSH-048](../history/dsh-048.md)。
+**可复用经验：**看到“超差”先确认比较的是哪两个量。预测准入、目标与参考偏差、参考与实测误差具有不同含义，不能用同一个“大容差”处理。此次参数仍属于仿真实验配方，不直接迁移到真机。决定与证据见 [DSH-048](../history/README.md#dsh-048)。
 
 ### 3.5 合法值的加权平均，也可能越界一个浮点舍入量
 
@@ -94,7 +94,7 @@ weight = exp(coeff * (t - s) / P)
 
 修复将每个时刻、每个轴的融合结果约束在**实际参与融合值的最小值与最大值之间**，恢复加权平均应有的凸组合范围；增加常量边界的长序列回归测试。没有放宽机器人限位，也没有新增机械臂目标投影。
 
-**可复用经验：**输入校验通过不代表计算结果自动保留输入的不变量。浮点修正应有数学依据和明确范围，不应靠通用裁剪掩盖非法输入。实现与验收见 [DSH-047](../history/dsh-047.md) 和 [融合测试](../../tests/unit/test_act_temporal.py)。
+**可复用经验：**输入校验通过不代表计算结果自动保留输入的不变量。浮点修正应有数学依据和明确范围，不应靠通用裁剪掩盖非法输入。实现与验收见 [DSH-047](../history/README.md#dsh-047) 和 [融合测试](../../tests/unit/test_act_temporal.py)。
 
 ### 3.6 Ruckig 的极小制动前缀被导出器当成真实额外制动
 
@@ -104,7 +104,7 @@ weight = exp(coeff * (t - s) / P)
 
 **可复用经验：**在连续时间算法与离散时间协议之间，检查量化及边界状态。不能因持续时间很短就直接丢弃，也不能把全部非零值都当成有意义的物理事件。本修复没有实现通用制动前缀支持。
 
-证据：[修复前真实请求](../../.build/reports/dsh-048/brake-probe.json)、[修复后重建](../../.build/reports/dsh-050/brake-probe-fixed.json)、[DSH-050](../history/dsh-050.md)；实现见 [ruckig_export.py](../../simulation/mujoco/src/robot_backend_sim/ruckig_export.py)。
+证据：[修复前真实请求](../../.build/reports/dsh-048/brake-probe.json)、[修复后重建](../../.build/reports/dsh-050/brake-probe-fixed.json)、[DSH-050](../history/README.md#dsh-050)；实现见 [ruckig_export.py](../../simulation/mujoco/src/robot_backend_sim/ruckig_export.py)。
 
 ### 3.7 静止速度的定义不一致，使正常夹持被判为跟踪超时
 
@@ -116,7 +116,7 @@ weight = exp(coeff * (t - s) / P)
 
 **可复用经验：**先追溯最早的失败事件，再解释上层后果；不要在运动已失败后盲目重试获取 anchor。相邻状态机对“零”“打开”“关闭”的数值定义应一致，并带明确单位。
 
-证据：[接触与跟踪重建](../../.build/reports/dsh-048/tracking-probe.json)、[DSH-051](../history/dsh-051.md)；实现见 [contact_unload.py](../../simulation/mujoco/src/robot_backend_sim/contact_unload.py) 和 [motion.py](../../simulation/mujoco/src/robot_backend_sim/motion.py)。修复后的同场景回归完成堆叠，但不能将全部组合收益都归因于这一项。
+证据：[接触与跟踪重建](../../.build/reports/dsh-048/tracking-probe.json)、[DSH-051](../history/README.md#dsh-051)；实现见 [contact_unload.py](../../simulation/mujoco/src/robot_backend_sim/contact_unload.py) 和 [motion.py](../../simulation/mujoco/src/robot_backend_sim/motion.py)。修复后的同场景回归完成堆叠，但不能将全部组合收益都归因于这一项。
 
 ## 4. 后续遇到类似问题的排查顺序
 
