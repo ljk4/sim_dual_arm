@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-SIM_SRC = ROOT / "components/backend_sim/src"
+SIM_SRC = ROOT / "simulation/mujoco/src"
 CONTRACTS = ROOT / "contracts/python/src"
 for source in (SIM_SRC, CONTRACTS):
     if str(source) not in sys.path:
@@ -26,33 +25,15 @@ from robot_backend_sim.stack_task import (  # noqa: E402
 from robot_backend_sim.task_config import load_task_config  # noqa: E402
 from robot_contracts.models import RunContext  # noqa: E402
 
-ASSETS_ROOT = Path(
-    os.environ.get(
-        "SIM_ASSETS_ROOT",
-        "/home/ljk/work/sim_dual_arm/third_party/src/mujoco_menagerie",
-    )
-)
-SUMMARY = Path(
-    os.environ.get(
-        "SIM_ASSET_SUMMARY", "/home/ljk/work/sim_dual_arm/.build/assets/panda.json"
-    )
-)
-SOURCE = ROOT / "third_party/panda-source.json"
-if not (ASSETS_ROOT / "franka_emika_panda/panda.xml").is_file() or not SUMMARY.is_file():
-    pytest.skip("fixed Panda assets are not available", allow_module_level=True)
-
 
 @pytest.fixture(scope="module")
 def scene_fixture():
-    scene_config = load_scene_config(ROOT / "configs/simulation/panda_stack.yaml")
+    scene_config = load_scene_config(ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml")
     scene = build_scene(
         scene_config,
-        assets_root=ASSETS_ROOT,
-        summary_path=SUMMARY,
-        source_path=SOURCE,
     )
     scene.reset(0)
-    task_config = load_task_config(ROOT / "configs/simulation/panda_stack_task.yaml")
+    task_config = load_task_config(ROOT / "simulation/mujoco/configs/scene/panda_stack_task.yaml")
     binding = make_task_binding(
         scene.model, task_config, table_top_z_m=scene.config.table.top_z
     )

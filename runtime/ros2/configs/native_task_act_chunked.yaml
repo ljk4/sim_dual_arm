@@ -1,0 +1,91 @@
+# ACT policy runtime controlled by the independent task judge.
+# The policy still sees only three RGB images plus 16 measured joints; task
+# truth and teacher phases stay in the separate diagnostic channel.
+schema_version: 1
+robot_profile: ../../../profiles/robots/panda_stack_learning_v1/profile.json
+observation_schema: ../../../profiles/observations/panda_rgb_joint_v1.json
+action_schema: ../../../profiles/actions/panda_joint_position_v1.json
+control_constraints: ../../../simulation/mujoco/configs/control/panda_control.yaml
+follower_constraints: ../../../simulation/mujoco/configs/control/panda_follower_act_chunked.yaml
+robot_namespace: /robot
+
+action_source: policy
+
+lease_duration_ns: 2000000000
+renew_interval_ns: 500000000
+command_acceptance_ns: 500000000
+startup_timeout_s: 30.0
+call_timeout_s: 5.0
+command_timeout_s: 8.0
+
+reset:
+  enabled: true
+  seed: 0
+
+observation:
+  reliable: true
+  max_skew_ns: 0
+  max_age_ns: 500000000
+  wall_arrival_timeout_s: 1.5
+  capacity: 32
+
+control:
+  submit_query_retries: 2
+  poll_interval_s: 0.02
+  stop_timeout_s: 8.0
+  terminal_timeout_s: 20.0
+
+policy:
+  # Template for runtime/ros2/scripts/run.sh prepare.  It reads a generic
+  # Policy binding from the learning side and writes the launchable runtime
+  # config.  The digests below are placeholders, never model identities; a
+  # direct launch must fail validation.
+  endpoint: learning:50051
+  model_bundle_digest: FROM_VERIFIED_ACT_BUNDLE
+  processor_digest: FROM_VERIFIED_ACT_BUNDLE
+  allow_test_policy: false
+  expected_test_only: false
+  task_id: panda-stack
+  task_text: Pick up the red source cube and place it on the blue target cube.
+  chunk_size: 60
+  action_period_ns: 50000000
+  # A 10-point execution window is 0.5 s at the fixed 50 ms period. The
+  # provider still returns a complete 3 s (60 point) chunk and the interface
+  # remains 60x16; overlapping windows drop predictions that are already stale
+  # at handoff, so a window is not always points 0..9 of a fresh chunk. No
+  # hidden queue and no ground-truth rescue are introduced.
+  target_count: 10
+  # Settle before task prepare/start; the 30 s task budget starts afterwards.
+  # ACT still consumes only subsequent fresh RGB and measured state.
+  startup_settle_sim_ns: 2000000000
+  initial_lead_ns: 250000000
+  max_chunks: 64
+  total_sim_deadline_ns: 30000000000
+  # Half-speed simulation needs 60s wall time for the 30s physical task.
+  # Leave bounded room for startup, RGB delivery, RPC and the final stop.
+  total_wall_deadline_s: 120.0
+  connect_timeout_s: 2.0
+  open_deadline_s: 2.0
+  predict_deadline_s: 2.0
+  close_deadline_s: 2.0
+  max_message_bytes: 16777216
+  poll_interval_s: 0.02
+  termination_mode: task
+  task_stop_margin_s: 1.0
+  task_sim_budget_ns: 30000000000
+
+motions: []
+
+logging:
+  queue_capacity: 256
+  max_event_bytes: 32768
+  max_file_bytes: 8388608
+  max_total_bytes: 268435456
+  close_timeout_s: 3.0
+  flush_interval_s: 0.2
+  console: false
+recording:
+  queue_capacity: 1024
+  max_pending_bytes: 67108864
+  startup_timeout_s: 5.0
+  close_timeout_s: 5.0

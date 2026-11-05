@@ -1,6 +1,7 @@
 [tool.ruff]
 target-version = "py312"
 line-length = 100
+cache-dir = ".build/ruff-cache"
 exclude = [".build", "var", "docs/archive"]
 
 [tool.ruff.lint]
@@ -12,7 +13,8 @@ pythonpath = [
   "contracts/python/src",
   "libraries/backend_core/src",
   "libraries/run_logging/src",
-  "components/runtime/ros/dual_arm_runtime",
-  "components/learning/src",
+  "simulation/mujoco/src",
+  "runtime/ros2/ros/dual_arm_runtime",
+  "learning/lerobot/src",
   "tests/doubles/policy",
 ]

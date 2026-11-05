@@ -28,7 +28,7 @@ from dual_arm_learning.sample_filter import (
 from dual_arm_learning.training import TrainingError, _sample_filter
 
 ROOT = Path(__file__).resolve().parents[2]
-RULE = ROOT / "configs/learning/act_sample_filter.yaml"
+RULE = ROOT / "learning/lerobot/configs/act_sample_filter.yaml"
 PROFILE = "a" * 64
 LEAD_NS = 50_000_000
 
@@ -430,7 +430,7 @@ def test_future_action_chunks_keep_their_original_interval_and_validation_is_unf
             }
 
     config = replace(
-        load_training_config(ROOT / "configs/learning/act_training.yaml", ROOT),
+        load_training_config(ROOT / "learning/lerobot/configs/act_training.yaml", ROOT),
         batch_size=2,
         num_workers=0,
     )
@@ -447,7 +447,7 @@ def test_future_action_chunks_keep_their_original_interval_and_validation_is_unf
 def test_old_unfiltered_binding_is_byte_for_byte_compatible(tmp_path):
     _write_json(tmp_path / "manifest.json", {"dataset": "accepted"})
     config = replace(
-        load_training_config(ROOT / "configs/learning/act_training.yaml", ROOT),
+        load_training_config(ROOT / "learning/lerobot/configs/act_training.yaml", ROOT),
         data_root=tmp_path,
     )
     assert config.sample_filter is None
@@ -467,7 +467,7 @@ def test_changed_sample_filter_cannot_resume(tmp_path):
     _, mask_path = _build(tmp_path / "data")
     dataset_root = tmp_path / "data"
     config = replace(
-        load_training_config(ROOT / "configs/learning/act_training.yaml", ROOT),
+        load_training_config(ROOT / "learning/lerobot/configs/act_training.yaml", ROOT),
         mode="full",
         data_root=dataset_root,
         sample_filter=mask_path,
@@ -482,7 +482,7 @@ def test_changed_sample_filter_cannot_resume(tmp_path):
 
 def test_sample_filter_config_is_optional_and_rejected_outside_full(tmp_path):
     document = yaml.safe_load(
-        (ROOT / "configs/learning/act_training.yaml").read_text(encoding="utf-8")
+        (ROOT / "learning/lerobot/configs/act_training.yaml").read_text(encoding="utf-8")
     )
     document["data"]["sample_filter"] = "filter.json"
     path = tmp_path / "training.yaml"

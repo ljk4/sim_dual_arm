@@ -16,7 +16,7 @@ from robot_contracts.models import ContractError
 
 TOPICS = {"/state": "RobotState", "/frame": "CameraFrame"}
 ROOT = Path(__file__).resolve().parents[2]
-BASE_CONFIG = ROOT / "configs/runtime/mock_collect.yaml"
+BASE_CONFIG = ROOT / "runtime/ros2/configs/mock_collect.yaml"
 
 
 class _Writer:

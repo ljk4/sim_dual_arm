@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -11,7 +10,7 @@ mujoco = pytest.importorskip("mujoco")
 np = pytest.importorskip("numpy")
 
 ROOT = Path(__file__).resolve().parents[2]
-SIM_SRC = ROOT / "components/backend_sim/src"
+SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
@@ -20,11 +19,8 @@ from robot_backend_sim.rendering import SceneRenderer, SceneRenderError  # noqa:
 from robot_backend_sim.scene import build_scene  # noqa: E402
 from robot_backend_sim.scene_config import load_scene_config  # noqa: E402
 
-CONFIG_PATH = ROOT / "configs/simulation/panda_stack.yaml"
-CHECK_PATH = ROOT / "configs/simulation/scene_check.yaml"
-ASSETS_ROOT = Path(os.environ.get("SIM_ASSETS_ROOT", ROOT / "third_party/src/mujoco_menagerie"))
-SUMMARY_PATH = Path(os.environ.get("SIM_ASSET_SUMMARY", ROOT / ".build/assets/panda.json"))
-SOURCE_PATH = Path(os.environ.get("SIM_ASSET_SOURCE", ROOT / "third_party/panda-source.json"))
+CONFIG_PATH = ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml"
+CHECK_PATH = ROOT / "simulation/mujoco/configs/checks/scene_check.yaml"
 
 
 @pytest.fixture(scope="module")
@@ -36,9 +32,6 @@ def scene_config():
 def scene(scene_config):
     return build_scene(
         scene_config,
-        assets_root=ASSETS_ROOT,
-        summary_path=SUMMARY_PATH,
-        source_path=SOURCE_PATH,
     )
 
 
@@ -132,14 +125,10 @@ def test_full_check_entry_with_one_real_layout(tmp_path, monkeypatch):
         lambda config, scene: real_build_layouts(config, scene)[:1],
     )
     arguments = check_scene.SceneCheckArguments(
-        assets_root=ASSETS_ROOT,
-        summary=SUMMARY_PATH,
-        source=SOURCE_PATH,
         scene_config=CONFIG_PATH,
         check_config=CHECK_PATH,
         report_root=tmp_path / "reports",
         run_id="native-one-layout",
-        packages=ROOT / "deploy/docker/sim-packages.json",
     )
 
     code = check_scene.run(arguments)

@@ -9,7 +9,7 @@ np = pytest.importorskip("numpy")
 pytest.importorskip("scipy")
 
 ROOT = Path(__file__).resolve().parents[2]
-for source in (ROOT / "components/backend_sim/src", ROOT / "contracts/python/src"):
+for source in (ROOT / "simulation/mujoco/src", ROOT / "contracts/python/src"):
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
 
@@ -44,7 +44,7 @@ def profile_and_config():
         ROOT / "profiles/robots/panda_stack_v1/profile.json",
         ROOT / "contracts/schemas",
     )
-    config = load_control_config(ROOT / "configs/simulation/panda_control.yaml")
+    config = load_control_config(ROOT / "simulation/mujoco/configs/control/panda_control.yaml")
     return profile, config
 
 

@@ -3,7 +3,6 @@ import hashlib
 import json
 import os
 import subprocess
-import sys
 import time
 from pathlib import Path
 
@@ -40,7 +39,7 @@ from dual_arm_learning.policy_types import (  # noqa: E402
 )
 
 ROOT = Path(__file__).resolve().parents[2]
-CONFIG = ROOT / "configs/learning/act_policy.yaml"
+CONFIG = ROOT / "learning/lerobot/configs/act_policy.yaml"
 
 
 @pytest.fixture(scope="module")
@@ -471,9 +470,10 @@ def test_act_entry_loads_warms_logs_and_shuts_down_cleanly(bundle, contract, tmp
     source = os.environ.get(
         "LEARNING_SOURCE", str(Path(lerobot.__file__).resolve().parents[1])
     )
+    environment["PROJECT_CONTAINER"] = "1"
     environment["PYTHONPATH"] = ":".join(
         [
-            str(ROOT / "components/learning/src"),
+            str(ROOT / "learning/lerobot/src"),
             str(ROOT / "libraries/run_logging/src"),
             sdk,
             source,
@@ -481,8 +481,9 @@ def test_act_entry_loads_warms_logs_and_shuts_down_cleanly(bundle, contract, tmp
     )
     process = subprocess.Popen(
         [
-            sys.executable,
-            str(ROOT / "tools/run/act_policy.py"),
+            "bash",
+            str(ROOT / "learning/lerobot/scripts/run.sh"),
+            "policy",
             "--config",
             str(config_path),
             "--log-directory",

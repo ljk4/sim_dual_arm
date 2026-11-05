@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[2]
     "fault", ["none", "wrong_epoch", "disconnect", "late", "midstream_disconnect"]
 )
 def test_policy_rpc_native_runtime_and_faults(tmp_path, fault):
-    config, settings = load_fake_config(ROOT / "configs/learning/fake_policy.yaml")
+    config, settings = load_fake_config(ROOT / "learning/lerobot/configs/fake_policy.yaml")
     config = replace(config, port=0)
     settings = (
         replace(settings, stop_after_predictions=2)
@@ -42,15 +42,17 @@ def test_policy_rpc_native_runtime_and_faults(tmp_path, fault):
     provider = FakeProvider(config, settings)
     server = PolicyServer(config, provider, log)
     port = server.start()
-    policy = yaml.safe_load((ROOT / "configs/runtime/native_policy.yaml").read_text())["policy"]
+    policy = yaml.safe_load(
+        (ROOT / "runtime/ros2/configs/native_policy.yaml").read_text()
+    )["policy"]
     policy["endpoint"] = f"127.0.0.1:{port}"
     if fault == "late":
         policy["predict_deadline_s"] = 0.1
     processes = Processes(
         tmp_path,
         native_overrides={"policy": policy},
-        backend_source=ROOT / "configs/simulation/backend_follower.yaml",
-        runtime_source=ROOT / "configs/runtime/native_policy.yaml",
+        backend_source=ROOT / "tests/fixtures/simulation/backend_follower.yaml",
+        runtime_source=ROOT / "runtime/ros2/configs/native_policy.yaml",
     )
     try:
         runtime = processes.start_runtime(once=True)
@@ -94,17 +96,19 @@ def test_policy_stream_stops_with_real_terminal_feedback(tmp_path, mode):
     from robot_api_msgs.srv import EndEpisode, StartEpisode
     from test_native_runtime_ros import RuntimeClient
 
-    config, settings = load_fake_config(ROOT / "configs/learning/fake_policy.yaml")
+    config, settings = load_fake_config(ROOT / "learning/lerobot/configs/fake_policy.yaml")
     config = replace(config, port=0)
     server = PolicyServer(config, FakeProvider(config, settings))
     port = server.start()
-    policy = yaml.safe_load((ROOT / "configs/runtime/native_policy.yaml").read_text())["policy"]
+    policy = yaml.safe_load(
+        (ROOT / "runtime/ros2/configs/native_policy.yaml").read_text()
+    )["policy"]
     policy.update(endpoint=f"127.0.0.1:{port}", max_chunks=32)
     processes = Processes(
         tmp_path,
         native_overrides={"policy": policy},
-        backend_source=ROOT / "configs/simulation/backend_follower.yaml",
-        runtime_source=ROOT / "configs/runtime/native_policy.yaml",
+        backend_source=ROOT / "tests/fixtures/simulation/backend_follower.yaml",
+        runtime_source=ROOT / "runtime/ros2/configs/native_policy.yaml",
     )
     client = RuntimeClient()
     try:
@@ -138,25 +142,27 @@ def test_policy_stream_stops_with_real_terminal_feedback(tmp_path, mode):
 
 
 def test_first_definitive_follower_rejection_does_not_await_execution(tmp_path):
-    config, settings = load_fake_config(ROOT / "configs/learning/fake_policy.yaml")
+    config, settings = load_fake_config(ROOT / "learning/lerobot/configs/fake_policy.yaml")
     config = replace(config, port=0)
     server = PolicyServer(config, FakeProvider(config, settings))
     port = server.start()
-    follower = yaml.safe_load((ROOT / "configs/simulation/panda_follower.yaml").read_text())
+    follower = yaml.safe_load((ROOT / "simulation/mujoco/configs/control/panda_follower.yaml").read_text())
     follower["max_target_deviations"] = [1e-6] * 16
     follower_path = tmp_path / "reject-follower.yaml"
     follower_path.write_text(yaml.safe_dump(follower))
-    backend = yaml.safe_load((ROOT / "configs/simulation/backend_follower.yaml").read_text())
+    backend = yaml.safe_load((ROOT / "tests/fixtures/simulation/backend_follower.yaml").read_text())
     backend["robot"]["follower"] = str(follower_path)
     backend_path = tmp_path / "reject-backend-source.yaml"
     backend_path.write_text(yaml.safe_dump(backend))
-    policy = yaml.safe_load((ROOT / "configs/runtime/native_policy.yaml").read_text())["policy"]
+    policy = yaml.safe_load(
+        (ROOT / "runtime/ros2/configs/native_policy.yaml").read_text()
+    )["policy"]
     policy["endpoint"] = f"127.0.0.1:{port}"
     processes = Processes(
         tmp_path,
         native_overrides={"policy": policy},
         backend_source=backend_path,
-        runtime_source=ROOT / "configs/runtime/native_policy.yaml",
+        runtime_source=ROOT / "runtime/ros2/configs/native_policy.yaml",
     )
     try:
         process = processes.start_runtime(once=True)

@@ -43,7 +43,7 @@ def _as_v1(manifest: dict) -> dict:
 
 
 def _empty_recorder(tmp_path: Path) -> EpisodeRecorder:
-    config = load_configuration(ROOT, ROOT / "configs/runtime/mock_collect.yaml")
+    config = load_configuration(ROOT, ROOT / "runtime/ros2/configs/mock_collect.yaml")
     context = RunContext(
         config.profile.robot_id,
         config.profile.digest,

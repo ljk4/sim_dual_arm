@@ -5,7 +5,7 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "tools/run"))
+sys.path.insert(0, str(ROOT / "runtime/ros2/scripts"))
 import stack_campaign  # noqa: E402
 import stack_evaluate  # noqa: E402
 
@@ -49,7 +49,7 @@ def campaign(tmp_path: Path) -> tuple[Path, Path]:
         "quality": {"sidecar": "quality.json"},
         "launch": {"command": [], "timeout_s": 10.0},
     }
-    config_path = root / "configs/experiments/stack_campaign.yaml"
+    config_path = root / "runtime/ros2/configs/experiments/stack_campaign.yaml"
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
     return root, config_path

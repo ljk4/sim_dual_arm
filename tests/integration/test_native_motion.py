@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import math
-import os
 import sys
 import threading
 from dataclasses import replace
@@ -14,7 +13,7 @@ pytest.importorskip("scipy")
 np = pytest.importorskip("numpy")
 
 ROOT = Path(__file__).resolve().parents[2]
-for source in (ROOT / "components/backend_sim/src", ROOT / "contracts/python/src"):
+for source in (ROOT / "simulation/mujoco/src", ROOT / "contracts/python/src"):
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
 
@@ -40,13 +39,10 @@ from robot_backend_sim.scene_config import load_scene_config  # noqa: E402
 from robot_contracts.models import ContractError, Target  # noqa: E402
 from robot_contracts.profiles import load_profile  # noqa: E402
 
-CONFIG_PATH = ROOT / "configs/simulation/panda_stack.yaml"
-CONTROL_PATH = ROOT / "configs/simulation/panda_control.yaml"
+CONFIG_PATH = ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml"
+CONTROL_PATH = ROOT / "simulation/mujoco/configs/control/panda_control.yaml"
 PROFILE_PATH = ROOT / "profiles/robots/panda_stack_v1/profile.json"
 SCHEMAS = ROOT / "contracts/schemas"
-ASSETS_ROOT = Path(os.environ.get("SIM_ASSETS_ROOT", ROOT / "third_party/src/mujoco_menagerie"))
-SUMMARY_PATH = Path(os.environ.get("SIM_ASSET_SUMMARY", ROOT / ".build/assets/panda.json"))
-SOURCE_PATH = Path(os.environ.get("SIM_ASSET_SOURCE", ROOT / "third_party/panda-source.json"))
 DT_NS = 2_000_000
 TERMINAL = frozenset({Phase.COMPLETED, Phase.STOPPED, Phase.FAILED})
 
@@ -60,9 +56,6 @@ def scene_config():
 def scene(scene_config):
     return build_scene(
         scene_config,
-        assets_root=ASSETS_ROOT,
-        summary_path=SUMMARY_PATH,
-        source_path=SOURCE_PATH,
     )
 
 
@@ -70,9 +63,6 @@ def scene(scene_config):
 def other_scene(scene_config):
     return build_scene(
         scene_config,
-        assets_root=ASSETS_ROOT,
-        summary_path=SUMMARY_PATH,
-        source_path=SOURCE_PATH,
     )
 
 

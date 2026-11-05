@@ -153,6 +153,24 @@
 | DSH-050 | [亚纳秒制动前缀导出](dsh-050.md) | 修复22飞秒前缀误拒绝，41项真实Ruckig回归与16DOF失败重建通过。 |
 | DSH-051 | [静止夹持速度的数值分类](dsh-051.md) | 与原卸载逻辑统一1e-9m/s数值容差，17项回归通过；夹持误停修复后完成堆叠。 |
 
+## 目录迁移（DSH-052）
+
+| 编号 | 文档 | 摘要 |
+| --- | --- | --- |
+| DSH-052 | [按端与实现拆分目录](dsh-052.md) | 迁移仿真/运行/学习实现、配置、Docker、Compose 与脚本；路径与只读回归通过，容器和集成验证留待 053。 |
+
+## 环境与业务执行分离（DSH-053）
+
+| 编号 | 文档 | 摘要 |
+| --- | --- | --- |
+| DSH-053 | [环境与业务执行分离](dsh-053.md) | 宿主唯一 `scripts/env.sh`；三端 idle Compose 与容器内 `run.sh`；learning 生成真实 bundle 绑定、runtime 消费通用 JSON；旧宿主启动器/overlay 清理，静态与有限纯回归通过。 |
+
+## 每端唯一 Docker 环境与入口（DSH-054）
+
+| 编号 | 文档 | 摘要 |
+| --- | --- | --- |
+| DSH-054 | [每端唯一 Docker 环境与入口](dsh-054.md) | 每实现一份 Dockerfile/docker-compose.yml/run.sh；根 Compose 只 include；env.sh 转发 run.sh 功能；旧入口、多 target 和宿主 venv 路线清理；候选静态与纯回归通过，实际构建/容器验收由主助手独立执行。 |
+
 ## 旧路径迁移表
 
 原路径均来自 `migration-input.json`；逐项哈希和正文覆盖见 `.build/reports/dsh-042/migration-report.json`。`docs/README.md`、各目录 `README.md` 和根 `README.md` 的重写/保留状态在现位置说明。
@@ -307,3 +325,19 @@
 | `docs/simulation-loop-progress.md` | 按 531 行区间拆入 000～041，见[时间线](#timeline) |
 
 旧 `docs/tasks/`、`docs/archive/`、`docs/dependencies/`、`docs/contracts/` 目录在内容归档并校验后移除；不再保留空壳跳转文档。
+
+## 仿真 Docker 职责与准备流程
+
+| 阶段 | 文档 | 内容 |
+| --- | --- | --- |
+| DSH-055 | [仿真 Docker 职责与操作流程简化](dsh-055.md) | 四个挂载、独立 SDK、依赖锁唯一来源、容器内业务入口；真实渲染、目标回归与 SIGINT/init 收尾验收。 |
+
+## 固定预编译依赖
+
+| 阶段 | 文档 | 内容 |
+| --- | --- | --- |
+| DSH-056 | [仿真直接安装固定 Ruckig wheel](dsh-056.md) | 移除编译 stage，单 FROM；固定产物/哈希/来源/许可证；285 项回归与实际场景、收尾验收通过。 |
+| DSH-057 | [仿真项目依赖统一清单](dsh-057.md) | 沿用官方 ROS 环境，移除重复清单与安装步骤；65 项测试、实际构建/相机/后端收尾验收通过。 |
+| DSH-058 | [删除仿真自定义镜像版本报告](dsh-058.md) | 删除生成器与三处入口的报告依赖；105 项测试和真实环境/场景/运动学/后端验收通过。 |
+| DSH-059 | [Docker 通用命名与本地上下文](dsh-059.md) | requirements.lock、/opt/dependencies、本地 COPY；57 项测试、实际构建/场景及跨 cwd 解析通过。 |
+| DSH-060 | [容器资产变量与冗余标记清理](dsh-060.md) | 通用资产变量、四个标记移除、运行 ENV 后置；138 项测试和真实功能验收通过。 |

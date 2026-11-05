@@ -1,9 +1,0 @@
-{
-  "schema_version": 1,
-  "name": "franka_emika_panda",
-  "repository": "https://github.com/google-deepmind/mujoco_menagerie.git",
-  "commit": "f3b6013629c7b94f8ee93fd977b161fa8350f9bc",
-  "subdirectory": "franka_emika_panda",
-  "license": "Apache-2.0",
-  "license_path": "LICENSE"
-}

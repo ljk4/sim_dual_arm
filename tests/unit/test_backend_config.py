@@ -8,7 +8,7 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-SIM_SRC = ROOT / "components/backend_sim/src"
+SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
@@ -17,12 +17,12 @@ from robot_backend_sim.backend_config import (  # noqa: E402
     load_backend_config,
 )
 
-CONFIG_PATH = ROOT / "configs/simulation/backend.yaml"
+CONFIG_PATH = ROOT / "simulation/mujoco/configs/backend/backend.yaml"
 DEFAULT_DOCUMENT = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
 
 
 def write_document(tmp_path: Path, document: dict) -> Path:
-    directory = tmp_path / "configs" / "simulation"
+    directory = tmp_path / "simulation" / "mujoco" / "configs"
     directory.mkdir(parents=True)
     path = directory / "backend.yaml"
     path.write_text(yaml.safe_dump(document), encoding="utf-8")

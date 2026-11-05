@@ -1,0 +1,30 @@
+# Run docker compose from this directory.
+name: sim-dual-arm
+
+services:
+  learning:
+    image: sim-dual-arm/learning:current
+    build: .
+    user: "1000:1000"
+    working_dir: /workspace
+    init: true
+    restart: "no"
+    stop_grace_period: 30s
+    pull_policy: never
+    runtime: nvidia
+    gpus: all
+    shm_size: 1gb
+    env_file: ../configs/container.env
+    volumes:
+      - ../../../:/workspace:ro
+      - ../../../var:/workspace/var
+      - ../../../.build:/workspace/.build
+      - ../../../.build:/build
+      - ../../../var:/data
+      - ../../../.build/generated/policy-sdk:/opt/policy-sdk:ro
+      - ../../../third_party:/third_party:ro
+      - ../../../.build/cache:/opt/learning-cache:ro
+    networks: [learning]
+
+networks:
+  learning: {}

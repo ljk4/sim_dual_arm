@@ -27,6 +27,19 @@ docs/
 各项目维护目录/README.md     本目录的用途、主要入口与边界
 ```
 
+仓库按端与实现组织，仿真器、中间件和学习框架各自一层，避免把具体实现写到
+顶层：
+
+```text
+simulation/<engine>/        仿真实现，当前 mujoco；其他引擎按需新增
+hardware/                   真机 Robot API 边界；驱动尚未实现
+runtime/<middleware>/       运行实现，当前 ros2
+learning/<framework>/       学习实现，当前 lerobot
+infrastructure/             公共 docker、构建/SDK scripts、examples
+contracts/ profiles/ libraries/ tests/ docs/ third_party/
+var/ .build/                原产物与构建输出，位置不变
+```
+
 - 根 README 面向第一次使用项目的人，不堆叠每日进展、会话和验收流水。
 - `project-status.md` 是当前阶段的唯一维护位置；已完成部分简记，详细过程、
   数字和失败回到对应历史阶段。
@@ -53,15 +66,16 @@ docs/
 
 | 位置 | 内容 | 边界 |
 | --- | --- | --- |
-| `components/` | backend-sim、runtime、learning 业务 | 按职责组织，不按容器复制代码 |
+| `simulation/<engine>/` | 仿真实现：`src/`、`configs/`、`docker/`、`scripts/` | 当前只有 `mujoco/`；不预建其他引擎空目录 |
+| `hardware/` | 真机统一 Robot API 边界与后续驱动 | 当前仅说明；不造假驱动或未来空框架 |
+| `runtime/<middleware>/` | 运行实现：`ros/`、`configs/`、`docker/`、`scripts/` | 当前只有 `ros2/`；不复制 backend 物理实现 |
+| `learning/<framework>/` | 学习实现：`src/`、`configs/`、`docker/`、`scripts/` | 当前只有 `lerobot/`；保持 ROS-free |
+| `infrastructure/` | 公共 `docker/`、构建/SDK `scripts/`、`examples/` | 仅公共环境与工具，不放业务、场景或训练算法 |
 | `libraries/` | 有明确用途与调用方的共享实现 | 不建任意 utils 或万能上下文 |
 | `contracts/` | IDL、proto、schema、轻量类型与语义校验 | 公共格式唯一来源，不依赖物理/学习框架 |
 | `profiles/` | 关节、单位、范围、相机与观测/动作语义 | 不放 IP、序列号、账号与机器路径 |
-| `configs/` | 场景、任务、控制、数据与训练配方 | 参数集中，不散落到脚本 |
-| `deploy/` | Docker、Compose、entrypoint、env 与机器绑定 | 不放模型、任务与控制算法 |
-| `tools/` | 构建、SDK、启动、审计与分析的薄入口 | 业务留所属组件，不复制生命周期 |
 | `tests/` | unit、integration、test-only doubles | mock/fake/synthetic 不冒充正式数据 |
-| `third_party/` | 固定来源、版本、许可与 checkout | 保留上游结构，不手写替代资产 |
+| `third_party/` | 其他固定外部源码 | Panda 模型直接放在 `simulation/mujoco/assets/` |
 | `var/` | 数据、模型、日志、预算与实验 | 不进 Git，按 run/episode/实验隔离 |
 | `.build/` | 构建、SDK、开发环境、工具与隔离工作树 | 不进 Git，清理前检查在用挂载及复现需要 |
 
@@ -128,7 +142,7 @@ docs/
   依赖实际状态的校验仍由执行层完成。
 - 每次运行保存有效配置与内容 hash。变化使用新 run 或受校验的恢复，不修改
   旧快照或篡改 manifest 适配新机器。
-- 私有绑定放忽略的 env、`deploy/local` 或实验目录；公开示例先写路径替换、
+- 私有绑定放忽略的 env、`infrastructure/local` 或实验目录；公开示例先写路径替换、
   挂载核对与输出，不写 token、账号或私密网络信息。
 
 ## 7. 日志、记录与结果
@@ -166,23 +180,109 @@ docs/
 ## 9. Docker、依赖与存储
 
 - ROS/控制与 ML 环境独立。系统依赖写进镜像，源码、配置、SDK、数据、资产、
-  模型优先挂载；输入只读，输出与缓存有明确可写位置。
-- 开发运行镜像不 COPY 业务源码、配方、profile 或测试。COPY 限于固定依赖清单、
-  必要的最小环境 bootstrap、来源信息和构建产物，并注明用途；运行模块来自显式
-  挂载目录，缺失挂载或 SDK 过期必须失败，不回退到镜像中的旧业务代码。
+  模型优先挂载；输入只读，输出与缓存有明确可写位置。每个实现恰好一份
+  `docker/Dockerfile`、`docker/docker-compose.yml` 和 `scripts/run.sh`，不维护根
+  Compose 或统一宿主环境包装。运行变量放各实现的 `configs/container.env`；公共
+  DDS 配置和可 source 的 `setup.sh` 放 `infrastructure/docker/`。
+- Dockerfile 只安装本端缺少的依赖，并以 `ENTRYPOINT []`、
+  `CMD ["sleep", "infinity"]` 空闲启动。各端在自己的 `docker/` 目录直接执行
+  `docker compose config/build/up -d/exec`；Compose 的 bind source 相对该文件，
+  容器内业务由本端 `scripts/run.sh` 手动启动。构建、启动和进入 shell 都不执行
+  数采、训练或推理。SDK 仍由 runtime 容器内的 `run.sh build-ros-sdk` /
+  `build-policy-sdk` 显式生成。
+- 三份 Compose 固定同一项目名，使 `ros` 与 `learning` 网络在独立启动时共享；
+  这是当前 Robot/Policy 通信需要的唯一跨端 Compose 约定。停止单端用 `stop`
+  和 `rm -f <服务名>`，不对单端使用 `down --remove-orphans`。当前本机以
+  `1000:1000` 写 bind 产物；迁移到其他 UID/GID 时分别核对 `user:`。
+- 服务名固定为 `simulation`、`runtime`、`learning`。simulation 与 runtime 共享
+  独立 ROS 网络和 `ROS_DOMAIN_ID`；runtime 另加入 learning 网络以解析 Policy
+  endpoint；learning 环境不得挂载 ROS SDK、设置 ROS 变量或引用 ROS。runtime 不
+  申请 GPU/NVIDIA；simulation 使用 `runtime: nvidia` + `gpus: all` 保证真实
+  NVIDIA EGL；learning 的训练/推理使用 NVIDIA GPU。三端均启用 `init: true`。
+- 仿真容器只把当前实现目录挂到 `/app:ro`，使用 `/app/scripts/run.sh`；不复刻宿主
+  `simulation/<engine>` 的分类，也不挂整个仓库。必要的 contracts、profiles、共享库
+  与配置单独只读挂载；Panda 模型放在 `simulation/mujoco/assets/`，通过
+  `/app:ro` 一起挂入，不另设资产下载、摘要或挂载。共享数据挂 `/data:rw`，
+  ROS SDK 挂 `/opt/ros-dev:ro`。宿主数据位置不因容器命名简化而移动。
+  runtime/learning 的现有脚本、SDK 构建和配置仍按仓库根解析跨端路径，因此
+  使用 `/workspace:ro`，数据/构建目录挂到 `/workspace/var`、`/workspace/.build`、
+  `/data`、`/build`。Policy SDK `/opt/policy-sdk:ro`，固定缓存只读；容器不挂
+  Docker socket/CLI。后续缩小挂载时必须先迁移并验证这些实际路径引用。
+- 公共 helper `setup.sh` 合并宿主边界与环境准备，可 source，只设置
+  PATH/PYTHONPATH/ROS；不保留 `environment.sh`、`exec.sh`、`require-container.sh`
+  等旧包装。三端通过 `env_file: ../configs/container.env` 配置容器内路径、
+  `PROJECT_SOURCE_PATHS`、ROS/离线设置。`docker compose exec` 不经过镜像入口；
+  各端 `run.sh` 自己 source 同一份 helper，再执行真实业务命令。
+  runtime 的 PYTHONPATH 必须包含只读 Policy SDK；首次无 SDK 时空闲启动和 shell
+  不预检，业务命令再检查。
+- 开发运行镜像不 COPY 业务源码、配方、profile、测试或 `run.sh`。COPY 限于锁文件、
+  固定依赖清单、必要的最小环境 bootstrap、来源信息和构建产物，并注明用途；运行
+  模块来自显式挂载目录，缺失挂载或 SDK 过期必须由具体业务脚本失败，不回退到镜像
+  中的旧业务代码。Dockerfile 仅保留依赖环境必需的 `ENV PATH`，用构建期 `ARG` 代替安装期的
+  `DEBIAN_FRONTEND` 运行变量，不设置 `WORKDIR`；统一清空继承的 `ENTRYPOINT`
+  并默认 `sleep infinity`。工作目录由 Compose 的 `working_dir` 指定；三端的
+  `run.sh` 都由用户进入容器后执行。不提供多 target 运行环境或宿主 venv 路线。
 - Dockerfile 禁止成段内嵌程序，包括 heredoc、多行 Python/Shell、循环分支以及
-  用字符串或编码隐藏脚本。构建逻辑放 `tools/build/`，Dockerfile 仅安装和调用；
+  用字符串或编码隐藏脚本。构建逻辑放 `infrastructure/scripts/`，Dockerfile 仅安装和调用；
   apt/pip 等命令可以分行列参数，不能借此塞入业务或构建算法。
 - Python/配置变更需重启相应进程，挂载不承诺自动热重载；IDL/proto 变化需重新
   生成 SDK 并核对来源摘要。验证修改生效要检查实际模块来源，而不只看挂载存在。
 - 改参数不重建镜像，依赖变化才重建对应层；固定上游版本/hash 和许可，锁文件
-  变化说明来源与影响，不用浮动依赖替代已验收基线。
-- 新机器先核对文件系统、挂载和可用空间。repo/DATA_ROOT、Docker、containerd
+  变化说明来源与影响。明确使用官方 `latest` 镜像的组件，每次重建记录实际摘要与
+  版本，并重新验证关键功能；之前的验收结果不自动适用于新镜像。
+- MuJoCo 等项目 Python 依赖统一维护在 `requirements.lock`，由 pip 使用固定版本
+  与 `--require-hashes` 安装；依赖清单变更后显式重建镜像。不另建镜像版本报告或
+  运行时锁摘要对比层。环境检查直接验证模块导入、挂载源码、EGL 与实际功能。
+- 模块的 `docker/` 目录内使用通用依赖名称（如 `requirements.lock`），不重复添加
+  sim、mujoco 等模块/引擎前缀。当前三端均使用本地 `build: .`，Dockerfile 的
+  COPY 直接使用本目录相对路径。源码归类
+  仍由外层模块目录负责；上游包名与官方环境变量保持原名。
+- `configs/container.env` 只声明运行时确实使用的固定设置，不保留未消费的组件
+  标签或重复检查开关。修改这些设置只需重新创建容器，不重建依赖镜像。
+  Compose 明写镜像、相对 bind 来源和共享网络，避免为早期项目维护宿主变量包装。
+- Ruckig 使用随源码提供的固定 wheel，安装锁和来源清单绑定同一产物；保留其平台
+  要求、许可证与哈希。普通仿真镜像构建直接安装，不隐式下载源码或退回编译；
+  升级版本/更换平台需另行发布并验收匹配的安装包。
+- 新机器先核对文件系统、挂载和可用空间。仓库、数据目录、Docker、containerd
   与匿名卷的存储位置分别确认，不能假设随仓库移动。
 - 启停/清理只操作已核对归属的 project/run 资源，保留 bind 产物和外来资源，
   不用全局 prune、模糊容器名或批量删除替代归属核对。
 - `.build` 中还有在用的冻结训练源与已验证环境，不能一概当可删缓存。
   清理前列目录、核对挂载/复现需要并取得用户授权。
+
+## 9.1 容器执行与替换边界
+
+- 实现相关的 Python 源目录和 ROS 环境选择由各实现的 Compose 或其 `env_file` 显式配置；公共
+  `setup.sh` 不按 MuJoCo、LeRobot 等具体名字分派。实现直接运行自己的 Compose，
+  公共检查器检查各模块目录，不要求根 Compose 选择器。
+- 每端只提供一个清晰的容器内 case 分发脚本 `scripts/run.sh`；进入空闲容器后
+  手动执行本端业务命令，参数透传给真实 CLI/SDK 工具。宿主用
+  `docker compose exec` 进入已有容器，不按功能名转发，也不在
+  `run.sh` 中重复实现 `idle`、`shell`、`exec`。
+  必要时只保留确有职责的准备脚本；业务脚本在宿主执行时明确失败，不悄悄创建或
+  使用宿主 venv。runtime 额外提供
+  `build-ros-sdk`、`build-policy-sdk`、`test`，learning 按需提供 `test`；脚本内部
+  调用 `infrastructure/scripts/test.sh` 和真实 SDK 生成器。simulation 直接沿用
+  官方 ROS 基础环境，不逐包拆除其自带依赖；项目新增 Python 包统一维护一份哈希
+  锁，不另建工具清单或重复安装层。以来源清楚、可维护为目标，不以包数量最少为
+  目标。ROS SDK 由 runtime 生成后只读挂载，仿真不维护重复的 SDK 构建入口。
+- 仿真 backend 配置/seed 由 simulation 端准备；learning 的 `prepare-policy`
+  校验真实 ACT bundle 并输出通用 Policy binding JSON 与 Policy 服务配置；runtime
+  的 `prepare` 只消费该 JSON、runtime 模板、seed/run-id，不得导入
+  `dual_arm_learning`、MuJoCo 或模型内核。绑定 run-id 必须与当前 run-id 一致；
+  endpoint 允许配置 host:port，但端口必须与声明 service.port 一致。runtime 只
+  要求通用 bundle/processor digest，直接设置已知 policy 字段；模板残留未解析占位
+  必须失败。
+- 所有准备输出使用显式目录，已存在即拒绝覆盖。准备产物可附 `run_manifest.json`
+  统一记录 run-id、seed、输入/输出 hash 和模型绑定；准备成功不计为运行成功。
+- 公共容器测试入口 `infrastructure/scripts/test.sh` 固定
+  `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`，避免 ROS 自动插件提前
+  导入未选择的 Torch 测试；skip 不等于通过。
+- 替换后端：实现同一 Robot API/语义 profile 和输入输出契约，在 `hardware/` 增加
+  实际驱动与最小配置，再在 Compose/环境中显式选择；不得让 runtime 导入具体物理
+  或驱动实现。替换学习框架：实现同一 Policy API，保持三路 RGB + 16 维实测输入和
+  当前 Panda 任务的 60×16 位置动作块语义，learning 环境仍保持 ROS-free。若动作
+  语义或时序改变，需同步契约、profile、配置与验收，不能靠目录替换自动兼容。
 
 ## 10. 变更、DSH 协作与验收
 

@@ -22,7 +22,7 @@
 | 模型时间语义 | 每点 50 ms；完整预测 60 点，即 3 秒 |
 | 数据 | 原 50 条合格 episode，45/5 划分；此次修复没有改数据或归一化统计 |
 | 最终执行配方 | 10 点／0.5 秒窗口、绝对仿真时间融合、系数 0.01、任务前稳定等待 2 秒 |
-| 最终配方入口 | [runtime](../../configs/runtime/native_task_act_chunked.yaml)、[backend](../../configs/simulation/backend_stack_act_chunked.yaml)、[follower](../../configs/simulation/panda_follower_act_chunked.yaml)、[policy](../../configs/learning/act_policy_temporal.yaml) |
+| 最终配方入口 | [runtime](../../runtime/ros2/configs/native_task_act_chunked.yaml)、[backend](../../simulation/mujoco/configs/backend/backend_stack_act_chunked.yaml)、[follower](../../simulation/mujoco/configs/control/panda_follower_act_chunked.yaml)、[policy](../../learning/lerobot/configs/act_policy_temporal.yaml) |
 
 模型包：`var/learning/experiments/act-static-b16-20k-20261103/bundle-best-20k`。
 其 digest 为 `c1ed8e8f0e3123f17fc1cba72aeec7c624b9a12d5a3f2c825c1f8300bcc278e6`。
@@ -67,7 +67,7 @@ weight = exp(coeff * (t - s) / P)
 
 **可复用经验：**异步查询的间隔可能超过一个动作周期，融合须按绝对执行时刻对齐，不能直接平均同一数组下标。保留历史观测身份和融合贡献数，防止平滑后无法解释动作来源。
 
-详见 [DSH-047](../history/dsh-047.md)、[融合实现](../../components/learning/src/dual_arm_learning/act_temporal.py) 和 [同一失败请求的融合对照](../../.build/reports/dsh-045/ensemble-probe-30401.json)。该离线通过不单独证明物理成功。
+详见 [DSH-047](../history/dsh-047.md)、[融合实现](../../learning/lerobot/src/dual_arm_learning/act_temporal.py) 和 [同一失败请求的融合对照](../../.build/reports/dsh-045/ensemble-probe-30401.json)。该离线通过不单独证明物理成功。
 
 ### 3.3 reset 完成不等于任务可准备，也不等于适合立即推理
 
@@ -104,7 +104,7 @@ weight = exp(coeff * (t - s) / P)
 
 **可复用经验：**在连续时间算法与离散时间协议之间，检查量化及边界状态。不能因持续时间很短就直接丢弃，也不能把全部非零值都当成有意义的物理事件。本修复没有实现通用制动前缀支持。
 
-证据：[修复前真实请求](../../.build/reports/dsh-048/brake-probe.json)、[修复后重建](../../.build/reports/dsh-050/brake-probe-fixed.json)、[DSH-050](../history/dsh-050.md)；实现见 [ruckig_export.py](../../components/backend_sim/src/robot_backend_sim/ruckig_export.py)。
+证据：[修复前真实请求](../../.build/reports/dsh-048/brake-probe.json)、[修复后重建](../../.build/reports/dsh-050/brake-probe-fixed.json)、[DSH-050](../history/dsh-050.md)；实现见 [ruckig_export.py](../../simulation/mujoco/src/robot_backend_sim/ruckig_export.py)。
 
 ### 3.7 静止速度的定义不一致，使正常夹持被判为跟踪超时
 
@@ -116,7 +116,7 @@ weight = exp(coeff * (t - s) / P)
 
 **可复用经验：**先追溯最早的失败事件，再解释上层后果；不要在运动已失败后盲目重试获取 anchor。相邻状态机对“零”“打开”“关闭”的数值定义应一致，并带明确单位。
 
-证据：[接触与跟踪重建](../../.build/reports/dsh-048/tracking-probe.json)、[DSH-051](../history/dsh-051.md)；实现见 [contact_unload.py](../../components/backend_sim/src/robot_backend_sim/contact_unload.py) 和 [motion.py](../../components/backend_sim/src/robot_backend_sim/motion.py)。修复后的同场景回归完成堆叠，但不能将全部组合收益都归因于这一项。
+证据：[接触与跟踪重建](../../.build/reports/dsh-048/tracking-probe.json)、[DSH-051](../history/dsh-051.md)；实现见 [contact_unload.py](../../simulation/mujoco/src/robot_backend_sim/contact_unload.py) 和 [motion.py](../../simulation/mujoco/src/robot_backend_sim/motion.py)。修复后的同场景回归完成堆叠，但不能将全部组合收益都归因于这一项。
 
 ## 4. 后续遇到类似问题的排查顺序
 

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "components/backend_sim/src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "simulation/mujoco/src"))
 from robot_backend_sim.feedback_mailbox import FeedbackMailbox  # noqa: E402
 
 

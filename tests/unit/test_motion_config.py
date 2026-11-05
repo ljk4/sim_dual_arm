@@ -10,7 +10,7 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-SIM_SRC = ROOT / "components/backend_sim/src"
+SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
@@ -21,7 +21,7 @@ from robot_backend_sim.motion_config import (  # noqa: E402
     parse_control_config,
 )
 
-CONFIG_PATH = ROOT / "configs/simulation/panda_control.yaml"
+CONFIG_PATH = ROOT / "simulation/mujoco/configs/control/panda_control.yaml"
 DEFAULT_DOCUMENT = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
 
 

@@ -30,14 +30,11 @@ except ImportError as error:  # pragma: no cover - host without ROS
     pytest.skip(f"ROS unavailable: {error}", allow_module_level=True)
 
 ROOT = Path(__file__).resolve().parents[2]
-RUNTIME_SRC = ROOT / "components/runtime/ros/dual_arm_runtime"
+RUNTIME_SRC = ROOT / "runtime/ros2/ros/dual_arm_runtime"
 CONTRACTS_SRC = ROOT / "contracts/python/src"
 ROS_SUPPORT_SRC = ROOT / "libraries/ros_support/src"
 RUN_LOGGING_SRC = ROOT / "libraries/run_logging/src"
-BACKEND_SRC = ROOT / "components/backend_sim/src"
-ASSETS_ROOT = Path(os.environ.get("SIM_ASSETS_ROOT", ROOT / "third_party/src/mujoco_menagerie"))
-SUMMARY = Path(os.environ.get("SIM_ASSET_SUMMARY", ROOT / ".build/assets/panda.json"))
-SOURCE = ROOT / "third_party/panda-source.json"
+BACKEND_SRC = ROOT / "simulation/mujoco/src"
 DOMAIN = os.environ.get("ROS_DOMAIN_ID", "77")
 
 
@@ -74,9 +71,9 @@ def _absolute_config(
                 "namespace": "/robot",
                 "profile": str(ROOT / "profiles/robots/panda_stack_v1/profile.json"),
                 "schemas": str(ROOT / "contracts/schemas"),
-                "scene": str(ROOT / "configs/simulation/panda_stack.yaml"),
-                "control": str(ROOT / "configs/simulation/panda_control.yaml"),
-                "stream": str(ROOT / "configs/simulation/panda_stream.yaml"),
+                "scene": str(ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml"),
+                "control": str(ROOT / "simulation/mujoco/configs/control/panda_control.yaml"),
+                "stream": str(ROOT / "simulation/mujoco/configs/control/panda_stream.yaml"),
             }
         )
         if document["robot"].get("follower"):
@@ -156,8 +153,8 @@ class Processes:
         tmp_path: Path,
         *,
         native_overrides: dict | None = None,
-        backend_source: Path = ROOT / "configs/simulation/backend.yaml",
-        runtime_source: Path = ROOT / "configs/runtime/native_collect.yaml",
+        backend_source: Path = ROOT / "simulation/mujoco/configs/backend/backend.yaml",
+        runtime_source: Path = ROOT / "runtime/ros2/configs/native_collect.yaml",
     ) -> None:
         self.tmp_path = tmp_path
         self.runtime_source = runtime_source
@@ -171,12 +168,6 @@ class Processes:
                 "robot_backend_sim.node",
                 "--config",
                 str(_absolute_config(tmp_path, backend_source, native=False)),
-                "--assets-root",
-                str(ASSETS_ROOT),
-                "--asset-summary",
-                str(SUMMARY),
-                "--asset-source",
-                str(SOURCE),
                 "--run-root",
                 str(tmp_path / "backend-runs"),
                 "--run-id",

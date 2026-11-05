@@ -27,7 +27,7 @@ def test_two_independent_datasets_train_only_processors_and_padding(tmp_path):
     pytest.importorskip("lerobot")
     import torch
 
-    config = load_dataset_config(ROOT / "configs/learning/act_dataset.yaml", ROOT)
+    config = load_dataset_config(ROOT / "learning/lerobot/configs/act_dataset.yaml", ROOT)
     config = replace(config, output_root=tmp_path / "data", cache_root=tmp_path / "cache")
     select = make_select(tmp_path, config, first_frames=61)
     manifest = convert(select_path=select, config=config, synthetic=True)
@@ -78,7 +78,7 @@ def test_two_independent_datasets_train_only_processors_and_padding(tmp_path):
     assert abs(float(train.meta.stats["action"]["mean"][0]) - 0.01) < 1e-6
     assert abs(float(validation.meta.stats["action"]["mean"][0]) - 1.01) < 1e-6
 
-    training = load_training_config(ROOT / "configs/learning/act_training.yaml", ROOT)
+    training = load_training_config(ROOT / "learning/lerobot/configs/act_training.yaml", ROOT)
     training = replace(training, data_root=tmp_path / "data", mode="smoke")
     audit = verify_dataset_manifest(training, allow_synthetic=True, require_full=False)
     assert audit.synthetic is True

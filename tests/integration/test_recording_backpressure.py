@@ -37,9 +37,9 @@ from std_msgs.msg import Header
 ROOT = Path("/workspace")
 SCHEMAS = ROOT / "contracts/schemas"
 CONFIG_SCHEMAS = ROOT / "contracts/schemas/v1"
-CONFIG = ROOT / "configs/runtime/mock_collect.yaml"
+CONFIG = ROOT / "runtime/ros2/configs/mock_collect.yaml"
 PROFILE = ROOT / "profiles/robots/mock_dual_arm_v1/profile.json"
-RUNTIME_SOURCE = ROOT / "components/runtime/ros/dual_arm_runtime"
+RUNTIME_SOURCE = ROOT / "runtime/ros2/ros/dual_arm_runtime"
 DOUBLES_SOURCE = ROOT / "tests/doubles/ros/mock_robot_backend"
 BOOTSTRAP = ROOT / "tests/integration/runtime_shutdown_bootstrap.py"
 TOPICS = {

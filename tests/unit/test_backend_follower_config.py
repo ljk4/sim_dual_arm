@@ -10,7 +10,7 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-SIM_SRC = ROOT / "components/backend_sim/src"
+SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
@@ -20,9 +20,9 @@ from robot_backend_sim.backend_config import (  # noqa: E402
 )
 from robot_backend_sim.follower_config import load_follower_config  # noqa: E402
 
-BASE = ROOT / "configs/simulation/backend.yaml"
-FOLLOWER = ROOT / "configs/simulation/backend_follower.yaml"
-FOLLOWER_PARAMS = ROOT / "configs/simulation/panda_follower.yaml"
+BASE = ROOT / "simulation/mujoco/configs/backend/backend.yaml"
+FOLLOWER = ROOT / "tests/fixtures/simulation/backend_follower.yaml"
+FOLLOWER_PARAMS = ROOT / "simulation/mujoco/configs/control/panda_follower.yaml"
 
 
 def write_variant(tmp_path: Path, mutate) -> Path:
@@ -31,9 +31,9 @@ def write_variant(tmp_path: Path, mutate) -> Path:
         {
             "profile": str(ROOT / "profiles/robots/panda_stack_v1/profile.json"),
             "schemas": str(ROOT / "contracts/schemas"),
-            "scene": str(ROOT / "configs/simulation/panda_stack.yaml"),
-            "control": str(ROOT / "configs/simulation/panda_control.yaml"),
-            "stream": str(ROOT / "configs/simulation/panda_stream.yaml"),
+            "scene": str(ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml"),
+            "control": str(ROOT / "simulation/mujoco/configs/control/panda_control.yaml"),
+            "stream": str(ROOT / "simulation/mujoco/configs/control/panda_stream.yaml"),
             "follower": str(FOLLOWER_PARAMS),
         }
     )
@@ -54,7 +54,7 @@ def test_follower_config_resolves_relative_follower_file_and_queue():
     assert config.follower_path == FOLLOWER_PARAMS.resolve()
     assert config.follower_reference_queue_capacity == 64
     assert load_follower_config(config.follower_path).target_count == 5
-    assert config.scene_path == (ROOT / "configs/simulation/panda_stack.yaml").resolve()
+    assert config.scene_path == (ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml").resolve()
 
 
 def test_missing_follower_file_is_rejected_not_disabled(tmp_path):

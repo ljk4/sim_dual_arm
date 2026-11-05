@@ -40,7 +40,7 @@ except ImportError as error:  # pragma: no cover - host without ROS
 
 ROOT = Path(__file__).resolve().parents[2]
 for source in (
-    ROOT / "components/backend_sim/src",
+    ROOT / "simulation/mujoco/src",
     ROOT / "contracts/python/src",
     ROOT / "libraries/ros_support/src",
 ):
@@ -59,9 +59,9 @@ from test_native_backend_ros import Stack, _profile_context, acquire  # noqa: E4
 
 PROFILE_PATH = ROOT / "profiles/robots/panda_stack_v1/profile.json"
 SCHEMAS = ROOT / "contracts/schemas"
-FOLLOWER_CONFIG = ROOT / "configs/simulation/backend_follower.yaml"
-CONTROL = load_control_config(ROOT / "configs/simulation/panda_control.yaml")
-FOLLOWER = load_follower_config(ROOT / "configs/simulation/panda_follower.yaml")
+FOLLOWER_CONFIG = ROOT / "tests/fixtures/simulation/backend_follower.yaml"
+CONTROL = load_control_config(ROOT / "simulation/mujoco/configs/control/panda_control.yaml")
+FOLLOWER = load_follower_config(ROOT / "simulation/mujoco/configs/control/panda_follower.yaml")
 PROFILE = load_profile(PROFILE_PATH, SCHEMAS)
 BASE = PROFILE.initial_positions
 COUNT = len(BASE)

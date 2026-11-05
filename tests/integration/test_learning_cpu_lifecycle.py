@@ -22,13 +22,13 @@ def test_public_act_training_resume_and_bundle_use_real_model(tmp_path):
     from dual_arm_learning.config import load_dataset_config
     from dual_arm_learning.dataset import convert
 
-    dataset_config = load_dataset_config(ROOT / "configs/learning/act_dataset.yaml", ROOT)
+    dataset_config = load_dataset_config(ROOT / "learning/lerobot/configs/act_dataset.yaml", ROOT)
     from dataclasses import replace
 
     dataset_config = replace(dataset_config, output_root=tmp_path / "data")
     select = make_select(tmp_path / "sources", dataset_config)
     convert(select_path=select, config=dataset_config, synthetic=True)
-    document = yaml.safe_load((ROOT / "configs/learning/act_training.yaml").read_text())
+    document = yaml.safe_load((ROOT / "learning/lerobot/configs/act_training.yaml").read_text())
     document["device"] = "cpu"
     document["data"]["root"] = str(tmp_path / "data")
     document["cache_root"] = str(tmp_path / "cache")
@@ -55,7 +55,7 @@ def test_public_act_training_resume_and_bundle_use_real_model(tmp_path):
 
     def cli(*arguments):
         result = subprocess.run(
-            [sys.executable, str(ROOT / "tools/run/learning.py"), *arguments],
+            ["bash", str(ROOT / "learning/lerobot/scripts/run.sh"), "cli", *arguments],
             capture_output=True,
             text=True,
             timeout=180,

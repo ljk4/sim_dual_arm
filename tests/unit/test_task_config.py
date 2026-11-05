@@ -9,7 +9,7 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-SIM_SRC = ROOT / "components/backend_sim/src"
+SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
@@ -20,7 +20,7 @@ from robot_backend_sim.task_config import (  # noqa: E402
     validate_scene_geometry,
 )
 
-CONFIG_PATH = ROOT / "configs/simulation/panda_stack_task.yaml"
+CONFIG_PATH = ROOT / "simulation/mujoco/configs/scene/panda_stack_task.yaml"
 
 
 def document() -> dict:
@@ -28,9 +28,11 @@ def document() -> dict:
 
 
 def write_config(tmp_path: Path, value: dict) -> Path:
-    directory = tmp_path / "configs" / "simulation"
+    directory = tmp_path / "simulation" / "mujoco" / "configs" / "scene"
     directory.mkdir(parents=True)
-    (directory / "kinematics_check.yaml").write_text("dummy: true\n", encoding="utf-8")
+    checks = directory.parent / "checks"
+    checks.mkdir()
+    (checks / "kinematics_check.yaml").write_text("dummy: true\n", encoding="utf-8")
     path = directory / "panda_stack_task.yaml"
     path.write_text(yaml.safe_dump(value), encoding="utf-8")
     return path
@@ -108,7 +110,7 @@ def test_wrong_geometry_is_rejected_against_configured_cube(tmp_path):
 
 
 def test_task_geometry_must_match_the_frozen_scene():
-    scene_config = load_scene_config(ROOT / "configs/simulation/panda_stack.yaml")
+    scene_config = load_scene_config(ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml")
     config = load_task_config(CONFIG_PATH)
     validate_scene_geometry(config, scene_config)
     wrong = replace(config, source_half_extents_m=(0.021, 0.02, 0.02))

@@ -1,0 +1,88 @@
+# Test-only applied-label replay runtime.  It uses the same policy stream and
+# bounded follower path, but the provider replays exported applied labels; this
+# is not ACT and never enters formal data.
+# Paths are relative to this file; all times are integer ns unless a field says
+# seconds.  Three RGB cameras and the full 16-joint order are fixed by the
+# referenced profile and the Policy service configuration.
+schema_version: 1
+robot_profile: ../../../profiles/robots/panda_stack_learning_v1/profile.json
+observation_schema: ../../../profiles/observations/panda_rgb_joint_v1.json
+action_schema: ../../../profiles/actions/panda_joint_position_v1.json
+control_constraints: ../../../simulation/mujoco/configs/control/panda_control.yaml
+follower_constraints: ../../../simulation/mujoco/configs/control/panda_follower.yaml
+robot_namespace: /robot
+
+action_source: policy
+# Policy inference never enables the program teacher.  Use a backend deployment
+# with task_mode: inference (or no robot.task) so teacher_chunk is absent from
+# BackendInfo capabilities and GetTeacherChunk is rejected.
+
+lease_duration_ns: 2000000000
+renew_interval_ns: 500000000
+command_acceptance_ns: 500000000
+startup_timeout_s: 30.0
+call_timeout_s: 5.0
+command_timeout_s: 8.0
+
+reset:
+  enabled: true
+  seed: 0
+
+observation:
+  reliable: true
+  max_skew_ns: 0
+  max_age_ns: 500000000
+  wall_arrival_timeout_s: 1.5
+  capacity: 32
+
+control:
+  submit_query_retries: 2
+  poll_interval_s: 0.02
+  stop_timeout_s: 8.0
+  terminal_timeout_s: 20.0
+
+# The diagnostic stream is finite: eight chunks x five selected points at
+# 50 ms.  It is not a task termination rule and does not claim task success.
+policy:
+  endpoint: fake-policy:50051
+  model_bundle_digest: 9f2c67c0c4b0a4f6f5a0d9b6c1f8f0c5c4f3e2d1a0b9c8d7e6f5a4b3c2d1e0f9
+  processor_digest: 1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809
+  allow_test_policy: true
+  expected_test_only: true
+  task_id: stack-label-replay
+  task_text: Replay exported applied teacher labels through the same bounded follower; test-only, not ACT.
+  chunk_size: 60
+  action_period_ns: 50000000
+  target_count: 5
+  # Matches panda_stream.initial_lead_s: the first hand-off is 250 ms ahead.
+  initial_lead_ns: 250000000
+  max_chunks: 128
+  total_sim_deadline_ns: 30000000000
+  total_wall_deadline_s: 60.0
+  connect_timeout_s: 2.0
+  open_deadline_s: 2.0
+  predict_deadline_s: 2.0
+  close_deadline_s: 2.0
+  max_message_bytes: 16777216
+  poll_interval_s: 0.02
+  termination_mode: task
+  task_stop_margin_s: 1.0
+  task_sim_budget_ns: 30000000000
+
+# Kept empty on purpose: policy mode never substitutes constant left-arm
+# targets or old MOTION preparation.  Use native_collect.yaml for MOTION.
+motions: []
+
+logging:
+  queue_capacity: 256
+  max_event_bytes: 32768
+  max_file_bytes: 8388608
+  max_total_bytes: 268435456
+  close_timeout_s: 3.0
+  flush_interval_s: 0.2
+  console: false
+recording:
+  queue_capacity: 1024
+  max_pending_bytes: 67108864
+  startup_timeout_s: 5.0
+  close_timeout_s: 5.0

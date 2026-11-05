@@ -14,7 +14,7 @@ from robot_contracts.episodes import (
 from robot_contracts.models import ContractError
 
 ROOT = Path(__file__).resolve().parents[2]
-CONFIG = ROOT / "configs/runtime/native_collect.yaml"
+CONFIG = ROOT / "runtime/ros2/configs/native_collect.yaml"
 
 
 def document():
@@ -108,7 +108,7 @@ def test_v3_v4_are_explicit_and_mock_default_stays_v2():
 
 
 def test_policy_max_chunks_can_cover_a_120_chunk_task(tmp_path):
-    policy_config = ROOT / "configs/runtime/native_policy.yaml"
+    policy_config = ROOT / "runtime/ros2/configs/native_policy.yaml"
     value = yaml.safe_load(policy_config.read_text(encoding="utf-8"))
     for field in (
         "robot_profile",
@@ -133,12 +133,12 @@ def test_policy_max_chunks_can_cover_a_120_chunk_task(tmp_path):
 
 def policy_document():
     return yaml.safe_load(
-        (ROOT / "configs/runtime/native_policy.yaml").read_text(encoding="utf-8")
+        (ROOT / "runtime/ros2/configs/native_policy.yaml").read_text(encoding="utf-8")
     )
 
 
 def write_policy(tmp_path, value):
-    base = ROOT / "configs/runtime/native_policy.yaml"
+    base = ROOT / "runtime/ros2/configs/native_policy.yaml"
     for field in (
         "robot_profile",
         "observation_schema",
@@ -155,7 +155,7 @@ def write_policy(tmp_path, value):
 
 def test_policy_startup_settle_defaults_to_disabled():
     configuration = load_native_configuration(
-        ROOT / "configs/runtime/native_policy.yaml", ROOT
+        ROOT / "runtime/ros2/configs/native_policy.yaml", ROOT
     )
     assert configuration.recipe.policy.startup_settle_sim_ns == 0
     assert configuration.snapshot["recipe"]["policy"]["startup_settle_sim_ns"] == 0

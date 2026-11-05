@@ -7,7 +7,6 @@ ROS services are covered by ``test_native_backend_ros.py`` under Docker.
 
 from __future__ import annotations
 
-import os
 import sys
 import time
 from dataclasses import replace
@@ -21,7 +20,7 @@ pytest.importorskip("scipy")
 
 ROOT = Path(__file__).resolve().parents[2]
 for source in (
-    ROOT / "components/backend_sim/src",
+    ROOT / "simulation/mujoco/src",
     ROOT / "contracts/python/src",
     ROOT / "libraries/run_logging/src",
 ):
@@ -34,12 +33,9 @@ from robot_backend_sim.worker import BackendClosed, NativeWorker  # noqa: E402
 from robot_contracts.models import ContractError, Target, Trajectory  # noqa: E402
 from robot_contracts.native import NATIVE_MOTION, NativeRequest  # noqa: E402
 
-CONFIG_PATH = ROOT / "configs/simulation/backend.yaml"
-STACK_TEACHER_CONFIG = ROOT / "configs/simulation/backend_stack_teacher.yaml"
-STACK_INFERENCE_CONFIG = ROOT / "configs/simulation/backend_stack_inference.yaml"
-ASSETS_ROOT = Path(os.environ.get("SIM_ASSETS_ROOT", ROOT / "third_party/src/mujoco_menagerie"))
-SUMMARY_PATH = Path(os.environ.get("SIM_ASSET_SUMMARY", ROOT / ".build/assets/panda.json"))
-SOURCE_PATH = ROOT / "third_party/panda-source.json"
+CONFIG_PATH = ROOT / "simulation/mujoco/configs/backend/backend.yaml"
+STACK_TEACHER_CONFIG = ROOT / "simulation/mujoco/configs/backend/backend_stack_teacher.yaml"
+STACK_INFERENCE_CONFIG = ROOT / "simulation/mujoco/configs/backend/backend_stack_inference.yaml"
 
 
 class FakeRenderer:
@@ -76,9 +72,6 @@ def new_worker_from(path, renderer=FakeRenderer, **changes):
     FakeRenderer.fail = False
     worker = NativeWorker(
         replace(load_backend_config(path), **changes),
-        assets_root=ASSETS_ROOT,
-        summary_path=SUMMARY_PATH,
-        source_path=SOURCE_PATH,
         renderer_factory=renderer,
     )
     worker.start()
@@ -363,9 +356,6 @@ def test_logger_failure_latches_a_nonzero_fault():
 
     worker = NativeWorker(
         config_for(realtime_speed=20.0),
-        assets_root=ASSETS_ROOT,
-        summary_path=SUMMARY_PATH,
-        source_path=SOURCE_PATH,
         log=BrokenLogger(),
         renderer_factory=FakeRenderer,
     )
@@ -444,9 +434,6 @@ def test_initial_seed_is_applied_and_idle_close_is_reported():
         capture = drain_until(worker, lambda item: item.captures() or None)[-1]
         expected = build_scene(
             worker.scene_config,
-            assets_root=ASSETS_ROOT,
-            summary_path=SUMMARY_PATH,
-            source_path=SOURCE_PATH,
         )
         expected.reset(711)
         clone = mujoco.MjData(expected.model)

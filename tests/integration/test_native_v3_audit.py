@@ -33,7 +33,7 @@ from std_msgs.msg import Header  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 for source in (
-    ROOT / "components/backend_sim/src",
+    ROOT / "simulation/mujoco/src",
     ROOT / "contracts/python/src",
     ROOT / "libraries/ros_support/src",
 ):

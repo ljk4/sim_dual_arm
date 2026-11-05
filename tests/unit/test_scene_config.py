@@ -10,7 +10,7 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-SIM_SRC = ROOT / "components/backend_sim/src"
+SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
@@ -21,7 +21,7 @@ from robot_backend_sim.scene_config import (  # noqa: E402
 )
 from robot_contracts.profiles import load_profile, semantic_hash  # noqa: E402
 
-CONFIG_PATH = ROOT / "configs/simulation/panda_stack.yaml"
+CONFIG_PATH = ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml"
 PROFILE_PATH = ROOT / "profiles/robots/panda_stack_v1/profile.json"
 SCHEMAS = ROOT / "contracts/schemas"
 DEFAULT_DOCUMENT = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))

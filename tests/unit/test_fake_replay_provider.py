@@ -21,7 +21,7 @@ def test_fake_provider_replays_only_applied_labels(tmp_path):
     }
     path = tmp_path / "labels.json"
     path.write_text(json.dumps(labels), encoding="utf-8")
-    config, settings = load_fake_config(ROOT / "configs/learning/replay_policy.yaml")
+    config, settings = load_fake_config(ROOT / "learning/lerobot/configs/replay_policy.yaml")
     provider = FakeProvider(
         config,
         FakeSettings(
@@ -76,7 +76,7 @@ def test_replay_uses_relative_time_across_independent_episode_clocks(tmp_path):
             }
         )
     )
-    config, _ = load_fake_config(ROOT / "configs/learning/replay_policy.yaml")
+    config, _ = load_fake_config(ROOT / "learning/lerobot/configs/replay_policy.yaml")
     provider = FakeProvider(config, FakeSettings(replay_labels=str(path), latency_s=0.0))
     context = ProviderContext("robot", config.robot_profile_hash, "backend", "sim", 1, "ep", 1)
     provider.open("session", context, "open", b"{}", b"{}", b"{}")

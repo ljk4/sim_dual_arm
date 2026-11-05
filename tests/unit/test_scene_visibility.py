@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import copy
-import importlib.util
 import json
 import math
 import sys
@@ -13,28 +12,15 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-SIM_SRC = ROOT / "components/backend_sim/src"
+SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
 from robot_backend_sim import check_scene, visibility  # noqa: E402
 from robot_backend_sim.scene_config import load_scene_config  # noqa: E402
 
-SCENE_CONFIG = ROOT / "configs/simulation/panda_stack.yaml"
-CHECK_CONFIG = ROOT / "configs/simulation/scene_check.yaml"
-
-
-def load_tool(name: str, relative: str):
-    path = ROOT / relative
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-sim_check = load_tool("dsh016_sim_check", "tools/run/sim_check.py")
+SCENE_CONFIG = ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml"
+CHECK_CONFIG = ROOT / "simulation/mujoco/configs/checks/scene_check.yaml"
 
 
 def write_yaml(tmp_path: Path, document: dict) -> Path:
@@ -384,16 +370,8 @@ def test_yaw_quaternion_is_normalized_and_has_both_signs():
 
 
 def check_arguments(tmp_path: Path) -> check_scene.SceneCheckArguments:
-    for name in ("assets", "reports"):
-        (tmp_path / name).mkdir()
-    summary = tmp_path / "summary.json"
-    summary.write_text("{}")
-    source = tmp_path / "source.json"
-    source.write_text("{}")
+    (tmp_path / "reports").mkdir()
     return check_scene.SceneCheckArguments(
-        assets_root=tmp_path / "assets",
-        summary=summary,
-        source=source,
         scene_config=SCENE_CONFIG,
         check_config=CHECK_CONFIG,
         report_root=tmp_path / "reports",
@@ -522,22 +500,10 @@ def install_success_fakes(monkeypatch, tmp_path, *, renderer=None):
     monkeypatch.setattr(
         check_scene.probe_environment,
         "check_dependencies",
-        lambda _path: {"python": {"version": "3.12"}, "packages": {}, "imports": {}},
+        lambda: {"python": {"version": "3.12"}, "packages": {}, "imports": {}},
     )
     monkeypatch.setattr(check_scene.probe_environment, "_verify_mounted_source", lambda *a: None)
-    monkeypatch.setattr(
-        check_scene,
-        "_load_asset_provenance",
-        lambda _arguments: {
-            "description": {},
-            "summary": {
-                "commit": "a" * 40,
-                "file_count": 1,
-                "total_sha256": "b" * 64,
-            },
-        },
-    )
-    monkeypatch.setattr(check_scene, "_build_scene", lambda _arguments, _config: FakeScene())
+    monkeypatch.setattr(check_scene, "_build_scene", lambda _config: FakeScene())
     monkeypatch.setattr(check_scene, "_make_renderer", lambda _scene, _config: renderer)
     monkeypatch.setattr(check_scene.visibility, "summarize_layout", fake_summary)
     monkeypatch.setattr(
@@ -637,97 +603,6 @@ def test_run_refuses_an_existing_run_directory_before_starting(tmp_path):
     (arguments.report_root / arguments.run_id).mkdir()
     with pytest.raises(check_scene.SceneCheckUsageError, match="already exists"):
         check_scene.run(arguments)
-
-
-def test_host_check_mode_defaults_and_scene_command_are_fixed(tmp_path):
-    build_root = tmp_path / "build"
-    assets_root = tmp_path / "assets"
-    for directory in (build_root, assets_root):
-        directory.mkdir()
-    summary = tmp_path / "summary.json"
-    summary.write_text("{}")
-    base = [
-        "--build-root",
-        str(build_root),
-        "--assets-root",
-        str(assets_root),
-        "--summary",
-        str(summary),
-        "--report-root",
-        str(tmp_path / "reports"),
-        "--run-id",
-        "scene-entry",
-    ]
-
-    environment = sim_check.parse_arguments(base)
-    assert environment.check == "environment"
-    assert environment.scene_config == ROOT / "configs/simulation/panda_stack.yaml"
-    assert environment.check_config == ROOT / "configs/simulation/scene_check.yaml"
-    environment_argv = sim_check.compose_argv(environment)
-    assert environment_argv[-1] == "sim-check"
-    assert not any("check_scene" in item for item in environment_argv)
-    assert sim_check.compose_environment(environment)["SIM_SCENE_CONFIG"] == str(
-        environment.scene_config
-    )
-
-    scene = sim_check.parse_arguments(
-        [
-            *base,
-            "--check",
-            "scene",
-            "--scene-config",
-            str(SCENE_CONFIG),
-            "--check-config",
-            str(CHECK_CONFIG),
-        ]
-    )
-    scene_argv = sim_check.compose_argv(scene)
-    assert scene_argv[-1] == "scene-entry"
-    assert "robot_backend_sim.check_scene" in scene_argv
-    assert "/sim-configs/panda_stack.yaml" in scene_argv
-    assert "/sim-configs/scene_check.yaml" in scene_argv
-    assert not any("probe_environment" in item for item in scene_argv)
-    assert scene_argv.count("--run-id") == 1
-
-
-def host_report(tmp_path: Path, run_id: str, *, kind: str | None) -> Path:
-    report_dir = tmp_path / "reports" / run_id
-    artifact = report_dir / "artifacts/contact_sheet.png"
-    artifact.parent.mkdir(parents=True)
-    artifact.write_bytes(b"png")
-    document = {
-        "run_id": run_id,
-        "status": "succeeded",
-        "exit_code": 0,
-        "logs_closed": True,
-        "artifact": "artifacts/contact_sheet.png",
-    }
-    if kind is not None:
-        document["kind"] = kind
-    report = report_dir / "report.json"
-    report.write_text(json.dumps(document))
-    return report
-
-
-def test_host_report_verification_requires_scene_kind(tmp_path):
-    missing = host_report(tmp_path, "scene-a", kind=None)
-    assert (
-        sim_check.verify_report(missing, run_id="scene-a", process_exit=0, kind="scene")[1]
-        == "report_kind_mismatch"
-    )
-    scene = host_report(tmp_path, "scene-b", kind="scene")
-    assert sim_check.verify_report(scene, run_id="scene-b", process_exit=0, kind="scene")[:2] == (
-        "succeeded",
-        "",
-    )
-
-
-def test_compose_contract_mounts_both_configs_read_only():
-    document = yaml.safe_load((ROOT / "deploy/compose/sim_check.yaml").read_text())
-    volumes = {volume["target"]: volume for volume in document["services"]["sim-check"]["volumes"]}
-    for target in ("/sim-configs/panda_stack.yaml", "/sim-configs/scene_check.yaml"):
-        assert volumes[target]["read_only"] is True
-    assert volumes["/sim-reports"].get("read_only", False) is False
 
 
 def test_python_source_manifest_tracks_code_and_is_independent_of_mount_location(tmp_path):

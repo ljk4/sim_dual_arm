@@ -10,8 +10,12 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_learning_scene_changes_only_the_right_wrist_field_of_view():
-    original = yaml.safe_load((ROOT / "configs/simulation/panda_stack.yaml").read_text())
-    learning = yaml.safe_load((ROOT / "configs/simulation/panda_stack_learning.yaml").read_text())
+    original = yaml.safe_load(
+        (ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml").read_text()
+    )
+    learning = yaml.safe_load(
+        (ROOT / "simulation/mujoco/configs/scene/panda_stack_learning.yaml").read_text()
+    )
     assert learning["cameras"]["right_wrist"]["fovy"] == 68.0
     learning["cameras"]["right_wrist"]["fovy"] = original["cameras"]["right_wrist"]["fovy"]
     assert learning == original

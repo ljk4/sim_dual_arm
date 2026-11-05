@@ -37,7 +37,7 @@ from dual_arm_runtime.native_control_client import NativeControlClient
 from dual_arm_runtime.stack_task_client import StackTaskClient
 
 ROOT = Path(__file__).resolve().parents[2]
-NATIVE_CONFIG = ROOT / "configs/runtime/native_teacher.yaml"
+NATIVE_CONFIG = ROOT / "runtime/ros2/configs/native_teacher.yaml"
 POLL_INTERVAL_S = 0.5
 ASYNC_ACK_DELAY_S = 0.02
 

@@ -29,7 +29,7 @@ SCHEMAS = ROOT / "contracts/schemas"
 PANDA_PROFILE = ROOT / "profiles/robots/panda_stack_v1/profile.json"
 PANDA_OBSERVATION = ROOT / "profiles/observations/panda_rgb_joint_v1.json"
 PANDA_ACTION = ROOT / "profiles/actions/panda_joint_position_v1.json"
-BASE_CONFIG = ROOT / "configs/runtime/mock_collect.yaml"
+BASE_CONFIG = ROOT / "runtime/ros2/configs/mock_collect.yaml"
 EPISODE_ID = "episode-multicamera"
 
 

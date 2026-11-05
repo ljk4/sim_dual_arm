@@ -9,27 +9,23 @@ skipped rather than substituting synthetic images.
 
 from __future__ import annotations
 
-import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 for source in (
-    ROOT / "components/backend_sim/src",
+    ROOT / "simulation/mujoco/src",
     ROOT / "contracts/python/src",
     ROOT / "libraries/ros_support/src",
 ):
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
 PROFILE_PATH = ROOT / "profiles/robots/panda_stack_v1/profile.json"
-SCENE_PATH = ROOT / "configs/simulation/panda_stack.yaml"
-CONTROL_PATH = ROOT / "configs/simulation/panda_control.yaml"
-NATIVE_CONFIG = ROOT / "configs/runtime/native_collect.yaml"
+SCENE_PATH = ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml"
+CONTROL_PATH = ROOT / "simulation/mujoco/configs/control/panda_control.yaml"
+NATIVE_CONFIG = ROOT / "runtime/ros2/configs/native_collect.yaml"
 SCHEMAS = ROOT / "contracts/schemas"
-ASSETS_ROOT = Path(os.environ.get("SIM_ASSETS_ROOT", ROOT / "third_party/src/mujoco_menagerie"))
-SUMMARY = Path(os.environ.get("SIM_ASSET_SUMMARY", ROOT / ".build/assets/panda.json"))
-SOURCE = ROOT / "third_party/panda-source.json"
 DT_NS = 2_000_000
 LEASE_NS = 10_000_000_000
 SAMPLE_NS = 50_000_000
@@ -149,9 +145,6 @@ def run_three_physical_chunks() -> PhysicalRun:
     control = load_control_config(CONTROL_PATH)
     scene = build_scene(
         load_scene_config(SCENE_PATH),
-        assets_root=ASSETS_ROOT,
-        summary_path=SUMMARY,
-        source_path=SOURCE,
     )
     scene.reset(0)
     io = PandaIO(scene, profile)

@@ -63,7 +63,7 @@ except ImportError as error:  # pragma: no cover - host without ROS
     pytest.skip(f"ROS unavailable: {error}", allow_module_level=True)
 
 ROOT = Path(__file__).resolve().parents[2]
-SIM_SRC = ROOT / "components/backend_sim/src"
+SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
@@ -72,12 +72,9 @@ from robot_backend_sim.node import NativeBackendNode  # noqa: E402
 from robot_backend_sim.ros_bridge import RosFutureBridge  # noqa: E402
 from robot_backend_sim.worker import NativeWorker  # noqa: E402
 
-CONFIG = ROOT / "configs/simulation/backend.yaml"
+CONFIG = ROOT / "simulation/mujoco/configs/backend/backend.yaml"
 PROFILE_PATH = ROOT / "profiles/robots/panda_stack_v1/profile.json"
 SCHEMAS = ROOT / "contracts/schemas"
-ASSETS_ROOT = Path(os.environ.get("SIM_ASSETS_ROOT", ROOT / "third_party/src/mujoco_menagerie"))
-SUMMARY = Path(os.environ.get("SIM_ASSET_SUMMARY", ROOT / ".build/assets/panda.json"))
-SOURCE = ROOT / "third_party/panda-source.json"
 
 
 def _config_for(
@@ -93,9 +90,9 @@ def _config_for(
             "namespace": namespace,
             "profile": str(PROFILE_PATH),
             "schemas": str(SCHEMAS),
-            "scene": str(ROOT / "configs/simulation/panda_stack.yaml"),
-            "control": str(ROOT / "configs/simulation/panda_control.yaml"),
-            "stream": str(ROOT / "configs/simulation/panda_stream.yaml"),
+            "scene": str(ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml"),
+            "control": str(ROOT / "simulation/mujoco/configs/control/panda_control.yaml"),
+            "stream": str(ROOT / "simulation/mujoco/configs/control/panda_stream.yaml"),
         }
     )
     follower = document["robot"].get("follower")
@@ -125,7 +122,7 @@ class Stack:
         child_env = os.environ.copy()
         child_env["PYTHONPATH"] = os.pathsep.join(
             [
-                str(ROOT / "components/backend_sim/src"),
+                str(ROOT / "simulation/mujoco/src"),
                 str(ROOT / "contracts/python/src"),
                 str(ROOT / "libraries/ros_support/src"),
                 str(ROOT / "libraries/run_logging/src"),
@@ -139,12 +136,6 @@ class Stack:
                 "robot_backend_sim.node",
                 "--config",
                 str(self.config),
-                "--assets-root",
-                str(ASSETS_ROOT),
-                "--asset-summary",
-                str(SUMMARY),
-                "--asset-source",
-                str(SOURCE),
                 "--run-root",
                 str(self.run_root),
                 "--run-id",
@@ -655,9 +646,6 @@ def test_node_setup_failure_closes_worker_and_renderer(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match="injected publisher failure"):
         NativeBackendNode(
             config,
-            assets_root=ASSETS_ROOT,
-            summary_path=SUMMARY,
-            source_path=SOURCE,
         )
     assert closed == ["NODE_START_FAILED"]
 

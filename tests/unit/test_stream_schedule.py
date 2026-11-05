@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-SIM_SRC = ROOT / "components/backend_sim/src"
+SIM_SRC = ROOT / "simulation/mujoco/src"
 CONTRACT_SRC = ROOT / "contracts/python/src"
 for source in (SIM_SRC, CONTRACT_SRC):
     if str(source) not in sys.path:

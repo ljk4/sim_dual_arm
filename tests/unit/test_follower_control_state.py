@@ -16,7 +16,7 @@ from robot_contracts.models import ContractError, JointSpec, RunContext, Target
 from robot_contracts.reference import CubicSegment, ReferencePlan, ReferenceSample
 
 ROOT = Path(__file__).resolve().parents[2]
-for source in (ROOT / "components/backend_sim/src", ROOT / "contracts/python/src"):
+for source in (ROOT / "simulation/mujoco/src", ROOT / "contracts/python/src"):
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
 
@@ -36,8 +36,8 @@ PROFILE = load_profile(
     ROOT / "profiles/robots/panda_stack_v1/profile.json",
     ROOT / "contracts/schemas/v1",
 )
-CONTROL = load_control_config(ROOT / "configs/simulation/panda_control.yaml")
-FOLLOWER = load_follower_config(ROOT / "configs/simulation/panda_follower.yaml")
+CONTROL = load_control_config(ROOT / "simulation/mujoco/configs/control/panda_control.yaml")
+FOLLOWER = load_follower_config(ROOT / "simulation/mujoco/configs/control/panda_follower.yaml")
 BASE = PROFILE.initial_positions
 JOINT_COUNT = len(BASE)
 GRID_NS = 2_000_000

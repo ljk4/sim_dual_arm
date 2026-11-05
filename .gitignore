@@ -5,7 +5,7 @@
 /.build/
 
 # Machine-specific deployment bindings and downloaded external checkouts.
-/deploy/local/
+/infrastructure/local/
 /third_party/src/
 
 # Python environments and caches.

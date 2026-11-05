@@ -1,0 +1,8 @@
+{
+  "source": "third_party/src/lerobot-act-v0.6.1",
+  "revision": "7e241bd630a3719a56157a497ce5d08f244784f1",
+  "archive_sha256": "710397ad753090743c1aadf04b2bd40584fbca8448b1409131138172913c8a0c",
+  "git_lfs_filters": "disabled; source-only export",
+  "python": "3.12",
+  "base_image": "huggingface/lerobot-gpu:latest"
+}

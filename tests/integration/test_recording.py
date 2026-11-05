@@ -47,7 +47,7 @@ def write_episode(
     on_recorder=None,
     feedback: tuple[CommandStatus, ...] = (),
 ) -> Path:
-    config = load_configuration(ROOT, ROOT / "configs/runtime/mock_collect.yaml")
+    config = load_configuration(ROOT, ROOT / "runtime/ros2/configs/mock_collect.yaml")
     context = RunContext(
         config.profile.robot_id,
         config.profile.digest,

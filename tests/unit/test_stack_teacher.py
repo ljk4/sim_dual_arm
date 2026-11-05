@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -8,7 +7,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-SIM_SRC = ROOT / "components/backend_sim/src"
+SIM_SRC = ROOT / "simulation/mujoco/src"
 CONTRACTS = ROOT / "contracts/python/src"
 for source in (SIM_SRC, CONTRACTS):
     if str(source) not in sys.path:
@@ -34,38 +33,22 @@ from robot_backend_sim.teacher import (  # noqa: E402
 from robot_contracts.models import RunContext  # noqa: E402
 from robot_contracts.profiles import load_profile  # noqa: E402
 
-ASSETS_ROOT = Path(
-    os.environ.get(
-        "SIM_ASSETS_ROOT",
-        "/home/ljk/work/sim_dual_arm/third_party/src/mujoco_menagerie",
-    )
-)
-SUMMARY = Path(
-    os.environ.get("SIM_ASSET_SUMMARY", "/home/ljk/work/sim_dual_arm/.build/assets/panda.json")
-)
-SOURCE = ROOT / "third_party/panda-source.json"
-if not (ASSETS_ROOT / "franka_emika_panda/panda.xml").is_file() or not SUMMARY.is_file():
-    pytest.skip("fixed Panda assets are not available", allow_module_level=True)
-
 
 @pytest.fixture(scope="module")
 def fixture():
-    scene_config = load_scene_config(ROOT / "configs/simulation/panda_stack.yaml")
+    scene_config = load_scene_config(ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml")
     scene = build_scene(
         scene_config,
-        assets_root=ASSETS_ROOT,
-        summary_path=SUMMARY,
-        source_path=SOURCE,
     )
     scene.reset(0)
-    task_config = load_task_config(ROOT / "configs/simulation/panda_stack_task.yaml")
+    task_config = load_task_config(ROOT / "simulation/mujoco/configs/scene/panda_stack_task.yaml")
     profile = load_profile(
         ROOT / "profiles/robots/panda_stack_v1/profile.json",
         ROOT / "contracts/schemas",
     )
-    control = load_control_config(ROOT / "configs/simulation/panda_control.yaml")
+    control = load_control_config(ROOT / "simulation/mujoco/configs/control/panda_control.yaml")
     kinematics = load_kinematics_config(
-        ROOT / "configs/simulation/kinematics_check.yaml", scene_config
+        ROOT / "simulation/mujoco/configs/checks/kinematics_check.yaml", scene_config
     )
     indices = scene.indices
     qpos = tuple(float(value) for value in scene.data.qpos)

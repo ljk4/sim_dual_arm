@@ -17,7 +17,7 @@ from robot_contracts.models import ContractError
 from robot_contracts.profiles import load_document, semantic_hash, validate_bindings
 
 ROOT = Path(__file__).resolve().parents[2]
-BASE_CONFIG = ROOT / "configs/runtime/mock_collect.yaml"
+BASE_CONFIG = ROOT / "runtime/ros2/configs/mock_collect.yaml"
 SCHEMAS = ROOT / "contracts/schemas/v1"
 
 

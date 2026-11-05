@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_effective_overrides_and_dataset_changes_cannot_reuse_checkpoint(tmp_path):
-    config = load_training_config(ROOT / "configs/learning/act_training.yaml", ROOT)
+    config = load_training_config(ROOT / "learning/lerobot/configs/act_training.yaml", ROOT)
     (tmp_path / "manifest.json").write_text(json.dumps({"dataset": "accepted-A"}))
     config = replace(config, data_root=tmp_path)
     checkpoint = {"training_binding": training_binding(config)}

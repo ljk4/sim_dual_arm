@@ -1,0 +1,27 @@
+# Run docker compose from this directory.
+name: sim-dual-arm
+
+services:
+  runtime:
+    image: sim-dual-arm/runtime:current
+    build: .
+    user: "1000:1000"
+    working_dir: /workspace
+    init: true
+    restart: "no"
+    stop_grace_period: 20s
+    pull_policy: never
+    env_file: ../configs/container.env
+    volumes:
+      - ../../../:/workspace:ro
+      - ../../../var:/workspace/var
+      - ../../../.build:/workspace/.build
+      - ../../../.build:/build
+      - ../../../var:/data
+      - ../../../.build/ros-dev:/opt/ros-dev:ro
+      - ../../../.build/generated/policy-sdk:/opt/policy-sdk:ro
+    networks: [ros, learning]
+
+networks:
+  ros: {}
+  learning: {}

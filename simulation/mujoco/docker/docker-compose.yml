@@ -1,0 +1,32 @@
+# Run docker compose from this directory.
+name: sim-dual-arm
+
+services:
+  simulation:
+    image: sim-dual-arm/simulation:current
+    build: .
+    user: "1000:1000"
+    working_dir: /app
+    init: true
+    restart: "no"
+    stop_grace_period: 10s
+    pull_policy: never
+    runtime: nvidia
+    gpus: all
+    env_file: ../configs/container.env
+    volumes:
+      - ../:/app:ro
+      - ../../../contracts:/contracts:ro
+      - ../../../profiles:/profiles:ro
+      - ../../../libraries/backend_core/src:/deps/backend_core:ro
+      - ../../../libraries/ros_support/src:/deps/ros_support:ro
+      - ../../../libraries/run_logging/src:/deps/run_logging:ro
+      - ../../../infrastructure/docker/setup.sh:/config/setup.sh:ro
+      - ../../../infrastructure/scripts/dev_workspace.py:/config/check_ros_sdk.py:ro
+      - ../../../infrastructure/docker/fastdds.xml:/config/fastdds.xml:ro
+      - ../../../var:/data
+      - ../../../.build/ros-dev:/opt/ros-dev:ro
+    networks: [ros]
+
+networks:
+  ros: {}

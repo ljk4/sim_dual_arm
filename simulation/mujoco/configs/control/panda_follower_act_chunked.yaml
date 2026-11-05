@@ -1,0 +1,40 @@
+# Bounded target-follower parameters.  This is a following budget, not a
+# relaxation of the robot profile's joint position/velocity hard limits.
+# Joint names follow robot_backend_sim.motion_config.CONTROL_JOINT_NAMES.
+joint_names:
+  - left_joint1
+  - left_joint2
+  - left_joint3
+  - left_joint4
+  - left_joint5
+  - left_joint6
+  - left_joint7
+  - left_gripper_width
+  - right_joint1
+  - right_joint2
+  - right_joint3
+  - right_joint4
+  - right_joint5
+  - right_joint6
+  - right_joint7
+  - right_gripper_width
+
+# Ten selected predictions per execution window (0.5 s at 20 Hz).
+# The ACT policy still predicts a complete 3 s (60 point) chunk; overlapping
+# windows hand off as soon as a successor starts, so predictions that are
+# already stale are dropped and the 10 points are not always points 0..9 of a
+# fresh complete chunk.  This adds no hidden queue and no ground-truth rescue.
+target_count: 10
+
+# Continuous maximum distance between the actual reference and the
+# piecewise-linear policy target: 0.30 rad for arm joints, 0.04 m for each
+# gripper. Explicitly approved for this simulation experiment on 2026-11-03.
+# These are reference-fidelity budgets; physical limits and measured tracking
+# thresholds remain in the unchanged robot profile and panda_control.yaml.
+max_target_deviations:
+  [0.30, 0.30, 0.30, 0.30, 0.30, 0.30, 0.40, 0.04,
+   0.30, 0.30, 0.30, 0.30, 0.30, 0.30, 0.40, 0.04]
+
+# A final reference may extend past the last selected prediction to reach the
+# target at zero velocity, but never beyond three seconds in total.
+max_terminal_tail_duration_s: 3.0

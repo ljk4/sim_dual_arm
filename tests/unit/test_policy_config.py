@@ -9,7 +9,7 @@ from dual_arm_learning.policy_config import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
-FAKE = ROOT / "configs/learning/fake_policy.yaml"
+FAKE = ROOT / "learning/lerobot/configs/fake_policy.yaml"
 
 
 def service_document():
@@ -52,4 +52,4 @@ def test_load_fake_config_keeps_provider_settings_out_of_the_service_schema():
     config, settings = load_fake_config(FAKE)
     assert isinstance(config, object)
     assert settings.fault == "none"
-    assert load_policy_config(ROOT / "configs/learning/policy.yaml").chunk_size == 60
+    assert load_policy_config(ROOT / "learning/lerobot/configs/policy.yaml").chunk_size == 60

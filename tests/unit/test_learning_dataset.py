@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 @pytest.fixture
 def config(tmp_path):
-    value = load_dataset_config(ROOT / "configs/learning/act_dataset.yaml", ROOT)
+    value = load_dataset_config(ROOT / "learning/lerobot/configs/act_dataset.yaml", ROOT)
     return replace(value, output_root=tmp_path / "output", cache_root=tmp_path / "cache")
 
 

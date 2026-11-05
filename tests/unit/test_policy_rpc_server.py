@@ -13,7 +13,7 @@ from fake_provider import FakeProvider, load_fake_config  # noqa: E402
 
 
 def test_real_grpc_server_uses_the_generated_descriptor():
-    config, settings = load_fake_config(ROOT / "configs/learning/fake_policy.yaml")
+    config, settings = load_fake_config(ROOT / "learning/lerobot/configs/fake_policy.yaml")
     config = dataclasses.replace(config, port=0)
     server = PolicyServer(config, FakeProvider(config, settings))
     port = server.start()

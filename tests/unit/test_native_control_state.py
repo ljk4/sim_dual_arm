@@ -8,7 +8,7 @@ from robot_contracts.control import ControlCommand
 from robot_contracts.models import ContractError, JointSpec, RunContext, Target
 from robot_contracts.reference import CubicSegment, ReferencePlan, ReferenceSample
 
-SIM_SRC = Path(__file__).resolve().parents[2] / "components/backend_sim/src"
+SIM_SRC = Path(__file__).resolve().parents[2] / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 

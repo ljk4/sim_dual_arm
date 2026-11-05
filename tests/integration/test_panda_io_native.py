@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import math
-import os
 import sys
 import threading
 from dataclasses import replace
@@ -14,7 +13,7 @@ mujoco = pytest.importorskip("mujoco")
 np = pytest.importorskip("numpy")
 
 ROOT = Path(__file__).resolve().parents[2]
-SIM_SRC = ROOT / "components/backend_sim/src"
+SIM_SRC = ROOT / "simulation/mujoco/src"
 CONTRACTS_SRC = ROOT / "contracts/python/src"
 for source in (SIM_SRC, CONTRACTS_SRC):
     if str(source) not in sys.path:
@@ -26,12 +25,9 @@ from robot_backend_sim.scene_config import load_scene_config  # noqa: E402
 from robot_contracts.models import ContractError  # noqa: E402
 from robot_contracts.profiles import load_profile  # noqa: E402
 
-CONFIG_PATH = ROOT / "configs/simulation/panda_stack.yaml"
+CONFIG_PATH = ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml"
 PROFILE_PATH = ROOT / "profiles/robots/panda_stack_v1/profile.json"
 SCHEMAS = ROOT / "contracts/schemas"
-ASSETS_ROOT = Path(os.environ.get("SIM_ASSETS_ROOT", ROOT / "third_party/src/mujoco_menagerie"))
-SUMMARY_PATH = Path(os.environ.get("SIM_ASSET_SUMMARY", ROOT / ".build/assets/panda.json"))
-SOURCE_PATH = Path(os.environ.get("SIM_ASSET_SOURCE", ROOT / "third_party/panda-source.json"))
 
 
 @pytest.fixture(scope="module")
@@ -43,9 +39,6 @@ def config():
 def scene(config):
     return build_scene(
         config,
-        assets_root=ASSETS_ROOT,
-        summary_path=SUMMARY_PATH,
-        source_path=SOURCE_PATH,
     )
 
 

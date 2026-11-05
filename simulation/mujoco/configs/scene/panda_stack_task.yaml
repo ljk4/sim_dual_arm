@@ -1,0 +1,88 @@
+# DSH-033 independent stack-task and optional program-teacher configuration.
+# SI units: metres, radians, seconds, newton.  This file is the single source
+# for success thresholds, teacher timing and bounded episode capacity.  The
+# 4 cm source / 6 cm target half extents are cross-checked against
+# panda_stack.yaml; they are not re-read from a live object.
+schema_version: 1
+
+objects:
+  source: source
+  target: target
+  # Real scene half extents: 4 cm cube and 6 cm cube.
+  source_half_extents_m: [0.02, 0.02, 0.02]
+  target_half_extents_m: [0.03, 0.03, 0.03]
+
+success:
+  # Source centre must be inside the target footprint with this edge margin.
+  support_xy_margin_m: 0.002
+  # Allowed error around target_z + target_half_z + source_half_z.
+  support_height_tolerance_m: 0.005
+  # Both blocks must stay upright, at rest, and supported by real contacts.
+  max_tilt_rad: 0.17453292519943295   # 10 degrees
+  max_linear_speed_m_s: 0.02
+  max_angular_speed_rad_s: 0.2
+  min_support_normal_force_n: 0.05
+  min_table_normal_force_n: 0.05
+  # Contact normals with a smaller world-Z component are side contacts.
+  min_vertical_normal_component: 0.8660254037844387  # cos(30 degrees)
+  min_gripper_opening_m: 0.06
+  min_tcp_clearance_m: 0.08
+  # Continuous success window and the two independent task clocks.
+  stable_duration_s: 2.0
+  max_task_sim_duration_s: 30.0
+  max_task_wall_duration_s: 60.0
+
+teacher:
+  enabled: true
+  # Reuse the accepted DSH-017 mink 1.3/DAQP key poses and collision budgets.
+  kinematics_config: ../checks/kinematics_check.yaml
+  chunk_size: 60
+  action_period_ns: 50000000
+  # IK and collision planning run on the bounded planner thread.
+  ik_wall_timeout_s: 8.0
+  plan_wall_timeout_s: 10.0
+  # Leave 1.5 s of the 30 s task budget unplanned for transport/gate margins.
+  max_plan_duration_s: 28.5
+  max_joint_velocity_fraction: 0.85
+  max_joint_acceleration_fraction: 0.80
+  gripper_velocity_m_s: 0.04
+  gripper_acceleration_m_s2: 0.5
+  stable_hold_s: 2.0
+  max_chunk_requests: 256
+  chunk_cache_entries: 256
+  phase_min_duration_s:
+    pregrasp: 0.5
+    grasp: 0.5
+    close: 3.0
+    lift: 1.0
+    transport: 0.5
+    lower: 0.5
+    open: 3.0
+    retreat: 0.5
+    stable: 2.0
+  position_tolerance_m: 0.005
+  orientation_tolerance_rad: 0.05
+  lift_height_m: 0.05
+  release_gripper_opening_m: 0.08
+  retreat_tcp_distance_m: 0.08
+  collision_sample_step_rad: 0.02
+  collision_max_samples_per_segment: 2000
+  # Measured gate thresholds, not nominal plan completion.
+  phase_joint_tolerance_rad: 0.02
+  phase_velocity_tolerance_rad_s: 0.05
+  gripper_position_tolerance_m: 0.005
+  gripper_velocity_tolerance_m_s: 0.01
+  contact_force_min_n: 0.1
+  finger_speed_max_m_s: 0.02
+  gate_stable_duration_s: 0.2
+  phase_gate_extra_timeout_s: 5.0
+
+capacity:
+  # 30 s at a 0.25 s five-point window is 120 chunks; 256 is the hard bound.
+  expected_chunks: 120
+  expected_references: 120
+  expected_events: 360
+  max_episode_chunks: 256
+  max_teacher_requests: 256
+  rpc_cache_entries: 256
+  backend_chunk_history: 256

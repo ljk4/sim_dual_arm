@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-SIM_SRC = ROOT / "components/backend_sim/src"
+SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
@@ -21,7 +21,7 @@ from robot_backend_sim.stack_task import (  # noqa: E402
 from robot_backend_sim.task_config import load_task_config  # noqa: E402
 from robot_contracts.models import ContractError, RunContext  # noqa: E402
 
-CONFIG_PATH = ROOT / "configs/simulation/panda_stack_task.yaml"
+CONFIG_PATH = ROOT / "simulation/mujoco/configs/scene/panda_stack_task.yaml"
 TABLE_TOP = 0.75
 TARGET_Z = TABLE_TOP + 0.03
 SOURCE_Z = TARGET_Z + 0.03 + 0.02

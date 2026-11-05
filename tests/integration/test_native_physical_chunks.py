@@ -17,7 +17,7 @@ from robot_contracts.profiles import load_profile  # noqa: E402
 def test_three_physical_chunks_have_real_references_retirement_and_measurements():
     run = run_three_physical_chunks()
     profile = load_profile(PROFILE_PATH, SCHEMAS)
-    control = load_control_config(ROOT / "configs/simulation/panda_control.yaml")
+    control = load_control_config(ROOT / "simulation/mujoco/configs/control/panda_control.yaml")
     assert len(run.references) == 3
     assert [len(record.request.trajectory.targets) for record in run.references] == [60, 60, 60]
     assert [len(record.selected_indices) for record in run.references] == [20, 20, 18]

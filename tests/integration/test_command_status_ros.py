@@ -327,7 +327,7 @@ def _recorded_positions(configuration):
 
 @pytest.fixture
 def feedback_context():
-    configuration = load_configuration(ROOT, ROOT / "configs/runtime/mock_collect.yaml")
+    configuration = load_configuration(ROOT, ROOT / "runtime/ros2/configs/mock_collect.yaml")
     context = RunContext(
         configuration.profile.robot_id,
         configuration.profile.digest,

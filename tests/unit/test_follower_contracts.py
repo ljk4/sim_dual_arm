@@ -19,11 +19,11 @@ from robot_contracts.models import ContractError, JointSpec, Target
 from robot_contracts.reference import CubicSegment, ReferencePlan, ReferenceSample
 
 ROOT = Path(__file__).resolve().parents[2]
-SIM_SRC = ROOT / "components/backend_sim/src"
+SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-CONFIG_PATH = ROOT / "configs/simulation/panda_follower.yaml"
+CONFIG_PATH = ROOT / "simulation/mujoco/configs/control/panda_follower.yaml"
 
 
 def joint(name: str, *, minimum: float = -10.0, maximum: float = 10.0, velocity: float = 1.0):

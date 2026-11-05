@@ -22,7 +22,7 @@ from robot_contracts.reference import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
-SIM_SRC = ROOT / "components/backend_sim/src"
+SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
@@ -38,8 +38,8 @@ PROFILE = load_profile(
     ROOT / "profiles/robots/panda_stack_v1/profile.json",
     ROOT / "contracts/schemas/v1",
 )
-CONTROL = load_control_config(ROOT / "configs/simulation/panda_control.yaml")
-FOLLOWER = load_follower_config(ROOT / "configs/simulation/panda_follower.yaml")
+CONTROL = load_control_config(ROOT / "simulation/mujoco/configs/control/panda_control.yaml")
+FOLLOWER = load_follower_config(ROOT / "simulation/mujoco/configs/control/panda_follower.yaml")
 BASE = PROFILE.initial_positions
 JOINT_COUNT = len(BASE)
 

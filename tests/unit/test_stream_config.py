@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-SIM_SRC = ROOT / "components/backend_sim/src"
+SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
@@ -64,7 +64,7 @@ def test_snapshot_is_frozen_fresh_and_complete():
 
 
 def test_candidate_file_loads_and_round_trips():
-    config = load_stream_config(ROOT / "configs/simulation/panda_stream.yaml")
+    config = load_stream_config(ROOT / "simulation/mujoco/configs/control/panda_stream.yaml")
     assert config.to_document() == VALID
     assert parse_stream_config(config.to_document()) == config
 

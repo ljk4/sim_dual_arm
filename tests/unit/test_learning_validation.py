@@ -30,7 +30,7 @@ class _Policy:
 
 
 def test_validation_restores_mode_and_never_passes_labels_to_model(monkeypatch):
-    config = load_training_config(ROOT / "configs/learning/act_training.yaml", ROOT)
+    config = load_training_config(ROOT / "learning/lerobot/configs/act_training.yaml", ROOT)
     samples = [
         {
             "observation.state": torch.zeros((1, 16)),

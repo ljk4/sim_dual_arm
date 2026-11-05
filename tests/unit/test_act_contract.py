@@ -115,13 +115,13 @@ def test_contract_rejects_temporal_ensemble_and_wrong_schema(tmp_path):
 
 
 def test_temporal_ensemble_setting_is_optional_and_strictly_bounded(tmp_path):
-    default = load_act_settings(ROOT / "configs/learning/act_policy.yaml")
+    default = load_act_settings(ROOT / "learning/lerobot/configs/act_policy.yaml")
     assert default.temporal_ensemble_coeff is None
-    temporal = load_act_settings(ROOT / "configs/learning/act_policy_temporal.yaml")
+    temporal = load_act_settings(ROOT / "learning/lerobot/configs/act_policy_temporal.yaml")
     assert temporal.temporal_ensemble_coeff == pytest.approx(0.01)
 
     document = yaml.safe_load(
-        (ROOT / "configs/learning/act_policy.yaml").read_text(encoding="utf-8")
+        (ROOT / "learning/lerobot/configs/act_policy.yaml").read_text(encoding="utf-8")
     )
     for index, value in enumerate((True, float("nan"), float("inf"), -0.01, 1.01, "0.1")):
         document["model"]["temporal_ensemble_coeff"] = value

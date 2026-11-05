@@ -193,7 +193,7 @@ def test_binding_mismatch_is_rejected(change):
 
 
 def test_camera_digest_is_the_scene_description_semantic_hash():
-    raw_cameras = load_document(ROOT / "configs/simulation/panda_stack.yaml")["cameras"]
+    raw_cameras = load_document(ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml")["cameras"]
     profile = load_profile(PANDA_PROFILE, SCHEMAS)
     for camera in profile.cameras:
         description = {"name": camera.name, **raw_cameras[camera.name]}

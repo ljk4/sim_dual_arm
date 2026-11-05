@@ -16,7 +16,7 @@ from robot_contracts.models import ContractError, RunContext
 from robot_contracts.reference import ReferenceSample
 
 ROOT = Path(__file__).resolve().parents[2]
-POLICY_CONFIG = ROOT / "configs/runtime/native_policy.yaml"
+POLICY_CONFIG = ROOT / "runtime/ros2/configs/native_policy.yaml"
 
 
 class _Image:
@@ -238,7 +238,9 @@ def _runner(configuration, io, control, log=None, *, stop=None, clock=None):
 
 
 def test_eight_chunks_use_fresh_captures_keep_raw_60_and_settle_only_last():
-    configuration = load_native_configuration(ROOT / "configs/runtime/native_policy.yaml", ROOT)
+    configuration = load_native_configuration(
+        ROOT / "runtime/ros2/configs/native_policy.yaml", ROOT
+    )
     profile = configuration.profile
     policy = configuration.recipe.policy
     context = RunContext("panda_stack", profile.digest, "backend", "sim", 1, "episode", 1)

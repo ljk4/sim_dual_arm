@@ -11,15 +11,15 @@ from robot_backend_sim.backend_config import BackendConfig, load_backend_config
 from robot_backend_sim.follower_config import load_follower_config
 
 ROOT = Path(__file__).resolve().parents[2]
-FOLLOWER = ROOT / "configs/simulation/panda_follower.yaml"
-FOLLOWER_ACT = ROOT / "configs/simulation/panda_follower_act.yaml"
-FOLLOWER_ACT_CHUNKED = ROOT / "configs/simulation/panda_follower_act_chunked.yaml"
-BACKEND = ROOT / "configs/simulation/backend_stack_inference.yaml"
-BACKEND_ACT = ROOT / "configs/simulation/backend_stack_act.yaml"
-BACKEND_ACT_CHUNKED = ROOT / "configs/simulation/backend_stack_act_chunked.yaml"
-RUNTIME = ROOT / "configs/runtime/native_task_act.yaml"
-RUNTIME_FAST = ROOT / "configs/runtime/native_task_act_fast.yaml"
-RUNTIME_CHUNKED = ROOT / "configs/runtime/native_task_act_chunked.yaml"
+FOLLOWER = ROOT / "simulation/mujoco/configs/control/panda_follower.yaml"
+FOLLOWER_ACT = ROOT / "simulation/mujoco/configs/control/panda_follower_act.yaml"
+FOLLOWER_ACT_CHUNKED = ROOT / "simulation/mujoco/configs/control/panda_follower_act_chunked.yaml"
+BACKEND = ROOT / "simulation/mujoco/configs/backend/backend_stack_inference.yaml"
+BACKEND_ACT = ROOT / "tests/fixtures/simulation/backend_stack_act.yaml"
+BACKEND_ACT_CHUNKED = ROOT / "simulation/mujoco/configs/backend/backend_stack_act_chunked.yaml"
+RUNTIME = ROOT / "runtime/ros2/configs/native_task_act.yaml"
+RUNTIME_FAST = ROOT / "runtime/ros2/configs/native_task_act_fast.yaml"
+RUNTIME_CHUNKED = ROOT / "runtime/ros2/configs/native_task_act_chunked.yaml"
 
 _REFERENCED_FILES = (
     "robot_profile",
@@ -31,7 +31,7 @@ _REFERENCED_FILES = (
 
 
 def materialize_runtime(template: Path, directory: Path) -> Path:
-    """Apply the same absolute paths and verified-identity placeholders as stack_once."""
+    """Apply absolute paths and verified-identity placeholders used by prepare_run."""
     document = yaml.safe_load(template.read_text(encoding="utf-8"))
     for field in _REFERENCED_FILES:
         document[field] = str((template.parent / document[field]).resolve())

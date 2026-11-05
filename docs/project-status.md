@@ -1,6 +1,6 @@
 # 总目标与当前阶段
 
-更新：2026-11-03。本文件统一维护目标、约束、阶段与下一步。
+更新：2026-11-04。本文件统一维护目标、约束、阶段与下一步。
 运行方法见[根 README](../README.md)，维护规则见[项目规范](standards.md)。
 本页不充当训练监控面板，运行事实以带时间的日志、台账和最终报告为准。
 
@@ -46,6 +46,15 @@ API 切换真机与仿真，通过独立 Policy API 切换模型；机器人、�
 | DSH-043 | 移除业务 COPY、提取 Dockerfile 程序、SDK 挂载校验 | 实际构建、源码修改对照和 CPU mock 采集/审计通过；未新增 GPU 推理 |
 | DSH-044 | 20K 模型包、验证观察对照与单次真实仿真 | 显存足够，83 次预测、82 块执行；CHUNK_LATE 停车，堆叠 0/1 |
 | DSH-045～051 | 推理窗口、预测融合、启动稳定与数值误判修复 | 30600同场景回归物理堆叠成功；腕部遮挡质量项仍保留 |
+| DSH-052 | 按仿真、真机边界、运行和学习拆分目录，迁移配置/Docker/Compose/脚本 | 包名、IDL、profile/schema 和物理/控制参数不变；完整入口与回归见 DSH-052 |
+| DSH-053 | 环境与业务执行分离、容器内具名脚本、bundle 驱动的准备流程 | 三端真实容器、SDK、NVIDIA 相机与模型加载验收通过；已由 054 收敛入口 |
+| DSH-054 | 每端唯一 Dockerfile/docker-compose.yml/run.sh；三份独立依赖镜像与统一功能入口 | 实际构建通过，运行 98／仿真 122／学习 61 项通过；三路 NVIDIA 相机与原 20K 模型预测通过，旧 31 标签已清理 |
+| DSH-055 | 精简仿真依赖、四个挂载、版本锁唯一来源、显式 SDK 与容器内入口 | 214 项目标回归及 33 项无 SDK 测试通过；公开场景/运动学、SIGINT 收尾与 init 停止验证通过 |
+| DSH-056 | 仿真 Dockerfile 单阶段，直接安装固定 Ruckig wheel，清除编译路线 | 实际构建及 285 项目标回归通过，Ruckig 动态库字节不变；场景/相机/收尾正常 |
+| DSH-057 | 仿真项目依赖统一为一份锁，沿用现成官方 ROS 环境 | 实际构建、65 项测试、相机场景与后端收尾通过；官方镜像自带工具保留 |
+| DSH-058 | 删除自定义镜像版本报告层及三处检查入口的报告依赖 | 实际构建、105 项测试及环境/场景/运动学/后端收尾检查通过 |
+| DSH-059 | Docker 内使用通用依赖文件名和本地构建上下文 | 实际构建、57 项测试及真实环境/三相机场景通过；不同宿主 cwd 解析一致 |
+| DSH-060 | 容器资产变量通用化、删除四个冗余标记，运行 ENV 放在依赖安装后 | 实际构建、138 项测试及环境/场景/运动学/后端启停通过 |
 
 详细计划、执行和结果已归并为 `history/dsh-NNN.md`，一阶段一文档，
 按大阶段分组查阅[历史索引](history/README.md)。
@@ -83,15 +92,51 @@ ACT预测、53块执行；无真值/teacher/回放补救。模型仍为原batch1
 日志或缓存，未自动提交。
 
 总览正文统一为根 README、本文件与规范文档；阶段详细材料集中在历史目录，
-各项目维护目录保留一份本地说明。功能与重要实践目录已建立，当前只包含组织与
-收录说明，具体内容后续编写；实践条目遵守用户提出或同意收录的规则。
+各项目维护目录保留一份本地说明。功能目录当前只有组织说明；重要实践目录已收录 ACT 推理执行修复经验，
+新条目继续遵守用户提出或同意收录的规则。
 原文件内容完整保留，旧路径已移除并更新链接。
 迁移范围、API 故障/恢复、审查修正与独立验收见[DSH-042](history/dsh-042.md)。
 
-[DSH-043](history/dsh-043.md) 已将运行入口统一为源码挂载依赖镜像，提取内嵌
-构建脚本并验证 SDK 拒绝、修改生效和 CPU mock 闭环。验收使用独立镜像标签与
-构建目录，未替换原有默认镜像标签；日常环境按根 README 的构建入口更新一次。
-未操作已有训练进程，未删除数据、模型或缓存。
+当前环境按 [DSH-060](history/dsh-060.md) 整理，文件组织保持每端唯一入口：
+
+| 端 | 实现 | 唯一环境文件 | 唯一容器入口 |
+| --- | --- | --- | --- |
+| 仿真 | `simulation/mujoco/` | `docker/Dockerfile`、`docker/docker-compose.yml`、`configs/container.env` | 手动执行 `scripts/run.sh` |
+| 运行 | `runtime/ros2/` | `docker/Dockerfile`、`docker/docker-compose.yml`、`configs/container.env` | 手动执行 `scripts/run.sh` |
+| 学习 | `learning/lerobot/` | `docker/Dockerfile`、`docker/docker-compose.yml`、`configs/container.env` | 手动执行 `scripts/run.sh` |
+| 真机 | `hardware/` | 尚未实现 | 尚未实现 |
+
+三端在各自 `docker/` 目录直接用 `docker compose build/up -d/exec` 管理；业务在容器内由本端 run.sh
+启动。SDK 不随 build 自动生成；ROS SDK 在 runtime 容器内显式生成，再只读挂载到仿真端。
+三端镜像仍为 `sim-dual-arm/{simulation,runtime,learning}:current`。
+
+仿真将 MuJoCo 项目挂到 `/app`，必要共享依赖与配置单独只读挂载，不带入运行端
+和学习端源码；容器内执行 `scripts/run.sh`。Panda 模型放在
+`simulation/mujoco/assets/franka_emika_panda/`，随 `/app:ro` 一起挂入，
+不再下载到 `var/` 或生成资产摘要。Python 安装只有一份
+`requirements.lock`：16 个固定版本及哈希包，含 Ruckig；Dockerfile 单 FROM、
+单 COPY、一次 pip 安装。本目录 `context: .` 配合 `dockerfile: Dockerfile`，
+COPY 使用本地相对路径，镜像内安装输入统一放 `/opt/dependencies`。
+Ruckig 的约 1 MB wheel 随源码提供，来源和 MIT 许可保留，
+适用于当前 Ubuntu 24.04/CPython 3.12/x86_64，不在日常构建中源码编译。
+
+额外工具清单与重复安装步骤已移除；官方 ROS 镜像自带的工具与系统依赖原样保留，
+不为包数量单独卸载。仿真入口不再维护测试或 SDK 构建命令，SDK 由运行端负责。
+环境、三相机、运动学检查仍是直接可运行的功能。
+构建直接由 pip 按唯一清单安装，不再生成镜像版本报告或进行运行时锁摘要比对。
+环境检查直接验证模块导入、挂载源码及实际渲染/场景功能；数据录制仍由运行端负责。
+Panda 模型现随仿真目录只读挂入，不使用资产环境变量或摘要文件。
+Compose 不再维护无用组件标签、SDK 镜像/工作区标记或重复 NVIDIA 检查开关；直接
+检查实际 GPU 配置。服务名和真实仓库路径仍负责多端编排与挂载定位。
+DSH-060 实际构建、138 项相关测试及环境/场景/运动学/后端启停通过；新镜像不含
+版本报告，Ruckig 二进制保持不变。未追加训练或完整任务 rollout。
+
+旧 31 个本项目镜像标签和已退出的旧训练容器已清理，数据、模型、日志、缓存保留。
+当前仅保留本地 `main`，用户成功阶段提交 `8ec25b7` 保留，重构未自动提交或推送。
+目录迁移与执行方式的历史记录见 [052](history/dsh-052.md)、[053](history/dsh-053.md)、
+[054](history/dsh-054.md)、[055](history/dsh-055.md)、[056](history/dsh-056.md)、
+[057](history/dsh-057.md)、[058](history/dsh-058.md)、[059](history/dsh-059.md)、[060](history/dsh-060.md)，
+操作步骤只按根 README 的现行入口执行。
 
 ## 主要产物与定位
 
@@ -122,7 +167,10 @@ ACT预测、53块执行；无真值/teacher/回放补救。模型仍为原batch1
 
 1. 固定已保留的推理配方，另定新种子与次数做独立评估，不能将同场景修复回归当泛化成功率。
 2. 分析腕部目标遮挡及阶段化质量规则，保持本次质量失败记录；需要改变相机/数据分布时另作决定。
-3. 日常默认环境仍需按根README运行一次 `bash tools/build/stage2.sh` 更新镜像/SDK。
-   本轮实际使用已验收review标签与隔离SDK，未自行替换默认环境。
+3. 日常环境使用三端 `:current` 镜像；进入所需实现的 `docker/` 目录执行
+   `docker compose build`。build 只构建环境，SDK 通过运行容器的 `run.sh build-ros-sdk`
+   / `build-policy-sdk` 显式生成。旧 review 标签只作为历史证据，不作为启动路线。
+4. 真机、其他仿真器和其他学习框架待实际选型后接入；当前仅验证 MuJoCo / ROS 2 /
+   LeRobot ACT。不得把目录分层当作其他适配器已实现。
 
 本轮物理目标已达到，未继续采集或训练。后续修改与预算另行确定。

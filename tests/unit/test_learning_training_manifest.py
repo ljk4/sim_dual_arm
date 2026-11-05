@@ -101,7 +101,7 @@ def _manifest(config, root: Path) -> dict:
 
 
 def test_manifest_partitions_45_5_and_rejects_overlap(tmp_path):
-    config = load_training_config(ROOT / "configs/learning/act_training.yaml", ROOT)
+    config = load_training_config(ROOT / "learning/lerobot/configs/act_training.yaml", ROOT)
     config = replace(config, data_root=tmp_path, verify_hashes=False, mode="full")
     manifest = _manifest(config, tmp_path)
     _write(tmp_path / "manifest.json", manifest)
@@ -123,7 +123,7 @@ def test_manifest_partitions_45_5_and_rejects_overlap(tmp_path):
 
 
 def test_full_refuses_short_episode_and_synthetic_data(tmp_path):
-    config = load_training_config(ROOT / "configs/learning/act_training.yaml", ROOT)
+    config = load_training_config(ROOT / "learning/lerobot/configs/act_training.yaml", ROOT)
     config = replace(config, data_root=tmp_path, verify_hashes=False, mode="full")
     manifest = _manifest(config, tmp_path)
     manifest["splits"]["training"]["episodes"][0]["frame_count"] = 1

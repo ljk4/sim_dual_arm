@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from robot_contracts.profiles import load_profile
 
-_TOOLS = Path(__file__).resolve().parents[2] / "tools/run"
+_TOOLS = Path(__file__).resolve().parents[2] / "runtime/ros2/scripts"
 if str(_TOOLS) not in sys.path:
     sys.path.insert(0, str(_TOOLS))
 

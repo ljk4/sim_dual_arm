@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import math
-import os
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -12,7 +11,7 @@ mujoco = pytest.importorskip("mujoco")
 np = pytest.importorskip("numpy")
 
 ROOT = Path(__file__).resolve().parents[2]
-SIM_SRC = ROOT / "components/backend_sim/src"
+SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
@@ -22,10 +21,7 @@ from robot_backend_sim.scene_config import (  # noqa: E402
     load_scene_config,
 )
 
-CONFIG_PATH = ROOT / "configs/simulation/panda_stack.yaml"
-ASSETS_ROOT = Path(os.environ.get("SIM_ASSETS_ROOT", ROOT / "third_party/src/mujoco_menagerie"))
-SUMMARY_PATH = Path(os.environ.get("SIM_ASSET_SUMMARY", ROOT / ".build/assets/panda.json"))
-SOURCE_PATH = Path(os.environ.get("SIM_ASSET_SOURCE", ROOT / "third_party/panda-source.json"))
+CONFIG_PATH = ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml"
 
 
 @pytest.fixture(scope="module")
@@ -33,9 +29,6 @@ def scene():
     config = load_scene_config(CONFIG_PATH)
     return build_scene(
         config,
-        assets_root=ASSETS_ROOT,
-        summary_path=SUMMARY_PATH,
-        source_path=SOURCE_PATH,
     )
 
 

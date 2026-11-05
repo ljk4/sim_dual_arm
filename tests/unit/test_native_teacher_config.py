@@ -6,7 +6,7 @@ from dual_arm_runtime.native_config import load_native_configuration
 from robot_contracts.models import ContractError
 
 ROOT = Path(__file__).resolve().parents[2]
-TEACHER = ROOT / "configs/runtime/native_teacher.yaml"
+TEACHER = ROOT / "runtime/ros2/configs/native_teacher.yaml"
 
 
 def test_teacher_config_is_task_terminated_and_policy_free():

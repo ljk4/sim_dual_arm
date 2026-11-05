@@ -21,7 +21,7 @@ pytest.importorskip("scipy")
 np = pytest.importorskip("numpy")
 
 ROOT = Path(__file__).resolve().parents[2]
-for source in (ROOT / "components/backend_sim/src", ROOT / "contracts/python/src"):
+for source in (ROOT / "simulation/mujoco/src", ROOT / "contracts/python/src"):
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
 
@@ -44,24 +44,17 @@ from robot_contracts.follower_math import normalize_follower_positions  # noqa: 
 from robot_contracts.models import ContractError, RunContext, Target  # noqa: E402
 from robot_contracts.profiles import load_profile  # noqa: E402
 
-SCENE_PATH = ROOT / "configs/simulation/panda_stack.yaml"
-CONTROL_PATH = ROOT / "configs/simulation/panda_control.yaml"
-FOLLOWER_PATH = ROOT / "configs/simulation/panda_follower.yaml"
+SCENE_PATH = ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml"
+CONTROL_PATH = ROOT / "simulation/mujoco/configs/control/panda_control.yaml"
+FOLLOWER_PATH = ROOT / "simulation/mujoco/configs/control/panda_follower.yaml"
 PROFILE_PATH = ROOT / "profiles/robots/panda_stack_v1/profile.json"
 SCHEMAS = ROOT / "contracts/schemas"
-ASSETS_ROOT = Path(
-    os.environ.get("SIM_ASSETS_ROOT", ROOT / "third_party/src/mujoco_menagerie")
-)
-SUMMARY_PATH = Path(
-    os.environ.get("SIM_ASSET_SUMMARY", ROOT / ".build/assets/panda.json")
-)
-SOURCE_PATH = Path(os.environ.get("SIM_ASSET_SOURCE", ROOT / "third_party/panda-source.json"))
 DT_NS = 2_000_000
 LEASE_NS = 10_000_000_000
 FIRST_START_NS = 250_000_000
 FINAL_CHUNK_SEQ = 11
 TERMINAL = frozenset({"COMPLETED", "CANCELED", "FAILED"})
-REPORT_DIR = Path(os.environ.get("DSH_REPORT_DIR", ROOT / ".build/reports/dsh-030"))
+REPORT_DIR = Path(os.environ.get("FOLLOWER_REPORT_DIR", ROOT / ".build/reports/dsh-030"))
 BASE_POSITIONS = load_profile(PROFILE_PATH, SCHEMAS).initial_positions
 
 
@@ -89,9 +82,6 @@ def follower_config():
 def scene(scene_config):
     return build_scene(
         scene_config,
-        assets_root=ASSETS_ROOT,
-        summary_path=SUMMARY_PATH,
-        source_path=SOURCE_PATH,
     )
 
 

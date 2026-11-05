@@ -11,7 +11,7 @@ from dual_arm_learning.policy_service import PolicyService  # noqa: E402
 from dual_arm_learning.policy_types import PolicyError  # noqa: E402
 from fake_provider import FakeProvider, load_fake_config  # noqa: E402
 
-CONFIG = ROOT / "configs/learning/fake_policy.yaml"
+CONFIG = ROOT / "learning/lerobot/configs/fake_policy.yaml"
 
 
 def documents():

@@ -11,9 +11,9 @@ from contextlib import contextmanager
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-RUNTIME_SOURCE = ROOT / "components/runtime/ros/dual_arm_runtime"
+RUNTIME_SOURCE = ROOT / "runtime/ros2/ros/dual_arm_runtime"
 DOUBLES_SOURCE = ROOT / "tests/doubles/ros/mock_robot_backend"
-CONFIG = ROOT / "configs/runtime/mock_collect.yaml"
+CONFIG = ROOT / "runtime/ros2/configs/mock_collect.yaml"
 PROFILE = ROOT / "profiles/robots/mock_dual_arm_v1/profile.json"
 SCHEMAS = ROOT / "contracts/schemas/v1"
 RUN_ID = "manual-cli-test"

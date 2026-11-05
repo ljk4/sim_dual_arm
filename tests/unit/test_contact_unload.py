@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 from robot_contracts.reference import ReferenceSample
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "components/backend_sim/src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "simulation/mujoco/src"))
 from robot_backend_sim.contact_unload import ContactUnload  # noqa: E402
 from robot_backend_sim.contacts import (  # noqa: E402
     FingerContactEvidence,

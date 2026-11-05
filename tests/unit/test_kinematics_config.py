@@ -9,7 +9,7 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-SIM_SRC = ROOT / "components/backend_sim/src"
+SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
@@ -20,9 +20,9 @@ from robot_backend_sim.kinematics_config import (  # noqa: E402
 )
 from robot_backend_sim.scene_config import load_scene_config  # noqa: E402
 
-SCENE_PATH = ROOT / "configs/simulation/panda_stack.yaml"
-CHECK_PATH = ROOT / "configs/simulation/scene_check.yaml"
-KINEMATICS_PATH = ROOT / "configs/simulation/kinematics_check.yaml"
+SCENE_PATH = ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml"
+CHECK_PATH = ROOT / "simulation/mujoco/configs/checks/scene_check.yaml"
+KINEMATICS_PATH = ROOT / "simulation/mujoco/configs/checks/kinematics_check.yaml"
 
 
 @pytest.fixture(scope="module")

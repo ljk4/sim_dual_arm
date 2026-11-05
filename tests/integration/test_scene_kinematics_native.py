@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import dataclasses
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -13,7 +12,7 @@ np = pytest.importorskip("numpy")
 pytest.importorskip("mink")
 
 ROOT = Path(__file__).resolve().parents[2]
-SIM_SRC = ROOT / "components/backend_sim/src"
+SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
@@ -25,12 +24,9 @@ from robot_backend_sim.rendering import SceneRenderer  # noqa: E402
 from robot_backend_sim.scene import build_scene  # noqa: E402
 from robot_backend_sim.scene_config import load_scene_config  # noqa: E402
 
-CONFIG_PATH = ROOT / "configs/simulation/panda_stack.yaml"
-CHECK_PATH = ROOT / "configs/simulation/scene_check.yaml"
-KINEMATICS_PATH = ROOT / "configs/simulation/kinematics_check.yaml"
-ASSETS_ROOT = Path(os.environ.get("SIM_ASSETS_ROOT", ROOT / "third_party/src/mujoco_menagerie"))
-SUMMARY_PATH = Path(os.environ.get("SIM_ASSET_SUMMARY", ROOT / ".build/assets/panda.json"))
-SOURCE_PATH = Path(os.environ.get("SIM_ASSET_SOURCE", ROOT / "third_party/panda-source.json"))
+CONFIG_PATH = ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml"
+CHECK_PATH = ROOT / "simulation/mujoco/configs/checks/scene_check.yaml"
+KINEMATICS_PATH = ROOT / "simulation/mujoco/configs/checks/kinematics_check.yaml"
 
 
 @pytest.fixture(scope="module")
@@ -47,9 +43,6 @@ def kinematics_config(scene_config):
 def scene(scene_config):
     return build_scene(
         scene_config,
-        assets_root=ASSETS_ROOT,
-        summary_path=SUMMARY_PATH,
-        source_path=SOURCE_PATH,
     )
 
 
@@ -264,15 +257,11 @@ def test_one_layout_end_to_end_with_real_logger_scene_renderer_and_png(
 
     monkeypatch.setattr(check_kinematics, "_load_configs", load_one_layout)
     arguments = check_kinematics.KinematicsCheckArguments(
-        assets_root=ASSETS_ROOT,
-        summary=SUMMARY_PATH,
-        source=SOURCE_PATH,
         scene_config=CONFIG_PATH,
         check_config=CHECK_PATH,
         kinematics_config=KINEMATICS_PATH,
         report_root=tmp_path / "reports",
         run_id="e2e-layout",
-        packages=ROOT / "deploy/docker/sim-packages.json",
     )
     code = check_kinematics.run(arguments)
     run_dir = arguments.report_root / arguments.run_id
@@ -392,9 +381,6 @@ class FakeRenderer:
 
 def fake_arguments(tmp_path: Path) -> check_kinematics.KinematicsCheckArguments:
     return check_kinematics.KinematicsCheckArguments(
-        assets_root=tmp_path,
-        summary=tmp_path / "summary.json",
-        source=tmp_path / "source.json",
         scene_config=CONFIG_PATH,
         check_config=CHECK_PATH,
         kinematics_config=KINEMATICS_PATH,
@@ -409,21 +395,10 @@ def install_success_fakes(monkeypatch, tmp_path: Path, *, logger, renderer):
     monkeypatch.setattr(
         check_kinematics.probe_environment,
         "check_dependencies",
-        lambda _path: {"python": {"version": "3.12"}, "packages": {}, "imports": {}},
+        lambda: {"python": {"version": "3.12"}, "packages": {}, "imports": {}},
     )
     monkeypatch.setattr(
         check_kinematics.probe_environment, "_verify_mounted_source", lambda *_args: None
-    )
-    monkeypatch.setattr(
-        check_kinematics,
-        "_load_asset_provenance",
-        lambda *_args: {
-            "summary": {
-                "commit": "a" * 40,
-                "file_count": 1,
-                "total_sha256": "b" * 64,
-            }
-        },
     )
     monkeypatch.setattr(check_kinematics, "code_provenance", lambda: {})
     monkeypatch.setattr(check_kinematics, "_build_scene", lambda *_args: object())
