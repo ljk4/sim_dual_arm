@@ -8,6 +8,7 @@ import os
 import signal
 import sys
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import rclpy
@@ -78,12 +79,27 @@ def main() -> None:
     parser.add_argument("--runs-output", type=Path, default=None)
     parser.add_argument("--once", action="store_true")
     parser.add_argument(
+        "--hold-after-episode",
+        action="store_true",
+        help="with --once, keep the runtime alive after the episode until SIGINT/SIGTERM",
+    )
+    parser.add_argument(
+        "--reset-seed",
+        type=int,
+        default=None,
+        help="override the configured scene/reset seed for this runtime process",
+    )
+    parser.add_argument(
         "--shutdown-timeout",
         type=positive_seconds,
         default=20.0,
         help="bounded seconds to wait for native episode cleanup after a signal",
     )
     args, ros_args = parser.parse_known_args()
+    if args.hold_after_episode and not args.once:
+        parser.error("--hold-after-episode requires --once")
+    if args.reset_seed is not None and not 0 <= args.reset_seed <= 2**63 - 1:
+        parser.error("--reset-seed must be within [0, 2^63-1]")
     try:
         run_id = new_run_id() if args.run_id is None else validate_run_id(args.run_id)
         if args.episode_id:
@@ -93,6 +109,18 @@ def main() -> None:
     runs_output = args.runs_output if args.runs_output is not None else args.output.parent / "runs"
     try:
         configuration = load_native_configuration(args.config, args.project_root)
+        if args.reset_seed is not None:
+            recipe = replace(
+                configuration.recipe,
+                reset=replace(configuration.recipe.reset, seed=args.reset_seed),
+            )
+            snapshot = configuration.snapshot
+            snapshot["recipe"]["reset"]["seed"] = args.reset_seed
+            configuration = replace(
+                configuration,
+                recipe=recipe,
+                _snapshot_json=json.dumps(snapshot, sort_keys=True, allow_nan=False),
+            )
     except Exception as error:
         print(
             json.dumps({"runtime_initialization_error": f"{type(error).__name__}: {error}"}),
@@ -124,6 +152,7 @@ def main() -> None:
     startup_announced = False
     stopping_logged = False
     health_failure_seen = False
+    hold_announced = False
     shutdown_deadline: float | None = None
     record_directory = ""
     episode_id = ""
@@ -241,8 +270,33 @@ def main() -> None:
                     request_stop(
                         signal_state.reason, signal_state.reason, detail="termination signal"
                     )
-                if args.once and node.done.is_set() and not node.shutdown_requested:
-                    break
+                if (
+                    args.once
+                    and node.done.is_set()
+                    and not node.shutdown_requested
+                    and not signal_state.requested
+                ):
+                    if not args.hold_after_episode:
+                        break
+                    if not hold_announced:
+                        details = node.shutdown_details()
+                        print(
+                            json.dumps(
+                                {
+                                    "episode_finished": True,
+                                    "episode_id": details.get("episode_id", ""),
+                                    "record_directory": details.get("directory", ""),
+                                    "hint": "Ctrl-C to exit",
+                                }
+                            ),
+                            flush=True,
+                        )
+                        hold_announced = True
+                    try:
+                        executor.spin_once(timeout_sec=0.1)
+                    except KeyboardInterrupt:
+                        signal_state(signal.SIGINT, None)
+                    continue
                 if node.shutdown_requested:
                     if not node.worker_alive():
                         break

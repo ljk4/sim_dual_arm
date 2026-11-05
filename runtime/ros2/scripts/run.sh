@@ -63,6 +63,7 @@ commands:
   prepare         bind a generic Policy JSON to runtime.yaml + run_manifest.json
   collect         run one native ROS collection (requires --output)
   policy          run one native policy execution (requires --output)
+  interactive     prompt, reset via episode start, run one policy episode, hold until Ctrl-C
   control         use the public runtime status/start/end client
   audit           inspect one committed episode (audit.main dispatches native v3)
   export          export one episode to labels/RGB/quality (stack_export.py)
@@ -122,6 +123,104 @@ case "$command" in
       --runs-output "$DATA_ROOT/runs" \
       --once \
       "$@"
+    ;;
+  interactive)
+    config=""
+    run_id=""
+    seed=""
+    output_root="$DATA_ROOT/raw"
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --config)
+          config="${2:-}"
+          shift 2
+          ;;
+        --config=*)
+          config="${1#*=}"
+          shift
+          ;;
+        --run-id)
+          run_id="${2:-}"
+          shift 2
+          ;;
+        --run-id=*)
+          run_id="${1#*=}"
+          shift
+          ;;
+        --seed)
+          seed="${2:-}"
+          shift 2
+          ;;
+        --seed=*)
+          seed="${1#*=}"
+          shift
+          ;;
+        --output-root)
+          output_root="${2:-}"
+          shift 2
+          ;;
+        --output-root=*)
+          output_root="${1#*=}"
+          shift
+          ;;
+        -h|--help)
+          printf '%s\n' \
+            'usage: runtime/ros2/scripts/run.sh interactive --config <runtime.yaml> [--run-id <id>] [--seed <int>] [--output-root <dir>]'
+          exit 0
+          ;;
+        *)
+          printf 'interactive: unknown argument %q\n' "$1" >&2
+          exit 2
+          ;;
+      esac
+    done
+    if [[ -z "$config" ]]; then
+      printf 'interactive: --config <runtime.yaml> is required\n' >&2
+      exit 2
+    fi
+    if [[ -z "$run_id" ]]; then
+      run_id="interactive-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+    fi
+    if [[ -n "$seed" && ! "$seed" =~ ^[0-9]+$ ]]; then
+      printf 'interactive: --seed must be a non-negative integer\n' >&2
+      exit 2
+    fi
+    if [[ -e "$output_root/$run_id" ]]; then
+      printf 'interactive: output already exists: %s\n' "$output_root/$run_id" >&2
+      exit 2
+    fi
+    printf '配置: %s\n' "$config"
+    printf 'run_id: %s\n' "$run_id"
+    printf 'seed: %s\n' "${seed:-<runtime.yaml reset.seed>}"
+    printf '输入 y 复原环境并开始本次任务，其他键取消: '
+    if ! read -r answer; then
+      printf '\ninteractive: no answer; canceled\n' >&2
+      exit 2
+    fi
+    case "$answer" in
+      y|Y|yes|YES)
+        ;;
+      *)
+        printf 'interactive: canceled\n'
+        exit 0
+        ;;
+    esac
+    check_ros_sdk
+    check_policy_sdk
+    seed_args=()
+    if [[ -n "$seed" ]]; then
+      seed_args=(--reset-seed "$seed")
+    fi
+    exec python3 -m dual_arm_runtime.native_node \
+      --project-root "$ROOT" \
+      --config "$config" \
+      --runs-output "$DATA_ROOT/runs" \
+      --once \
+      --hold-after-episode \
+      --run-id "$run_id" \
+      --episode-id "$run_id" \
+      --output "$output_root/$run_id" \
+      "${seed_args[@]}"
     ;;
   control)
     check_ros_sdk

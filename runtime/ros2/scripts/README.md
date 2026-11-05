@@ -8,6 +8,9 @@
   `runtime.yaml` + `run_manifest.json`。
 - `collect` / `policy`：运行原生 ROS 采集或 Policy 执行；必须显式给
   `--output /data/raw/<run-id>`，不共享同一输出目录。
+- `interactive`：交互式运行一局 Policy。`y` 后通过 episode start 复原环境并开始；
+  `--run-id` 默认按时间自动生成，`--seed` 可覆盖本次 reset seed。任务结束后
+  进程保持 IDLE，按 `Ctrl-C` 完成有界退出。仿真/策略服务可在此之前长期运行。
 - `control`：使用公共 runtime status/start/end 客户端（`--help` 为 argparse 帮助）。
 - `audit`：进入 `dual_arm_runtime.audit.main`；原生 v3 由 `inspect_episode` 分发。
 - `test`：固定 `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` 的 pytest 入口。

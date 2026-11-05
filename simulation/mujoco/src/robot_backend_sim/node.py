@@ -63,7 +63,7 @@ from robot_ros_support.native_conversions import (
 from robot_ros_support.qos import EVENT_QOS, INFO_QOS, RELIABLE_SENSOR_QOS, SENSOR_QOS
 from robot_run_logging import EventContext, EventLogger, LogFailure
 from sensor_msgs.msg import CameraInfo, Image, JointState
-from std_msgs.msg import Header
+from std_msgs.msg import Float64MultiArray, Header
 
 from .backend_config import BackendConfig
 from .control_state import ChunkStatus, ControlStatus
@@ -155,6 +155,9 @@ class NativeBackendNode(Node):
         self._info_pub = self.create_publisher(BackendInfo, f"{self._root}/info", INFO_QOS)
         sensor_qos = RELIABLE_SENSOR_QOS if self.config.reliable_sensors else SENSOR_QOS
         self._state_pub = self.create_publisher(RobotState, f"{self._root}/state", sensor_qos)
+        self._visual_state_pub = self.create_publisher(
+            Float64MultiArray, f"{self._root}/visualization/mujoco_state", SENSOR_QOS
+        )
         self._camera_pubs = {
             camera.name: self.create_publisher(
                 CameraFrame, f"{self._root}/cameras/{camera.name}/frame", sensor_qos
@@ -326,6 +329,7 @@ class NativeBackendNode(Node):
             self.request_stop(fault.reason, failed=True)
         for capture in self._worker.captures():
             self._publish_state(capture)
+            self._publish_visual_state(capture)
         for rendered in self._worker.rendered():
             self._publish_frames(rendered)
         self._publish_stack_state()
@@ -393,6 +397,23 @@ class NativeBackendNode(Node):
                 fault_reason="" if self._worker.fault is None else self._worker.fault.reason,
             )
         )
+
+    def _publish_visual_state(self, capture: object) -> None:
+        """Publish one read-only full-physics snapshot for the optional viewer.
+
+        The normal RobotState API remains the contract path.  This debug topic is
+        best-effort and never feeds control or task evaluation.
+        """
+        try:
+            state = capture.snapshot.state  # type: ignore[attr-defined]
+            self._visual_state_pub.publish(Float64MultiArray(data=state.tolist()))
+        except Exception as error:  # noqa: BLE001 - visualization must not fail control
+            self._emit(
+                "backend.visualization.publish_failed",
+                level="WARNING",
+                reason="VISUALIZATION_PUBLISH_FAILED",
+                message=f"{type(error).__name__}: {error}",
+            )
 
     def _publish_stack_state(self) -> None:
         state = self._worker.stack_state

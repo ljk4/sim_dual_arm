@@ -78,6 +78,31 @@ scripts/run.sh backend \
 `backend` 前台运行，用 Ctrl+C 正常停止。采集、控制和 Policy 调用见
 [项目使用指南](../../../README.md#运行端)。
 
+## 实时 MuJoCo 可视化
+
+backend 保持无窗口 EGL 渲染；另开一个 simulation 容器终端启动 viewer：
+
+```bash
+scripts/run.sh viewer \
+  --config /data/prepared/prep-001/backend.yaml
+```
+
+viewer 是独立进程，订阅后端发布的只读完整物理快照并显示，不参与物理步进。
+在宿主机启动 Compose 前确保 `DISPLAY` 和 `XAUTHORITY` 指向当前 X11 会话：
+
+```bash
+echo "DISPLAY=$DISPLAY"
+echo "XAUTHORITY=$XAUTHORITY"
+# 如果 XAUTHORITY 未设置，按实际桌面会话设置，例如：
+# export XAUTHORITY=/run/user/$(id -u)/gdm/Xauthority
+cd /path/to/sim_dual_arm/simulation/mujoco/docker
+docker compose up -d
+```
+
+Compose 会把宿主 `/tmp/.X11-unix` 和 `XAUTHORITY` 只读挂入 simulation 容器；
+若 `XAUTHORITY` 未设置则挂载 `/dev/null`，不会影响无 GUI 的 backend 运行。
+viewer 只对当前仿真端有效，不进入 runtime 或 learning 容器。
+
 ## 停止与排查
 
 在本目录仅停止并移除仿真容器，bind 数据保留：

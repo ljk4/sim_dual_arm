@@ -23,7 +23,9 @@ docker compose exec simulation bash
 scripts/run.sh environment --run-id env-001
 ```
 
-`run.sh` 提供 `environment`、`scene`、`kinematics`、`prepare`、`backend`。
+`run.sh` 提供 `environment`、`scene`、`kinematics`、`prepare`、`backend`、
+`viewer`。其中 `viewer` 使用宿主机 X11 打开实时 MuJoCo 窗口，后端本身仍保持
+无窗口 EGL 渲染。
 backend 需要 runtime 生成的 ROS SDK；仿真检查可以独立运行。
 模型随本目录挂到 `/app/assets/`，报告与运行数据写到 `/data`；
 完整采集与任务记录由运行端负责。命令参数见[脚本说明](scripts/README.md)。

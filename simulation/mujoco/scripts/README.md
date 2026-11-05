@@ -11,6 +11,7 @@ Python CLI，参数原样传递。
 | `kinematics` | 关键位姿与运动学净空检查 | 同上 |
 | `prepare` | 从模板、seed、run-id 生成 backend 配置 | 显式 `--output` 下的 `backend.yaml` 和 `run_manifest.json` |
 | `backend` | 运行 MuJoCo ROS 后端，启动前检查 ROS SDK | `/data/runs/backend/<run-id>/` |
+| `viewer` | 连接正在运行的后端，打开实时 MuJoCo GUI；只读快照，不步进物理 | 当前终端窗口 |
 
 在宿主进入 `simulation/mujoco/docker` 并运行 `docker compose exec simulation bash`，再执行：
 
@@ -20,6 +21,17 @@ scripts/run.sh scene --help
 ```
 
 `prepare_backend.py` 负责配置准备；Panda 模型直接位于 `../assets/franka_emika_panda/`。
+
+实时可视化示例：
+
+```bash
+scripts/run.sh viewer \
+  --config /data/prepared/<run>/simulation/backend.yaml
+```
+
+viewer 是独立进程，通过 `/robot/visualization/mujoco_state` 订阅完整物理快照；
+后端仍使用 EGL 无窗口渲染，viewer 自行使用宿主机 X11 窗口。不要在 viewer
+进程里修改控制或任务状态。
 场景、控制与物理参数由 `configs/` 提供。backend 必须显式指定 `--config` 和
 `--run-id`；scene/kinematics 的默认 YAML 在 `run.sh` 中选择，可用 CLI 参数覆盖。
 
