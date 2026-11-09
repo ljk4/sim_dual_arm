@@ -47,6 +47,9 @@
 3. **将 `act_provider.py` 移至 [`adapters/lerobot_act.py`](../../learning/lerobot/src/dual_arm_learning/adapters/lerobot_act.py) 并大幅瘦身（从 675 行压至 **$\le 200$ 行**）**：
    - 只保留 `BundleActModel`（实现 `PolicyModelAdapter`）与 `load_act_adapter()`。
    - 将会话字典锁、观测单调性检查、图像解码、`ChunkedPolicyPipeline.predict()` 调用、产物落盘和预测超时判断全部收归 [`policy_service.py`](../../learning/lerobot/src/dual_arm_learning/policy_service.py)（使 `policy_service.py` 控制在 **$\le 580$ 行**）。
+4. **合并 `learning_config_sections.py` 并修复 2 个学习端单测细节**：
+   - 将 `learning_config_sections.py` 合回 `learning/lerobot/src/dual_arm_learning/config.py`（删除 `learning_config_sections.py`）；
+   - 修复原 `test_act_provider.py`（重命名为 `test_lerobot_act_adapter.py`）子进程测试拼接 `PYTHONPATH` 时遗漏 `contracts/python/src` 的问题，以及对齐 `test_temporal_ensemble_is_off_by_default` 与 `PolicyServiceConfig` 默认值的断言。
 
 ---
 

@@ -55,9 +55,13 @@
 
 ---
 
-## 3. 移动离线诊断工具并瘦身仿真后端其余超标模块（全部压至 $\le 700$ 行）
+## 3. 移动离线诊断工具、修复基线残留细节并瘦身仿真后端其余超标模块（全部压至 $\le 700$ 行）
 
-1. **将 3 个离线检查脚本移入 `simulation/mujoco/src/robot_backend_sim/tools/` 子目录**：
+1. **修复两处 Phase 1/2 迁移遗留细节与合并 `*_config_sections.py`**：
+   - 在重构 `motion.py` $\rightarrow$ `motion_controller.py` 时，修复原 `motion.py:1350` 的 `if self._stream is not None and self._stream.kind == "FOLLOWER":`（因为现在所有流式块均为 `PreparedFollowerPlan`，`StreamSchedule` 已无 `.kind` 属性，直接改为 `if self._stream is not None:`）。
+   - 在 [`backend_cli.py`](../../simulation/mujoco/src/robot_backend_sim/backend_cli.py) 第 130 行中，将对 Pydantic 模型 `BackendConfig` 调用 `asdict(config)` 改为 `config.canonical_dict()`（并删除 `from dataclasses import asdict`）。
+   - 将 Phase 2 拆出的 `backend_config_sections.py`、`kinematics_config_sections.py`、`scene_config_sections.py`、`task_config_sections.py` 分别合回对应的 `backend_config.py`、`kinematics_config.py`、`scene_config.py`、`tasks/stack/config.py`，消除零碎的 `*_sections.py` 伴生文件。
+2. **将 3 个离线检查脚本移入 `simulation/mujoco/src/robot_backend_sim/tools/` 子目录**：
    - `check_kinematics.py`、`check_scene.py`、`probe_environment.py` 移至 `tools/`（同步更新 `backend_cli.py` 与测试导入）。
 2. **瘦身 `control.py` 与 `control_state.py`（两文件合计必须 $\le 920$ 行）**：
    - `control_state.py`（**目标 $\le 400$ 行**）：直接引用不可变契约对象，删除重复字段平铺拷贝与非流式死代码。
@@ -75,6 +79,7 @@
    find . -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
    test ! -f simulation/mujoco/src/robot_backend_sim/motion.py
    test ! -f simulation/mujoco/src/robot_backend_sim/contact_unload.py
+   find simulation/mujoco/src/robot_backend_sim -name "*_sections.py" | grep . && exit 1 || true
    # 1. 严禁存在任何 Mixin 类（输出必须为空）
    grep -rn "class .*Mixin" simulation/mujoco/src/robot_backend_sim/
    # 2. 验证 motion_controller.py <= 550 行，control.py + control_state.py <= 920 行
