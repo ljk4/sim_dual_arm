@@ -43,9 +43,9 @@ from robot_api_msgs.srv import (
     Stop,
     SubmitFollower,
 )
-from robot_contracts.follower_reference import FollowerReference as FollowerReferenceRecord
 from robot_contracts.models import CameraSpec, ContractError, RunContext
 from robot_contracts.native import NativeExecution as NativeExecutionRecord
+from robot_contracts.trajectory import FollowerReference as FollowerReferenceRecord
 from robot_ros_support.conversions import context_from_message, context_message, stamp, time_ns
 from robot_ros_support.follower_conversions import follower_reference_message
 from robot_ros_support.native_conversions import (

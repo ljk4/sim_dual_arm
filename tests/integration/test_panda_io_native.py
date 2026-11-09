@@ -3,11 +3,11 @@ from __future__ import annotations
 import math
 import sys
 import threading
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from model_helpers import replace
 
 mujoco = pytest.importorskip("mujoco")
 np = pytest.importorskip("numpy")

@@ -1,11 +1,11 @@
 import json
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from dual_arm_learning.config import load_dataset_config
 from dual_arm_learning.dataset import ExportError, _validate_export, configure_local_caches
 from learning_fixtures import make_export, profile_hash
+from model_helpers import replace
 
 ROOT = Path(__file__).resolve().parents[2]
 

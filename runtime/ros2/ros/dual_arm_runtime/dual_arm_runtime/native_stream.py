@@ -16,14 +16,15 @@ import time
 from collections.abc import Callable, Sequence
 from typing import Protocol
 
-from robot_contracts.follower_reference import FollowerValidationLimits
-from robot_contracts.models import ContractError, RobotProfile, RunContext, Target, Trajectory
+from robot_contracts.models import ContractError, RobotProfile, RunContext, Target
 from robot_contracts.native import (
     NATIVE_STREAM_FIRST,
     NATIVE_STREAM_NEXT,
     NativeExecution,
     NativeRequest,
 )
+from robot_contracts.native_reference import Trajectory
+from robot_contracts.trajectory import FollowerValidationLimits
 from robot_run_logging import EventContext, Scalar
 
 from dual_arm_runtime.native_config import NativeConfiguration, NativePolicy
@@ -542,7 +543,7 @@ class ContinuousStreamRunner:
         self, prediction: Prediction, observation: ExactObservation
     ) -> None:
         from robot_contracts.models import Target
-        from robot_contracts.reference import validate_reference_inputs
+        from robot_contracts.trajectory import validate_reference_inputs
 
         if prediction.context != self.context:
             raise ContractError("STREAM_CONTEXT_MISMATCH", "prediction context differs")

@@ -1,9 +1,9 @@
 import json
 from copy import deepcopy
-from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 from robot_contracts.models import CameraSpec, ContractError
 from robot_contracts.profiles import (
     load_document,
@@ -59,7 +59,7 @@ def test_v2_profile_is_an_immutable_multi_camera_view():
     assert profile.cameras[0].name == "global"
     assert profile.joints[0].initial == 0.0
 
-    with pytest.raises(FrozenInstanceError):
+    with pytest.raises(ValidationError):
         profile.cameras[0].name = "changed"
 
 
@@ -207,9 +207,11 @@ def test_unrepresentable_joint_number_is_a_contract_error(tmp_path, field):
     document["joints"][0][field] = 10**3500
     path = _write(tmp_path, document)
 
-    with pytest.raises(ContractError, match=f"joints\\[0\\]\\.{field}") as caught:
+    with pytest.raises(ContractError) as caught:
         load_profile(path, SCHEMAS)
     assert caught.value.reason == "SCHEMA_MISMATCH"
+    assert "joints[0]" in str(caught.value)
+    assert field in str(caught.value)
     assert str(path) in str(caught.value)
 
 

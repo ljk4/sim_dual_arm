@@ -62,21 +62,24 @@ def test_missing_follower_file_is_rejected_not_disabled(tmp_path):
     path = write_variant(
         tmp_path, lambda document: document["robot"].update({"follower": "missing.yaml"})
     )
-    with pytest.raises(BackendConfigError, match="robot.follower: must be an existing file"):
+    with pytest.raises(BackendConfigError) as caught:
         load_backend_config(path)
+    assert caught.value.field == "robot.follower"
 
 
 def test_unknown_robot_key_still_rejected(tmp_path):
     path = write_variant(
         tmp_path, lambda document: document["robot"].update({"follower_extra": "x"})
     )
-    with pytest.raises(BackendConfigError, match="robot.follower_extra: unknown key"):
+    with pytest.raises(BackendConfigError) as caught:
         load_backend_config(path)
+    assert caught.value.field == "robot.follower_extra"
 
 
 def test_follower_queue_must_be_positive(tmp_path):
     path = write_variant(
         tmp_path, lambda document: document["queues"].update({"follower_references": 0})
     )
-    with pytest.raises(BackendConfigError, match="queues.follower_references"):
+    with pytest.raises(BackendConfigError) as caught:
         load_backend_config(path)
+    assert caught.value.field == "queues.follower_references"

@@ -1,18 +1,18 @@
 """Pure control identity, command envelope and shared generation checks.
 
 This module deliberately uses only the Python standard library.  It does not
-import MuJoCo, SciPy, ROS, a scene, a clock or any backend.  Mock and native
-control adapters compare the same five generation fields through
-:func:`check_generation`; a full lease context additionally requires the
-episode and control epoch to match.
+import MuJoCo, SciPy, ROS, a scene, a clock or any backend.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from numbers import Integral
+from typing import Annotated, ClassVar
+
+from pydantic import Field
 
 from .models import ContractError, RunContext
+from .validation import NonEmptyStr, PositiveInt, StrictContractModel
 
 __all__ = [
     "GENERATION_FIELDS",
@@ -37,7 +37,6 @@ UINT64_MAX = 2**64 - 1
 MAX_ID_LENGTH = 128
 MIN_LEASE_DURATION_NS = 100_000_000
 MAX_LEASE_DURATION_NS = 10_000_000_000
-
 GENERATION_FIELDS = (
     "robot_id",
     "robot_profile_hash",
@@ -57,10 +56,7 @@ def _integer(value: object, location: str, minimum: int, maximum: int) -> int:
         raise _invalid("INVALID_CONTROL_IDENTITY", f"{location}: must be an integer")
     result = int(value)
     if result < minimum or result > maximum:
-        raise _invalid(
-            "INVALID_CONTROL_IDENTITY",
-            f"{location}: must be in {minimum}..{maximum}",
-        )
+        raise _invalid("INVALID_CONTROL_IDENTITY", f"{location}: must be in {minimum}..{maximum}")
     return result
 
 
@@ -70,10 +66,7 @@ def _text(value: object, location: str, *, allow_empty: bool = False) -> str:
     if not value and not allow_empty:
         raise _invalid("INVALID_CONTROL_IDENTITY", f"{location}: must not be empty")
     if len(value) > MAX_ID_LENGTH:
-        raise _invalid(
-            "INVALID_CONTROL_IDENTITY",
-            f"{location}: must be at most {MAX_ID_LENGTH} characters",
-        )
+        raise _invalid("INVALID_CONTROL_IDENTITY", f"{location}: must be at most {MAX_ID_LENGTH}")
     return value
 
 
@@ -81,22 +74,11 @@ def validate_context(context: object) -> RunContext:
     """Reject a malformed RunContext before it reaches control state."""
     if not isinstance(context, RunContext):
         raise _invalid("INVALID_CONTEXT", "context must be a RunContext")
-    _text(context.robot_id, "context.robot_id")
-    _text(context.robot_profile_hash, "context.robot_profile_hash")
-    _text(context.backend_instance_id, "context.backend_instance_id")
-    _text(context.time_domain_id, "context.time_domain_id")
-    _text(context.episode_id, "context.episode_id", allow_empty=True)
-    _integer(context.clock_epoch, "context.clock_epoch", 0, INT64_MAX)
-    _integer(context.control_epoch, "context.control_epoch", 0, INT64_MAX)
     return context
 
 
 def check_generation(context: object, expected: object) -> None:
-    """Compare exactly the five fields that define one robot generation.
-
-    Kept semantically identical to the former ``BackendEngine._check_generation``:
-    a mismatch raises ``STALE_CONTEXT`` with the differing field name.
-    """
+    """Compare exactly the five fields that define one robot generation."""
     if not isinstance(context, RunContext) or not isinstance(expected, RunContext):
         raise _invalid("STALE_CONTEXT", "RunContext")
     for name in GENERATION_FIELDS:
@@ -147,34 +129,17 @@ def validate_seed(seed: object) -> int:
     return result
 
 
-@dataclass(frozen=True, slots=True)
-class ControlCommand:
-    """Transport-independent identity of one overall command or stream.
+class ControlCommand(StrictContractModel):
+    """Transport-independent identity of one overall command or stream."""
 
-    ``command_seq`` identifies the whole command, not an individual chunk.  A
-    continuous stream keeps the same context/lease/id/seq while every successor
-    packet carries its own ``observation_id``.
-    """
+    _error_reason: ClassVar[str] = "INVALID_CONTROL_IDENTITY"
 
     context: RunContext
-    lease_id: str
-    command_id: str
-    command_seq: int
-    observation_id: int
-    accept_before_ns: int
-
-    def __post_init__(self) -> None:
-        validate_context(self.context)
-        lease_id = _text(self.lease_id, "lease_id")
-        command_id = _text(self.command_id, "command_id")
-        sequence = _integer(self.command_seq, "command_seq", 1, UINT64_MAX)
-        observation = _integer(self.observation_id, "observation_id", 1, UINT64_MAX)
-        accept_before = _integer(self.accept_before_ns, "accept_before_ns", 0, INT64_MAX)
-        object.__setattr__(self, "lease_id", lease_id)
-        object.__setattr__(self, "command_id", command_id)
-        object.__setattr__(self, "command_seq", sequence)
-        object.__setattr__(self, "observation_id", observation)
-        object.__setattr__(self, "accept_before_ns", accept_before)
+    lease_id: Annotated[NonEmptyStr, Field(max_length=MAX_ID_LENGTH)]
+    command_id: Annotated[NonEmptyStr, Field(max_length=MAX_ID_LENGTH)]
+    command_seq: Annotated[PositiveInt, Field(le=UINT64_MAX)]
+    observation_id: Annotated[PositiveInt, Field(le=UINT64_MAX)]
+    accept_before_ns: Annotated[int, Field(strict=True, ge=0, le=INT64_MAX)]
 
     @property
     def generation(self) -> tuple[str, int]:

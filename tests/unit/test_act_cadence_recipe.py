@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import fields
 from pathlib import Path
 
 import yaml
@@ -84,10 +83,13 @@ def test_chunked_backend_only_redirects_the_follower_and_stays_inference():
     assert new.chunk_history_capacity == 512
     # source is the file path itself; every other field except the follower
     # redirect must match the accepted 2-point ACT backend exactly.
-    for item in fields(BackendConfig):
-        if item.name in {"source", "follower_path"}:
+    raw_paths = {"profile", "schemas", "scene", "control", "stream", "task", "follower"}
+    assert (new.robot.model_dump(exclude=raw_paths)
+            == old.robot.model_dump(exclude=raw_paths))
+    for name in BackendConfig.model_fields:
+        if name in {"source", "robot", "follower_path"}:
             continue
-        assert getattr(new, item.name) == getattr(old, item.name)
+        assert getattr(new, name) == getattr(old, name)
 
 
 def test_chunked_runtime_keeps_the_60x16_interface_and_covers_the_task(tmp_path):

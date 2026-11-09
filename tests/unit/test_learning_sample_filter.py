@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, replace
 from pathlib import Path
 
 import numpy as np
@@ -26,6 +25,7 @@ from dual_arm_learning.sample_filter import (
     write_filter_manifest,
 )
 from dual_arm_learning.training import TrainingError, _sample_filter
+from model_helpers import replace
 
 ROOT = Path(__file__).resolve().parents[2]
 RULE = ROOT / "learning/lerobot/configs/act_sample_filter.yaml"
@@ -457,7 +457,7 @@ def test_old_unfiltered_binding_is_byte_for_byte_compatible(tmp_path):
         "effective_configuration_sha256",
         "dataset_manifest_sha256",
     }
-    effective = json.loads(json.dumps(asdict(config), default=str))
+    effective = config.to_document()
     effective.pop("sample_filter")
     assert binding["effective_configuration"] == effective
     assert "sample_filter" not in binding["effective_configuration"]

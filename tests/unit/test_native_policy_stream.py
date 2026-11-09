@@ -13,7 +13,7 @@ from dual_arm_runtime.native_stream import (
 from dual_arm_runtime.policy_client import PolicyPrediction
 from robot_contracts.action_chunks import ChunkAnchor
 from robot_contracts.models import ContractError, RunContext
-from robot_contracts.reference import ReferenceSample
+from robot_contracts.trajectory import ReferenceSample
 
 ROOT = Path(__file__).resolve().parents[2]
 POLICY_CONFIG = ROOT / "tests/fixtures/simulation/native_policy_unit.yaml"

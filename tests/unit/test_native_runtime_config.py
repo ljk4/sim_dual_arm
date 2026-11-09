@@ -28,6 +28,7 @@ def write(tmp_path, value, *, absolute=True):
             "observation_schema",
             "action_schema",
             "control_constraints",
+            "follower_constraints",
         ):
             if field in value:
                 value[field] = str((CONFIG.parent / value[field]).resolve())
@@ -54,12 +55,13 @@ def test_native_config_snapshot_has_complete_constraints_and_motions():
 def test_unknown_key_and_bool_integer_are_rejected(tmp_path):
     value = document()
     value["unknown"] = 1
-    with pytest.raises(ContractError, match="unknown field"):
+    with pytest.raises(ContractError):
         load_native_configuration(write(tmp_path, value), ROOT)
     value = document()
     value["lease_duration_ns"] = True
-    with pytest.raises(ContractError, match="must be an integer"):
+    with pytest.raises(ContractError) as caught:
         load_native_configuration(write(tmp_path, value), ROOT)
+    assert "lease_duration_ns" in str(caught.value)
 
 
 def test_lease_renew_and_follower_dimensions_are_checked(tmp_path):
@@ -97,8 +99,9 @@ def test_manifest_schema_is_a_single_v1():
         .as_posix()
         .endswith("v1/episode_manifest.schema.json")
     )
-    with pytest.raises(ContractError, match="not supported"):
+    with pytest.raises(ContractError) as caught:
         manifest_schema_path(ROOT / "contracts/schemas", 2)
+    assert caught.value.reason == "UNSUPPORTED_SCHEMA_VERSION"
 
 
 def test_policy_max_chunks_can_cover_a_120_chunk_task(tmp_path):
@@ -164,18 +167,10 @@ def test_policy_startup_settle_accepts_zero_to_five_seconds(tmp_path, value):
     )
 
 
-@pytest.mark.parametrize(
-    ("value", "message"),
-    [
-        (-1, "must be within"),
-        (True, "must be an integer"),
-        (1.5, "must be an integer"),
-        ("1000", "must be an integer"),
-        (5_000_000_001, "must be within"),
-    ],
-)
-def test_policy_startup_settle_rejects_invalid_values(tmp_path, value, message):
+@pytest.mark.parametrize("value", [-1, True, 1.5, "1000", 5_000_000_001])
+def test_policy_startup_settle_rejects_invalid_values(tmp_path, value):
     document = policy_document()
     document["policy"]["startup_settle_sim_ns"] = value
-    with pytest.raises(ContractError, match=f"startup_settle_sim_ns: {message}"):
+    with pytest.raises(ContractError) as caught:
         load_native_configuration(write_policy(tmp_path, document), ROOT)
+    assert "startup_settle_sim_ns" in str(caught.value)

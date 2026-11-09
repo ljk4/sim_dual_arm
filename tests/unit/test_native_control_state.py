@@ -1,14 +1,13 @@
 import sys
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from model_helpers import replace
 from robot_contracts.action_chunks import ActionWindow, ChunkAnchor
 from robot_contracts.control import ControlCommand
-from robot_contracts.follower import PreparedFollowerPlan
 from robot_contracts.models import ContractError, RunContext, Target
 from robot_contracts.profiles import load_profile
-from robot_contracts.reference import ReferenceSample
+from robot_contracts.trajectory import PreparedFollowerPlan, ReferenceSample
 
 ROOT = Path(__file__).resolve().parents[2]
 SIM_SRC = ROOT / "simulation/mujoco/src"

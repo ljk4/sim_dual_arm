@@ -31,19 +31,19 @@ from robot_api_msgs.srv import (
     SubmitFollower,
 )
 from robot_contracts.action_chunks import ChunkAnchor
-from robot_contracts.follower_reference import (
-    FollowerReference,
-    FollowerValidationLimits,
-)
-from robot_contracts.follower_reference import (
-    validate as validate_follower_reference,
-)
 from robot_contracts.models import ContractError, RobotProfile, RunContext
 from robot_contracts.native import (
     NATIVE_STREAM_FIRST,
     NATIVE_STREAM_NEXT,
     NativeExecution,
     NativeRequest,
+)
+from robot_contracts.trajectory import (
+    FollowerReference,
+    FollowerValidationLimits,
+)
+from robot_contracts.trajectory import (
+    validate as validate_follower_reference,
 )
 from robot_ros_support.conversions import context_from_message, context_message, duration
 from robot_ros_support.follower_conversions import follower_reference_from_message

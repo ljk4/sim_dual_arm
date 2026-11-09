@@ -1,7 +1,7 @@
 """Explicit ROS conversions for the independent bounded-follower record.
 
 Every field is copied by name and revalidated by the shared
-:class:`robot_contracts.follower_reference.FollowerReference` constructor.  The
+:class:`robot_contracts.trajectory.FollowerReference` constructor.  The
 record is never converted into a strict ``AcceptedReference``.
 """
 
@@ -10,10 +10,9 @@ from __future__ import annotations
 from robot_api_msgs.msg import FollowerReference as FollowerReferenceMessage
 from robot_api_msgs.msg import ReferenceSegment as ReferenceSegmentMessage
 from robot_contracts.action_chunks import ActionWindow
-from robot_contracts.follower_reference import FollowerReference
 from robot_contracts.models import ContractError
 from robot_contracts.native import plan_from_segments
-from robot_contracts.reference import CubicSegment
+from robot_contracts.trajectory import CubicSegment, FollowerReference
 
 from .native_conversions import (
     anchor_from_message,

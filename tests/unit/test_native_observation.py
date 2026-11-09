@@ -1,7 +1,6 @@
-from dataclasses import replace
-
 import pytest
 from dual_arm_runtime.observation import ExactCaptureBuffer
+from model_helpers import replace
 from robot_contracts.models import ContractError
 
 CAMS = ("global", "left", "right")

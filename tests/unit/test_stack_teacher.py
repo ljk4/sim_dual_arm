@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import sys
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from model_helpers import replace
 
 ROOT = Path(__file__).resolve().parents[2]
 SIM_SRC = ROOT / "simulation/mujoco/src"

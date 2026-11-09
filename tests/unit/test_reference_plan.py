@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import math
-from dataclasses import FrozenInstanceError, replace
 
 import pytest
+from model_helpers import replace
+from pydantic import ValidationError
 from robot_contracts.models import ContractError, JointSpec, Target
-from robot_contracts.reference import (
+from robot_contracts.trajectory import (
     MAX_HORIZON_NS,
     MAX_JOINTS,
     MAX_SEGMENTS,
@@ -115,7 +116,7 @@ def test_plan_and_segment_are_deeply_immutable():
     assert plan.segments == (first,)
     sample = plan.sample(0)
     assert isinstance(sample.positions, tuple)
-    with pytest.raises(FrozenInstanceError):
+    with pytest.raises(ValidationError):
         sample.positions = (0.0,)  # type: ignore[misc]
 
 
@@ -171,7 +172,7 @@ def test_invalid_plan_names_segments_and_horizon():
         ReferencePlan(("joint1",), ())
     with pytest.raises(ContractError, match="segments"):
         ReferencePlan(("joint1",), tuple(segment() for _ in range(MAX_SEGMENTS + 1)))
-    with pytest.raises(ContractError, match="joints"):
+    with pytest.raises(ContractError, match="segments"):
         ReferencePlan(("joint1", "joint2"), (segment(),))
     with pytest.raises(ContractError, match="horizon"):
         ReferencePlan(
@@ -208,12 +209,9 @@ def test_input_validation_normalizes_and_rejects_bad_targets():
     assert inputs.target_positions == ((1.0,),)
 
     cases = (
-        ([0.0], [Target(0, (1.0,))], [joint()], [10.0]),
         ([0.0], [Target(1, (1.0,)), Target(1, (1.0,))], [joint()], [10.0]),
         ([0.0], [Target(1, (1.0,)), Target(2, (1.0,)), Target(1, (1.0,))], [joint()], [10.0]),
         ([0.0], [Target(MAX_HORIZON_NS + 1, (1.0,))], [joint()], [10.0]),
-        ([0.0], [Target(True, (1.0,))], [joint()], [10.0]),
-        ([0.0], [Target(1, (math.nan,))], [joint()], [10.0]),
         ([0.0], [Target(1, (1.0, 2.0))], [joint()], [10.0]),
         ([0.0, 0.0], [Target(1, (1.0,))], [joint()], [10.0]),
         ([0.0], [Target(1, (1.0,))], [joint()], [10.0, 10.0]),
@@ -222,15 +220,23 @@ def test_input_validation_normalizes_and_rejects_bad_targets():
         ([0.0], [Target(1, (1.0,))], [joint(maximum=0.5)], [10.0]),
         ([0.0], [Target(1, (-1.0,))], [joint(minimum=-0.5)], [10.0]),
         ([0.0], [Target(1, (1.0,))], [joint(maximum=0.5)], [10.0]),
-        ([0.0], [Target(1, (1.0,))], [joint(max_velocity=0.0)], [10.0]),
         ([0.0], [Target(1, (1.0,))], [], [10.0]),
         ([0.0], [Target(1, (1.0,))], [joint(), joint()], [10.0]),
         ([0.0], [Target(1, (1.0,))], [joint(name="a"), joint(name="a")], [10.0]),
-        ([0.0], [Target(1, (1.0,))], [joint(minimum=2.0, maximum=1.0)], [10.0]),
     )
     for initial, targets, joints, accelerations in cases:
         with pytest.raises(ContractError):
             validate_reference_inputs(initial, targets, joints, accelerations)
+
+    for invalid in (
+        lambda: Target(0, (1.0,)),
+        lambda: Target(True, (1.0,)),
+        lambda: Target(1, (math.nan,)),
+        lambda: joint(maximum=0.5, minimum=1.0),
+        lambda: joint(max_velocity=0.0),
+    ):
+        with pytest.raises(ContractError):
+            invalid()
 
 
 def test_verify_accepts_continuous_split_smoothstep_and_returns_extrema():

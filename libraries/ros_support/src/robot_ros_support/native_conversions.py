@@ -17,7 +17,7 @@ from robot_api_msgs.msg import NativeFinger as NativeFingerMessage
 from robot_api_msgs.msg import NativeGripper as NativeGripperMessage
 from robot_api_msgs.msg import ReferenceAnchor as ReferenceAnchorMessage
 from robot_contracts.action_chunks import ChunkAnchor
-from robot_contracts.models import ContractError, Trajectory
+from robot_contracts.models import ContractError
 from robot_contracts.native import (
     NativeChunkStatus,
     NativeControlEvent,
@@ -26,7 +26,8 @@ from robot_contracts.native import (
     NativeGripper,
     NativeRequest,
 )
-from robot_contracts.reference import ReferenceSample
+from robot_contracts.native_reference import Trajectory
+from robot_contracts.trajectory import ReferenceSample
 
 from .conversions import (
     context_from_message,

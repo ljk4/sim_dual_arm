@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from robot_contracts.models import ContractError, RobotProfile, RunContext, Target
-from robot_contracts.reference import validate_reference_inputs
+from robot_contracts.trajectory import validate_reference_inputs
 
 from .kinematics import (
     CollisionPairSet,

@@ -25,8 +25,8 @@ from robot_contracts.control import (
     validate_owner,
     validate_wall,
 )
-from robot_contracts.follower import FOLLOWER_ALGORITHM_VERSION, PreparedFollowerPlan
 from robot_contracts.native import NativeRequest
+from robot_contracts.trajectory import FOLLOWER_ALGORITHM_VERSION, PreparedFollowerPlan
 
 if TYPE_CHECKING:  # pragma: no cover - import only for static type checking
     from .motion import MotionSnapshot

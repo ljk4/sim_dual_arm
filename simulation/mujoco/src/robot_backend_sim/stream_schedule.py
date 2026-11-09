@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from numbers import Integral
 
 from robot_contracts.action_chunks import ActionWindow
-from robot_contracts.follower import PreparedFollowerPlan
+from robot_contracts.trajectory import PreparedFollowerPlan
 
 __all__ = [
     "ChunkEvent",

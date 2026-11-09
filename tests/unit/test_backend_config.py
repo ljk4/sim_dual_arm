@@ -77,15 +77,17 @@ def test_repository_config_loads():
 def test_unknown_key_is_rejected(tmp_path):
     document = document_with_paths(tmp_path)
     document["run"]["unknown"] = 1
-    with pytest.raises(BackendConfigError, match="run.unknown: unknown key"):
+    with pytest.raises(BackendConfigError) as caught:
         load_backend_config(write_document(tmp_path, document))
+    assert caught.value.field == "run.unknown"
 
 
 def test_unknown_nested_key_is_rejected(tmp_path):
     document = document_with_paths(tmp_path)
     document["logging"]["extra"] = True
-    with pytest.raises(BackendConfigError, match="logging.extra: unknown key"):
+    with pytest.raises(BackendConfigError) as caught:
         load_backend_config(write_document(tmp_path, document))
+    assert caught.value.field == "logging.extra"
 
 
 def test_duplicate_key_is_rejected(tmp_path):
@@ -94,24 +96,21 @@ def test_duplicate_key_is_rejected(tmp_path):
         "  capture_hz: 20.0\n", "  capture_hz: 20.0\n  capture_hz: 10.0\n"
     )
     path.write_text(text, encoding="utf-8")
-    with pytest.raises(BackendConfigError, match="capture_hz: duplicate key"):
+    with pytest.raises(BackendConfigError) as caught:
         load_backend_config(path)
+    assert caught.value.field == "capture_hz"
 
 
-@pytest.mark.parametrize(
-    ("field", "value", "message"),
-    [
-        ("seed", True, "must be an integer"),
-        ("capture_hz", float("nan"), "must be finite"),
-        ("realtime_speed", 0.0, "greater than"),
-        ("max_catchup_steps", 0, "must be in 1..64"),
-    ],
-)
-def test_run_values_are_strict(tmp_path, field, value, message):
+@pytest.mark.parametrize("field,value", [
+    ("seed", True), ("capture_hz", float("nan")),
+    ("realtime_speed", 0.0), ("max_catchup_steps", 0),
+])
+def test_run_values_are_strict(tmp_path, field, value):
     document = document_with_paths(tmp_path)
     document["run"][field] = value
-    with pytest.raises(BackendConfigError, match=message):
+    with pytest.raises(BackendConfigError) as caught:
         load_backend_config(write_document(tmp_path, document))
+    assert caught.value.field == f"run.{field}"
 
 
 @pytest.mark.parametrize("value", [0, 5000, True])

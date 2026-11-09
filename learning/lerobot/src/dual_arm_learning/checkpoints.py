@@ -7,12 +7,10 @@ checks and resume loading.
 
 from __future__ import annotations
 
-import json
 import os
 import random
 import shutil
 import time
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -46,7 +44,7 @@ def load_checkpoint(path: Path) -> dict[str, Any]:
 
 def training_binding(config: TrainingConfig) -> dict[str, Any]:
     """Bind CLI overrides and the accepted dataset, as well as YAML bytes."""
-    effective = json.loads(json.dumps(asdict(config), default=str))
+    effective = config.to_document()
     if config.sample_filter is None:
         # Preserve the exact pre-filter binding so old checkpoints still resume.
         effective.pop("sample_filter", None)

@@ -11,7 +11,6 @@ import hashlib
 import threading
 import time
 from collections.abc import Sequence
-from dataclasses import replace
 from pathlib import Path
 
 from rclpy.callback_groups import ReentrantCallbackGroup
@@ -31,20 +30,20 @@ from robot_api_msgs.msg import (
     StackTaskState as StackTaskStateMessage,
 )
 from robot_api_msgs.srv import EndEpisode, StartEpisode
-from robot_contracts.follower_reference import (
-    FollowerReference as DomainFollowerReference,
-)
-from robot_contracts.follower_reference import (
-    FollowerValidationLimits,
-)
-from robot_contracts.follower_reference import (
-    validate as validate_follower_reference,
-)
 from robot_contracts.models import ContractError, RunContext
 from robot_contracts.native import (
     NativeExecution as DomainNativeExecution,
 )
 from robot_contracts.native import NativeRequest
+from robot_contracts.trajectory import (
+    FollowerReference as DomainFollowerReference,
+)
+from robot_contracts.trajectory import (
+    FollowerValidationLimits,
+)
+from robot_contracts.trajectory import (
+    validate as validate_follower_reference,
+)
 from robot_ros_support.conversions import (
     context_from_message,
     context_message,
@@ -339,9 +338,8 @@ class NativeRuntimeNode(Node):
             raise ContractError("SCHEMA_MISMATCH", "backend joints")
         if tuple(info.camera_names) != self.config.profile.camera_names:
             raise ContractError("SCHEMA_MISMATCH", "backend cameras")
-        context = replace(
-            context_from_message(info.context), episode_id=episode_id, control_epoch=1
-        )
+        context = context_from_message(info.context).model_copy(update={
+            "episode_id": episode_id, "control_epoch": 1})
         return context, info
 
     def bind_context(self, context: RunContext) -> None:

@@ -3,20 +3,23 @@ from __future__ import annotations
 import copy
 import math
 import sys
-from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 
 import pytest
 import yaml
+from model_helpers import replace
+from pydantic import ValidationError
 from robot_contracts.action_chunks import ActionWindow, ChunkAnchor
-from robot_contracts.follower import (
+from robot_contracts.models import ContractError, JointSpec, Target
+from robot_contracts.trajectory import (
+    CubicSegment,
     FollowerLimitFlags,
     PreparedFollowerPlan,
+    ReferencePlan,
+    ReferenceSample,
     compute_follower_deviations,
     restrict_terminal_velocities,
 )
-from robot_contracts.models import ContractError, JointSpec, Target
-from robot_contracts.reference import CubicSegment, ReferencePlan, ReferenceSample
 
 ROOT = Path(__file__).resolve().parents[2]
 SIM_SRC = ROOT / "simulation/mujoco/src"
@@ -113,7 +116,7 @@ def test_non_final_plan_is_immutable_and_serialises_every_source_target():
     assert document["flags"]["any_acceleration_limited"] is True
     assert "actual_terminal_positions" in document
 
-    with pytest.raises(FrozenInstanceError):
+    with pytest.raises(ValidationError):
         prepared.is_final = True  # type: ignore[misc]
 
 

@@ -16,7 +16,7 @@ import os
 import shutil
 import time
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -890,7 +890,7 @@ def convert(
                 "path": str(config_path.resolve()) if config_path else "",
                 "sha256": file_sha256(config_path) if config_path else "",
                 "dataset_config_sha256": hashlib.sha256(
-                    json.dumps(asdict(config), sort_keys=True, default=str).encode()
+                    json.dumps(config.to_document(), sort_keys=True).encode()
                 ).hexdigest(),
             },
             "profile": {

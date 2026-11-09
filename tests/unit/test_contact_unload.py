@@ -1,12 +1,12 @@
 """Contact release grace requires evidence and cannot renew its own deadline."""
 
 import sys
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from robot_contracts.reference import ReferenceSample
+from model_helpers import replace
+from robot_contracts.trajectory import ReferenceSample
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "simulation/mujoco/src"))
 from robot_backend_sim.contact_unload import ContactUnload  # noqa: E402

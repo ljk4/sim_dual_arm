@@ -22,11 +22,11 @@ try:
         SubmitFollower,
     )
     from robot_contracts.action_chunks import ChunkAnchor
-    from robot_contracts.follower_reference import validate
-    from robot_contracts.models import RunContext, Target, Trajectory
+    from robot_contracts.models import RunContext, Target
     from robot_contracts.native import NATIVE_STREAM_FIRST, NATIVE_STREAM_NEXT, NativeRequest
+    from robot_contracts.native_reference import Trajectory
     from robot_contracts.profiles import load_profile
-    from robot_contracts.reference import ReferenceSample
+    from robot_contracts.trajectory import ReferenceSample, validate
     from robot_ros_support.conversions import context_message, time_ns
     from robot_ros_support.follower_conversions import (
         follower_reference_from_message,

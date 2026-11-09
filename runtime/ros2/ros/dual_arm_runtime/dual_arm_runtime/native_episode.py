@@ -24,9 +24,9 @@ from robot_contracts.episodes import (
     TaskOutcome,
     TaskResult,
 )
-from robot_contracts.follower_reference import FollowerReference
 from robot_contracts.models import ContractError, RunContext
 from robot_contracts.native import NativeExecution, NativeRequest
+from robot_contracts.trajectory import FollowerReference
 from robot_run_logging import EventContext, LogFailure, Scalar
 
 from dual_arm_runtime.native_config import NativeConfiguration

@@ -17,7 +17,7 @@ from typing import Any
 
 import numpy as np
 
-from .config import (
+from .config_yaml import (
     ConfigError,
     integer,
     load_yaml,

@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import sys
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from model_helpers import replace
 from robot_contracts.action_chunks import ActionWindow, ChunkAnchor
 from robot_contracts.control import ControlCommand
-from robot_contracts.follower import FOLLOWER_ALGORITHM_VERSION, PreparedFollowerPlan
-from robot_contracts.follower_math import normalize_follower_positions
 from robot_contracts.models import ContractError, JointSpec, RunContext, Target
-from robot_contracts.reference import ReferenceSample
+from robot_contracts.trajectory import (
+    FOLLOWER_ALGORITHM_VERSION,
+    PreparedFollowerPlan,
+    ReferenceSample,
+    normalize_follower_positions,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 for source in (ROOT / "simulation/mujoco/src", ROOT / "contracts/python/src"):

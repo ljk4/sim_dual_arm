@@ -8,7 +8,6 @@ import os
 import signal
 import sys
 import time
-from dataclasses import replace
 from pathlib import Path
 
 import rclpy
@@ -112,17 +111,15 @@ def main() -> None:
     try:
         configuration = load_native_configuration(args.config, args.project_root)
         if args.reset_seed is not None:
-            recipe = replace(
-                configuration.recipe,
-                reset=replace(configuration.recipe.reset, seed=args.reset_seed),
-            )
+            recipe = configuration.recipe.model_copy(update={
+                "reset": configuration.recipe.reset.model_copy(
+                    update={"seed": args.reset_seed})})
             snapshot = configuration.snapshot
             snapshot["recipe"]["reset"]["seed"] = args.reset_seed
-            configuration = replace(
-                configuration,
-                recipe=recipe,
-                _snapshot_json=json.dumps(snapshot, sort_keys=True, allow_nan=False),
-            )
+            configuration = configuration.model_copy(update={
+                "recipe": recipe,
+                "snapshot_json": json.dumps(snapshot, sort_keys=True, allow_nan=False),
+            })
     except Exception as error:
         print(
             json.dumps({"runtime_initialization_error": f"{type(error).__name__}: {error}"}),

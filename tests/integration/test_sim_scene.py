@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import math
 import sys
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from model_helpers import replace
 
 mujoco = pytest.importorskip("mujoco")
 np = pytest.importorskip("numpy")

@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import threading
 import uuid
-from dataclasses import replace
 from numbers import Integral
 
 from robot_contracts.action_chunks import ChunkAnchor
@@ -26,8 +25,8 @@ from robot_contracts.control import (
     validate_seed,
     validate_wall,
 )
-from robot_contracts.follower import PreparedFollowerPlan
 from robot_contracts.models import ContractError, RunContext
+from robot_contracts.trajectory import PreparedFollowerPlan
 
 from .control_state import (
     COMMAND_ACTIVE_PHASES,
@@ -610,12 +609,11 @@ class NativeController:
         self._chunks.clear()
         self._current_command_id = None
         self._highest_sequence = 0
-        self._context = replace(
-            self._context,
-            clock_epoch=self._context.clock_epoch + 1,
-            episode_id="",
-            control_epoch=0,
-        )
+        self._context = self._context.model_copy(update={
+            "clock_epoch": self._context.clock_epoch + 1,
+            "episode_id": "",
+            "control_epoch": 0,
+        })
         return self._context
 
     # ------------------------------------------------------------- internals

@@ -10,13 +10,13 @@ publishes ROS messages, and it never wraps a follower in the strict
 
 from __future__ import annotations
 
-from robot_contracts.follower import PreparedFollowerPlan
-from robot_contracts.follower_reference import (
-    FollowerReference,
-    FollowerValidationLimits,
-)
 from robot_contracts.models import ContractError, RobotProfile
 from robot_contracts.native import NATIVE_STREAM_FIRST, NATIVE_STREAM_NEXT, NativeRequest
+from robot_contracts.trajectory import (
+    FollowerReference,
+    FollowerValidationLimits,
+    PreparedFollowerPlan,
+)
 
 from .control_state import ChunkStatus, ControlStatus, PreparedControlCommand
 from .follower_config import PandaFollowerConfig

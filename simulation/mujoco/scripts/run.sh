@@ -39,6 +39,7 @@ commands:
   scene         check three-camera scene visibility
   kinematics    check key poses and kinematics clearance
   prepare       write backend.yaml + run_manifest.json from a template/seed
+  test          run pytest with plugin autoload disabled
 
 Examples:
   scripts/run.sh backend --help
@@ -138,6 +139,9 @@ case "$command" in
     ;;
   prepare)
     exec python3 "$ROOT/scripts/prepare_backend.py" "$@"
+    ;;
+  test)
+    exec bash "$ROOT/../../infrastructure/scripts/test.sh" "$@"
     ;;
   *)
     printf 'simulation run.sh: unknown command %q\n' "$command" >&2

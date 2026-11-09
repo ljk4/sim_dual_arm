@@ -38,14 +38,21 @@
 | `srv/GetNativeAnchor.srv` | `srv/GetStreamAnchor.srv` | 获取流式块衔接锚点服务 |
 | `srv/QueryNativeCommand.srv` | `srv/QueryStreamCommand.srv` | 查询流式控制指令状态服务 |
 
-### 2.2 Python 模块文件重命名（使用 `git mv`，不留旧文件）
+### 2.2 Python 模块文件重命名与消除 `_impl/` 碎片目录（使用 `git mv`，不留旧文件）
+- **消除 `contracts/python/src/robot_contracts/_impl/` 隐藏目录**：
+  - 将 `_impl/yaml.py`（50 行）直接合回 `validation.py`（删除 `validation.py` 末尾的 `__getattr__` 动态导入）；
+  - 将 `_impl/native_reference.py` 直接合并作为 `contracts/python/src/robot_contracts/stream_request.py`（并删除尚未被生产链路使用的 `AcceptedReference`、`Trajectory` 死类，使其保持在 $\le 220$ 行）；
+  - 将 `_impl/native_feedback.py` 合回 `contracts/python/src/robot_contracts/execution_feedback.py`（合回后约 310 行）；
+  - **彻底删除 `contracts/python/src/robot_contracts/_impl/` 目录**！
+- **禁止为凑行数新建 `*_sections.py` 或 `_impl` 碎片文件**：将 `native_config_sections.py` 合回重命名后的 `runtime_config.py`（合计 $\le 380$ 行）。
+
 | 原文件路径 | 新文件路径 |
 | :--- | :--- |
-| `contracts/python/src/robot_contracts/native_reference.py` | `contracts/python/src/robot_contracts/stream_request.py` |
-| `contracts/python/src/robot_contracts/native_feedback.py` | `contracts/python/src/robot_contracts/execution_feedback.py` |
+| `contracts/python/src/robot_contracts/native_reference.py` (+ `_impl/native_reference.py`) | `contracts/python/src/robot_contracts/stream_request.py` |
+| `contracts/python/src/robot_contracts/native_feedback.py` (+ `_impl/native_feedback.py`) | `contracts/python/src/robot_contracts/execution_feedback.py` |
 | `contracts/python/src/robot_contracts/native.py` | **直接删除**（将常量并入 `stream_request.py` 与 `execution_feedback.py`） |
 | `libraries/ros_support/src/robot_ros_support/native_conversions.py` | `libraries/ros_support/src/robot_ros_support/stream_conversions.py` |
-| `runtime/ros2/ros/dual_arm_runtime/dual_arm_runtime/native_config.py` | `runtime/ros2/ros/dual_arm_runtime/dual_arm_runtime/runtime_config.py` |
+| `runtime/ros2/ros/dual_arm_runtime/dual_arm_runtime/native_config.py` (+ `native_config_sections.py`) | `runtime/ros2/ros/dual_arm_runtime/dual_arm_runtime/runtime_config.py` |
 | `runtime/ros2/ros/dual_arm_runtime/dual_arm_runtime/native_node.py` | `runtime/ros2/ros/dual_arm_runtime/dual_arm_runtime/runtime_node.py` |
 | `runtime/ros2/ros/dual_arm_runtime/dual_arm_runtime/native_episode.py` | `runtime/ros2/ros/dual_arm_runtime/dual_arm_runtime/episode_runner.py` |
 | `runtime/ros2/ros/dual_arm_runtime/dual_arm_runtime/native_stream.py` | `runtime/ros2/ros/dual_arm_runtime/dual_arm_runtime/chunk_stream.py` |
@@ -74,9 +81,11 @@
 
 ## 3. 本阶段量化验收标准（必须逐条执行并全部达标）
 
-1. **验证旧 `native_*` 文件与 `Native*` 类名/消息名已 100% 清零**：
+1. **验证旧 `native_*` 文件、`_impl/` 目录与 `Native*` 类名/消息名已 100% 清零**：
    ```bash
    find . -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+   test ! -d contracts/python/src/robot_contracts/_impl
+   test ! -f runtime/ros2/ros/dual_arm_runtime/dual_arm_runtime/native_config_sections.py
    # 1. 检查 runtime 与 contracts 下是否还有 native_*.py
    find contracts/ libraries/ runtime/ -name "native*.py" | grep . && exit 1 || true
 

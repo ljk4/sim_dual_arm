@@ -23,7 +23,7 @@ def test_public_act_training_resume_and_bundle_use_real_model(tmp_path):
     from dual_arm_learning.dataset import convert
 
     dataset_config = load_dataset_config(ROOT / "learning/lerobot/configs/act_dataset.yaml", ROOT)
-    from dataclasses import replace
+    from model_helpers import replace
 
     dataset_config = replace(dataset_config, output_root=tmp_path / "data")
     select = make_select(tmp_path / "sources", dataset_config)

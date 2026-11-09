@@ -8,15 +8,15 @@ from pathlib import Path
 import pytest
 from robot_contracts.action_chunks import ChunkAnchor
 from robot_contracts.control import ControlCommand
-from robot_contracts.follower_reference import validate
-from robot_contracts.models import ContractError, RunContext, Target, Trajectory
+from robot_contracts.models import ContractError, RunContext, Target
 from robot_contracts.native import (
     NATIVE_MOTION,
     NATIVE_STREAM_FIRST,
     NativeRequest,
 )
+from robot_contracts.native_reference import Trajectory
 from robot_contracts.profiles import load_profile
-from robot_contracts.reference import ReferenceSample
+from robot_contracts.trajectory import ReferenceSample, validate
 
 ROOT = Path(__file__).resolve().parents[2]
 for source in (ROOT / "simulation/mujoco/src", ROOT / "contracts/python/src"):
@@ -252,7 +252,7 @@ def test_successor_fingerprint_is_separate_from_strict_chunks():
 
 def test_real_final_counterexample_checks_executed_tail_and_target_count():
     """The accepted DSH-031 counterexample: 0.4 s plan must fail a 0.3 s tail."""
-    from dataclasses import replace
+    from model_helpers import replace
 
     raw_targets = []
     right_joint1 = 8

@@ -16,13 +16,6 @@ from pathlib import Path
 
 import rosbag2_py
 from rclpy.serialization import deserialize_message
-from robot_contracts.follower_reference import (
-    FollowerReference,
-    FollowerValidationLimits,
-)
-from robot_contracts.follower_reference import (
-    validate as validate_follower_reference,
-)
 from robot_contracts.models import ContractError, RunContext
 from robot_contracts.native import (
     NATIVE_MOTION,
@@ -31,6 +24,13 @@ from robot_contracts.native import (
     NativeRequest,
 )
 from robot_contracts.profiles import normalize_cameras
+from robot_contracts.trajectory import (
+    FollowerReference,
+    FollowerValidationLimits,
+)
+from robot_contracts.trajectory import (
+    validate as validate_follower_reference,
+)
 from robot_ros_support.conversions import context_from_message, time_ns
 from robot_ros_support.follower_conversions import follower_reference_from_message
 from robot_ros_support.native_conversions import (

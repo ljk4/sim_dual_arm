@@ -4,12 +4,12 @@ import copy
 import json
 import math
 import sys
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 import yaml
+from model_helpers import replace
 
 ROOT = Path(__file__).resolve().parents[2]
 SIM_SRC = ROOT / "simulation/mujoco/src"

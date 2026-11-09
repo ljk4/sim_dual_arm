@@ -9,13 +9,13 @@ from types import SimpleNamespace
 
 import pytest
 from robot_contracts.action_chunks import ActionWindow, ChunkAnchor
-from robot_contracts.follower import PreparedFollowerPlan
 from robot_contracts.models import ContractError, Target
 from robot_contracts.profiles import load_profile
-from robot_contracts.reference import (
+from robot_contracts.trajectory import (
     POSITION_ATOL,
     RELATIVE_TOLERANCE,
     VELOCITY_ATOL,
+    PreparedFollowerPlan,
     ReferenceSample,
     check_continuous_limits,
     compute_reference_extremes,

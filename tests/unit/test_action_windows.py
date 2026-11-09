@@ -10,7 +10,7 @@ from robot_contracts.action_chunks import (
     ChunkAnchor,
 )
 from robot_contracts.models import ContractError, Target
-from robot_contracts.reference import ReferenceSample
+from robot_contracts.trajectory import ReferenceSample
 
 
 def target(time_ns: int, positions: tuple[float, ...] = (0.0,)) -> Target:
@@ -91,27 +91,16 @@ def test_window_reports_insufficient_horizon_and_expiry():
 
 
 def test_window_validates_the_complete_source_including_unselected_prefix_and_tail():
-    bad_prefix = (
-        target(100_000_000, (math.nan,)),
-        target(500_000_000, (0.0,)),
-        target(1_000_000_000, (0.0,)),
-    )
-    with pytest.raises(ContractError, match="source_targets\\[0\\]"):
-        make_window(target_count=2, handoff_ns=1_500_000_000, source=bad_prefix)
-
-    bad_tail = (
-        target(500_000_000, (0.0,)),
-        target(1_000_000_000, (0.0,)),
-        target(2_000_000_000, (math.inf,)),
-    )
-    with pytest.raises(ContractError, match="source_targets\\[2\\]"):
-        make_window(target_count=2, handoff_ns=1_500_000_000, source=bad_tail)
+    with pytest.raises(ContractError, match="positions"):
+        target(100_000_000, (math.nan,))
+    with pytest.raises(ContractError, match="positions"):
+        target(2_000_000_000, (math.inf,))
 
     uneven = (
         target(500_000_000, (0.0,)),
         target(1_000_000_000, (0.0, 1.0)),
     )
-    with pytest.raises(ContractError, match="positions"):
+    with pytest.raises(ContractError, match="source_targets\\[1\\]\\.positions"):
         make_window(target_count=2, handoff_ns=1_000_000_000, source=uneven)
 
 

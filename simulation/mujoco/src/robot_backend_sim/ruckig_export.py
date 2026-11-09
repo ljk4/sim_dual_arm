@@ -23,7 +23,7 @@ import math
 from dataclasses import dataclass
 
 from robot_contracts.models import ContractError
-from robot_contracts.reference import MAX_HORIZON_NS, CubicSegment, ReferencePlan
+from robot_contracts.trajectory import MAX_HORIZON_NS, CubicSegment, ReferencePlan
 
 _NS_PER_S = 1_000_000_000
 _MAX_PHASES = 64

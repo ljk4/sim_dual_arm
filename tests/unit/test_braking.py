@@ -14,7 +14,7 @@ if str(SIM_SRC) not in sys.path:
 
 from robot_backend_sim.braking import BrakingPlan, plan_braking  # noqa: E402
 from robot_contracts.models import ContractError, JointSpec  # noqa: E402
-from robot_contracts.reference import (  # noqa: E402
+from robot_contracts.trajectory import (  # noqa: E402
     JointExtremes,
     ReferenceExtremes,
     check_continuous_limits,
@@ -154,30 +154,26 @@ def test_plan_is_immutable_and_has_no_zero_length_segments():
 
 
 @pytest.mark.parametrize(
-    "extreme",
+    "args",
     [
-        JointExtremes("wrong", 0.0, 0.0, 0.0, 0.0),
-        JointExtremes("j", math.nan, 0.0, 0.0, 0.0),
-        JointExtremes("j", 0.0, 0.0, math.inf, 0.0),
-        JointExtremes("j", 0.0, 0.0, -0.1, 0.0),
-        JointExtremes("j", 0.0, 0.0, 0.0, True),
-        JointExtremes("j", 1.0, 0.0, 0.0, 0.0),
+        ("wrong", 0.0, 0.0, 0.0, 0.0),
+        ("j", math.nan, 0.0, 0.0, 0.0),
+        ("j", 0.0, 0.0, math.inf, 0.0),
+        ("j", 0.0, 0.0, -0.1, 0.0),
+        ("j", 0.0, 0.0, 0.0, True),
+        ("j", 1.0, 0.0, 0.0, 0.0),
     ],
 )
-def test_public_continuous_limits_reject_invalid_extrema_and_order(extreme):
+def test_public_continuous_limits_reject_invalid_extrema_and_order(args):
     with pytest.raises(ContractError) as caught:
-        check_continuous_limits(ReferenceExtremes((extreme,)), (joint("j"),), (1.0,))
+        check_continuous_limits(
+            ReferenceExtremes((JointExtremes(*args),)), (joint("j"),), (1.0,))
     assert caught.value.reason == "INVALID_REFERENCE_PLAN"
 
 
 def test_public_continuous_limits_reject_nonfinite_joint_limit():
-    with pytest.raises(ContractError) as caught:
-        check_continuous_limits(
-            ReferenceExtremes((JointExtremes("j", 0.0, 0.0, 0.0, 0.0),)),
-            (joint("j", minimum=math.nan),),
-            (1.0,),
-        )
-    assert caught.value.reason == "INVALID_REFERENCE_PLAN"
+    with pytest.raises(ContractError):
+        joint("j", minimum=math.nan)
 
 
 def test_nearly_coincident_stop_times_do_not_amplify_velocity_cancellation():

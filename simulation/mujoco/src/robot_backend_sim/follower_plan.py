@@ -15,13 +15,15 @@ from collections.abc import Sequence
 from numbers import Integral
 
 from robot_contracts.action_chunks import ActionWindow, ChunkAnchor
-from robot_contracts.follower import (
+from robot_contracts.models import ContractError, JointSpec, RobotProfile, Target
+from robot_contracts.trajectory import (
+    MAX_HORIZON_NS,
+    VELOCITY_ATOL,
     PreparedFollowerPlan,
     estimate_raw_terminal_velocities,
     restrict_terminal_velocities,
+    validate_reference_inputs,
 )
-from robot_contracts.models import ContractError, JointSpec, RobotProfile, Target
-from robot_contracts.reference import MAX_HORIZON_NS, VELOCITY_ATOL, validate_reference_inputs
 
 from .follower_config import PandaFollowerConfig
 from .motion_config import PandaControlConfig

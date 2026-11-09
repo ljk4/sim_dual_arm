@@ -14,10 +14,10 @@ import threading
 import time
 from concurrent.futures import Future
 
-from robot_contracts.follower_reference import FollowerReference
 from robot_contracts.models import ContractError, RobotProfile, RunContext
 from robot_contracts.native import NativeRequest
 from robot_contracts.profiles import load_profile
+from robot_contracts.trajectory import FollowerReference
 
 from .backend_config import BackendConfig
 from .control_state import (

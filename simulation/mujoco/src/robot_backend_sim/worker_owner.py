@@ -17,9 +17,9 @@ from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass
 from typing import Protocol
 
-from robot_contracts.follower_reference import FollowerReference
 from robot_contracts.models import ContractError, RobotProfile, RunContext
 from robot_contracts.native import NATIVE_STREAM_NEXT, NativeRequest
+from robot_contracts.trajectory import FollowerReference
 
 from .backend_config import BackendConfig
 from .control import NativeController

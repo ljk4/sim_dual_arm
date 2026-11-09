@@ -5,30 +5,34 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from model_helpers import replace
 from robot_contracts.action_chunks import ActionWindow, ChunkAnchor
-from robot_contracts.follower import FOLLOWER_ALGORITHM_VERSION, PreparedFollowerPlan
-from robot_contracts.follower_reference import (
-    FOLLOWER_NORMALIZATION_VERSION,
-    FOLLOWER_SAMPLER_VERSION,
-    FollowerReference,
-    FollowerValidationLimits,
-    compute_follower_reference_digest,
-    validate,
-)
 from robot_contracts.models import (
+    CameraSpec,
     ContractError,
     JointSpec,
     RobotProfile,
     RunContext,
     Target,
-    Trajectory,
 )
 from robot_contracts.native import NATIVE_STREAM_FIRST, NativeRequest
-from robot_contracts.reference import CubicSegment, ReferencePlan, ReferenceSample
+from robot_contracts.native_reference import Trajectory
+from robot_contracts.trajectory import (
+    FOLLOWER_ALGORITHM_VERSION,
+    FOLLOWER_NORMALIZATION_VERSION,
+    FOLLOWER_SAMPLER_VERSION,
+    CubicSegment,
+    FollowerReference,
+    FollowerValidationLimits,
+    PreparedFollowerPlan,
+    ReferencePlan,
+    ReferenceSample,
+    compute_follower_reference_digest,
+    validate,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 PROFILE_DIGEST = "profile-hash"
@@ -61,7 +65,7 @@ def profile() -> RobotProfile:
             JointSpec("joint1", "rad", -10.0, TARGET_POSITION - OVERSHOOT, 10.0, 0.0),
             JointSpec("joint2", "rad", -10.0, 10.0, 10.0, 0.0),
         ),
-        (),
+        (CameraSpec("front", 64, 48, "front", ""),),
     )
 
 
@@ -336,11 +340,11 @@ def test_record_module_has_no_science_or_ros_dependency(tmp_path):
     script = """
 import importlib
 import sys
-import robot_contracts.follower_reference as module
+import robot_contracts.trajectory as module
 forbidden = ("ruckig", "numpy", "scipy", "mujoco", "rclpy", "robot_api_msgs")
 loaded = [name for name in forbidden if name in sys.modules]
 assert not loaded, loaded
-assert module.FollowerReference.__dataclass_fields__
+assert module.FollowerReference.model_fields
 """
     environment = os.environ.copy()
     environment["PYTHONPATH"] = str(ROOT / "contracts/python/src")

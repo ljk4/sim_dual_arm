@@ -12,8 +12,8 @@ import threading
 import time
 from collections.abc import Callable
 
-from robot_contracts.follower_reference import FollowerValidationLimits
 from robot_contracts.models import ContractError, RobotProfile, RunContext
+from robot_contracts.trajectory import FollowerValidationLimits
 
 from dual_arm_runtime.native_config import NativeConfiguration, NativeTeacher
 from dual_arm_runtime.native_stream import (

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import copy
 import sys
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
 import yaml
+from model_helpers import replace
 
 ROOT = Path(__file__).resolve().parents[2]
 SIM_SRC = ROOT / "simulation/mujoco/src"
@@ -113,6 +113,7 @@ def test_task_geometry_must_match_the_frozen_scene():
     scene_config = load_scene_config(ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml")
     config = load_task_config(CONFIG_PATH)
     validate_scene_geometry(config, scene_config)
-    wrong = replace(config, source_half_extents_m=(0.021, 0.02, 0.02))
+    wrong = replace(config, objects=replace(
+        config.objects, source_half_extents_m=(0.021, 0.021, 0.021)))
     with pytest.raises(StackTaskConfigError, match="half extents"):
         validate_scene_geometry(wrong, scene_config)

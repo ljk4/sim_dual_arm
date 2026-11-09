@@ -38,10 +38,12 @@ from robot_backend_sim.stream_config import StreamConfig  # noqa: E402
 from robot_backend_sim.stream_schedule import next_grid_time  # noqa: E402
 from robot_contracts.action_chunks import ActionWindow  # noqa: E402
 from robot_contracts.control import ControlCommand  # noqa: E402
-from robot_contracts.follower import PreparedFollowerPlan  # noqa: E402
-from robot_contracts.follower_math import normalize_follower_positions  # noqa: E402
 from robot_contracts.models import ContractError, RunContext, Target  # noqa: E402
 from robot_contracts.profiles import load_profile  # noqa: E402
+from robot_contracts.trajectory import (  # noqa: E402
+    PreparedFollowerPlan,  # noqa: E402
+    normalize_follower_positions,  # noqa: E402
+)
 
 SCENE_PATH = ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml"
 CONTROL_PATH = ROOT / "simulation/mujoco/configs/control/panda_control.yaml"

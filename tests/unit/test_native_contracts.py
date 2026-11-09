@@ -1,14 +1,9 @@
 import math
-from dataclasses import FrozenInstanceError
 
 import pytest
+from pydantic import ValidationError
 from robot_contracts.action_chunks import ChunkAnchor
-from robot_contracts.models import (
-    ContractError,
-    RunContext,
-    Target,
-    Trajectory,
-)
+from robot_contracts.models import ContractError, RunContext, Target
 from robot_contracts.native import (
     NATIVE_MOTION,
     NATIVE_STREAM_FIRST,
@@ -20,7 +15,8 @@ from robot_contracts.native import (
     NativeGripper,
     NativeRequest,
 )
-from robot_contracts.reference import ReferenceSample
+from robot_contracts.native_reference import Trajectory
+from robot_contracts.trajectory import ReferenceSample
 
 PROFILE_DIGEST = "profile-digest"
 
@@ -167,9 +163,9 @@ def test_request_is_deeply_normalised_and_frozen():
     assert request.trajectory.targets[0].positions == (0.2, -0.2)
     assert request.mode == "MOTION"
     assert request.command.command_id == "command-1"
-    with pytest.raises(FrozenInstanceError):
+    with pytest.raises(ValidationError):
         request.kind = 2  # type: ignore[misc]
-    with pytest.raises((FrozenInstanceError, TypeError)):
+    with pytest.raises((ValidationError, TypeError)):
         request.trajectory.targets[0].positions[0] = 1.0  # type: ignore[index]
 
 

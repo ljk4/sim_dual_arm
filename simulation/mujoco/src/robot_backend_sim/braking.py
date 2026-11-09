@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from numbers import Integral, Real
 
 from robot_contracts.models import ContractError, JointSpec
-from robot_contracts.reference import (
+from robot_contracts.trajectory import (
     CubicSegment,
     JointExtremes,
     ReferenceExtremes,

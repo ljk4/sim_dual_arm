@@ -1,7 +1,6 @@
 """Resume must bind resolved CLI inputs and accepted data, not only YAML text."""
 
 import json
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -11,6 +10,7 @@ from dual_arm_learning.checkpoints import (
     validate_checkpoint_binding,
 )
 from dual_arm_learning.config import load_training_config
+from model_helpers import replace
 
 ROOT = Path(__file__).resolve().parents[2]
 

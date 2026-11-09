@@ -20,10 +20,12 @@ from enum import StrEnum
 from numbers import Integral, Real
 
 from robot_contracts.action_chunks import ChunkAnchor
-from robot_contracts.follower import PreparedFollowerPlan
-from robot_contracts.follower_math import normalize_follower_positions
 from robot_contracts.models import ContractError
-from robot_contracts.reference import ReferenceSample
+from robot_contracts.trajectory import (
+    PreparedFollowerPlan,
+    ReferenceSample,
+    normalize_follower_positions,
+)
 
 from .braking import BrakingPlan, plan_braking
 from .contact_unload import REFERENCE_VELOCITY_ATOL_M_S, ContactUnload
