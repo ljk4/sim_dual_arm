@@ -176,7 +176,7 @@ class StackTaskClient:
                 if not waiting_logged:
                     # One entry per prepare call, not one per poll interval.
                     self.emit(
-                        "native.task.prepare_waiting",
+                        "task.prepare_waiting",
                         reason="TASK_NOT_QUIESCENT",
                         message="stack task prepare waiting for a still robot",
                         fields={
@@ -216,7 +216,7 @@ class StackTaskClient:
                 )
             if waiting_logged:
                 self.emit(
-                    "native.task.prepare_succeeded",
+                    "task.prepare_succeeded",
                     message="stack task prepare succeeded after quiescence wait",
                     fields={
                         "request_id": request_id,
@@ -262,7 +262,7 @@ class StackTaskClient:
     ) -> None:
         elapsed = time.monotonic() - started
         self.emit(
-            "native.task.prepare_timeout",
+            "task.prepare_timeout",
             level="WARNING",
             reason="PREPARE_TIMEOUT",
             message="stack task prepare budget expired while waiting for quiescence",

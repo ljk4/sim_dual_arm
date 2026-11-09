@@ -793,7 +793,7 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("--seed", type=int, default=None)
     run.add_argument("--run-id", default=None)
     run.add_argument("--episode-id", default=None)
-    run.add_argument("--runtime-config", default="runtime/ros2/configs/native_teacher.yaml")
+    run.add_argument("--runtime-config", default="runtime/ros2/configs/teacher_collect.yaml")
     run.add_argument("launch_command", nargs=argparse.REMAINDER)
 
     status = sub.add_parser("status", help="show budgets and consumed raw bytes")

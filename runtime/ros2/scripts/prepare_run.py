@@ -29,7 +29,7 @@ RUNTIME_FIELDS = (
     "observation_schema",
     "action_schema",
     "control_constraints",
-    "follower_constraints",
+    "follower_config",
 )
 REQUIRED_BINDING = (
     "schema_version",

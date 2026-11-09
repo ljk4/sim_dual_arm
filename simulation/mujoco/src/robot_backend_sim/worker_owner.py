@@ -1,4 +1,4 @@
-"""The single physics-owner thread for the native backend.
+"""The single physics-owner thread for the backend.
 
 All live ``MjData`` access and every ``mj_step`` happen here.  Callers can only
 enqueue fixed operations with a bounded queue and wait on their own ``Future``.
@@ -18,11 +18,11 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from robot_contracts.models import ContractError, RobotProfile, RunContext
-from robot_contracts.native import NATIVE_STREAM_NEXT, NativeRequest
+from robot_contracts.stream_request import REQUEST_STREAM_NEXT, StreamRequest
 from robot_contracts.trajectory import FollowerReference
 
 from .backend_config import BackendConfig
-from .control import NativeController
+from .control import ControlSession
 from .control_state import (
     ChunkStatus,
     ControlEvent,
@@ -169,7 +169,7 @@ class _Owner:
         self._renderer: RendererThread | None = None
         self._renderer_lock = threading.Lock()
         self._health_check = None
-        self._controller: NativeController | None = None
+        self._controller: ControlSession | None = None
         self._scene: Scene | None = None
         self._owner_context: RunContext | None = None
         self._captures: queue.Queue[Capture] = queue.Queue(maxsize=config.capture_queue_capacity)
@@ -187,7 +187,7 @@ class _Owner:
         self._accepted_commands = 0
         self._events_emitted = 0
         self._feedback_key: tuple[str, str] | None = None
-        self._thread = threading.Thread(target=self._run, name="native-physics", daemon=True)
+        self._thread = threading.Thread(target=self._run, name="backend-physics", daemon=True)
 
     # ------------------------------------------------------------- lifecycle
     def start(self) -> None:
@@ -297,7 +297,7 @@ class _Owner:
 
     # --------------------------------------------------------------- thread
     def _run(self) -> None:
-        controller: NativeController | None = None
+        controller: ControlSession | None = None
         try:
             scene = build_scene(self._scene_config)
             scene.reset(self._config.seed)
@@ -305,7 +305,7 @@ class _Owner:
             io = PandaIO(
                 scene, self._profile, velocity_feedforward=self._config.velocity_feedforward
             )
-            controller = NativeController(
+            controller = ControlSession(
                 scene,
                 io,
                 self._control_config,
@@ -382,7 +382,7 @@ class _Owner:
             self._done.set()
             self._drain_pending(self._close_reason or "backend closed")
 
-    def _process_queue(self, controller: NativeController) -> None:
+    def _process_queue(self, controller: ControlSession) -> None:
         for _ in range(_MAX_OPERATION_CYCLE):
             try:
                 operation = self._queue.get_nowait()
@@ -390,7 +390,7 @@ class _Owner:
                 return
             self._execute(controller, operation)
 
-    def _execute(self, controller: NativeController, operation: _Operation) -> None:
+    def _execute(self, controller: ControlSession, operation: _Operation) -> None:
         if not operation.future.set_running_or_notify_cancel():
             return
         try:
@@ -400,7 +400,7 @@ class _Owner:
             operation.future.set_exception(error)
 
     def _dispatch(
-        self, controller: NativeController, name: str, payload: tuple[object, ...]
+        self, controller: ControlSession, name: str, payload: tuple[object, ...]
     ) -> object:
         now = time.monotonic_ns()
         if name == "acquire":
@@ -572,7 +572,7 @@ class _Owner:
 
     def _stack_snapshot(
         self,
-        controller: NativeController,
+        controller: ControlSession,
         context: RunContext,
         lease_id: str,
         request_id: str,
@@ -656,7 +656,7 @@ class _Owner:
 
     def _stack_commit(
         self,
-        controller: NativeController,
+        controller: ControlSession,
         context: RunContext,
         lease_id: str,
         request_id: str,
@@ -755,7 +755,7 @@ class _Owner:
 
     def _stack_start(
         self,
-        controller: NativeController,
+        controller: ControlSession,
         context: RunContext,
         lease_id: str,
         request_id: str,
@@ -862,12 +862,12 @@ class _Owner:
 
     def _admit(
         self,
-        controller: NativeController,
-        request: NativeRequest,
+        controller: ControlSession,
+        request: StreamRequest,
         packet: PreparedControlCommand,
     ) -> ControlReply:
-        if not isinstance(request, NativeRequest):
-            raise ContractError("INVALID_NATIVE_REQUEST", "request must be a NativeRequest")
+        if not isinstance(request, StreamRequest):
+            raise ContractError("INVALID_STREAM_REQUEST", "request must be a StreamRequest")
         if not isinstance(packet, PreparedControlCommand):
             raise ContractError(
                 "INVALID_PREPARED_COMMAND", "packet must be a PreparedControlCommand"
@@ -883,11 +883,11 @@ class _Owner:
         )
         reply = (
             controller.submit(packet, time.monotonic_ns())
-            if request.kind != NATIVE_STREAM_NEXT
+            if request.kind != REQUEST_STREAM_NEXT
             else controller.queue_chunk(packet, time.monotonic_ns())
         )
         self._record_reply(controller, reply)
-        self._accepted_commands += int(original is None and request.kind != NATIVE_STREAM_NEXT)
+        self._accepted_commands += int(original is None and request.kind != REQUEST_STREAM_NEXT)
         status = reply.status
         if (
             original is None
@@ -907,7 +907,7 @@ class _Owner:
             self._offer(self._follower_references, reference, "follower_reference")
         return reply
 
-    def _record_reply(self, controller: NativeController, reply: ControlReply) -> ControlReply:
+    def _record_reply(self, controller: ControlSession, reply: ControlReply) -> ControlReply:
         for event in reply.events:
             self._offer(self._events, event, "event")
             self._events_emitted += 1
@@ -953,7 +953,7 @@ class _Owner:
         except queue.Full:  # pragma: no cover - bounded race
             pass
 
-    def _step_and_capture(self, controller: NativeController, now: int) -> None:
+    def _step_and_capture(self, controller: ControlSession, now: int) -> None:
         try:
             reply = controller.step(now)
         except BaseException as error:  # noqa: BLE001 - a step failure is fatal
@@ -988,7 +988,7 @@ class _Owner:
             self.latch_fault("CAPTURE_FAILED", f"{type(error).__name__}: {error}")
             self._begin_fault_stop(self.fault)
 
-    def _capture(self, controller: NativeController, reply: ControlReply, now: int) -> None:
+    def _capture(self, controller: ControlSession, reply: ControlReply, now: int) -> None:
         renderer = self._renderer
         if renderer is None or renderer.failure is not None:
             self._dropped_captures += 1
@@ -1049,7 +1049,7 @@ class _Owner:
             self._teacher_feedback.clear()
         self._teacher_feedback[capture.capture_seq] = (feedback, fact)
 
-    def _check_health(self, controller: NativeController, now: int) -> None:
+    def _check_health(self, controller: ControlSession, now: int) -> None:
         if self._health_check is None:
             return
         try:
@@ -1076,14 +1076,14 @@ class _Owner:
         if self._controller is not None:
             self._safe_system_stop(self._controller, reason)
 
-    def _safe_system_stop(self, controller: NativeController, reason: str) -> None:
+    def _safe_system_stop(self, controller: ControlSession, reason: str) -> None:
         try:
             reply = controller.system_stop(reason, time.monotonic_ns())
             self._record_reply(controller, reply)
         except BaseException as error:  # noqa: BLE001 - braking failure is another fault
             self.latch_fault("SYSTEM_STOP_FAILED", f"{type(error).__name__}: {error}")
 
-    def _braking_complete(self, controller: NativeController, now: int) -> bool:
+    def _braking_complete(self, controller: ControlSession, now: int) -> bool:
         if now >= self._close_deadline_ns:
             return True
         phase = controller.phase

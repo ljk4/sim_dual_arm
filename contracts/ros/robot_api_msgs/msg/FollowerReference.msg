@@ -1,9 +1,9 @@
 # Independent accepted bounded-follower record.  It is not a strict-reference
 # record: the follower curve is not required to pass through every
-# raw prediction.  The complete raw NativeCommand (including any unselected
+# raw prediction.  The complete raw StreamCommand (including any unselected
 # tail) is retained in `request`; the explicit curve, limits, terminal speeds,
 # versions and acceptance times are copied verbatim.
-robot_api_msgs/NativeCommand request
+robot_api_msgs/StreamCommand request
 uint64 motion_seq
 int64 accepted_sim_time_ns
 int64 accepted_wall_time_ns

@@ -1,4 +1,4 @@
-"""Bounded write-behind native rosbag2/MCAP recorder with checked commit."""
+"""Bounded write-behind rosbag2/MCAP recorder with checked commit."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from robot_contracts.episodes import (
 from robot_contracts.models import ContractError
 from robot_contracts.profiles import validate_document
 
-from dual_arm_runtime.native_follower_audit import audit_follower_recording
+from dual_arm_runtime.episode_audit import audit_follower_recording
 from dual_arm_runtime.recording_queue import (
     BoundedRecordingQueue,
     RecordingQueueError,
@@ -43,7 +43,7 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-class _NativeWriter:
+class _RosbagWriter:
     """The only object allowed to touch a ``SequentialWriter``.
 
     It is constructed inside the recorder's writer thread, so ``open``,
@@ -83,7 +83,7 @@ class _NativeWriter:
 
     def write(self, topic: str, payload: bytes, timestamp_ns: int) -> None:
         if self._writer is None:
-            raise RuntimeError("native writer is not open")
+            raise RuntimeError("writer is not open")
         self._writer.write(topic, payload, timestamp_ns)
 
     def close(self) -> None:
@@ -93,7 +93,7 @@ class _NativeWriter:
 
 
 class EpisodeRecorder:
-    """Own one bounded queue and one native writer thread for an episode.
+    """Own one bounded queue and one writer thread for an episode.
 
     ``append`` serializes on the calling thread, then hands immutable bytes to the
     queue.  It never waits for disk or free capacity.  ``finish`` stops producers,
@@ -156,7 +156,7 @@ class EpisodeRecorder:
         try:
             self._queue = BoundedRecordingQueue(
                 self._settings,
-                lambda: _NativeWriter(self.directory, self._topics),
+                lambda: _RosbagWriter(self.directory, self._topics),
                 self._topics,
                 thread_name=f"mcap-writer-{episode_id}",
             )
@@ -228,7 +228,7 @@ class EpisodeRecorder:
         being silently recorded as ``completed``.
 
         A writer close failure or timeout keeps the directory recognizable as a
-        partial episode and raises; this method never force-closes the native
+        partial episode and raises; this method never force-closes the
         handle and never publishes a success manifest for a timed-out writer.
         """
         with self._finish_lock:

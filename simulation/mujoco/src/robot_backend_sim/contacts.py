@@ -198,7 +198,7 @@ def _normal_force(model: Any, data: Any, contact_index: int) -> float:
         import numpy as np
     except ImportError as error:  # pragma: no cover - native path only
         raise ContractError(
-            "NATIVE_UNAVAILABLE", "MuJoCo is required for contact forces"
+            "MUJOCO_UNAVAILABLE", "MuJoCo is required for contact forces"
         ) from error
     value = np.zeros(6, dtype=float)
     mujoco.mj_contactForce(model, data, contact_index, value)

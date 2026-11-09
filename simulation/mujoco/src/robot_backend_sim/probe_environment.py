@@ -1,4 +1,4 @@
-"""Native MuJoCo/mink/EGL environment probe for one report run.
+"""MuJoCo/mink/EGL environment probe for one report run.
 
 The module is intentionally small: it reports installed dependency versions and
 import sources, loads the local single Panda keyframe,

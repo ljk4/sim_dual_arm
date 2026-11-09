@@ -6,9 +6,9 @@ robot:
   profile: ../../../profiles/robots/panda_stack_learning_v1/profile.json
   schemas: ../../../contracts/schemas
   scene: ../../../simulation/mujoco/configs/scene/panda_stack_learning.yaml
-  control: ../../../simulation/mujoco/configs/control/panda_control.yaml
-  stream: ../../../simulation/mujoco/configs/control/panda_task_stream.yaml
-  follower: ../../../simulation/mujoco/configs/control/panda_follower_act.yaml
+  control: ../../../profiles/control/panda_control_v1.yaml
+  stream: ../../../profiles/control/panda_stream_v1.yaml
+  follower: ../../../profiles/control/panda_follower_v1.yaml
   task: ../../../simulation/mujoco/configs/scene/panda_stack_task.yaml
   # Optional read-only segmentation counts on the same render snapshot.
   render_quality:

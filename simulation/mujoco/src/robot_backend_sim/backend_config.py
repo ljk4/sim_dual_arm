@@ -1,4 +1,4 @@
-"""Strict configuration for the runnable native simulation backend."""
+"""Strict configuration for the runnable simulation backend."""
 
 from __future__ import annotations
 

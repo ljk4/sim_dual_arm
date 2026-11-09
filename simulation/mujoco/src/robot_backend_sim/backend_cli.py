@@ -1,4 +1,4 @@
-"""Process entry point for the runnable native backend.
+"""Process entry point for the runnable backend.
 
 Run directory creation, signals, run metadata and the SingleThreadedExecutor
 loop live here so ``node.py`` stays focused on ROS conversion/lifecycle.
@@ -26,7 +26,7 @@ from robot_run_logging import EventLogger, LogFailure, LogSettings
 from . import assets
 from .backend_config import load_backend_config
 from .diagnostics import code_provenance
-from .node import NativeBackendNode
+from .node import BackendNode
 from .worker import WorkerSummary
 
 _RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -109,7 +109,7 @@ def run(argv: list[str] | None = None) -> int:
     logger = EventLogger(
         run_dir / "log",
         run_id=run_id,
-        component="native_backend",
+        component="backend",
         settings=LogSettings(
             queue_capacity=config.log.queue_capacity,
             max_event_bytes=config.log.max_event_bytes,
@@ -168,20 +168,20 @@ def run(argv: list[str] | None = None) -> int:
         signal.signal(signum, signals)
     rclpy.init(args=None, signal_handler_options=SignalHandlerOptions.NO)
     executor = SingleThreadedExecutor()
-    node: NativeBackendNode | None = None
+    node: BackendNode | None = None
     summary: WorkerSummary | None = None
     failure: str | None = None
     exit_code = _EXIT_OK
     started = time.monotonic()
     try:
-        node = NativeBackendNode(
+        node = BackendNode(
             config,
             log=logger,
         )
         executor.add_node(node)
         logger.emit(
             "backend.start",
-            message="native backend ready",
+            message="backend ready",
             fields={
                 "namespace": config.namespace,
                 "backend_kind": "mujoco",
@@ -257,7 +257,7 @@ def run(argv: list[str] | None = None) -> int:
             if exit_code == _EXIT_OK:
                 exit_code = _EXIT_FAILURE
             failure = failure or f"LOGGER_CLOSE_FAILED: {error}"
-            sys.stderr.write(f"native backend logger close failed: {error}\n")
+            sys.stderr.write(f"backend logger close failed: {error}\n")
         status = {
             "run_id": run_id,
             "finished_utc": _now_utc(),

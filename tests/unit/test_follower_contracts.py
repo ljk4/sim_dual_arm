@@ -26,7 +26,7 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-CONFIG_PATH = ROOT / "simulation/mujoco/configs/control/panda_follower.yaml"
+CONFIG_PATH = ROOT / "profiles/control/panda_follower_v1.yaml"
 
 
 def joint(name: str, *, minimum: float = -10.0, maximum: float = 10.0, velocity: float = 1.0):
@@ -275,13 +275,15 @@ def test_follower_config_values_and_round_trip(tmp_path):
     from robot_backend_sim.follower_config import load_follower_config, parse_follower_config
 
     config = load_follower_config(CONFIG_PATH)
-    assert config.target_count == 5
-    assert config.max_target_deviations == ((0.15,) * 7 + (0.02,) + (0.15,) * 7 + (0.02,))
+    assert config.target_count == 10
+    assert config.max_target_deviations == (
+        (0.30,) * 6 + (0.40, 0.04) + (0.30,) * 6 + (0.40, 0.04)
+    )
     assert config.max_terminal_tail_duration_s == pytest.approx(3.0)
     assert config.max_terminal_tail_duration_ns == 3_000_000_000
     snapshot = config.to_document()
     snapshot["max_target_deviations"][0] = 99.0
-    assert config.max_target_deviations[0] == 0.15
+    assert config.max_target_deviations[0] == 0.30
     assert parse_follower_config(config.to_document(), "<snapshot>") == config
 
     path = tmp_path / "follower.yaml"
@@ -327,7 +329,7 @@ def test_follower_config_rejects_duplicate_keys(tmp_path):
 
     path = tmp_path / "duplicate.yaml"
     path.write_text(
-        CONFIG_PATH.read_text(encoding="utf-8") + "\ntarget_count: 5\n",
+        CONFIG_PATH.read_text(encoding="utf-8") + "\ntarget_count: 10\n",
         encoding="utf-8",
     )
     with pytest.raises(FollowerConfigError) as caught:

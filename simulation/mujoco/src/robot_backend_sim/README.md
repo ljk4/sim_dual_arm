@@ -7,7 +7,7 @@ MuJoCo 后端 Python 包。按状态所有权分组：
 - `scene.py`、`scene_config.py`、`assets.py`、`panda_io.py`、`rendering.py`、
   `render_worker.py`、`visibility.py`：场景组装、Panda 映射、渲染和视野检查。
 - `motion.py`、`motion_config.py`、`braking.py`、`contacts.py`、`control.py`、
-  `control_state.py`：原生运动、接触完成、刹车和控制状态。
+  `control_state.py`：运动、接触完成、刹车和控制状态。
 - `follower_plan.py`、`follower_protocol.py`、`follower_config.py`、
   `stream_schedule.py`：受限跟随、连续流调度和预编译。
 - `stack_task.py`、`stack_ros.py`、`teacher.py`、`task_config.py`、

@@ -46,7 +46,7 @@ def fixture():
         ROOT / "profiles/robots/panda_stack_v1/profile.json",
         ROOT / "contracts/schemas",
     )
-    control = load_control_config(ROOT / "simulation/mujoco/configs/control/panda_control.yaml")
+    control = load_control_config(ROOT / "profiles/control/panda_control_v1.yaml")
     kinematics = load_kinematics_config(
         ROOT / "simulation/mujoco/configs/checks/kinematics_check.yaml", scene_config
     )

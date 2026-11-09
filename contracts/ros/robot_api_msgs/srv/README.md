@@ -2,7 +2,7 @@
 
 控制与 episode：`AcquireControl`、`RenewControl`、`ReleaseControl`、
 `StartEpisode`、`EndEpisode`、`Stop`、`ResetSimulation`。
-原生：`QueryNativeCommand`、`GetNativeAnchor`。跟随：`SubmitFollower`。
+流式：`QueryStreamCommand`、`GetStreamAnchor`。跟随：`SubmitFollower`。
 任务/示教：`PrepareStackTask`、`StartStackTask`、`GetStackTaskState`、
 `GetTeacherChunk`。
 

@@ -57,7 +57,7 @@ __all__ = [
     "FailedReason",
     "MotionResult",
     "MotionSnapshot",
-    "NativeMotion",
+    "MotionController",
     "Phase",
     "StopReason",
 ]
@@ -236,7 +236,7 @@ class _AppliedStep:
     reference_corrections: tuple[float, ...]
 
 
-class NativeMotion:
+class MotionController:
     """One motion owner bound to the creating thread and one ``PandaIO``.
 
     ``step`` applies the reference at simulation time ``t`` through
@@ -321,7 +321,7 @@ class NativeMotion:
         self._stable_since_ns: int | None = None
         self._stable_signature: tuple[tuple[str, str | None], ...] | None = None
         self._stop_stable_since_ns: int | None = None
-        self._instance_id = f"native-{uuid.uuid4().hex}"
+        self._instance_id = f"stream-{uuid.uuid4().hex}"
         self._stream: StreamSchedule | None = None
         self._stream_initial_positions: tuple[float, ...] | None = None
         self._stream_final_positions: tuple[float, ...] | None = None
@@ -375,7 +375,7 @@ class NativeMotion:
         self._check_thread()
         if self._stream_config is None:
             raise _invalid(
-                "STREAM_NOT_CONFIGURED", "NativeMotion was created without a stream config"
+                "STREAM_NOT_CONFIGURED", "MotionController was created without a stream config"
             )
         now_sim_ns = _sim_time_ns(self._scene.data)
         if self._phase is Phase.FAILED:
@@ -446,7 +446,7 @@ class NativeMotion:
         wall = self._validate_wall(wall_time_ns)
         if self._stream_config is None:
             raise _invalid(
-                "STREAM_NOT_CONFIGURED", "NativeMotion was created without a stream config"
+                "STREAM_NOT_CONFIGURED", "MotionController was created without a stream config"
             )
         if not isinstance(first, PreparedFollowerPlan):
             raise _invalid("INVALID_PREPARED_CHUNK", "first must be a PreparedFollowerPlan")
@@ -564,7 +564,7 @@ class NativeMotion:
         wall = self._validate_wall(wall_time_ns)
         if self._stream_config is None:
             raise _invalid(
-                "STREAM_NOT_CONFIGURED", "NativeMotion was created without a stream config"
+                "STREAM_NOT_CONFIGURED", "MotionController was created without a stream config"
             )
         if not isinstance(successor, PreparedFollowerPlan):
             raise _invalid("INVALID_PREPARED_CHUNK", "successor must be a PreparedFollowerPlan")
@@ -996,7 +996,7 @@ class NativeMotion:
 
     def _check_thread(self) -> None:
         if threading.current_thread() is not self._owner_thread:
-            raise _invalid("WRONG_THREAD", "NativeMotion must be used on its creating thread")
+            raise _invalid("WRONG_THREAD", "MotionController must be used on its creating thread")
 
     def _validate_wall(self, value: object) -> int:
         if isinstance(value, bool) or not isinstance(value, Integral):

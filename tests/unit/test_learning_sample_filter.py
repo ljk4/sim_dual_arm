@@ -72,7 +72,7 @@ def _events(
         lines.append(
             json.dumps(
                 {
-                    "event": "native.follower.chunk_accepted",
+                    "event": "follower.chunk_accepted",
                     "fields": {
                         "chunk_seq": chunk_seq,
                         "phase": phase,

@@ -1,4 +1,4 @@
-"""Pure constant-acceleration braking plans for bounded native motion stops.
+"""Pure constant-acceleration braking plans for bounded motion stops.
 
 Every axis starts from the last reference position/velocity actually applied to
 the robot and decelerates at no more than its configured maximum until zero,

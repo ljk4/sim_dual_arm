@@ -17,22 +17,26 @@ try:
     from rclpy.serialization import deserialize_message, serialize_message
     from robot_api_msgs.msg import FollowerReference as FollowerReferenceMessage
     from robot_api_msgs.srv import (
-        GetNativeAnchor,
-        QueryNativeCommand,
+        GetStreamAnchor,
+        QueryStreamCommand,
         SubmitFollower,
     )
     from robot_contracts.action_chunks import ChunkAnchor
     from robot_contracts.models import RunContext, Target
-    from robot_contracts.native import NATIVE_STREAM_FIRST, NATIVE_STREAM_NEXT, NativeRequest
-    from robot_contracts.native_reference import Trajectory
     from robot_contracts.profiles import load_profile
+    from robot_contracts.stream_request import (
+        REQUEST_STREAM_FIRST,
+        REQUEST_STREAM_NEXT,
+        StreamRequest,
+        Trajectory,
+    )
     from robot_contracts.trajectory import ReferenceSample, validate
     from robot_ros_support.conversions import context_message, time_ns
     from robot_ros_support.follower_conversions import (
         follower_reference_from_message,
         follower_reference_message,
     )
-    from robot_ros_support.native_conversions import anchor_from_message, native_command_message
+    from robot_ros_support.stream_conversions import anchor_from_message, stream_command_message
 except ImportError as error:  # pragma: no cover - host without ROS
     pytest.skip(f"ROS unavailable: {error}", allow_module_level=True)
 
@@ -53,13 +57,13 @@ from robot_backend_sim.follower_protocol import (  # noqa: E402
     validation_limits,
 )
 from robot_backend_sim.motion_config import load_control_config  # noqa: E402
-from test_native_backend_ros import Stack, _profile_context, acquire  # noqa: E402
+from test_backend_ros import Stack, _profile_context, acquire  # noqa: E402
 
 PROFILE_PATH = ROOT / "profiles/robots/panda_stack_v1/profile.json"
 SCHEMAS = ROOT / "contracts/schemas"
 FOLLOWER_CONFIG = ROOT / "tests/fixtures/simulation/backend_follower.yaml"
-CONTROL = load_control_config(ROOT / "simulation/mujoco/configs/control/panda_control.yaml")
-FOLLOWER = load_follower_config(ROOT / "simulation/mujoco/configs/control/panda_follower.yaml")
+CONTROL = load_control_config(ROOT / "profiles/control/panda_control_v1.yaml")
+FOLLOWER = load_follower_config(ROOT / "profiles/control/panda_follower_v1.yaml")
 PROFILE = load_profile(PROFILE_PATH, SCHEMAS)
 BASE = PROFILE.initial_positions
 COUNT = len(BASE)
@@ -110,8 +114,8 @@ def _request(
     observation_id: int,
     final: bool,
     observation_ns: int,
-) -> NativeRequest:
-    return NativeRequest(
+) -> StreamRequest:
+    return StreamRequest(
         trajectory=Trajectory(
             context,
             lease,
@@ -130,26 +134,26 @@ def _request(
     )
 
 
-def _submit(stack: Stack, request: NativeRequest):
-    message = SubmitFollower.Request(request=native_command_message(request))
+def _submit(stack: Stack, request: StreamRequest):
+    message = SubmitFollower.Request(request=stream_command_message(request))
     return stack.call("submit_follower", message, timeout=20.0)
 
 
 def _acquire_anchor(stack: Stack, context: RunContext, lease: str) -> ChunkAnchor:
-    request = GetNativeAnchor.Request(
+    request = GetStreamAnchor.Request(
         context=context_message(context),
         lease_id=lease,
         has_start=False,
     )
-    response = stack.call("get_native_anchor", request)
+    response = stack.call("get_stream_anchor", request)
     assert response.success, response.reason
     return anchor_from_message(response.anchor)
 
 
 def _query(stack: Stack, context: RunContext, command_id: str):
     return stack.call(
-        "query_native_command",
-        QueryNativeCommand.Request(
+        "query_stream_command",
+        QueryStreamCommand.Request(
             context=context_message(context), command_id=command_id
         ),
     )
@@ -168,7 +172,7 @@ def test_follower_reference_really_serializes_and_roundtrips():
         _context(),
         "lease-1",
         anchor,
-        kind=NATIVE_STREAM_FIRST,
+        kind=REQUEST_STREAM_FIRST,
         observation_id=1,
         final=False,
         observation_ns=700_000_000,
@@ -205,7 +209,7 @@ def test_follower_reference_really_serializes_and_roundtrips():
         validation_limits(CONTROL, FOLLOWER, duration_grid_ns=GRID_NS),
     )
 
-    submit = SubmitFollower.Request(request=native_command_message(raw))
+    submit = SubmitFollower.Request(request=stream_command_message(raw))
     assert deserialize_message(serialize_message(submit), SubmitFollower.Request).request.kind == 2
     response = SubmitFollower.Response(
         accepted=True,
@@ -263,7 +267,7 @@ def test_three_follower_blocks_over_real_ros_services(tmp_path):
             context,
             lease,
             first_anchor,
-            kind=NATIVE_STREAM_FIRST,
+            kind=REQUEST_STREAM_FIRST,
             observation_id=1,
             final=False,
             observation_ns=time_ns(stack.states[-1].stamp),
@@ -289,7 +293,7 @@ def test_three_follower_blocks_over_real_ros_services(tmp_path):
             changed_targets[-1].time_ns,
             (changed_targets[-1].positions[0] + 1e-3, *changed_targets[-1].positions[1:]),
         )
-        modified = NativeRequest(
+        modified = StreamRequest(
             trajectory=Trajectory(
                 first_request.trajectory.context,
                 first_request.trajectory.lease_id,
@@ -326,7 +330,7 @@ def test_three_follower_blocks_over_real_ros_services(tmp_path):
             context,
             lease,
             second_anchor,
-            kind=NATIVE_STREAM_NEXT,
+            kind=REQUEST_STREAM_NEXT,
             observation_id=2,
             final=False,
             observation_ns=second_observation,
@@ -358,7 +362,7 @@ def test_three_follower_blocks_over_real_ros_services(tmp_path):
             context,
             lease,
             third_anchor,
-            kind=NATIVE_STREAM_NEXT,
+            kind=REQUEST_STREAM_NEXT,
             observation_id=3,
             final=True,
             observation_ns=third_observation,

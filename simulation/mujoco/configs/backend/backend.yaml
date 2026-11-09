@@ -24,7 +24,7 @@
 # limits.chunk_history：动作块历史容量。
 # logging.*：事件日志队列、单条/单文件/总大小、关闭超时、刷新间隔、控制台开关。
 
-# Runnable native ROS backend.  This file owns deployment choices only; the
+# Runnable ROS backend.  This file owns deployment choices only; the
 # referenced scene/control/stream/profile files remain the single sources of
 # physics, controller and calibration parameters.  Every path is relative to
 # this file.  SI time units are seconds unless a field says otherwise.
@@ -33,8 +33,8 @@ robot:
   profile: ../../../../profiles/robots/panda_stack_v1/profile.json
   schemas: ../../../../contracts/schemas
   scene: ../scene/panda_stack.yaml
-  control: ../control/panda_control.yaml
-  stream: ../control/panda_stream.yaml
+  control: ../../../../profiles/control/panda_control_v1.yaml
+  stream: ../../../../profiles/control/panda_stream_v1.yaml
 
 run:
   seed: 0

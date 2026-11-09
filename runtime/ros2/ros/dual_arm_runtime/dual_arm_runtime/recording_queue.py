@@ -1,7 +1,7 @@
 """Bounded, write-behind queue in front of one MCAP writer thread.
 
 The queue is deliberately transport-agnostic so it can be exercised without ROS.
-It owns all producer-facing state and exactly one consumer thread.  The native
+It owns all producer-facing state and exactly one consumer thread.  The
 ``rosbag2_py`` writer is created, opened, used and closed only by that thread.
 """
 
@@ -59,7 +59,7 @@ class RecordingQueueError(RuntimeError):
 
 
 class Writer(Protocol):
-    """Minimal native-writer surface owned by the queue's consumer thread."""
+    """Minimal writer surface owned by the queue's consumer thread."""
 
     def open(self) -> None: ...
 
@@ -191,7 +191,7 @@ class BoundedRecordingQueue:
         """Stop accepting, drain and wait for the writer's own close call.
 
         A timeout or failure is latched and re-raised by every later close.  The
-        caller never closes the native handle and never waits without a deadline.
+        caller never closes the writer handle and never waits without a deadline.
         """
         timeout = self.settings.close_timeout_s if timeout_s is None else timeout_s
         if isinstance(timeout, bool) or not isinstance(timeout, int | float):

@@ -35,8 +35,8 @@ PROFILE = load_profile(
     ROOT / "profiles/robots/panda_stack_v1/profile.json",
     ROOT / "contracts/schemas/v1",
 )
-CONTROL = load_control_config(ROOT / "simulation/mujoco/configs/control/panda_control.yaml")
-FOLLOWER = load_follower_config(ROOT / "simulation/mujoco/configs/control/panda_follower.yaml")
+CONTROL = load_control_config(ROOT / "profiles/control/panda_control_v1.yaml")
+FOLLOWER = load_follower_config(ROOT / "profiles/control/panda_follower_v1.yaml")
 BASE = PROFILE.initial_positions
 JOINT_COUNT = len(BASE)
 GRID_NS = 2_000_000
@@ -169,13 +169,8 @@ def test_follower_fingerprint_covers_unselected_tail_and_follower_limits() -> No
 
 
 def final_extension_source() -> tuple[Target, ...]:
-    targets = []
-    for index in range(60):
-        seconds = (index + 1) * 0.05
-        values = list(BASE)
-        values[0] = min(0.05, seconds / 0.25 * 0.05)
-        targets.append(Target(round(seconds * 1_000_000_000), tuple(values)))
-    return tuple(targets)
+    """A moving target at the window end forces a bounded settling extension."""
+    return linear_source(1.0)
 
 
 def test_follower_fingerprint_covers_coefficients_anchor_and_extension() -> None:
@@ -199,11 +194,12 @@ def test_follower_fingerprint_covers_algorithm_version(monkeypatch) -> None:
 
 def test_follower_fingerprint_payload_keeps_all_terminal_and_deviation_evidence() -> None:
     closing = []
-    for index, opening in enumerate((0.0016, 0.0012, 0.0008, 0.0004, 0.0)):
+    openings = tuple(0.002 - index * 0.0002 for index in range(9)) + (0.0,)
+    for index, opening in enumerate(openings):
         values = list(BASE)
         values[7] = opening
         closing.append(Target((index + 1) * 50_000_000, tuple(values)))
-    for index in range(5, 60):
+    for index in range(len(openings), 60):
         values = list(BASE)
         values[7] = 0.0
         closing.append(Target((index + 1) * 50_000_000, tuple(values)))

@@ -14,7 +14,7 @@ from robot_backend_sim.contacts import (  # noqa: E402
     FingerContactEvidence,
     GripperContactEvidence,
 )
-from robot_backend_sim.motion import NativeMotion  # noqa: E402
+from robot_backend_sim.motion import MotionController  # noqa: E402
 from robot_backend_sim.motion_config import CONTROL_JOINT_NAMES  # noqa: E402
 from robot_backend_sim.panda_io import Measurement  # noqa: E402
 from robot_backend_sim.stream_config import StreamConfig, StreamConfigError  # noqa: E402
@@ -89,9 +89,9 @@ def captured_measurement():
 
 
 def constrained_motion():
-    # Construct only the state _constrained_axes reads; the rest of NativeMotion
+    # Construct only the state _constrained_axes reads; the rest of MotionController
     # requires a live MuJoCo scene and is unrelated to this classification.
-    motion = NativeMotion.__new__(NativeMotion)
+    motion = MotionController.__new__(MotionController)
     motion._config = SimpleNamespace(
         position_tolerances=(0.012,) * 7 + (0.002,) + (0.012,) * 7 + (0.002,),
         velocity_tolerances=(0.025,) * 7 + (0.004,) + (0.025,) * 7 + (0.004,),

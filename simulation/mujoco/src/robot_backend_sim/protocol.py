@@ -1,4 +1,4 @@
-"""Shared-DTO feedback adaptation for the native worker.
+"""Shared-DTO feedback adaptation for the backend worker.
 
 Nothing here imports ROS, writes a file, steps physics, creates a thread or
 reads a hidden clock.  The functions copy an already frozen
@@ -11,14 +11,16 @@ from __future__ import annotations
 
 from numbers import Integral
 
-from robot_contracts.models import ContractError
-from robot_contracts.native import (
-    NativeChunkStatus,
-    NativeControlEvent,
-    NativeExecution,
-    NativeFinger,
-    NativeGripper,
+from robot_contracts.execution_feedback import (
+    ControlEvent as ControlEventRecord,
 )
+from robot_contracts.execution_feedback import (
+    ExecutionFeedback,
+    FingerFeedback,
+    GripperFeedback,
+    StreamChunkStatus,
+)
+from robot_contracts.models import ContractError
 
 from .control_state import ChunkStatus, ControlEvent, ControlStatus
 
@@ -33,14 +35,14 @@ def _invalid(reason: str, detail: str) -> ContractError:
     return ContractError(reason, detail)
 
 
-def _gripper_feedback(completion: object) -> NativeGripper:
-    fingers: list[NativeFinger] = []
+def _gripper_feedback(completion: object) -> GripperFeedback:
+    fingers: list[FingerFeedback] = []
     for evidence in completion.fingers:  # type: ignore[attr-defined]
         object_names = tuple(item[0] for item in evidence.object_forces)
         normal_forces = tuple(item[1] for item in evidence.object_forces)
         contact_counts = tuple(item[2] for item in evidence.object_forces)
         fingers.append(
-            NativeFinger(
+            FingerFeedback(
                 side=evidence.side,
                 finger_index=evidence.finger_index,
                 body_name=evidence.body_name,
@@ -50,7 +52,7 @@ def _gripper_feedback(completion: object) -> NativeGripper:
                 contact_counts=contact_counts,
             )
         )
-    return NativeGripper(
+    return GripperFeedback(
         side=completion.side,  # type: ignore[attr-defined]
         mode=completion.mode,  # type: ignore[attr-defined]
         position_ok=completion.position_ok,  # type: ignore[attr-defined]
@@ -67,27 +69,27 @@ def _gripper_feedback(completion: object) -> NativeGripper:
     )
 
 
-def _execution_grippers(snapshot: object) -> tuple[NativeGripper, ...]:
+def _execution_grippers(snapshot: object) -> tuple[GripperFeedback, ...]:
     grippers = tuple(_gripper_feedback(completion) for completion in snapshot.grippers)  # type: ignore[attr-defined]
     if len(grippers) != 2:
         raise _invalid(
-            "INVALID_NATIVE_EXECUTION", "snapshot must carry exactly two gripper decisions"
+            "INVALID_EXECUTION_FEEDBACK", "snapshot must carry exactly two gripper decisions"
         )
     return grippers
 
 
-def execution_feedback(status: ControlStatus) -> NativeExecution:
+def execution_feedback(status: ControlStatus) -> ExecutionFeedback:
     """Copy one frozen overall status snapshot into shared execution feedback."""
     if not isinstance(status, ControlStatus):
-        raise _invalid("INVALID_NATIVE_EXECUTION", "status must be a ControlStatus")
+        raise _invalid("INVALID_EXECUTION_FEEDBACK", "status must be a ControlStatus")
     snapshot = status.snapshot
     if snapshot is None:
         raise _invalid(
-            "INVALID_NATIVE_EXECUTION", "status has no immutable snapshot to report"
+            "INVALID_EXECUTION_FEEDBACK", "status has no immutable snapshot to report"
         )
     if status.accepted_wall_ns is None:
         raise _invalid(
-            "INVALID_NATIVE_EXECUTION", "accepted wall time is required for feedback"
+            "INVALID_EXECUTION_FEEDBACK", "accepted wall time is required for feedback"
         )
     velocity_errors = snapshot.tracking_velocity_errors
     if not velocity_errors:
@@ -99,7 +101,7 @@ def execution_feedback(status: ControlStatus) -> NativeExecution:
                 strict=True,
             )
         )
-    return NativeExecution(
+    return ExecutionFeedback(
         context=status.context,
         command_id=status.command_id,
         command_seq=status.command_seq,
@@ -138,13 +140,13 @@ def execution_feedback(status: ControlStatus) -> NativeExecution:
     )
 
 
-def chunk_feedback(chunk: ChunkStatus) -> NativeChunkStatus:
+def chunk_feedback(chunk: ChunkStatus) -> StreamChunkStatus:
     """Copy one frozen chunk status without relabelling RETIRED/terminal phases."""
     if not isinstance(chunk, ChunkStatus):
-        raise _invalid("INVALID_NATIVE_CHUNK", "chunk must be a ChunkStatus")
+        raise _invalid("INVALID_STREAM_CHUNK", "chunk must be a ChunkStatus")
     if chunk.accepted_wall_ns is None:
-        raise _invalid("INVALID_NATIVE_CHUNK", "accepted wall time is required")
-    return NativeChunkStatus(
+        raise _invalid("INVALID_STREAM_CHUNK", "accepted wall time is required")
+    return StreamChunkStatus(
         context=chunk.context,
         command_id=chunk.command_id,
         command_seq=chunk.command_seq,
@@ -163,17 +165,17 @@ def chunk_feedback(chunk: ChunkStatus) -> NativeChunkStatus:
     )
 
 
-def control_event(event: ControlEvent) -> NativeControlEvent:
+def control_event(event: ControlEvent) -> ControlEventRecord:
     """Copy one controller event verbatim, including its original identity/time."""
     if not isinstance(event, ControlEvent):
-        raise _invalid("INVALID_NATIVE_EVENT", "event must be a ControlEvent")
+        raise _invalid("INVALID_CONTROL_EVENT", "event must be a ControlEvent")
     if event.chunk_seq is not None and (
         isinstance(event.chunk_seq, bool)
         or not isinstance(event.chunk_seq, Integral)
         or int(event.chunk_seq) < 1
     ):
-        raise _invalid("INVALID_NATIVE_EVENT", "chunk_seq must be positive or absent")
-    return NativeControlEvent(
+        raise _invalid("INVALID_CONTROL_EVENT", "chunk_seq must be positive or absent")
+    return ControlEventRecord(
         context=event.context,
         event_seq=event.event_seq,
         command_id=event.command_id,

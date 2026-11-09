@@ -75,8 +75,8 @@ paths:
   run_lock: var/campaigns/panda_stack_v1/.run.lock
   # Created/checked before a reservation; all must exist.
   required_paths:
-    - runtime/ros2/configs/native_teacher.yaml
-    - runtime/ros2/configs/native_task_act_chunked.yaml
+    - runtime/ros2/configs/teacher_collect.yaml
+    - runtime/ros2/configs/policy_rollout.yaml
     - learning/lerobot/configs/act_policy_temporal.yaml
     - learning/lerobot/docker/docker-compose.yml
     - runtime/ros2/docker/docker-compose.yml

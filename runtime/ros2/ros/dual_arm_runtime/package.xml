@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package format="3">
   <name>dual_arm_runtime</name><version>0.1.0</version>
-  <description>Episode control, synchronized observations and native ROS MCAP recording.</description>
+  <description>Episode control, synchronized observations and ROS MCAP recording.</description>
   <maintainer email="maintainers@example.invalid">sim_dual_arm maintainers</maintainer>
   <license>UNLICENSED</license>
   <buildtool_depend>ament_python</buildtool_depend>

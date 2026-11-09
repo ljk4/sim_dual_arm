@@ -1,7 +1,7 @@
 # 测试
 
 - `unit/`：纯 Python 单元测试和共享夹具，默认不依赖 ROS/GPU。
-- `integration/`：ROS 服务、原生物理、记录、任务和运行入口的集成检查。
+- `integration/`：ROS 服务、物理执行、记录、任务和运行入口的集成检查。
 - `doubles/`：test-only fake Policy 与 mock ROS backend，不冒充正式数据。
 
 测试按 `pyproject.toml` 运行纯 Python 部分；进入已有运行或学习容器后执行该端

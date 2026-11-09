@@ -22,7 +22,7 @@ from robot_backend_sim.follower_config import load_follower_config  # noqa: E402
 
 BASE = ROOT / "simulation/mujoco/configs/backend/backend.yaml"
 FOLLOWER = ROOT / "tests/fixtures/simulation/backend_follower.yaml"
-FOLLOWER_PARAMS = ROOT / "simulation/mujoco/configs/control/panda_follower.yaml"
+FOLLOWER_PARAMS = ROOT / "profiles/control/panda_follower_v1.yaml"
 
 
 def write_variant(tmp_path: Path, mutate) -> Path:
@@ -32,8 +32,8 @@ def write_variant(tmp_path: Path, mutate) -> Path:
             "profile": str(ROOT / "profiles/robots/panda_stack_v1/profile.json"),
             "schemas": str(ROOT / "contracts/schemas"),
             "scene": str(ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml"),
-            "control": str(ROOT / "simulation/mujoco/configs/control/panda_control.yaml"),
-            "stream": str(ROOT / "simulation/mujoco/configs/control/panda_stream.yaml"),
+            "control": str(ROOT / "profiles/control/panda_control_v1.yaml"),
+            "stream": str(ROOT / "profiles/control/panda_stream_v1.yaml"),
             "follower": str(FOLLOWER_PARAMS),
         }
     )
@@ -53,7 +53,7 @@ def test_follower_config_resolves_relative_follower_file_and_queue():
     config = load_backend_config(FOLLOWER)
     assert config.follower_path == FOLLOWER_PARAMS.resolve()
     assert config.follower_reference_queue_capacity == 64
-    assert load_follower_config(config.follower_path).target_count == 5
+    assert load_follower_config(config.follower_path).target_count == 10
     expected_scene = ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml"
     assert config.scene_path == expected_scene.resolve()
 

@@ -22,7 +22,7 @@
 | 模型时间语义 | 每点 50 ms；完整预测 60 点，即 3 秒 |
 | 数据 | 原 50 条合格 episode，45/5 划分；此次修复没有改数据或归一化统计 |
 | 最终执行配方 | 10 点／0.5 秒窗口、绝对仿真时间融合、系数 0.01、任务前稳定等待 2 秒 |
-| 最终配方入口 | [runtime](../../runtime/ros2/configs/native_task_act_chunked.yaml)、[backend](../../simulation/mujoco/configs/backend/backend_stack_act_chunked.yaml)、[follower](../../simulation/mujoco/configs/control/panda_follower_act_chunked.yaml)、[policy](../../learning/lerobot/configs/act_policy_temporal.yaml) |
+| 最终配方入口 | [runtime](../../runtime/ros2/configs/policy_rollout.yaml)、[backend](../../simulation/mujoco/configs/backend/backend_stack_act_chunked.yaml)、[follower](../../profiles/control/panda_follower_v1.yaml)、[policy](../../learning/lerobot/configs/act_policy_temporal.yaml) |
 
 模型包：`var/learning/experiments/act-static-b16-20k-20261103/bundle-best-20k`。
 其 digest 为 `c1ed8e8f0e3123f17fc1cba72aeec7c624b9a12d5a3f2c825c1f8300bcc278e6`。

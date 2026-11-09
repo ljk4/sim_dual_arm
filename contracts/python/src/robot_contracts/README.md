@@ -2,8 +2,8 @@
 
 - `models.py`、`profiles.py`、`episodes.py`、`action_chunks.py`：profile、观测、
   episode manifest、动作块与语义哈希。
-- `control.py`、`native.py`、`native_reference.py`、`native_feedback.py`：
-  命令、原生请求/参考/反馈和校验。
+- `control.py`、`stream_request.py`、`execution_feedback.py`：
+  命令、流式请求和反馈 DTO 及校验。
 - `reference.py`：不可变分段三次参考、采样、连续极值和约束验证。
 - `follower.py`、`follower_math.py`、`follower_reference.py`、
   `follower_reference_digest.py`：受限跟随计划、端速/偏差计算和参考摘要。

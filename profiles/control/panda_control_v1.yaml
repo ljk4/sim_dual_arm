@@ -1,0 +1,63 @@
+# 中文参数说明（维护时优先阅读本段）
+# joint_names：16 个控制轴固定顺序，两臂各 7 关节 + 1 个夹爪开度。
+# max_accelerations：各轴最大加速度；臂 rad/s^2，夹爪 m/s^2。
+# position_tolerances：参考与实测位置的容差；臂 rad，夹爪 m。
+# velocity_tolerances：参考与实测速度的容差；臂 rad/s，夹爪 m/s。
+# stable_duration_s：完成和停止判定所需连续稳定时间，单位 s。
+# settle_timeout_s：参考轨迹结束后等待稳定的最长时间，单位 s。
+# motion_wall_timeout_s：单次运动墙钟超时，单位 s。
+# stop_wall_timeout_s：停止/制动墙钟超时，单位 s。
+# contact_force_min_n：单指与同一物体接触所需最小法向力，单位 N。
+# finger_velocity_max_m_s：接触完成判定允许的最大单指滑动速度，单位 m/s。
+
+# No-ROS motion controller parameters.  SI units only:
+# rad, m, s, rad/s, m/s, rad/s^2, m/s^2, N.
+# Joint position/velocity hard limits come from the accepted robot profile and
+# are intentionally not duplicated here.  Arrays follow the fixed 16-joint
+# order checked by robot_backend_sim.motion_config.CONTROL_JOINT_NAMES.
+joint_names:
+  - left_joint1
+  - left_joint2
+  - left_joint3
+  - left_joint4
+  - left_joint5
+  - left_joint6
+  - left_joint7
+  - left_gripper_width
+  - right_joint1
+  - right_joint2
+  - right_joint3
+  - right_joint4
+  - right_joint5
+  - right_joint6
+  - right_joint7
+  - right_gripper_width
+
+# Arm brakes use 1.0 rad/s^2; each total gripper opening uses 0.5 m/s^2.
+max_accelerations:
+  [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.5,
+   1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.5]
+
+# Position tolerances: 0.012 rad for arm joints, 0.002 m total opening.
+position_tolerances:
+  [0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.002,
+   0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.002]
+
+# Velocity tolerances: 0.025 rad/s for arm joints, 0.004 m/s total opening.
+# The same per-axis thresholds decide whether a stop is measurably settled.
+velocity_tolerances:
+  [0.025, 0.025, 0.025, 0.025, 0.025, 0.025, 0.025, 0.004,
+   0.025, 0.025, 0.025, 0.025, 0.025, 0.025, 0.025, 0.004]
+
+# Normal completion and measured stop both require 0.2 s of simulation time
+# with a continuous, unchanged completion mode/object and all axes stable.
+stable_duration_s: 0.2
+# After the reference horizon, wait at most 2 s of simulation time while settling.
+settle_timeout_s: 2.0
+# Overall motion and braking deadlines use caller-supplied monotonic wall time.
+motion_wall_timeout_s: 10.0
+stop_wall_timeout_s: 3.0
+
+# Per named finger body normal contact force and per-finger slide speed.
+contact_force_min_n: 0.5
+finger_velocity_max_m_s: 0.003

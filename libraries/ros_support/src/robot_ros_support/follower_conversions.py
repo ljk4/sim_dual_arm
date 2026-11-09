@@ -2,7 +2,7 @@
 
 Every field is copied by name and revalidated by the shared
 :class:`robot_contracts.trajectory.FollowerReference` constructor.  The
-record is never converted into a strict ``AcceptedReference``.
+record is never reconstructed from convenience defaults.
 """
 
 from __future__ import annotations
@@ -11,14 +11,14 @@ from robot_api_msgs.msg import FollowerReference as FollowerReferenceMessage
 from robot_api_msgs.msg import ReferenceSegment as ReferenceSegmentMessage
 from robot_contracts.action_chunks import ActionWindow
 from robot_contracts.models import ContractError
-from robot_contracts.native import plan_from_segments
+from robot_contracts.stream_request import plan_from_segments
 from robot_contracts.trajectory import CubicSegment, FollowerReference
 
-from .native_conversions import (
+from .stream_conversions import (
     anchor_from_message,
     anchor_message,
-    native_command_from_message,
-    native_command_message,
+    stream_command_from_message,
+    stream_command_message,
 )
 
 __all__ = [
@@ -46,7 +46,7 @@ def follower_reference_message(value: FollowerReference) -> FollowerReferenceMes
     if not isinstance(value, FollowerReference):
         raise _invalid("value must be a FollowerReference")
     return FollowerReferenceMessage(
-        request=native_command_message(value.request),
+        request=stream_command_message(value.request),
         motion_seq=value.motion_seq,
         accepted_sim_time_ns=value.accepted_sim_time_ns,
         accepted_wall_time_ns=value.accepted_wall_time_ns,
@@ -88,7 +88,7 @@ def follower_reference_from_message(value: object) -> FollowerReference:
         raise _invalid("value is not a FollowerReference message")
     if not value.has_duration_grid and value.duration_grid_ns != 0:
         raise _invalid("has_duration_grid is false but duration_grid_ns is nonzero")
-    request = native_command_from_message(value.request)
+    request = stream_command_from_message(value.request)
     if request.anchor is None or request.window is None:
         raise _invalid("request lacks an anchor/window")
     if tuple(value.joint_names) != tuple(request.trajectory.joint_names):

@@ -63,7 +63,7 @@ def _run(root, run_id):
             "--run-id",
             run_id,
             "--runtime-config",
-            "runtime/ros2/configs/native_teacher.yaml",
+            "runtime/ros2/configs/teacher_collect.yaml",
             "--",
             sys.executable,
             "-c",
@@ -128,7 +128,7 @@ def test_label_replay_consumes_a_pilot_attempt_and_needs_used_seed(tmp_path):
                 "--run-id",
                 "replay",
                 "--runtime-config",
-                "runtime/ros2/configs/native_teacher.yaml",
+                "runtime/ros2/configs/teacher_collect.yaml",
                 "--",
                 sys.executable,
                 "-c",
@@ -158,7 +158,7 @@ def test_formal_is_teacher_only_and_test_is_act_only(tmp_path):
         "--run-id",
         "guard",
         "--runtime-config",
-        "runtime/ros2/configs/native_teacher.yaml",
+        "runtime/ros2/configs/teacher_collect.yaml",
     ]
     assert (
         stack_campaign.main(
@@ -219,7 +219,7 @@ def test_formal_stops_after_fifty_qualified(tmp_path):
                 "--run-id",
                 "after-target",
                 "--runtime-config",
-                "runtime/ros2/configs/native_teacher.yaml",
+                "runtime/ros2/configs/teacher_collect.yaml",
                 "--",
                 sys.executable,
                 "-c",

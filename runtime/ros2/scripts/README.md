@@ -6,7 +6,7 @@
 - `build-ros-sdk` / `build-policy-sdk`：调用真实 SDK 生成脚本。
 - `prepare`：把通用 Policy binding、runtime 模板、seed/run-id 生成为
   `runtime.yaml` + `run_manifest.json`。
-- `collect` / `policy`：运行原生 ROS 采集或 Policy 执行；必须显式给
+- `collect` / `policy`：运行 ROS 采集或 Policy 执行；必须显式给
   `--output /data/raw/<run-id>`，不共享同一输出目录。
 - `interactive`：交互式运行一局 Policy。`y` 后通过 episode start 复原环境并开始；
   `--run-id` 默认按时间自动生成，`--seed` 可覆盖本次 reset seed。任务结束后

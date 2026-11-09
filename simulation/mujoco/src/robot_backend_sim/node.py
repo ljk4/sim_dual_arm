@@ -1,4 +1,4 @@
-"""ROS 2 adapter for the runnable native MuJoCo backend.
+"""ROS 2 adapter for the runnable MuJoCo backend.
 
 This module owns ROS entities, wire conversions, publishers/services and node
 lifecycle only.  Physics, planning and rendering stay on the worker threads;
@@ -21,9 +21,9 @@ from rclpy.node import Node
 from robot_api_msgs.msg import (
     BackendInfo,
     CameraFrame,
+    ControlEvent,
+    ExecutionFeedback,
     FollowerReference,
-    NativeControlEvent,
-    NativeExecution,
     RobotState,
 )
 from robot_api_msgs.msg import (
@@ -31,11 +31,11 @@ from robot_api_msgs.msg import (
 )
 from robot_api_msgs.srv import (
     AcquireControl,
-    GetNativeAnchor,
     GetStackTaskState,
+    GetStreamAnchor,
     GetTeacherChunk,
     PrepareStackTask,
-    QueryNativeCommand,
+    QueryStreamCommand,
     ReleaseControl,
     RenewControl,
     ResetSimulation,
@@ -43,19 +43,19 @@ from robot_api_msgs.srv import (
     Stop,
     SubmitFollower,
 )
+from robot_contracts.execution_feedback import ExecutionFeedback as ExecutionFeedbackRecord
 from robot_contracts.models import CameraSpec, ContractError, RunContext
-from robot_contracts.native import NativeExecution as NativeExecutionRecord
 from robot_contracts.trajectory import FollowerReference as FollowerReferenceRecord
 from robot_ros_support.conversions import context_from_message, context_message, stamp, time_ns
 from robot_ros_support.follower_conversions import follower_reference_message
-from robot_ros_support.native_conversions import (
-    anchor_message,
-    native_chunk_status_message,
-    native_command_from_message,
-    native_control_event_message,
-    native_execution_message,
-)
 from robot_ros_support.qos import EVENT_QOS, INFO_QOS, RELIABLE_SENSOR_QOS, SENSOR_QOS
+from robot_ros_support.stream_conversions import (
+    anchor_message,
+    control_event_message,
+    execution_feedback_message,
+    stream_chunk_status_message,
+    stream_command_from_message,
+)
 from robot_run_logging import EventContext, EventLogger, LogFailure
 from sensor_msgs.msg import CameraInfo, Image, JointState
 from std_msgs.msg import Float64MultiArray, Header
@@ -68,9 +68,9 @@ from .ros_bridge import RosFutureBridge
 from .scene_config import SceneConfig
 from .stack_ros import fill_teacher_chunk_response, stack_state_message
 from .stack_task import StackPrepareResult, StackTaskState
-from .worker import BackendClosed, NativeWorker, SubmitOutcome, WorkerSummary
+from .worker import BackendClosed, SubmitOutcome, Worker, WorkerSummary
 
-__all__ = ["NativeBackendNode", "main"]
+__all__ = ["BackendNode", "main"]
 
 _CAPABILITIES = (
     "continuous_chunks",
@@ -79,7 +79,7 @@ _CAPABILITIES = (
     "lease",
     "stop",
     "command_query",
-    "native_events",
+    "control_events",
     "follower_reference",
 )
 _STACK_CAPABILITIES = ("stack_task", "stack_task_state")
@@ -105,8 +105,8 @@ def _mount_calibration(
     return fy, fy, (width - 1) / 2.0, (height - 1) / 2.0
 
 
-class NativeBackendNode(Node):
-    """Publish exact captures and expose the shared native service/topic API."""
+class BackendNode(Node):
+    """Publish exact captures and expose the shared service/topic API."""
 
     def __init__(
         self,
@@ -115,7 +115,7 @@ class NativeBackendNode(Node):
         log: EventLogger | None = None,
         renderer_factory: RendererFactory | None = None,
     ) -> None:
-        super().__init__("native_backend")
+        super().__init__("backend")
         self.config = config
         self._log = log
         self._root = config.namespace.rstrip("/")
@@ -127,7 +127,7 @@ class NativeBackendNode(Node):
         self._exit_code = _EXIT_OK
         self._unload_active = False
         self._last_failed_command = ""
-        self._worker = NativeWorker(
+        self._worker = Worker(
             config,
             log=log,
             renderer_factory=renderer_factory,
@@ -158,10 +158,10 @@ class NativeBackendNode(Node):
             for camera in self.profile.cameras
         }
         self._events_pub = self.create_publisher(
-            NativeControlEvent, f"{self._root}/native_events", EVENT_QOS
+            ControlEvent, f"{self._root}/control_events", EVENT_QOS
         )
         self._feedback_pub = self.create_publisher(
-            NativeExecution, f"{self._root}/native_feedback", EVENT_QOS
+            ExecutionFeedback, f"{self._root}/execution_feedback", EVENT_QOS
         )
         self._follower_pub = self.create_publisher(
             FollowerReference, f"{self._root}/follower_references", EVENT_QOS
@@ -179,8 +179,8 @@ class NativeBackendNode(Node):
             (ReleaseControl, "release_control", self._release),
             (Stop, "stop", self._stop),
             (SubmitFollower, "submit_follower", self._submit_follower),
-            (GetNativeAnchor, "get_native_anchor", self._get_anchor),
-            (QueryNativeCommand, "query_native_command", self._query_command),
+            (GetStreamAnchor, "get_stream_anchor", self._get_anchor),
+            (QueryStreamCommand, "query_stream_command", self._query_command),
             (ResetSimulation, "reset_simulation", self._reset),
             (PrepareStackTask, "prepare_stack_task", self._prepare_stack_task),
             (StartStackTask, "start_stack_task", self._start_stack_task),
@@ -326,9 +326,9 @@ class NativeBackendNode(Node):
     def _publish_control_pending(self) -> None:
         for status in self._worker.feedback():
             self._publish_feedback(status)
-        for event in self._worker.native_events():
+        for event in self._worker.control_events():
             try:
-                self._events_pub.publish(native_control_event_message(control_event(event)))
+                self._events_pub.publish(control_event_message(control_event(event)))
                 self._emit(
                     "backend.control",
                     message=event.phase,
@@ -512,13 +512,13 @@ class NativeBackendNode(Node):
             return
         try:
             feedback = execution_feedback(status)
-            self._feedback_pub.publish(native_execution_message(feedback))
+            self._feedback_pub.publish(execution_feedback_message(feedback))
             self._log_feedback_transitions(status, feedback)
         except Exception as error:  # noqa: BLE001 - a terminal fact must not vanish
             self._worker.latch_fault("FEEDBACK_PUBLISH_FAILED", f"{type(error).__name__}: {error}")
 
     def _log_feedback_transitions(
-        self, status: ControlStatus, feedback: NativeExecutionRecord
+        self, status: ControlStatus, feedback: ExecutionFeedbackRecord
     ) -> None:
         """Log bounded transition evidence; full per-frame facts remain in MCAP."""
         active = feedback.tracking_quality == "CONTACT_UNLOADING"
@@ -549,7 +549,7 @@ class NativeBackendNode(Node):
         if feedback.phase == "FAILED" and feedback.command_id != self._last_failed_command:
             self._last_failed_command = feedback.command_id
             self._emit(
-                "backend.native.failed",
+                "backend.failed",
                 level="WARNING",
                 reason=feedback.reason,
                 context=context,
@@ -675,13 +675,13 @@ class NativeBackendNode(Node):
 
     async def _submit_follower(self, request: object, response: object) -> object:
         try:
-            native = native_command_from_message(request.request)  # type: ignore[attr-defined]
-            if native.kind not in (2, 3):
+            record = stream_command_from_message(request.request)  # type: ignore[attr-defined]
+            if record.kind not in (2, 3):
                 raise ContractError(
                     "INVALID_FOLLOWER_REQUEST",
                     "SubmitFollower accepts only STREAM_FIRST or STREAM_NEXT",
                 )
-            outcome = await self._await(self._worker.submit_follower(native), submit=True)
+            outcome = await self._await(self._worker.submit_follower(record), submit=True)
         except TimeoutError as error:
             response.accepted = False  # type: ignore[attr-defined]
             response.reason = str(error)  # type: ignore[attr-defined]
@@ -729,12 +729,12 @@ class NativeBackendNode(Node):
         response.reason = outcome.reply.reason  # type: ignore[attr-defined]
         response.has_execution = outcome.execution is not None  # type: ignore[attr-defined]
         if outcome.execution is not None and outcome.execution.snapshot is not None:
-            response.execution = native_execution_message(  # type: ignore[attr-defined]
+            response.execution = execution_feedback_message(  # type: ignore[attr-defined]
                 execution_feedback(outcome.execution)
             )
         response.has_chunk = outcome.chunk is not None  # type: ignore[attr-defined]
         if outcome.chunk is not None:
-            response.chunk = native_chunk_status_message(  # type: ignore[attr-defined]
+            response.chunk = stream_chunk_status_message(  # type: ignore[attr-defined]
                 chunk_feedback(outcome.chunk)
             )
         response.has_reference = outcome.reference is not None  # type: ignore[attr-defined]
@@ -747,13 +747,13 @@ class NativeBackendNode(Node):
             message="accepted" if response.accepted else "rejected",
             reason=response.reason or None,
             context=EventContext(
-                episode_id=native.trajectory.context.episode_id or None,
-                command_id=native.trajectory.command_id,
-                clock_epoch=native.trajectory.context.clock_epoch,
+                episode_id=record.trajectory.context.episode_id or None,
+                command_id=record.trajectory.command_id,
+                clock_epoch=record.trajectory.context.clock_epoch,
             ),
             fields={
-                "command_id": native.trajectory.command_id,
-                "kind": native.mode,
+                "command_id": record.trajectory.command_id,
+                "kind": record.mode,
                 "mode": "FOLLOWER",
                 "idempotent": outcome.idempotent,
                 "has_reference": response.has_reference,
@@ -787,7 +787,7 @@ class NativeBackendNode(Node):
             )
             if not isinstance(status, ControlStatus) or status.snapshot is None:
                 raise ContractError("RESULT_EXPIRED", "command has no frozen status")
-            response.execution = native_execution_message(  # type: ignore[attr-defined]
+            response.execution = execution_feedback_message(  # type: ignore[attr-defined]
                 execution_feedback(status)
             )
             response.success = True  # type: ignore[attr-defined]

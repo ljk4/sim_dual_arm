@@ -12,10 +12,10 @@ from pydantic import BeforeValidator, Field, model_validator
 
 from ..action_chunks import MAX_TARGET_COUNT, ActionWindow, ChunkAnchor
 from ..models import ContractError, FloatVector, JointSpec, RobotProfile
-from ..native_reference import (
-    NATIVE_STREAM_FIRST,
-    NATIVE_STREAM_NEXT,
-    NativeRequest,
+from ..stream_request import (
+    REQUEST_STREAM_FIRST,
+    REQUEST_STREAM_NEXT,
+    StreamRequest,
 )
 from ..validation import (
     NonEmptyStr,
@@ -40,7 +40,7 @@ from .spline import (
 FOLLOWER_SAMPLER_VERSION = "follower-sampler-v1"
 FOLLOWER_NORMALIZATION_VERSION = "hard-boundary-normalization-v1"
 FOLLOWER_REFERENCE_DIGEST_VERSION = "follower-reference-v1"
-FOLLOWER_REFERENCE_KINDS = (NATIVE_STREAM_FIRST, NATIVE_STREAM_NEXT)
+FOLLOWER_REFERENCE_KINDS = (REQUEST_STREAM_FIRST, REQUEST_STREAM_NEXT)
 DIGEST_HEX_LENGTH = 64
 _UINT64_MAX = 2**64 - 1
 _INT64_MAX = 2**63 - 1
@@ -88,7 +88,7 @@ class FollowerReference(StrictContractModel):
 
     _error_reason: ClassVar[str] = "INVALID_FOLLOWER_REFERENCE"
 
-    request: NativeRequest
+    request: StreamRequest
     motion_seq: Annotated[PositiveInt, Field(le=_UINT64_MAX)]
     accepted_sim_time_ns: Annotated[int, Field(strict=True, ge=0, le=_INT64_MAX)]
     accepted_wall_time_ns: Annotated[int, Field(strict=True, ge=0, le=_INT64_MAX)]
@@ -255,7 +255,7 @@ class FollowerReference(StrictContractModel):
     def from_prepared(
         cls,
         prepared: PreparedFollowerPlan,
-        request: NativeRequest,
+        request: StreamRequest,
         *,
         motion_seq: int,
         accepted_sim_time_ns: int,
@@ -265,8 +265,8 @@ class FollowerReference(StrictContractModel):
         """Capture one prepared follower plan as an immutable accepted record."""
         if not isinstance(prepared, PreparedFollowerPlan):
             raise _invalid("prepared", "must be a PreparedFollowerPlan")
-        if not isinstance(request, NativeRequest):
-            raise _invalid("request", "must be a NativeRequest")
+        if not isinstance(request, StreamRequest):
+            raise _invalid("request", "must be a StreamRequest")
         names = prepared.joint_names if joint_names is None else tuple(joint_names)
         return cls(
             request=request,

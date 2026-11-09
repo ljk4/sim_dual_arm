@@ -17,7 +17,7 @@ REFERENCES = (
     "observation_schema",
     "action_schema",
     "control_constraints",
-    "follower_constraints",
+    "follower_config",
 )
 
 

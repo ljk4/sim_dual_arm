@@ -6,17 +6,17 @@ from pathlib import Path
 
 import pytest
 import yaml
-from dual_arm_runtime.native_config import load_native_configuration
 from dual_arm_runtime.recording_queue import (
     BoundedRecordingQueue,
     RecordingQueueError,
     RecordingSettings,
 )
+from dual_arm_runtime.runtime_config import load_runtime_configuration
 from robot_contracts.models import ContractError
 
 TOPICS = {"/state": "RobotState", "/frame": "CameraFrame"}
 ROOT = Path(__file__).resolve().parents[2]
-BASE_CONFIG = ROOT / "runtime/ros2/configs/native_teacher.yaml"
+BASE_CONFIG = ROOT / "runtime/ros2/configs/teacher_collect.yaml"
 
 
 def _resolve_paths(document, source: Path) -> None:
@@ -25,7 +25,7 @@ def _resolve_paths(document, source: Path) -> None:
         "observation_schema",
         "action_schema",
         "control_constraints",
-        "follower_constraints",
+        "follower_config",
     ):
         if field in document:
             document[field] = str((source.parent / document[field]).resolve())
@@ -333,7 +333,7 @@ def test_configuration_fills_recording_defaults_into_snapshot(tmp_path):
     path = tmp_path / "runtime-without-recording.yaml"
     path.write_text(yaml.safe_dump(document))
 
-    configuration = load_native_configuration(path, ROOT)
+    configuration = load_runtime_configuration(path, ROOT)
 
     expected = RecordingSettings()
     assert configuration.recipe.recording == expected
@@ -363,7 +363,7 @@ def test_configuration_rejects_invalid_recording_limits(tmp_path, field, value):
     path.write_text(yaml.safe_dump(document))
 
     with pytest.raises(ContractError, match="SCHEMA_MISMATCH"):
-        load_native_configuration(path, ROOT)
+        load_runtime_configuration(path, ROOT)
 
 
 def test_explicit_producer_fail_latches_and_rejects_later_appends():

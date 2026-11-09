@@ -1,8 +1,8 @@
 """Pure control leases, bounded command/chunk records and canonical requests.
 
 Nothing in this module reads a scene, clock, file or network, and no physical
-step happens here.  :class:`~robot_backend_sim.control.NativeController` owns
-the one ``NativeMotion``; this module owns the concrete lease and bounded
+step happens here.  :class:`~robot_backend_sim.control.ControlSession` owns
+the one ``MotionController``; this module owns the concrete lease and bounded
 history values that surround it.
 """
 
@@ -25,7 +25,7 @@ from robot_contracts.control import (
     validate_owner,
     validate_wall,
 )
-from robot_contracts.native import NativeRequest
+from robot_contracts.stream_request import StreamRequest
 from robot_contracts.trajectory import FOLLOWER_ALGORITHM_VERSION, PreparedFollowerPlan
 
 if TYPE_CHECKING:  # pragma: no cover - import only for static type checking
@@ -244,16 +244,16 @@ class PreparedControlCommand:
     # The complete source request is retained only so an idempotent retry can
     # prove that *every* field still matches.  It is excluded from equality and
     # the packet fingerprint because the compiled plan already covers it.
-    request: NativeRequest | None = field(default=None, compare=False, repr=False)
+    request: StreamRequest | None = field(default=None, compare=False, repr=False)
     fingerprint: str = field(init=False, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         if not isinstance(self.command, ControlCommand):
             raise _invalid("INVALID_PREPARED_COMMAND", "command must be a ControlCommand")
         if self.request is not None:
-            if not isinstance(self.request, NativeRequest):
+            if not isinstance(self.request, StreamRequest):
                 raise _invalid(
-                    "INVALID_PREPARED_COMMAND", "request must be a NativeRequest"
+                    "INVALID_PREPARED_COMMAND", "request must be a StreamRequest"
                 )
             if self.request.command != self.command:
                 raise _invalid(
@@ -407,7 +407,7 @@ class CommandRecord:
     stream_id: str | None = None
     latest_snapshot: MotionSnapshot | None = None
     terminal_status: ControlStatus | None = None
-    last_native_event_seq: int = 0
+    last_control_event_seq: int = 0
     max_chunk_seq: int = 0
 
     @property

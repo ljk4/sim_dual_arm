@@ -382,7 +382,7 @@ def _phase_gate_map(paths: list[Path]) -> dict[int, tuple[str | None, str | None
                 raise FilterError(f"{path}:{line_number}: invalid JSON: {error}") from error
             if (
                 not isinstance(event, dict)
-                or event.get("event") != "native.follower.chunk_accepted"
+                or event.get("event") != "follower.chunk_accepted"
             ):
                 continue
             fields = event.get("fields")

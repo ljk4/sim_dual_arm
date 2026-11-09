@@ -172,7 +172,7 @@ class RendererThread:
         self._close_summary: RenderCloseSummary | None = None
         self._thread = threading.Thread(
             target=self._run,
-            name="native-renderer",
+            name="backend-renderer",
             daemon=True,
         )
 

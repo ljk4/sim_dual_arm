@@ -1,7 +1,7 @@
 """Typed key poses, private mink IK and geometric clearance diagnostics.
 
 Pure target and joint-path construction lives at the top of this module so it
-can be validated before MuJoCo or an EGL context exists.  Native functions use
+can be validated before MuJoCo or an EGL context exists.  MuJoCo-facing functions use
 a private ``mink.Configuration``/MjData and never write ``Scene.data``.  The
 gripper stays open and both objects stay at their initial poses; lift/place are
 key-pose previews, not object transport.

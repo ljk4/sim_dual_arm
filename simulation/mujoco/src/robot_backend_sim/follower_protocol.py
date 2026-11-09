@@ -1,17 +1,16 @@
 """Planning and feedback adaptation for bounded-follower requests.
 
 This module is the follower counterpart of :mod:`robot_backend_sim.protocol`.
-It compiles one already validated raw :class:`NativeRequest` into the existing
+It compiles one already validated raw :class:`StreamRequest` into the existing
 ``PreparedControlCommand`` envelope and freezes accepted evidence as a
 :class:`FollowerReference`.  It never runs physics, reads a scene/clock or
-publishes ROS messages, and it never wraps a follower in the strict
-``AcceptedReference`` type.
+publishes ROS messages, and it never mutates the frozen stream request.
 """
 
 from __future__ import annotations
 
 from robot_contracts.models import ContractError, RobotProfile
-from robot_contracts.native import NATIVE_STREAM_FIRST, NATIVE_STREAM_NEXT, NativeRequest
+from robot_contracts.stream_request import REQUEST_STREAM_FIRST, REQUEST_STREAM_NEXT, StreamRequest
 from robot_contracts.trajectory import (
     FollowerReference,
     FollowerValidationLimits,
@@ -60,7 +59,7 @@ def validation_limits(
 
 
 def prepare_follower_request(
-    request: NativeRequest,
+    request: StreamRequest,
     profile: RobotProfile,
     control_config: PandaControlConfig,
     follower_config: PandaFollowerConfig,
@@ -76,9 +75,9 @@ def prepare_follower_request(
     strict final stream chunk.  The caller may pass ``is_final`` explicitly when
     it has additional terminal knowledge; the two values must agree.
     """
-    if not isinstance(request, NativeRequest):
-        raise _invalid("INVALID_FOLLOWER_REQUEST", "request must be a NativeRequest")
-    if request.kind not in (NATIVE_STREAM_FIRST, NATIVE_STREAM_NEXT):
+    if not isinstance(request, StreamRequest):
+        raise _invalid("INVALID_FOLLOWER_REQUEST", "request must be a StreamRequest")
+    if request.kind not in (REQUEST_STREAM_FIRST, REQUEST_STREAM_NEXT):
         raise _invalid(
             "INVALID_FOLLOWER_REQUEST",
             "follower requests allow only STREAM_FIRST or STREAM_NEXT",
@@ -118,11 +117,11 @@ def prepare_follower_request(
 
 
 def _check_request_packet(
-    request: NativeRequest, packet: PreparedControlCommand
+    request: StreamRequest, packet: PreparedControlCommand
 ) -> PreparedFollowerPlan:
-    if not isinstance(request, NativeRequest):
-        raise _invalid("INVALID_NATIVE_REQUEST", "request must be a NativeRequest")
-    if request.kind not in (NATIVE_STREAM_FIRST, NATIVE_STREAM_NEXT):
+    if not isinstance(request, StreamRequest):
+        raise _invalid("INVALID_STREAM_REQUEST", "request must be a StreamRequest")
+    if request.kind not in (REQUEST_STREAM_FIRST, REQUEST_STREAM_NEXT):
         raise _invalid(
             "INVALID_FOLLOWER_REQUEST",
             "follower references allow only STREAM_FIRST or STREAM_NEXT",
@@ -158,7 +157,7 @@ def _check_motion_seq(motion_seq: object) -> int:
 
 
 def follower_reference(
-    request: NativeRequest,
+    request: StreamRequest,
     packet: PreparedControlCommand,
     *,
     motion_seq: int,
@@ -178,7 +177,7 @@ def follower_reference(
 
 
 def follower_reference_from_status(
-    request: NativeRequest,
+    request: StreamRequest,
     packet: PreparedControlCommand,
     status: ControlStatus,
 ) -> FollowerReference:
@@ -206,7 +205,7 @@ def follower_reference_from_status(
 
 
 def follower_reference_from_chunk_status(
-    request: NativeRequest,
+    request: StreamRequest,
     packet: PreparedControlCommand,
     chunk: ChunkStatus,
     *,

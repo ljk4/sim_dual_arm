@@ -5,25 +5,23 @@ from __future__ import annotations
 from pathlib import Path
 
 import yaml
-from dual_arm_runtime.native_config import load_native_configuration
-from robot_backend_sim.backend_config import BackendConfig, load_backend_config
+from dual_arm_runtime.runtime_config import load_runtime_configuration
+from robot_backend_sim.backend_config import load_backend_config
 from robot_backend_sim.follower_config import load_follower_config
 
 ROOT = Path(__file__).resolve().parents[2]
-FOLLOWER = ROOT / "simulation/mujoco/configs/control/panda_follower.yaml"
-FOLLOWER_ACT = ROOT / "simulation/mujoco/configs/control/panda_follower_act.yaml"
-FOLLOWER_ACT_CHUNKED = ROOT / "simulation/mujoco/configs/control/panda_follower_act_chunked.yaml"
+FOLLOWER = ROOT / "profiles/control/panda_follower_v1.yaml"
 BACKEND = ROOT / "simulation/mujoco/configs/backend/backend_stack_inference.yaml"
-BACKEND_ACT = ROOT / "tests/fixtures/simulation/backend_stack_act.yaml"
-BACKEND_ACT_CHUNKED = ROOT / "simulation/mujoco/configs/backend/backend_stack_act_chunked.yaml"
-RUNTIME_CHUNKED = ROOT / "runtime/ros2/configs/native_task_act_chunked.yaml"
+BACKEND_CHUNKED = ROOT / "simulation/mujoco/configs/backend/backend_stack_act_chunked.yaml"
+RUNTIME_CHUNKED = ROOT / "runtime/ros2/configs/policy_rollout.yaml"
+RUNTIME_TEACHER = ROOT / "runtime/ros2/configs/teacher_collect.yaml"
 
 _REFERENCED_FILES = (
     "robot_profile",
     "observation_schema",
     "action_schema",
     "control_constraints",
-    "follower_constraints",
+    "follower_config",
 )
 
 
@@ -43,53 +41,35 @@ def materialize_runtime(template: Path, directory: Path) -> Path:
 
 def load_runtime(template: Path, directory: Path):
     path = materialize_runtime(template, directory)
-    return load_native_configuration(path, ROOT)
+    return load_runtime_configuration(path, ROOT)
 
 
-def test_act_follower_keeps_the_accepted_limits_and_selects_two_points():
-    old = load_follower_config(FOLLOWER)
-    new = load_follower_config(FOLLOWER_ACT)
-    assert new.target_count == 2
-    assert new.joint_names == old.joint_names
-    assert new.max_target_deviations == old.max_target_deviations
-    assert new.max_terminal_tail_duration_s == old.max_terminal_tail_duration_s
-    changed = {key for key in old.to_document() if old.to_document()[key] != new.to_document()[key]}
-    assert changed == {"target_count"}
-
-
-def test_chunked_follower_uses_the_approved_simulation_reference_budget():
-    old = load_follower_config(FOLLOWER_ACT)
-    new = load_follower_config(FOLLOWER_ACT_CHUNKED)
-    assert new.target_count == 10
-    assert new.target_count * 50_000_000 == 500_000_000
-    assert new.joint_names == old.joint_names
-    assert new.max_target_deviations == tuple(
-        0.04 if index in (7, 15) else 0.40 if index in (6, 14) else 0.30
-        for index in range(16)
+def test_single_follower_source_owns_target_count_and_deviation_budget():
+    config = load_follower_config(FOLLOWER)
+    assert config.target_count == 10
+    assert config.target_count * 50_000_000 == 500_000_000
+    assert config.max_target_deviations == (
+        (0.30,) * 6 + (0.40, 0.04) + (0.30,) * 6 + (0.40, 0.04)
     )
-    assert new.max_terminal_tail_duration_s == old.max_terminal_tail_duration_s
-    old_document = old.to_document()
-    new_document = new.to_document()
-    changed = {key for key in old_document if old_document[key] != new_document[key]}
-    assert changed == {"target_count", "max_target_deviations"}
+    assert config.max_terminal_tail_duration_s == 3.0
 
 
-def test_chunked_backend_only_redirects_the_follower_and_stays_inference():
-    old = load_backend_config(BACKEND_ACT)
-    new = load_backend_config(BACKEND_ACT_CHUNKED)
-    assert new.follower_path == FOLLOWER_ACT_CHUNKED.resolve()
-    assert new.task_mode == old.task_mode == "inference"
-    assert new.realtime_speed == 0.5
-    assert new.chunk_history_capacity == 512
-    # source is the file path itself; every other field except the follower
-    # redirect must match the accepted 2-point ACT backend exactly.
-    raw_paths = {"profile", "schemas", "scene", "control", "stream", "task", "follower"}
-    assert (new.robot.model_dump(exclude=raw_paths)
-            == old.robot.model_dump(exclude=raw_paths))
-    for name in BackendConfig.model_fields:
-        if name in {"source", "robot", "follower_path"}:
-            continue
-        assert getattr(new, name) == getattr(old, name)
+def test_backend_recipes_reference_the_single_follower_source():
+    inference = load_backend_config(BACKEND)
+    chunked = load_backend_config(BACKEND_CHUNKED)
+    assert inference.follower_path == FOLLOWER.resolve()
+    assert chunked.follower_path == FOLLOWER.resolve()
+    assert chunked.task_mode == inference.task_mode == "inference"
+    assert chunked.realtime_speed == 0.5
+    assert chunked.chunk_history_capacity == 512
+
+
+def test_runtime_configs_reference_the_single_follower_source():
+    for template in (RUNTIME_CHUNKED, RUNTIME_TEACHER):
+        document = yaml.safe_load(template.read_text(encoding="utf-8"))
+        assert "target_count" not in document.get("policy", {})
+        assert "target_count" not in document.get("teacher", {})
+        assert (template.parent / document["follower_config"]).resolve() == FOLLOWER.resolve()
 
 
 def test_chunked_runtime_keeps_the_60x16_interface_and_covers_the_task(tmp_path):
@@ -100,18 +80,14 @@ def test_chunked_runtime_keeps_the_60x16_interface_and_covers_the_task(tmp_path)
     assert follower is not None
     assert runtime.recipe.action_source == "policy"
     assert runtime.recipe.teacher is None
-    assert (
-        RUNTIME_CHUNKED.parent
-        / yaml.safe_load(RUNTIME_CHUNKED.read_text(encoding="utf-8"))["follower_constraints"]
-    ).resolve() == FOLLOWER_ACT_CHUNKED.resolve()
 
-    loaded_follower = load_follower_config(FOLLOWER_ACT_CHUNKED)
-    assert policy.target_count == follower.target_count == loaded_follower.target_count == 10
+    loaded_follower = load_follower_config(FOLLOWER)
+    assert follower.target_count == loaded_follower.target_count == 10
     assert policy.chunk_size == 60
     assert policy.action_period_ns == 50_000_000
     assert follower.duration_grid_ns == 2_000_000
 
-    window_ns = policy.target_count * policy.action_period_ns
+    window_ns = follower.target_count * policy.action_period_ns
     assert window_ns == 500_000_000
     assert policy.max_chunks == 64
     assert policy.max_chunks * window_ns == 32_000_000_000

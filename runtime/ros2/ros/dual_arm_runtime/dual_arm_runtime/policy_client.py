@@ -3,7 +3,7 @@
 This module never imports ROS message classes.  The runtime converts one exact
 capture into :class:`PolicyObservation`, then this client checks every returned
 identity, digest, joint/camera order and 60x16 finite target before anything can
-be submitted as a native follower request.
+be submitted as a bounded-follower stream request.
 """
 
 from __future__ import annotations
@@ -17,8 +17,8 @@ from typing import Any
 from robot_contracts.models import ContractError, RobotProfile, RunContext
 from robot_run_logging import Scalar
 
-from dual_arm_runtime.native_config import NativePolicy
 from dual_arm_runtime.run_logging import EventSink, emit_best_effort
+from dual_arm_runtime.runtime_config import PolicyConfig
 
 IMAGE_ENCODING_RAW_RGB8 = 1
 
@@ -114,7 +114,7 @@ def _canonical_json(document: dict[str, Any]) -> bytes:
 def observation_from_exact(
     exact: object,
     profile: RobotProfile,
-    policy: NativePolicy,
+    policy: PolicyConfig,
 ) -> PolicyObservation:
     """Copy one exact capture; never synthesise a newer observation ID."""
     frames = exact.frames  # type: ignore[attr-defined]
@@ -184,7 +184,7 @@ class PolicyClient:
 
     def __init__(
         self,
-        policy: NativePolicy,
+        policy: PolicyConfig,
         profile: RobotProfile,
         profile_document: dict[str, Any],
         observation_document: dict[str, Any],
@@ -192,7 +192,7 @@ class PolicyClient:
         *,
         log: EventSink | None = None,
     ) -> None:
-        if not isinstance(policy, NativePolicy):
+        if not isinstance(policy, PolicyConfig):
             raise ContractError("POLICY_CONFIGURATION", "policy settings are missing")
         self.policy = policy
         self.profile = profile

@@ -321,7 +321,7 @@ test -f /data/prepared/infer-5k-server/policy/policy_binding.json
 含义：把 Policy binding 和 runtime 模板组合成 runtime 配置。
 
 ```bash
-runtime/ros2/scripts/run.sh prepare --template /workspace/runtime/ros2/configs/native_task_act_chunked.yaml --policy-binding /data/prepared/infer-5k-server/policy/policy_binding.json --seed 20001 --run-id infer-5k-server --output /data/prepared/infer-5k-server/runtime
+runtime/ros2/scripts/run.sh prepare --template /workspace/runtime/ros2/configs/policy_rollout.yaml --policy-binding /data/prepared/infer-5k-server/policy/policy_binding.json --seed 20001 --run-id infer-5k-server --output /data/prepared/infer-5k-server/runtime
 ```
 
 该命令只执行一次；后续任务复用生成的
@@ -372,13 +372,13 @@ learning bundle
   -> /data/prepared/<run-id>/policy/policy_binding.json
 
 policy_binding.json
-  + runtime/ros2/configs/native_task_act_chunked.yaml
+  + runtime/ros2/configs/policy_rollout.yaml
   -> runtime prepare
   -> /data/prepared/<run-id>/runtime/runtime.yaml
 
 simulation backend 模板
   + simulation/mujoco/configs/scene/*
-  + simulation/mujoco/configs/control/*
+  + profiles/control/*
   -> simulation prepare
   -> /data/prepared/<run-id>/simulation/backend.yaml
 ```
@@ -391,11 +391,11 @@ simulation backend 模板
 | 推理后端模板 | `simulation/mujoco/configs/backend/backend_stack_act_chunked.yaml` | 重新执行 simulation `prepare`，然后重启推理 backend 和 viewer |
 | 场景、物体、相机 | `simulation/mujoco/configs/scene/panda_stack_learning.yaml` | 重新执行 simulation `prepare`，重启 backend 和 viewer；旧数据不要与新场景混训 |
 | 任务成功阈值 | `simulation/mujoco/configs/scene/panda_stack_task.yaml` | 重新执行 simulation `prepare`，重启 backend；旧任务结果仍按生成时的 digest 保留 |
-| 物理控制限值、容差 | `simulation/mujoco/configs/control/panda_control.yaml` | 同时重新执行 simulation `prepare` 和 runtime `prepare`，重启 backend 与 runtime |
-| chunk stream 超时 | `simulation/mujoco/configs/control/panda_task_stream.yaml` | 重新执行 simulation `prepare`，重启 backend |
-| follower 窗口和偏差预算 | `simulation/mujoco/configs/control/panda_follower_act_chunked.yaml` | 同时重新执行 simulation `prepare` 和 runtime `prepare`，重启 backend 与 runtime |
-| runtime 策略模板 | `runtime/ros2/configs/native_task_act_chunked.yaml` | 重新执行 runtime `prepare`，重启 runtime |
-| 数采 runtime 模板 | `runtime/ros2/configs/native_teacher.yaml` | 下一次 `campaign run` 会重新生成该 attempt 的 runtime 配置，无需手工 prepare |
+| 物理控制限值、容差 | `profiles/control/panda_control_v1.yaml` | 同时重新执行 simulation `prepare` 和 runtime `prepare`，重启 backend 与 runtime |
+| chunk stream 超时 | `profiles/control/panda_stream_v1.yaml` | 重新执行 simulation `prepare`，重启 backend |
+| follower 窗口和偏差预算 | `profiles/control/panda_follower_v1.yaml` | 同时重新执行 simulation `prepare` 和 runtime `prepare`，重启 backend 与 runtime |
+| runtime 策略模板 | `runtime/ros2/configs/policy_rollout.yaml` | 重新执行 runtime `prepare`，重启 runtime |
+| 数采 runtime 模板 | `runtime/ros2/configs/teacher_collect.yaml` | 下一次 `campaign run` 会重新生成该 attempt 的 runtime 配置，无需手工 prepare |
 | Policy 服务模板 | `learning/lerobot/configs/act_policy_temporal.yaml` | 重新执行 learning `prepare-policy`，再用新 binding 重新执行 runtime `prepare`，重启 Policy 服务和 runtime |
 | 训练参数 | `learning/lerobot/configs/act_training.container.yaml` | 下一次 `train` 使用新参数；训练后重新 bundle、prepare-policy、runtime prepare |
 | 数据转换、划分、质量规则 | `learning/lerobot/configs/act_dataset.container.yaml` | 重新执行 `convert`；已有数据集目录不会覆盖，需使用新的输出目录或 run-id |
@@ -407,15 +407,11 @@ simulation backend 模板
 
 **修改 follower 的 `target_count`**
 
-必须同时检查两处：
+唯一数据源是 `profiles/control/panda_follower_v1.yaml` 的 `target_count`；runtime
+配置通过 `follower_config` 直接引用该文件，不再内联重复定义。修改后重新执行
+simulation 和 runtime 两个 `prepare`，并重启 backend 和 runtime。
 
-- `simulation/mujoco/configs/control/panda_follower_act_chunked.yaml` 的 `target_count`
-- `runtime/ros2/configs/native_task_act_chunked.yaml` 的 `policy.target_count`
-
-两处不一致会导致 runtime 或 backend 校验失败。修改后重新执行 simulation 和 runtime
-两个 `prepare`，并重启 backend 和 runtime。
-
-**修改 `panda_control.yaml`**
+**修改 `panda_control_v1.yaml`**
 
 这个文件同时被 backend 和 runtime 引用。只重新生成 backend 配置是不够的，必须同时
 重新生成 runtime 配置。通常还需要重启三端中的 backend 和 runtime。

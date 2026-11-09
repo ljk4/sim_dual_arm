@@ -485,7 +485,7 @@ def test_backend_rejection_detail_is_machine_readable_and_preferred(tmp_path):
         attempt,
         {
             "schema_version": 1,
-            "component": "native_backend",
+            "component": "backend",
             "instance_id": "backend-1",
             "event_seq": 10,
             "event": "backend.submit_follower",
@@ -496,7 +496,7 @@ def test_backend_rejection_detail_is_machine_readable_and_preferred(tmp_path):
         },
         {
             "schema_version": 1,
-            "component": "native_backend",
+            "component": "backend",
             "instance_id": "backend-1",
             "event_seq": 11,
             "event": "backend.submit_follower.rejected",

@@ -1,0 +1,6 @@
+robot_api_msgs/RunContext context
+string command_id
+---
+bool success
+string reason
+robot_api_msgs/ExecutionFeedback execution

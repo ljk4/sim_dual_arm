@@ -21,7 +21,7 @@ from robot_backend_sim.motion_config import (  # noqa: E402
     parse_control_config,
 )
 
-CONFIG_PATH = ROOT / "simulation/mujoco/configs/control/panda_control.yaml"
+CONFIG_PATH = ROOT / "profiles/control/panda_control_v1.yaml"
 DEFAULT_DOCUMENT = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
 
 

@@ -27,6 +27,7 @@ VALID = {
     "stream_wall_timeout_s": 120.0,
     "progress_wall_timeout_s": 3.0,
     "tracking_timeout_s": 2.0,
+    "contact_unload_timeout_s": 2.0,
 }
 
 
@@ -53,7 +54,7 @@ def test_candidate_config_converts_to_exact_bounded_integer_nanoseconds():
 def test_snapshot_is_frozen_fresh_and_complete():
     config = parse_stream_config(dict(VALID))
     document = config.to_document()
-    assert set(document) == set(STREAM_CONFIG_FIELDS)
+    assert set(document) == set(STREAM_CONFIG_FIELDS) | {"contact_unload_timeout_s"}
     assert document == VALID
     document["initial_lead_s"] = 999.0
     assert config.to_document()["initial_lead_s"] == 0.25
@@ -64,7 +65,7 @@ def test_snapshot_is_frozen_fresh_and_complete():
 
 
 def test_candidate_file_loads_and_round_trips():
-    config = load_stream_config(ROOT / "simulation/mujoco/configs/control/panda_stream.yaml")
+    config = load_stream_config(ROOT / "profiles/control/panda_stream_v1.yaml")
     assert config.to_document() == VALID
     assert parse_stream_config(config.to_document()) == config
 

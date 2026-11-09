@@ -79,7 +79,7 @@ def _phase_observations(
     result: dict[str, int] = {}
     by_time = {value: key for key, value in observation_times.items()}
     for event in runtime_events:
-        if event.get("event") != "native.follower.chunk_accepted":
+        if event.get("event") != "follower.chunk_accepted":
             continue
         fields = event.get("fields")
         if not isinstance(fields, dict):
@@ -264,12 +264,12 @@ def _rule_metrics(
 def _read_metadata(recording: Path, root: str) -> dict[str, Any]:
     import rosbag2_py
     from rclpy.serialization import deserialize_message
-    from robot_contracts.native import NativeRequest
+    from robot_contracts.stream_request import StreamRequest
     from robot_ros_support.follower_conversions import follower_reference_from_message
-    from robot_ros_support.native_conversions import (
-        native_command_from_message,
-        native_control_event_from_message,
-        native_execution_from_message,
+    from robot_ros_support.stream_conversions import (
+        control_event_from_message,
+        execution_feedback_from_message,
+        stream_command_from_message,
     )
     from rosidl_runtime_py.utilities import get_message
 
@@ -322,9 +322,9 @@ def _read_metadata(recording: Path, root: str) -> dict[str, Any]:
                     )
             else:
                 frames[key] = message
-        elif topic == "/runtime/native/commands":
-            request = native_command_from_message(message)
-            if isinstance(request, NativeRequest) and request.anchor is not None:
+        elif topic == "/runtime/commands":
+            request = stream_command_from_message(message)
+            if isinstance(request, StreamRequest) and request.anchor is not None:
                 key = int(request.trajectory.observation_id)
                 targets = request.trajectory.targets
                 requests.setdefault(
@@ -341,8 +341,8 @@ def _read_metadata(recording: Path, root: str) -> dict[str, Any]:
         elif topic == f"{root}/follower_references":
             record = follower_reference_from_message(message)
             references[(record.command_id, record.chunk_seq)] = record
-        elif topic == f"{root}/native_events":
-            event = native_control_event_from_message(message)
+        elif topic == f"{root}/control_events":
+            event = control_event_from_message(message)
             if not event.is_chunk and event.phase == "STOPPING":
                 # This is the controller's switch from the follower to BRAKE.
                 # Overall started_time is the stream start, and canceled_time
@@ -353,8 +353,8 @@ def _read_metadata(recording: Path, root: str) -> dict[str, Any]:
                 phases = chunk_events.setdefault(key, {})
                 if event.phase in {"STARTED", "RETIRED", "CANCELED", "REJECTED"}:
                     phases.setdefault(event.phase, int(event.sim_time_ns))
-        elif topic == f"{root}/native_feedback":
-            execution = native_execution_from_message(message)
+        elif topic == f"{root}/execution_feedback":
+            execution = execution_feedback_from_message(message)
             if execution.reference_kind == "BRAKE":
                 start = (
                     int(execution.reference_application_sim_time_ns)

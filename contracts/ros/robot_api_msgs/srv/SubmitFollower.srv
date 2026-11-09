@@ -1,13 +1,13 @@
-# Follower entry.  The raw NativeCommand kind must be STREAM_FIRST or
+# Follower entry.  The raw StreamCommand kind must be STREAM_FIRST or
 # STREAM_NEXT; settle_at_end is the explicit final-block flag.  The service
 # entry, not a hidden request field, selects bounded-follower planning.
-robot_api_msgs/NativeCommand request
+robot_api_msgs/StreamCommand request
 ---
 bool accepted
 string reason
 bool has_execution
-robot_api_msgs/NativeExecution execution
+robot_api_msgs/ExecutionFeedback execution
 bool has_chunk
-robot_api_msgs/NativeChunkStatus chunk
+robot_api_msgs/StreamChunkStatus chunk
 bool has_reference
 robot_api_msgs/FollowerReference reference

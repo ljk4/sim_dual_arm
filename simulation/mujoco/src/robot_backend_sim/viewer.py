@@ -1,4 +1,4 @@
-"""Live MuJoCo viewer for the native simulation backend.
+"""Live MuJoCo viewer for the simulation backend.
 
 The viewer is intentionally separate from the physics process.  It rebuilds the
 same read-only scene model, subscribes to the backend's full-physics debug state,

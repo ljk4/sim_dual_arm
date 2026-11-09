@@ -208,7 +208,7 @@ class PandaIO:
         """Track one unchanged position/velocity reference through affine PD.
 
         This is a low-level actuator command, not a change to policy targets or
-        trajectory labels. Native actuator ctrl/force ranges still apply.
+        trajectory labels. Actuator ctrl/force ranges still apply.
         Disabled mode is exactly the original position-only I/O.
         """
         if not self.velocity_feedforward:

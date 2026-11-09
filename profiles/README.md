@@ -7,6 +7,7 @@
 - `robots/panda_stack_v1/`：双 Panda、16 维关节、三相机基线。
 - `robots/panda_stack_learning_v1/`：学习任务相机变体，右腕 FOV 68°。
 - `observations/`、`actions/`：观测和动作绑定，顺序必须与 profile 完全一致。
+- `control/`：跨 simulation 与 runtime 共享的控制、跟随和流式超时配置。
 
 profile 不包含主机路径或后端类型；改变关节/相机语义必须形成新摘要，不能沿用旧
 hash。历史细节见 [DSH-018](../docs/history/README.md#dsh-018)。

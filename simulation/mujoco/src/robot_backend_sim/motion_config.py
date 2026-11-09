@@ -1,4 +1,4 @@
-"""Strict immutable configuration for the native motion core."""
+"""Strict immutable configuration for the motion core."""
 
 from __future__ import annotations
 

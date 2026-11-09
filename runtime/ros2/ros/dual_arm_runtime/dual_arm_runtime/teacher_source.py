@@ -15,8 +15,7 @@ from collections.abc import Callable
 from robot_contracts.models import ContractError, RobotProfile, RunContext
 from robot_contracts.trajectory import FollowerValidationLimits
 
-from dual_arm_runtime.native_config import NativeConfiguration, NativeTeacher
-from dual_arm_runtime.native_stream import (
+from dual_arm_runtime.chunk_stream import (
     ContinuousStreamRunner,
     StreamControl,
     StreamIO,
@@ -24,6 +23,7 @@ from dual_arm_runtime.native_stream import (
 )
 from dual_arm_runtime.observation import ExactObservation
 from dual_arm_runtime.run_logging import EventSink
+from dual_arm_runtime.runtime_config import RuntimeConfiguration, TeacherConfig
 from dual_arm_runtime.stack_task_client import StackTaskClient
 from dual_arm_runtime.target_source import (
     Prediction,
@@ -40,9 +40,10 @@ class TeacherTargetSource:
     def __init__(
         self,
         client: StackTaskClient,
-        teacher: NativeTeacher,
+        teacher: TeacherConfig,
         profile: RobotProfile,
         *,
+        target_count: int,
         task_seed: int,
         log: EventSink | None = None,
     ) -> None:
@@ -52,7 +53,7 @@ class TeacherTargetSource:
         self.task_seed = task_seed
         self.log = log
         self.chunk_size = teacher.chunk_size
-        self.target_count = teacher.target_count
+        self.target_count = target_count
         self.max_chunks = teacher.max_chunks
         self.initial_lead_ns = teacher.initial_lead_ns
         self.predict_deadline_s = teacher.chunk_deadline_s
@@ -164,7 +165,7 @@ class TeacherStreamRunner(ContinuousStreamRunner):
 
     def __init__(
         self,
-        configuration: NativeConfiguration,
+        configuration: RuntimeConfiguration,
         context: RunContext,
         episode_id: str,
         task_id: str,
@@ -205,7 +206,7 @@ class TeacherStreamRunner(ContinuousStreamRunner):
             if error.reason == "TEACHER_GATE_FAILED":
                 self.task_end = self.source.task_terminal()
                 self._emit(
-                    "native.teacher.gate_failed",
+                    "teacher.gate_failed",
                     level="ERROR",
                     reason="TEACHER_GATE_FAILED",
                     fields={

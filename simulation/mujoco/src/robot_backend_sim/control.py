@@ -1,8 +1,8 @@
-"""Single-owner native control session over an already owned scene and I/O.
+"""Single-owner control session over an already owned scene and I/O.
 
-``NativeController`` composes an existing :class:`~robot_backend_sim.scene.Scene`,
+``ControlSession`` composes an existing :class:`~robot_backend_sim.scene.Scene`,
 the accepted :class:`~robot_backend_sim.panda_io.PandaIO` and the one
-``NativeMotion`` physical loop.  It adds explicit leases, immutable command
+``MotionController`` physical loop.  It adds explicit leases, immutable command
 identity, bounded idempotent command/chunk history, aggregate status and
 episode-boundary reset.  It never creates a thread, reads a clock/file/network,
 fits a curve or performs a second ``mj_step``.
@@ -47,8 +47,8 @@ from .control_state import (
     _status_from_record,
 )
 from .motion import (
+    MotionController,
     MotionSnapshot,
-    NativeMotion,
     Phase,
 )
 from .motion_config import PandaControlConfig
@@ -56,12 +56,12 @@ from .panda_io import PandaIO
 from .scene import Scene
 from .stream_config import StreamConfig
 
-__all__ = ["MAX_DEFERRED_EVENTS", "NativeController", "TIME_DOMAIN_ID"]
+__all__ = ["MAX_DEFERRED_EVENTS", "ControlSession", "TIME_DOMAIN_ID"]
 
 TIME_DOMAIN_ID = "mujoco-sim"
 
-_NATIVE_ACTIVE = frozenset({Phase.ACCEPTED, Phase.RUNNING, Phase.SETTLING, Phase.STOPPING})
-_NATIVE_RESETTABLE = frozenset({Phase.IDLE, Phase.COMPLETED, Phase.STOPPED, Phase.FAILED})
+_MOTION_ACTIVE = frozenset({Phase.ACCEPTED, Phase.RUNNING, Phase.SETTLING, Phase.STOPPING})
+_MOTION_RESETTABLE = frozenset({Phase.IDLE, Phase.COMPLETED, Phase.STOPPED, Phase.FAILED})
 _COMMAND_STARTED = "STARTED"
 _COMMAND_ACCEPTED = "ACCEPTED"
 _COMMAND_STOPPING = "STOPPING"
@@ -82,7 +82,7 @@ def _reason_text(value: object) -> str:
     return value
 
 
-class NativeController:
+class ControlSession:
     """One controller bound to the creating thread and one physical scene owner."""
 
     def __init__(
@@ -112,7 +112,7 @@ class NativeController:
         self._commands = CommandHistory(max_history)
         self._chunks = ChunkHistory(max_chunk_history)
         self._leases = LeaseBook()
-        self._motion = NativeMotion(
+        self._motion = MotionController(
             scene,
             io,
             control_config,
@@ -122,7 +122,7 @@ class NativeController:
         self._context = RunContext(
             io.profile.robot_id,
             io.profile.digest,
-            f"native-{uuid.uuid4().hex}",
+            f"control-{uuid.uuid4().hex}",
             TIME_DOMAIN_ID,
             0,
         )
@@ -170,14 +170,14 @@ class NativeController:
         max_arm_speed_rad_s: float = 0.05,
         max_gripper_speed_m_s: float = 0.01,
     ) -> bool:
-        """Require no active native motion and measured joints close to rest.
+        """Require no active motion and measured joints close to rest.
 
         Prepare is read-only, but a snapshot taken while a command is running
         would silently plan from a moving scene.  Both the controller phase and
         the measured velocities must be quiescent.
         """
         self._check_thread()
-        if self._motion.phase in _NATIVE_ACTIVE:
+        if self._motion.phase in _MOTION_ACTIVE:
             return False
         measurement = self._io.measure()
         for index, velocity in enumerate(measurement.velocities):
@@ -245,8 +245,8 @@ class NativeController:
         record = self._current_record()
         if record is not None and record.phase in COMMAND_ACTIVE_PHASES:
             raise _invalid("CONTROL_BUSY", "an active or stopping command still owns control")
-        if self._motion.phase in _NATIVE_ACTIVE:
-            raise _invalid("CONTROL_BUSY", "native motion is active or stopping")
+        if self._motion.phase in _MOTION_ACTIVE:
+            raise _invalid("CONTROL_BUSY", "motion is active or stopping")
         lease = self._leases.acquire(context, owner, duration_ns, wall)
         self._context = context
         # Sequence order belongs to this lease. Old immutable history remains
@@ -287,11 +287,11 @@ class NativeController:
                 _COMMAND_STARTED,
             )
         ):
-            snapshot, stop_events = self._request_native_stop("CONTROL_RELEASED", wall)
+            snapshot, stop_events = self._request_stop("CONTROL_RELEASED", wall)
             events.extend(stop_events)
         else:
             snapshot = expiry_snapshot or self._motion.poll(wall)
-            self._sync_native(snapshot, wall, events)
+            self._sync_stream(snapshot, wall, events)
         return self._reply(snapshot, events, accepted=True, reason="CONTROL_RELEASED")
 
     def submit(self, packet: PreparedControlCommand, wall_ns: int) -> ControlReply:
@@ -323,8 +323,8 @@ class NativeController:
         record = self._current_record()
         if record is not None and record.phase in COMMAND_ACTIVE_PHASES:
             raise _invalid("CONTROL_BUSY", "a previous command is still active")
-        if self._motion.phase in _NATIVE_ACTIVE:
-            raise _invalid("CONTROL_BUSY", "native motion is active or stopping")
+        if self._motion.phase in _MOTION_ACTIVE:
+            raise _invalid("CONTROL_BUSY", "motion is active or stopping")
         if packet.kind != "FOLLOWER":
             raise _invalid(
                 "INVALID_PREPARED_COMMAND",
@@ -358,7 +358,7 @@ class NativeController:
         self._highest_sequence = command.command_seq
         self._record_chunk(new_record, prepared, snapshot, wall)
         events.append(self._emit(new_record, _COMMAND_ACCEPTED, "", accepted_sim))
-        self._sync_native(snapshot, wall, events)
+        self._sync_stream(snapshot, wall, events)
         return self._reply(snapshot, events, accepted=True, reason=_COMMAND_ACCEPTED)
 
     def queue_chunk(self, packet: PreparedControlCommand, wall_ns: int) -> ControlReply:
@@ -450,7 +450,7 @@ class NativeController:
             )
             self._chunks.add(chunk_record)
             record.max_chunk_seq = prepared.seq
-        self._sync_native(submission.snapshot, wall, events)
+        self._sync_stream(submission.snapshot, wall, events)
         return self._reply(
             submission.snapshot,
             events,
@@ -476,17 +476,17 @@ class NativeController:
         if record is None or record.command.context != context:
             if self._motion.phase is Phase.IDLE:
                 snapshot = expiry_snapshot or self._motion.poll(wall)
-                self._sync_native(snapshot, wall, events)
+                self._sync_stream(snapshot, wall, events)
                 return self._reply(
                     snapshot,
                     events,
                     accepted=False,
                     reason="NO_ACTIVE_COMMAND",
                 )
-            snapshot, stop_events = self._request_native_stop(reason, wall)
+            snapshot, stop_events = self._request_stop(reason, wall)
             events.extend(stop_events)
             return self._reply(snapshot, events, accepted=True, reason=reason)
-        snapshot, stop_events = self._request_native_stop(reason, wall)
+        snapshot, stop_events = self._request_stop(reason, wall)
         events.extend(stop_events)
         return self._reply(snapshot, events, accepted=True, reason=reason)
 
@@ -497,7 +497,7 @@ class NativeController:
         self._defer_events(expiry_events)
         events: list[ControlEvent] = []
         snapshot = self._motion.step(wall)
-        self._sync_native(snapshot, wall, events)
+        self._sync_stream(snapshot, wall, events)
         return self._reply(snapshot, events)
 
     def poll(self, wall_ns: int) -> ControlReply:
@@ -507,7 +507,7 @@ class NativeController:
         self._defer_events(expiry_events)
         events: list[ControlEvent] = []
         snapshot = self._motion.poll(wall)
-        self._sync_native(snapshot, wall, events)
+        self._sync_stream(snapshot, wall, events)
         return self._reply(snapshot, events)
 
     def query_command(self, context: RunContext, command_id: str) -> ControlStatus:
@@ -563,7 +563,7 @@ class NativeController:
 
         This is deliberately not a ROS entry point.  It is used for shutdown,
         logger/queue/renderer faults and other software failures.  The real
-        ``NativeMotion`` brake and terminal rules still decide the physical
+        ``MotionController`` brake and terminal rules still decide the physical
         outcome; a CANCELED terminal result does not make the software failure
         disappear (the worker keeps its own nonzero fault state).
         """
@@ -572,7 +572,7 @@ class NativeController:
         reason = _reason_text(reason)
         events: list[ControlEvent] = []
         self._leases.clear()
-        snapshot, stop_events = self._request_native_stop(reason, wall)
+        snapshot, stop_events = self._request_stop(reason, wall)
         events.extend(stop_events)
         return self._reply(snapshot, events, accepted=True, reason=reason)
 
@@ -589,15 +589,15 @@ class NativeController:
         self._defer_events(events)
         self._require_lease(context, lease_id)
         validated_seed = validate_seed(seed)
-        if self._motion.phase not in _NATIVE_RESETTABLE:
+        if self._motion.phase not in _MOTION_RESETTABLE:
             raise _invalid(
                 "RESET_NOT_ALLOWED",
-                "reset requires an idle or safely terminal native motion",
+                "reset requires an idle or safely terminal motion",
             )
         if self._context.clock_epoch >= INT64_MAX:
             raise _invalid("INVALID_CONTEXT", "clock_epoch cannot increase")
         self._scene.reset(validated_seed)
-        self._motion = NativeMotion(
+        self._motion = MotionController(
             self._scene,
             self._io,
             self._control_config,
@@ -620,7 +620,7 @@ class NativeController:
 
     def _check_thread(self) -> None:
         if threading.current_thread() is not self._owner_thread:
-            raise _invalid("WRONG_THREAD", "NativeController must be used on its creating thread")
+            raise _invalid("WRONG_THREAD", "ControlSession must be used on its creating thread")
 
     def _begin_call(self, wall_ns: object) -> int:
         wall = validate_wall(wall_ns)
@@ -671,19 +671,19 @@ class NativeController:
             return None, []
         record = self._current_record()
         if record is not None and record.phase in (_COMMAND_ACCEPTED, _COMMAND_STARTED):
-            return self._request_native_stop("LEASE_EXPIRED", wall)
-        if record is None and self._motion.phase in _NATIVE_ACTIVE:
-            return self._request_native_stop("LEASE_EXPIRED", wall)
+            return self._request_stop("LEASE_EXPIRED", wall)
+        if record is None and self._motion.phase in _MOTION_ACTIVE:
+            return self._request_stop("LEASE_EXPIRED", wall)
         return None, []
 
-    def _request_native_stop(
+    def _request_stop(
         self, reason: str, wall: int
     ) -> tuple[MotionSnapshot, list[ControlEvent]]:
         events: list[ControlEvent] = []
         record = self._current_record()
-        if self._motion.phase not in _NATIVE_ACTIVE:
+        if self._motion.phase not in _MOTION_ACTIVE:
             snapshot = self._motion.poll(wall)
-            self._sync_native(snapshot, wall, events)
+            self._sync_stream(snapshot, wall, events)
             return snapshot, events
         snapshot = self._motion.request_stop(reason, wall)
         if (
@@ -699,10 +699,10 @@ class NativeController:
             events.append(
                 self._emit(record, _COMMAND_STOPPING, reason, snapshot.measurement_sim_time_ns)
             )
-        self._sync_native(snapshot, wall, events)
+        self._sync_stream(snapshot, wall, events)
         return snapshot, events
 
-    def _sync_native(
+    def _sync_stream(
         self,
         snapshot: MotionSnapshot,
         wall: int,
@@ -765,35 +765,35 @@ class NativeController:
         wall: int,
         events: list[ControlEvent],
     ) -> None:
-        for native_event in sorted(snapshot.chunk_events, key=lambda item: item.event_seq):
-            if native_event.event_seq <= record.last_native_event_seq:
+        for control_event in sorted(snapshot.chunk_events, key=lambda item: item.event_seq):
+            if control_event.event_seq <= record.last_control_event_seq:
                 continue
-            record.last_native_event_seq = native_event.event_seq
-            chunk = self._chunks.get(record.command.command_id, native_event.chunk_seq)
+            record.last_control_event_seq = control_event.event_seq
+            chunk = self._chunks.get(record.command.command_id, control_event.chunk_seq)
             if chunk is not None:
                 chunk.latest_snapshot = snapshot
-                if native_event.phase == "STARTED":
+                if control_event.phase == "STARTED":
                     chunk.phase = "STARTED"
-                    chunk.started_sim_ns = native_event.sim_time_ns
+                    chunk.started_sim_ns = control_event.sim_time_ns
                     chunk.started_wall_ns = wall
-                    chunk.reason = native_event.reason
-                elif native_event.phase == "RETIRED":
+                    chunk.reason = control_event.reason
+                elif control_event.phase == "RETIRED":
                     chunk.phase = "RETIRED"
-                    chunk.finished_sim_ns = native_event.sim_time_ns
+                    chunk.finished_sim_ns = control_event.sim_time_ns
                     chunk.finished_wall_ns = wall
-                    chunk.reason = native_event.reason
-                elif native_event.phase == "CANCELED":
+                    chunk.reason = control_event.reason
+                elif control_event.phase == "CANCELED":
                     chunk.phase = "CANCELED"
-                    chunk.finished_sim_ns = native_event.sim_time_ns
+                    chunk.finished_sim_ns = control_event.sim_time_ns
                     chunk.finished_wall_ns = wall
-                    chunk.reason = native_event.reason
-                elif native_event.phase == "REJECTED":
+                    chunk.reason = control_event.reason
+                elif control_event.phase == "REJECTED":
                     chunk.phase = "REJECTED"
-                    chunk.finished_sim_ns = native_event.sim_time_ns
+                    chunk.finished_sim_ns = control_event.sim_time_ns
                     chunk.finished_wall_ns = wall
-                    chunk.reason = native_event.reason
-                elif native_event.phase == "ACCEPTED":
-                    chunk.reason = native_event.reason or chunk.reason
+                    chunk.reason = control_event.reason
+                elif control_event.phase == "ACCEPTED":
+                    chunk.reason = control_event.reason or chunk.reason
             self._event_sequence += 1
             if self._event_sequence > MAX_EVENT_SEQUENCE:
                 raise _invalid("EVENT_SEQUENCE_EXHAUSTED", "controller event sequence")
@@ -803,11 +803,11 @@ class NativeController:
                     context=record.command.context,
                     command_id=record.command.command_id,
                     command_seq=record.command.command_seq,
-                    observation_id=native_event.observation_id,
-                    chunk_seq=native_event.chunk_seq,
-                    phase=native_event.phase,
-                    reason=native_event.reason,
-                    sim_time_ns=native_event.sim_time_ns,
+                    observation_id=control_event.observation_id,
+                    chunk_seq=control_event.chunk_seq,
+                    phase=control_event.phase,
+                    reason=control_event.reason,
+                    sim_time_ns=control_event.sim_time_ns,
                 )
             )
 

@@ -65,11 +65,11 @@ class Snapshot:
         sim_time = float(self.sim_time)
         if not np.isfinite(sim_time):
             raise ValueError("snapshot sim_time must be finite")
-        native_time = float(state[0])
-        if sim_time != native_time:
+        reported_time = float(state[0])
+        if sim_time != reported_time:
             raise ValueError(
                 "snapshot sim_time does not match the native mjSTATE_FULLPHYSICS "
-                f"TIME element: {sim_time!r} != {native_time!r}"
+                f"TIME element: {sim_time!r} != {reported_time!r}"
             )
         object.__setattr__(self, "sim_time", sim_time)
 

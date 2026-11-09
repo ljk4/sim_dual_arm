@@ -9,13 +9,13 @@ import pytest
 from robot_contracts.action_chunks import ChunkAnchor
 from robot_contracts.control import ControlCommand
 from robot_contracts.models import ContractError, RunContext, Target
-from robot_contracts.native import (
-    NATIVE_MOTION,
-    NATIVE_STREAM_FIRST,
-    NativeRequest,
-)
-from robot_contracts.native_reference import Trajectory
 from robot_contracts.profiles import load_profile
+from robot_contracts.stream_request import (
+    REQUEST_MOTION,
+    REQUEST_STREAM_FIRST,
+    StreamRequest,
+    Trajectory,
+)
 from robot_contracts.trajectory import ReferenceSample, validate
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -40,8 +40,8 @@ PROFILE = load_profile(
     ROOT / "profiles/robots/panda_stack_v1/profile.json",
     ROOT / "contracts/schemas/v1",
 )
-CONTROL = load_control_config(ROOT / "simulation/mujoco/configs/control/panda_control.yaml")
-FOLLOWER = load_follower_config(ROOT / "simulation/mujoco/configs/control/panda_follower.yaml")
+CONTROL = load_control_config(ROOT / "profiles/control/panda_control_v1.yaml")
+FOLLOWER = load_follower_config(ROOT / "profiles/control/panda_follower_v1.yaml")
 BASE = PROFILE.initial_positions
 COUNT = len(BASE)
 GRID_NS = 2_000_000
@@ -84,8 +84,8 @@ def anchor() -> ChunkAnchor:
     )
 
 
-def request(*, kind: int = NATIVE_STREAM_FIRST, final: bool = False) -> NativeRequest:
-    return NativeRequest(
+def request(*, kind: int = REQUEST_STREAM_FIRST, final: bool = False) -> StreamRequest:
+    return StreamRequest(
         trajectory=Trajectory(
             context(),
             "lease-1",
@@ -188,7 +188,7 @@ def test_retry_returns_the_original_acceptance_times_and_digest():
 
 
 def test_follower_protocol_rejects_motion_and_mismatched_final_flag():
-    motion = NativeRequest(
+    motion = StreamRequest(
         trajectory=Trajectory(
             context(),
             "lease-1",
@@ -199,7 +199,7 @@ def test_follower_protocol_rejects_motion_and_mismatched_final_flag():
             PROFILE.joint_names,
             source_targets(),
         ),
-        kind=NATIVE_MOTION,
+        kind=REQUEST_MOTION,
     )
     with pytest.raises(ContractError) as caught:
         prepare_follower_request(motion, PROFILE, CONTROL, FOLLOWER)
@@ -215,7 +215,7 @@ def test_follower_protocol_rejects_motion_and_mismatched_final_flag():
 def test_successor_fingerprint_is_separate_from_strict_chunks():
     first = request()
     packet = prepare_follower_request(first, PROFILE, CONTROL, FOLLOWER, duration_grid_ns=GRID_NS)
-    successor_request = NativeRequest(
+    successor_request = StreamRequest(
         trajectory=Trajectory(
             context(),
             "lease-1",
@@ -267,7 +267,7 @@ def test_real_final_counterexample_checks_executed_tail_and_target_count():
         ReferenceSample(BASE, (0.0,) * COUNT, (0.0,) * COUNT),
         PROFILE.digest,
     )
-    raw = NativeRequest(
+    raw = StreamRequest(
         trajectory=Trajectory(
             context(),
             "lease-1",
@@ -278,7 +278,7 @@ def test_real_final_counterexample_checks_executed_tail_and_target_count():
             PROFILE.joint_names,
             tuple(raw_targets),
         ),
-        kind=NATIVE_STREAM_FIRST,
+        kind=REQUEST_STREAM_FIRST,
         anchor=final_anchor,
         observation_time_ns=0,
         target_count=FOLLOWER.target_count,
@@ -287,7 +287,7 @@ def test_real_final_counterexample_checks_executed_tail_and_target_count():
     packet = prepare_follower_request(raw, PROFILE, CONTROL, FOLLOWER, duration_grid_ns=GRID_NS)
     prepared = packet.prepared
     assert prepared.is_final is True
-    assert prepared.requested_window_ns == 250_000_000
+    assert prepared.requested_window_ns == FOLLOWER.target_count * 50_000_000
     assert prepared.duration_ns > 300_000_000
     record = follower_reference(
         raw,

@@ -2,7 +2,7 @@
 
 No MuJoCo, clock, thread, IO or SciPy call lives here.  ``StreamSchedule`` only
 composes the single active plan and the single optional successor plus the
-monotonic per-stream event sequence; :class:`~robot_backend_sim.motion.NativeMotion`
+monotonic per-stream event sequence; :class:`~robot_backend_sim.motion.MotionController`
 owns the physical state and performs the one real step.
 """
 

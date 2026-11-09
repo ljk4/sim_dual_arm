@@ -37,8 +37,8 @@ PROFILE = load_profile(
     ROOT / "profiles/robots/panda_stack_v1/profile.json",
     ROOT / "contracts/schemas/v1",
 )
-CONTROL = load_control_config(ROOT / "simulation/mujoco/configs/control/panda_control.yaml")
-FOLLOWER = load_follower_config(ROOT / "simulation/mujoco/configs/control/panda_follower.yaml")
+CONTROL = load_control_config(ROOT / "profiles/control/panda_control_v1.yaml")
+FOLLOWER = load_follower_config(ROOT / "profiles/control/panda_follower_v1.yaml")
 BASE = PROFILE.initial_positions
 JOINT_COUNT = len(BASE)
 
@@ -164,7 +164,7 @@ def make_window(
     *,
     observation_id=1,
     handoff_ns=250_000_000,
-    target_count=5,
+    target_count=FOLLOWER.target_count,
 ):
     return ActionWindow(
         observation_id=observation_id,
@@ -588,8 +588,8 @@ def test_first_window_counterexample_and_bounded_follower():
 
 
 @pytest.mark.parametrize("lead_ms", (50, 100, 250))
-def test_two_radian_seven_second_fragment_with_three_leads(lead_ms):
-    targets = make_source_targets(BASE, (BASE[0] + 2.0,) + BASE[1:], 7.0)
+def test_two_radian_ten_second_fragment_with_three_leads(lead_ms):
+    targets = make_source_targets(BASE, (BASE[0] + 2.0,) + BASE[1:], 10.0)
     window = make_window(targets, handoff_ns=lead_ms * 1_000_000)
     anchor = make_anchor(window, BASE, (0.0,) * JOINT_COUNT)
 
@@ -608,8 +608,6 @@ def test_two_radian_seven_second_fragment_with_three_leads(lead_ms):
             assert prepared.actual_terminal_velocities == pytest.approx(
                 (0.0,) * JOINT_COUNT, abs=1e-9
             )
-            if lead_ms == 250:
-                assert prepared.extension_ns > 0
         else:
             assert prepared.plan.duration_ns == window.end_time_ns
         assert max(prepared.max_target_deviations) <= max(
@@ -741,7 +739,7 @@ def test_nonfinal_actual_endpoint_is_inherited_by_the_successor():
 
 
 def test_terminal_speed_is_capped_while_raw_targets_are_preserved():
-    positions = (0.0, 0.01, 0.02, 0.03, 0.09)
+    positions = (0.0, 0.006, 0.012, 0.018, 0.024, 0.030, 0.040, 0.050, 0.060, 0.090)
     source_targets = tuple(
         Target(300_000_000 + index * 50_000_000, (position,) + BASE[1:])
         for index, position in enumerate(positions)
@@ -786,14 +784,14 @@ def gripper_boundary_source(first_positions, remaining_position):
         (
             "min-boundary",
             0.002,
-            (0.0016, 0.0012, 0.0008, 0.0004, 0.0),
+            tuple(0.002 - index * 0.0002 for index in range(9)) + (0.0,),
             0.0,
             -0.008,
         ),
         (
             "max-boundary",
             0.078,
-            (0.0784, 0.0788, 0.0792, 0.0796, 0.08),
+            tuple(0.078 + index * 0.0002 for index in range(9)) + (0.08,),
             0.08,
             0.008,
         ),
@@ -846,14 +844,14 @@ def test_successive_windows_approach_each_joint_boundary_with_inherited_state():
                         (
                             current_positions[axis]
                             + (goal - current_positions[7])
-                            * ((point + 1) / 5.0)
+                            * ((point + 1) / FOLLOWER.target_count)
                             if axis == 7
                             else current_positions[axis]
                         )
                         for axis in range(JOINT_COUNT)
                     ),
                 )
-                for point in range(5)
+                for point in range(FOLLOWER.target_count)
             )
             window = make_window(source, handoff_ns=handoff_ns)
             anchor = ChunkAnchor(

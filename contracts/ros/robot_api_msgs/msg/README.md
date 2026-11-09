@@ -1,8 +1,8 @@
 # msg
 
 按用途分组：`RobotState`、`CameraFrame`、`ObservationIndex`、`RunContext`；
-`BackendInfo`、`RuntimeStatus`；原生 `NativeCommand`、`NativeExecution`、
-`NativeChunkStatus`、`NativeControlEvent`、`NativeGripper`、`NativeFinger`；
+`BackendInfo`、`RuntimeStatus`；流式 `StreamCommand`、`ExecutionFeedback`、
+`StreamChunkStatus`、`ControlEvent`、`GripperFeedback`、`FingerFeedback`；
 跟随 `FollowerReference`、`ReferenceAnchor`、`ReferenceSegment`；任务
 `StackTaskState`。
 

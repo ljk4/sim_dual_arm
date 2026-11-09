@@ -108,7 +108,7 @@ def _backend_rejection_events(attempt: Path) -> list[tuple[Path, dict[str, Any]]
                 continue
             name = str(event.get("event") or "")
             if (
-                event.get("component") != "native_backend"
+                event.get("component") != "backend"
                 and not name.startswith("backend.")
             ):
                 continue

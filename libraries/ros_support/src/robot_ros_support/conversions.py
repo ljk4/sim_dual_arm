@@ -3,7 +3,7 @@
 from builtin_interfaces.msg import Duration, Time
 from robot_api_msgs.msg import RunContext as ContextMessage
 from robot_contracts.models import ContractError, RunContext, Target
-from robot_contracts.native_reference import Trajectory
+from robot_contracts.stream_request import Trajectory
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
 

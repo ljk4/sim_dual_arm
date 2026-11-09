@@ -1,0 +1,144 @@
+# 中文参数说明（维护时优先阅读本段）
+# schema_version：配置格式版本，当前必须为 1。
+# robot_profile：机器人关节、相机和硬件范围定义文件。
+# observation_schema：策略观测字段与顺序定义文件。
+# action_schema：策略动作字段、单位与顺序定义文件。
+# control_constraints：执行器加速度、位置/速度容差和接触阈值。
+# follower_config：动作块跟随窗口与目标偏差预算（唯一数据源）。
+# robot_namespace：ROS 话题、服务和参数使用的命名空间。
+# action_source：动作来源，可选 policy 或 teacher。
+# lease_duration_ns：控制租约有效期，单位 ns。
+# renew_interval_ns：租约续期周期，单位 ns。
+# command_acceptance_ns：命令接受时间窗口，单位 ns。
+# startup_timeout_s：等待后端 ready 的超时，单位 s。
+# call_timeout_s：普通 ROS 服务调用超时，单位 s。
+# command_timeout_s：命令提交、查询和终态等待超时，单位 s。
+# reset.enabled：每局开始前是否复位机器人/仿真环境。
+# reset.seed：复位种子；相同种子生成相同初始布局。
+# observation.reliable：是否使用可靠 QoS 接收观测。
+# observation.max_skew_ns：状态与三路图像允许的最大时间偏差，单位 ns。
+# observation.max_age_ns：完整观测允许的最大年龄，单位 ns。
+# observation.wall_arrival_timeout_s：等待完整观测的墙钟超时，单位 s。
+# observation.capacity：观测缓存容量。
+# control.submit_query_retries：提交结果未知时按 command_id 查询的重试次数。
+# control.poll_interval_s：命令状态查询轮询间隔，单位 s。
+# control.stop_timeout_s：停止动作等待超时，单位 s。
+# control.terminal_timeout_s：等待命令进入终态的超时，单位 s。
+# policy.endpoint：gRPC Policy 服务地址。
+# policy.model_bundle_digest：模型 bundle 摘要；模板中的占位符由 prepare 替换。
+# policy.processor_digest：模型预处理/后处理身份摘要。
+# policy.allow_test_policy：是否允许测试策略。
+# policy.expected_test_only：是否要求本次运行必须为 test_only 策略。
+# policy.task_id：任务标识。
+# policy.task_text：传给策略服务的任务文本。
+# policy.chunk_size：策略一次返回的动作点数。
+# policy.action_period_ns：相邻动作点的时间间隔，单位 ns。
+# policy.startup_settle_sim_ns：任务开始前静置的仿真时间，单位 ns。
+# policy.initial_lead_ns：首块动作相对观测时间的提前量，单位 ns。
+# policy.max_chunks：单局最多提交的动作块数。
+# policy.total_sim_deadline_ns：单局仿真时间上限，单位 ns。
+# policy.total_wall_deadline_s：单局墙钟时间上限，单位 s。
+# policy.connect_timeout_s：建立 gRPC 连接超时，单位 s。
+# policy.open_deadline_s：打开 Policy session 超时，单位 s。
+# policy.predict_deadline_s：单次预测超时，单位 s。
+# policy.close_deadline_s：关闭 Policy session 超时，单位 s。
+# policy.max_message_bytes：gRPC 单条消息大小上限。
+# policy.poll_interval_s：策略/观测状态轮询间隔，单位 s。
+# policy.termination_mode：终止模式，finite_chunks 按块数结束，task 按任务判定结束。
+# policy.task_stop_margin_s：任务截止前预留的停车余量，单位 s。
+# policy.task_sim_budget_ns：任务阶段仿真预算，单位 ns。
+# motions：诊断动作列表；policy/teacher 运行通常为空。
+# logging.queue_capacity：事件日志内存队列容量。
+# logging.max_event_bytes：单条日志最大字节数。
+# logging.max_file_bytes：单个日志文件最大字节数。
+# logging.max_total_bytes：单个运行日志总大小上限。
+# logging.close_timeout_s：关闭日志的等待超时，单位 s。
+# logging.flush_interval_s：日志刷新间隔，单位 s。
+# logging.console：是否同时输出到控制台；容器运行通常为 false。
+# recording.queue_capacity：MCAP 录制写入队列容量。
+# recording.max_pending_bytes：录制待写数据最大字节数。
+# recording.startup_timeout_s：录像启动超时，单位 s。
+# recording.close_timeout_s：录像关闭超时，单位 s。
+
+# Unit-test continuous-policy runtime.  It selects the policy action source and
+# keeps every other parameter identical to the accepted diagnostic recipe.
+# Paths are relative to this file; all times are integer ns unless a field says
+# seconds.  Three RGB cameras and the full 16-joint order are fixed by the
+# referenced profile and the Policy service configuration.
+schema_version: 1
+robot_profile: ../../../profiles/robots/panda_stack_v1/profile.json
+observation_schema: ../../../profiles/observations/panda_rgb_joint_v1.json
+action_schema: ../../../profiles/actions/panda_joint_position_v1.json
+control_constraints: ../../../profiles/control/panda_control_v1.yaml
+follower_config: ../../../profiles/control/panda_follower_v1.yaml
+robot_namespace: /robot
+
+action_source: policy
+# Policy inference never enables the program teacher.  Use a backend deployment
+# with task_mode: inference (or no robot.task) so teacher_chunk is absent from
+# BackendInfo capabilities and GetTeacherChunk is rejected.
+
+lease_duration_ns: 2000000000
+renew_interval_ns: 500000000
+command_acceptance_ns: 500000000
+startup_timeout_s: 30.0
+call_timeout_s: 5.0
+command_timeout_s: 8.0
+
+reset:
+  enabled: true
+  seed: 0
+
+observation:
+  max_skew_ns: 0
+  max_age_ns: 500000000
+  wall_arrival_timeout_s: 1.5
+  capacity: 32
+
+control:
+  submit_query_retries: 2
+  poll_interval_s: 0.02
+  stop_timeout_s: 8.0
+  terminal_timeout_s: 20.0
+
+# The diagnostic stream is finite: eight chunks x the configured selected
+# points at 50 ms.  It is not a task termination rule and does not claim
+# task success.
+policy:
+  endpoint: fake-policy:50051
+  model_bundle_digest: 9f2c67c0c4b0a4f6f5a0d9b6c1f8f0c5c4f3e2d1a0b9c8d7e6f5a4b3c2d1e0f9
+  processor_digest: 1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809
+  allow_test_policy: true
+  expected_test_only: true
+  task_id: diagnostic-policy-stream
+  task_text: Follow the observed three-camera dual-arm state with small bounded joint motion.
+  chunk_size: 60
+  action_period_ns: 50000000
+  # Matches panda_stream.initial_lead_s: the first hand-off is 250 ms ahead.
+  initial_lead_ns: 250000000
+  max_chunks: 8
+  total_sim_deadline_ns: 8000000000
+  total_wall_deadline_s: 45.0
+  connect_timeout_s: 2.0
+  open_deadline_s: 2.0
+  predict_deadline_s: 2.0
+  close_deadline_s: 2.0
+  max_message_bytes: 16777216
+  poll_interval_s: 0.02
+
+# Kept empty on purpose: the streaming runtime has no diagnostic motion list.
+motions: []
+
+logging:
+  queue_capacity: 256
+  max_event_bytes: 32768
+  max_file_bytes: 8388608
+  max_total_bytes: 268435456
+  close_timeout_s: 3.0
+  flush_interval_s: 0.2
+  console: false
+recording:
+  queue_capacity: 1024
+  max_pending_bytes: 67108864
+  startup_timeout_s: 5.0
+  close_timeout_s: 5.0

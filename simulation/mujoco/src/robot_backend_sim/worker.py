@@ -1,4 +1,4 @@
-"""Native worker orchestration: bounded planner and public worker surface.
+"""Worker orchestration: bounded planner and public worker surface.
 
 The single live-physics owner lives in :mod:`robot_backend_sim.worker_owner`; this
 module keeps the one-compile planner thread and the lifecycle/output helpers the
@@ -15,8 +15,8 @@ import time
 from concurrent.futures import Future
 
 from robot_contracts.models import ContractError, RobotProfile, RunContext
-from robot_contracts.native import NativeRequest
 from robot_contracts.profiles import load_profile
+from robot_contracts.stream_request import StreamRequest
 from robot_contracts.trajectory import FollowerReference
 
 from .backend_config import BackendConfig
@@ -64,7 +64,7 @@ from .worker_owner import (
 
 __all__ = [
     "BackendClosed",
-    "NativeWorker",
+    "Worker",
     "SubmitOutcome",
     "WorkerFault",
     "WorkerSummary",
@@ -91,14 +91,14 @@ class _Planner:
         self._log = log
         self._follower_config: PandaFollowerConfig | None = follower_config
         self._duration_grid_ns = duration_grid_ns
-        self._queue: queue.Queue[tuple[NativeRequest, Future]] = queue.Queue(
+        self._queue: queue.Queue[tuple[StreamRequest, Future]] = queue.Queue(
             maxsize=config.planner_queue_capacity
         )
         self._lock = threading.Lock()
         self._busy_since_ns: int | None = None
         self._active_future: Future | None = None
         self._closing = threading.Event()
-        self._thread = threading.Thread(target=self._run, name="native-planner", daemon=True)
+        self._thread = threading.Thread(target=self._run, name="backend-planner", daemon=True)
 
     def start(self) -> None:
         self._thread.start()
@@ -108,7 +108,7 @@ class _Planner:
         with self._lock:
             return self._busy_since_ns
 
-    def submit(self, request: NativeRequest, future: Future) -> None:
+    def submit(self, request: StreamRequest, future: Future) -> None:
         if self._closing.is_set():
             future.set_exception(BackendClosed("planner is closing"))
             return
@@ -163,7 +163,7 @@ class _Planner:
                     self._busy_since_ns = None
                     self._active_future = None
 
-    def _compile_and_admit(self, request: NativeRequest) -> SubmitOutcome:
+    def _compile_and_admit(self, request: StreamRequest) -> SubmitOutcome:
         if self._follower_config is None:
             raise ContractError(
                 "FOLLOWER_DISABLED",
@@ -589,8 +589,8 @@ class _TaskPlanner:
         return chunk
 
 
-class NativeWorker:
-    """Public orchestrator used by the ROS node and by native tests."""
+class Worker:
+    """Public orchestrator used by the ROS node and by direct tests."""
 
     def __init__(
         self,
@@ -734,7 +734,7 @@ class NativeWorker:
         self._planner.start()
         if self._task_planner is not None:
             self._task_planner.start()
-        self._emit("backend.worker.start", message="native backend worker started")
+        self._emit("backend.worker.start", message="backend worker started")
 
     def _monitor_health(self, now: int) -> WorkerFault | None:
         renderer = self._renderer
@@ -823,7 +823,7 @@ class NativeWorker:
             (reason,),
         )
 
-    def submit_follower(self, request: NativeRequest) -> Future:
+    def submit_follower(self, request: StreamRequest) -> Future:
         if self.follower_config is None:
             future: Future = Future()
             future.set_exception(
@@ -952,15 +952,15 @@ class NativeWorker:
         if self._task_planner is not None:
             self._task_planner.clear_cache()
 
-    def _submit(self, request: NativeRequest) -> Future:
+    def _submit(self, request: StreamRequest) -> Future:
         if self._closed:
             future: Future = Future()
             future.set_exception(BackendClosed("backend is closing"))
             return future
-        if not isinstance(request, NativeRequest):
+        if not isinstance(request, StreamRequest):
             future: Future = Future()
             future.set_exception(
-                ContractError("INVALID_NATIVE_REQUEST", "request must be a NativeRequest")
+                ContractError("INVALID_STREAM_REQUEST", "request must be a StreamRequest")
             )
             return future
         future = Future()
@@ -989,7 +989,7 @@ class NativeWorker:
                 break
         return tuple(items)
 
-    def native_events(self, limit: int = 256) -> tuple[ControlEvent, ...]:
+    def control_events(self, limit: int = 256) -> tuple[ControlEvent, ...]:
         items: list[ControlEvent] = []
         for _ in range(limit):
             try:

@@ -50,7 +50,7 @@ def fixture(tmp_path: Path, *, run_id: str = "run-42", endpoint: str = "learning
                 "observation_schema": "observation.json",
                 "action_schema": "action.json",
                 "control_constraints": "control.yaml",
-                "follower_constraints": "follower.yaml",
+                "follower_config": "follower.yaml",
                 "robot_namespace": "/robot",
                 "action_source": "policy",
                 "reset": {"enabled": True, "seed": 0},

@@ -207,7 +207,7 @@ def test_compose_checker_rejects_task_startup_healthcheck_and_socket():
                     "dockerfile": "Dockerfile",
                     "target": "test",
                 },
-                "command": ["python3", "-m", "dual_arm_runtime.native_node"],
+                "command": ["python3", "-m", "dual_arm_runtime.runtime_node"],
                 "healthcheck": {"test": ["CMD", "true"]},
                 "entrypoint": ["bash", "/workspace/runtime/ros2/scripts/run.sh"],
                 "environment": {

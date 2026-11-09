@@ -1,4 +1,4 @@
-"""Native three-camera static-layout visibility check for the S2 scene.
+"""MuJoCo three-camera static-layout visibility check for the S2 scene.
 
 The module loads the scene and check configurations, builds the scene once,
 takes explicit full-physics snapshots, renders three named RGB/segmentation

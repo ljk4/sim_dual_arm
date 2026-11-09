@@ -18,8 +18,7 @@ from robot_contracts.models import (
     RunContext,
     Target,
 )
-from robot_contracts.native import NATIVE_STREAM_FIRST, NativeRequest
-from robot_contracts.native_reference import Trajectory
+from robot_contracts.stream_request import REQUEST_STREAM_FIRST, StreamRequest, Trajectory
 from robot_contracts.trajectory import (
     FOLLOWER_ALGORITHM_VERSION,
     FOLLOWER_NORMALIZATION_VERSION,
@@ -127,8 +126,8 @@ def prepared() -> PreparedFollowerPlan:
     )
 
 
-def request() -> NativeRequest:
-    return NativeRequest(
+def request() -> StreamRequest:
+    return StreamRequest(
         trajectory=Trajectory(
             context(),
             "lease-1",
@@ -139,7 +138,7 @@ def request() -> NativeRequest:
             ("joint1", "joint2"),
             source_targets(),
         ),
-        kind=NATIVE_STREAM_FIRST,
+        kind=REQUEST_STREAM_FIRST,
         anchor=anchor(),
         observation_time_ns=0,
         target_count=2,

@@ -1,4 +1,4 @@
-# Runnable native ROS backend with the bounded-target follower entry enabled.
+# Runnable ROS backend with the bounded-target follower entry enabled.
 # Deployment choices only; the referenced scene/control/stream/profile and
 # panda_follower files remain the single sources of physics, controller,
 # calibration and follower-budget parameters.  Every path is relative to this
@@ -8,9 +8,9 @@ robot:
   profile: ../../../profiles/robots/panda_stack_v1/profile.json
   schemas: ../../../contracts/schemas
   scene: ../../../simulation/mujoco/configs/scene/panda_stack.yaml
-  control: ../../../simulation/mujoco/configs/control/panda_control.yaml
-  stream: ../../../simulation/mujoco/configs/control/panda_stream.yaml
-  follower: ../../../simulation/mujoco/configs/control/panda_follower.yaml
+  control: ../../../profiles/control/panda_control_v1.yaml
+  stream: ../../../profiles/control/panda_stream_v1.yaml
+  follower: ../../../profiles/control/panda_follower_v1.yaml
 
 run:
   seed: 0

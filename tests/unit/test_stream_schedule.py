@@ -44,7 +44,7 @@ def plan(positions, velocities):
 
 def chunk(
     *,
-    stream_id="native-abc:motion-1",
+    stream_id="stream-abc:motion-1",
     predecessor=0,
     start=0,
     end=1_000_000_000,
@@ -73,7 +73,7 @@ def chunk(
 
 
 def active(**overrides):
-    values = dict(stream_id="native-abc:motion-1", predecessor=0, start=0, end=1_000_000_000)
+    values = dict(stream_id="stream-abc:motion-1", predecessor=0, start=0, end=1_000_000_000)
     values.update(overrides)
     item = chunk(**values)
     item.plan = plan((0.0, 0.0), (0.0, 0.0))
@@ -84,7 +84,7 @@ def check(successor, *, now=900_000_000, min_lead=50_000_000, max_age=500_000_00
     return boundary_rejection(
         active(),
         successor,
-        stream_id="native-abc:motion-1",
+        stream_id="stream-abc:motion-1",
         profile_digest="profile",
         joints=("a", "b"),
         max_accelerations=(1.0, 0.5),
@@ -178,7 +178,7 @@ def test_event_is_immutable_and_uses_monotonic_stream_sequence():
 
 
 def test_schedule_composes_one_active_and_one_pending_then_handoff():
-    schedule = StreamSchedule("native-abc:motion-1", 7)
+    schedule = StreamSchedule("stream-abc:motion-1", 7)
     first = chunk(predecessor=0, start=100, end=200)
     second = chunk(predecessor=1, start=200, end=300)
     schedule.install_start(first)
@@ -193,7 +193,7 @@ def test_schedule_composes_one_active_and_one_pending_then_handoff():
         schedule.make_event("STARTED", second, 200, "HANDOFF"),
     ]
     assert [event.event_seq for event in events] == [1, 2, 3, 4]
-    assert {event.stream_id for event in events} == {"native-abc:motion-1"}
+    assert {event.stream_id for event in events} == {"stream-abc:motion-1"}
     retired, started = schedule.handoff()
     assert (retired, started) == (first, second)
     assert schedule.active is second and schedule.pending is None
