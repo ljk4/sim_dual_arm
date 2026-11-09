@@ -28,11 +28,8 @@ from robot_contracts.control import (
 from robot_contracts.follower import FOLLOWER_ALGORITHM_VERSION, PreparedFollowerPlan
 from robot_contracts.native import NativeRequest
 
-from .chunk_plan import PreparedChunk
-from .chunk_types import PreparedStreamChunk
-
 if TYPE_CHECKING:  # pragma: no cover - import only for static type checking
-    from .motion import MotionSnapshot, PreparedMotion
+    from .motion import MotionSnapshot
 
 __all__ = [
     "MAX_CHUNK_HISTORY",
@@ -143,45 +140,6 @@ def _reference_payload(reference: object) -> dict[str, object]:
     }
 
 
-def _motion_payload(prepared: PreparedMotion) -> dict[str, object]:
-    return {
-        "kind": "MOTION",
-        "joint_names": list(prepared.joint_names),
-        "joints": _joints_payload(prepared.joints),
-        "initial_reference": _finite_list(prepared.initial_reference, "prepared.initial_reference"),
-        "targets": _targets_payload(prepared.targets),
-        "plan": _plan_payload(prepared.plan),
-        "max_accelerations": _finite_list(prepared.max_accelerations, "prepared.max_accelerations"),
-        "profile_digest": prepared.profile_digest,
-    }
-
-
-def _chunk_payload(prepared: PreparedChunk) -> dict[str, object]:
-    return {
-        "kind": "CHUNK",
-        "anchor": {
-            "stream_id": prepared.anchor.stream_id,
-            "predecessor_seq": prepared.anchor.predecessor_seq,
-            "start_sim_time_ns": prepared.anchor.start_sim_time_ns,
-            "reference": _reference_payload(prepared.anchor.reference),
-            "robot_profile_hash": prepared.anchor.robot_profile_hash,
-        },
-        "window": {
-            "observation_id": prepared.window.observation_id,
-            "observation_time_ns": prepared.window.observation_time_ns,
-            "handoff_time_ns": prepared.window.handoff_time_ns,
-            "source_targets": _targets_payload(prepared.window.source_targets),
-            "target_count": prepared.window.target_count,
-            "selected_indices": list(prepared.window.selected_indices),
-        },
-        "plan": _plan_payload(prepared.plan),
-        "joints": _joints_payload(prepared.joints),
-        "max_accelerations": _finite_list(prepared.max_accelerations, "prepared.max_accelerations"),
-        "final_velocities": _finite_list(prepared.final_velocities, "prepared.final_velocities"),
-        "settle_at_end": bool(prepared.settle_at_end),
-    }
-
-
 def _follower_payload(prepared: PreparedFollowerPlan) -> dict[str, object]:
     return {
         "kind": "FOLLOWER",
@@ -261,20 +219,11 @@ def _command_payload(command: ControlCommand) -> dict[str, object]:
 
 
 def _kind_of(prepared: object) -> str:
-    if isinstance(prepared, PreparedChunk):
-        return "CHUNK"
     if isinstance(prepared, PreparedFollowerPlan):
         return "FOLLOWER"
-    if type(prepared).__name__ == "PreparedMotion":
-        # Importing motion pulls the native I/O module, so it is lazy.  The
-        # real type check still rejects duck-typed stand-ins.
-        from .motion import PreparedMotion
-
-        if isinstance(prepared, PreparedMotion):
-            return "MOTION"
     raise _invalid(
         "INVALID_PREPARED_COMMAND",
-        "prepared must be a PreparedMotion, PreparedChunk or PreparedFollowerPlan",
+        "prepared must be a PreparedFollowerPlan",
     )
 
 
@@ -285,13 +234,13 @@ class PreparedControlCommand:
     Construction happens in the caller's planning phase.  It validates the
     command/profile relation and chunk observation identity, then hashes the
     complete immutable request (identity, joints, source/window/boundaries,
-    every cubic segment and final-settle mode), not only the last target.  A
-    follower packet uses its own ``FOLLOWER`` payload with the algorithm version
-    and bounded-follower evidence; MOTION/CHUNK fingerprints stay byte-stable.
+    every cubic segment and final-settle mode), not only the last target.  The
+    ``FOLLOWER`` payload carries the algorithm version and bounded-follower
+    evidence for every stream block.
     """
 
     command: ControlCommand
-    prepared: PreparedMotion | PreparedChunk | PreparedFollowerPlan
+    prepared: PreparedFollowerPlan
     # The complete source request is retained only so an idempotent retry can
     # prove that *every* field still matches.  It is excluded from equality and
     # the packet fingerprint because the compiled plan already covers it.
@@ -313,30 +262,8 @@ class PreparedControlCommand:
                 )
         kind = _kind_of(self.prepared)
         context = self.command.context
-        if kind == "MOTION":
+        if kind == "FOLLOWER":
             prepared = self.prepared
-            if prepared.profile_digest != context.robot_profile_hash:  # type: ignore[union-attr]
-                raise _invalid(
-                    "PROFILE_MISMATCH",
-                    "prepared motion profile digest differs from command context",
-                )
-            payload = _motion_payload(prepared)  # type: ignore[arg-type]
-        elif kind == "CHUNK":
-            prepared = self.prepared
-            if prepared.anchor.robot_profile_hash != context.robot_profile_hash:  # type: ignore[union-attr]
-                raise _invalid(
-                    "PROFILE_MISMATCH",
-                    "prepared chunk profile digest differs from command context",
-                )
-            if self.command.observation_id != prepared.window.observation_id:  # type: ignore[union-attr]
-                raise _invalid(
-                    "INVALID_OBSERVATION",
-                    "command observation_id must equal the prepared chunk window",
-                )
-            payload = _chunk_payload(prepared)  # type: ignore[arg-type]
-        elif kind == "FOLLOWER":
-            prepared = self.prepared
-            assert isinstance(prepared, PreparedFollowerPlan)
             if prepared.anchor.robot_profile_hash != context.robot_profile_hash:
                 raise _invalid(
                     "PROFILE_MISMATCH",
@@ -510,10 +437,8 @@ class ChunkRecord:
         return self.packet.command
 
     @property
-    def chunk(self) -> PreparedStreamChunk:
-        prepared = self.packet.prepared
-        assert isinstance(prepared, PreparedChunk | PreparedFollowerPlan)
-        return prepared
+    def chunk(self) -> PreparedFollowerPlan:
+        return self.packet.prepared
 
     @property
     def key(self) -> tuple[str, int]:

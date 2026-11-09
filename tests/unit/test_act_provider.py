@@ -39,7 +39,7 @@ from dual_arm_learning.policy_types import (  # noqa: E402
 )
 
 ROOT = Path(__file__).resolve().parents[2]
-CONFIG = ROOT / "learning/lerobot/configs/act_policy.yaml"
+CONFIG = ROOT / "learning/lerobot/configs/act_policy_temporal.yaml"
 
 
 @pytest.fixture(scope="module")

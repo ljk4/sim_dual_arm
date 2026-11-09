@@ -9,12 +9,12 @@ from pathlib import Path
 import pytest
 import yaml
 from dual_arm_runtime import run_logging
-from dual_arm_runtime.configuration import load_configuration
+from dual_arm_runtime.native_config import load_native_configuration
 from robot_contracts.models import ContractError
 from robot_run_logging import LogFailure, LogSettings
 
 ROOT = Path(__file__).resolve().parents[2]
-BASE_CONFIG = ROOT / "runtime/ros2/configs/mock_collect.yaml"
+BASE_CONFIG = ROOT / "runtime/ros2/configs/native_teacher.yaml"
 DEFAULTS = asdict(LogSettings())
 
 
@@ -25,6 +25,15 @@ def test_missing_health_check_is_rejected_instead_of_silently_disabled():
 
 def write_config(tmp_path: Path, mutate) -> Path:
     document = yaml.safe_load(BASE_CONFIG.read_text(encoding="utf-8"))
+    for field in (
+        "robot_profile",
+        "observation_schema",
+        "action_schema",
+        "control_constraints",
+        "follower_constraints",
+    ):
+        if field in document:
+            document[field] = str((BASE_CONFIG.parent / document[field]).resolve())
     mutate(document)
     path = tmp_path / "runtime.yaml"
     path.write_text(yaml.safe_dump(document), encoding="utf-8")
@@ -32,7 +41,7 @@ def write_config(tmp_path: Path, mutate) -> Path:
 
 
 def load_with(tmp_path: Path, mutate):
-    return load_configuration(ROOT, write_config(tmp_path, mutate))
+    return load_native_configuration(write_config(tmp_path, mutate), ROOT)
 
 
 def test_old_config_without_logging_gets_effective_defaults_and_snapshot(tmp_path):
@@ -42,7 +51,7 @@ def test_old_config_without_logging_gets_effective_defaults_and_snapshot(tmp_pat
     assert configuration.snapshot["recipe"]["logging"] == DEFAULTS
     # Configuration logging is deployment metadata; it must not perturb the
     # profile/observation/action semantic identity.
-    configured = load_configuration(ROOT, BASE_CONFIG)
+    configured = load_native_configuration(BASE_CONFIG, ROOT)
     for key in ("profile_hash", "observation_hash", "action_hash"):
         assert configuration.snapshot[key] == configured.snapshot[key]
 
@@ -84,7 +93,7 @@ def test_invalid_logging_value_reports_config_path(tmp_path, field, value):
 
     path = write_config(tmp_path, mutate)
     with pytest.raises(ContractError) as caught:
-        load_configuration(ROOT, path)
+        load_native_configuration(path, ROOT)
     message = str(caught.value)
     assert caught.value.reason == "SCHEMA_MISMATCH"
     assert str(path) in message
@@ -105,7 +114,7 @@ def test_invalid_logging_capacity_relations_report_config_path(tmp_path, logging
 
     path = write_config(tmp_path, mutate)
     with pytest.raises(ContractError) as caught:
-        load_configuration(ROOT, path)
+        load_native_configuration(path, ROOT)
     message = str(caught.value)
     assert str(path) in message
     assert "logging" in message
@@ -134,7 +143,7 @@ def test_run_id_accepts_generated_uuid_and_safe_names():
 
 def test_initialize_run_writes_metadata_and_exclusive_directory(tmp_path, monkeypatch):
     monkeypatch.setenv("DSH008_SECRET_TOKEN", "secret-value")
-    configuration = load_configuration(ROOT, BASE_CONFIG)
+    configuration = load_native_configuration(BASE_CONFIG, ROOT)
     session = run_logging.initialize_run(
         configuration,
         run_id="run-metadata",
@@ -149,7 +158,7 @@ def test_initialize_run_writes_metadata_and_exclusive_directory(tmp_path, monkey
         resolved = json.loads((session.run_directory / "resolved/runtime.json").read_text())
         assert resolved["run_id"] == "run-metadata"
         assert resolved["instance_id"] == session.instance_id
-        assert resolved["recipe"]["logging"] == DEFAULTS
+        assert resolved["recipe"]["logging"] == asdict(configuration.recipe.logging)
         assert resolved["profile_hash"] == configuration.snapshot["profile_hash"]
 
         versions = json.loads((session.run_directory / "versions.json").read_text())
@@ -200,7 +209,7 @@ def test_initialize_run_writes_metadata_and_exclusive_directory(tmp_path, monkey
 def test_initialize_run_does_not_leave_completion_evidence_on_metadata_failure(
     tmp_path, monkeypatch
 ):
-    configuration = load_configuration(ROOT, BASE_CONFIG)
+    configuration = load_native_configuration(BASE_CONFIG, ROOT)
 
     def fail_write(path, document):
         raise OSError("simulated metadata failure")
@@ -222,7 +231,7 @@ def test_initialize_run_does_not_leave_completion_evidence_on_metadata_failure(
 
 
 def test_existing_directory_file_and_symlinks_are_never_reused(tmp_path):
-    configuration = load_configuration(ROOT, BASE_CONFIG)
+    configuration = load_native_configuration(BASE_CONFIG, ROOT)
     runs = tmp_path / "runs"
     runs.mkdir()
     (runs / "existing-dir").mkdir()

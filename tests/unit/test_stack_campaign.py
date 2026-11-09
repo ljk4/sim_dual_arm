@@ -128,7 +128,7 @@ def test_label_replay_consumes_a_pilot_attempt_and_needs_used_seed(tmp_path):
                 "--run-id",
                 "replay",
                 "--runtime-config",
-                "runtime/ros2/configs/native_replay.yaml",
+                "runtime/ros2/configs/native_teacher.yaml",
                 "--",
                 sys.executable,
                 "-c",

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, fields
+from dataclasses import fields
 from pathlib import Path
 
 import yaml
@@ -17,8 +17,6 @@ FOLLOWER_ACT_CHUNKED = ROOT / "simulation/mujoco/configs/control/panda_follower_
 BACKEND = ROOT / "simulation/mujoco/configs/backend/backend_stack_inference.yaml"
 BACKEND_ACT = ROOT / "tests/fixtures/simulation/backend_stack_act.yaml"
 BACKEND_ACT_CHUNKED = ROOT / "simulation/mujoco/configs/backend/backend_stack_act_chunked.yaml"
-RUNTIME = ROOT / "runtime/ros2/configs/native_task_act.yaml"
-RUNTIME_FAST = ROOT / "runtime/ros2/configs/native_task_act_fast.yaml"
 RUNTIME_CHUNKED = ROOT / "runtime/ros2/configs/native_task_act_chunked.yaml"
 
 _REFERENCED_FILES = (
@@ -60,66 +58,6 @@ def test_act_follower_keeps_the_accepted_limits_and_selects_two_points():
     assert changed == {"target_count"}
 
 
-def test_backend_and_runtime_share_the_two_point_follower_and_old_limits(tmp_path):
-    old_backend = load_backend_config(BACKEND)
-    new_backend = load_backend_config(BACKEND_ACT)
-    assert new_backend.follower_path == FOLLOWER_ACT.resolve()
-    assert new_backend.chunk_history_capacity == 512
-    for item in fields(BackendConfig):
-        if item.name in {"source", "follower_path", "chunk_history_capacity", "realtime_speed"}:
-            continue
-        assert getattr(new_backend, item.name) == getattr(old_backend, item.name)
-
-    assert (
-        RUNTIME_FAST.parent
-        / yaml.safe_load(RUNTIME_FAST.read_text(encoding="utf-8"))["follower_constraints"]
-    ).resolve() == FOLLOWER_ACT.resolve()
-
-    old_runtime = load_runtime(RUNTIME, tmp_path / "old")
-    new_runtime = load_runtime(RUNTIME_FAST, tmp_path / "new")
-    assert new_runtime.recipe.follower is not None
-    assert new_runtime.recipe.policy is not None
-    follower = load_follower_config(FOLLOWER_ACT)
-    assert new_runtime.recipe.follower.target_count == follower.target_count == 2
-    assert (
-        new_runtime.recipe.follower.max_target_deviations
-        == follower.max_target_deviations
-        == load_follower_config(FOLLOWER).max_target_deviations
-    )
-    assert (
-        new_runtime.recipe.follower.max_terminal_tail_duration_ns
-        == follower.max_terminal_tail_duration_ns
-    )
-    assert new_runtime.recipe.follower.duration_grid_ns == 2_000_000
-    assert new_runtime.control_document == old_runtime.control_document
-    assert new_runtime.profile.digest == old_runtime.profile.digest
-
-    old_policy = asdict(old_runtime.recipe.policy)
-    new_policy = asdict(new_runtime.recipe.policy)
-    changed = {key for key in old_policy if old_policy[key] != new_policy[key]}
-    assert changed == {"target_count", "max_chunks", "total_wall_deadline_s"}
-    assert new_policy["target_count"] == 2
-    assert new_policy["max_chunks"] == 320
-
-
-def test_two_point_window_covers_the_thirty_second_task_budget(tmp_path):
-    runtime = load_runtime(RUNTIME_FAST, tmp_path)
-    policy = runtime.recipe.policy
-    assert policy is not None
-    window_ns = policy.target_count * policy.action_period_ns
-    assert window_ns == 100_000_000
-    assert policy.max_chunks * window_ns == 32_000_000_000
-    assert policy.max_chunks * window_ns >= policy.task_sim_budget_ns
-    assert policy.task_sim_budget_ns == 30_000_000_000
-    assert policy.total_sim_deadline_ns == 30_000_000_000
-    assert policy.chunk_size == 60
-    assert policy.action_period_ns == 50_000_000
-    backend = load_backend_config(BACKEND_ACT)
-    assert backend.realtime_speed == 0.5
-    assert window_ns / 1e9 / backend.realtime_speed == 0.2
-    assert policy.total_wall_deadline_s > policy.task_sim_budget_ns / 1e9 / backend.realtime_speed
-
-
 def test_chunked_follower_uses_the_approved_simulation_reference_budget():
     old = load_follower_config(FOLLOWER_ACT)
     new = load_follower_config(FOLLOWER_ACT_CHUNKED)
@@ -127,7 +65,8 @@ def test_chunked_follower_uses_the_approved_simulation_reference_budget():
     assert new.target_count * 50_000_000 == 500_000_000
     assert new.joint_names == old.joint_names
     assert new.max_target_deviations == tuple(
-        0.04 if index in (7, 15) else 0.30 for index in range(16)
+        0.04 if index in (7, 15) else 0.40 if index in (6, 14) else 0.30
+        for index in range(16)
     )
     assert new.max_terminal_tail_duration_s == old.max_terminal_tail_duration_s
     old_document = old.to_document()
@@ -152,7 +91,6 @@ def test_chunked_backend_only_redirects_the_follower_and_stays_inference():
 
 
 def test_chunked_runtime_keeps_the_60x16_interface_and_covers_the_task(tmp_path):
-    old_runtime = load_runtime(RUNTIME_FAST, tmp_path / "fast")
     runtime = load_runtime(RUNTIME_CHUNKED, tmp_path / "chunked")
     policy = runtime.recipe.policy
     follower = runtime.recipe.follower
@@ -182,26 +120,6 @@ def test_chunked_runtime_keeps_the_60x16_interface_and_covers_the_task(tmp_path)
 
     assert follower.max_target_deviations == loaded_follower.max_target_deviations
     assert follower.max_terminal_tail_duration_ns == loaded_follower.max_terminal_tail_duration_ns
-    assert runtime.control_document == old_runtime.control_document
-    assert runtime.profile.digest == old_runtime.profile.digest
-    assert runtime.snapshot["action"]["joint_names"] == old_runtime.snapshot["action"][
-        "joint_names"
-    ]
     assert len(runtime.snapshot["action"]["joint_names"]) == 16
-    assert runtime.snapshot["action_hash"] == old_runtime.snapshot["action_hash"]
-
-    old_follower = asdict(old_runtime.recipe.follower)
-    new_follower = asdict(follower)
-    assert {key for key in old_follower if old_follower[key] != new_follower[key]} == {
-        "target_count", "max_target_deviations"
-    }
-
-    old_policy = asdict(old_runtime.recipe.policy)
-    new_policy = asdict(policy)
-    assert {key for key in old_policy if old_policy[key] != new_policy[key]} == {
-        "target_count",
-        "max_chunks",
-        "startup_settle_sim_ns",
-    }
-    assert policy.task_id == old_runtime.recipe.policy.task_id
-    assert policy.task_text == old_runtime.recipe.policy.task_text
+    assert policy.task_id == "panda-stack"
+    assert policy.task_text.startswith("Pick up the red source cube")

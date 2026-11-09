@@ -1,7 +1,7 @@
 """Typed provider boundary shared by the service and test doubles.
 
 These values contain no protobuf or ROS types, so a provider can be implemented
-by a fake in ``tests/doubles`` or by a future ACT adapter without importing the
+by a fake in ``tests/fakes`` or by a future ACT adapter without importing the
 wire layer.  The service always rebuilds the canonical wire identity itself.
 """
 

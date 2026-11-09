@@ -13,11 +13,11 @@ from pathlib import Path
 
 from robot_contracts.models import ContractError
 
-EPISODE_SCHEMA_VERSION = 2
-NATIVE_EPISODE_SCHEMA_VERSION = 3
-POLICY_EPISODE_SCHEMA_VERSION = 4
-SUPPORTED_EPISODE_SCHEMA_VERSIONS = (1, 2, 3, 4)
-_VERSION_DIRECTORIES = {1: "v1", 2: "v2", 3: "v3", 4: "v4"}
+EPISODE_SCHEMA_VERSION = 1
+NATIVE_EPISODE_SCHEMA_VERSION = 1
+POLICY_EPISODE_SCHEMA_VERSION = 1
+SUPPORTED_EPISODE_SCHEMA_VERSIONS = (1,)
+_VERSION_DIRECTORIES = {1: "v1"}
 
 
 class RuntimeOutcome(StrEnum):
@@ -95,9 +95,9 @@ class TaskResult:
 def manifest_schema_path(schema_root: Path, version: int) -> Path:
     """Select the episode manifest schema by explicit version mapping.
 
-    ``schema_root`` is normally ``contracts/schemas``.  A version-specific
-    directory (``.../v1`` .. ``.../v4``) is accepted only when it matches the
-    requested version; user data never supplies a path fragment.
+    ``schema_root`` is normally ``contracts/schemas``.  The single
+    version-specific directory (``.../v1``) is accepted only when it matches
+    the requested version; user data never supplies a path fragment.
     """
     if isinstance(version, bool) or version not in _VERSION_DIRECTORIES:
         raise ContractError(

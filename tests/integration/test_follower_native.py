@@ -25,7 +25,6 @@ for source in (ROOT / "simulation/mujoco/src", ROOT / "contracts/python/src"):
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
 
-from robot_backend_sim.chunk_plan import prepare_chunk  # noqa: E402
 from robot_backend_sim.control import NativeController  # noqa: E402
 from robot_backend_sim.control_state import PreparedControlCommand  # noqa: E402
 from robot_backend_sim.follower_config import load_follower_config  # noqa: E402
@@ -433,19 +432,13 @@ def write_run_artifact(run: FollowerRun, profile) -> Path:
 # --------------------------------------------------------------------------- run
 
 
-def test_strict_first_window_counterexample_and_same_follower_executes(
+def test_first_window_follower_executes(
     scene, profile, control_config, follower_config
 ):
     controller, _io, context, lease = new_controller(
-        scene, profile, control_config, "follower-strict-counterexample"
+        scene, profile, control_config, "follower-first-window"
     )
     source = linear_source()
-    anchor = controller.chunk_anchor(context, lease, 0, FIRST_START_NS)
-    window = ActionWindow(1, 0, anchor.start_sim_time_ns, source, follower_config.target_count)
-    with pytest.raises(ContractError) as strict_error:
-        prepare_chunk(anchor, window, profile, control_config)
-    assert strict_error.value.reason == "VELOCITY_LIMIT"
-
     packet, prepared, _window = make_packet(
         controller,
         context,
@@ -682,7 +675,7 @@ def test_late_prediction_latches_and_brakes(
     assert any(reply.snapshot.reference_kind == "BRAKE" for reply in replies)
 
 
-def test_mode_mixing_is_rejected_and_the_active_follower_continues(
+def test_active_follower_accepts_a_successor_and_stops(
     scene, profile, control_config, follower_config
 ):
     controller, _io, context, lease = new_controller(
@@ -706,23 +699,6 @@ def test_mode_mixing_is_rejected_and_the_active_follower_continues(
     while round(float(scene.data.time) * 1_000_000_000) < FIRST_START_NS:
         controller.step(wall)
         wall += DT_NS
-    anchor = controller.chunk_anchor(context, lease, wall)
-    window = ActionWindow(
-        1,
-        0,
-        anchor.start_sim_time_ns,
-        source,
-        follower_config.target_count,
-    )
-    strict_prepared = prepare_chunk(anchor, window, profile, control_config)
-    strict_packet = PreparedControlCommand(
-        ControlCommand(context, lease, "cmd-mode-mix", 1, 1, 10_000_000_000),
-        strict_prepared,
-    )
-    with pytest.raises(ContractError) as caught:
-        controller.queue_chunk(strict_packet, wall)
-    assert caught.value.reason == "STREAM_MODE_MISMATCH"
-
     follower_packet, _plan, _window = make_packet(
         controller,
         context,
@@ -883,32 +859,6 @@ def test_wrong_context_lease_expiry_reset_and_new_stream_mode(
     with pytest.raises(ContractError) as caught:
         controller.query_command(context, "cmd-context")
     assert caught.value.reason == "STALE_CONTEXT"
-
-    # A fresh stream after reset may choose strict chunking; the follower mode
-    # is a stream choice, not a controller-wide mode latch.
-    strict_context = replace(new_context, episode_id="strict-after-reset", control_epoch=1)
-    strict_lease = controller.acquire(strict_context, "strict-after-reset", LEASE_NS, wall)
-    strict_anchor = controller.chunk_anchor(
-        strict_context, strict_lease, wall, FIRST_START_NS + wall
-    )
-    strict_window = ActionWindow(
-        1,
-        0,
-        strict_anchor.start_sim_time_ns,
-        linear_source(0.0),
-        follower_config.target_count,
-    )
-    strict_prepared = prepare_chunk(strict_anchor, strict_window, profile, control_config)
-    strict_packet = PreparedControlCommand(
-        ControlCommand(
-            strict_context, strict_lease, "cmd-strict-after-reset", 1, 1, 10_000_000_000
-        ),
-        strict_prepared,
-    )
-    assert controller.submit(strict_packet, wall).accepted
-    controller.stop(strict_context, strict_lease, "STRICT_DONE", wall)
-    terminal, _replies, _wall = step_until_terminal(controller, wall)
-    assert terminal.phase == "CANCELED"
 
 
 def test_short_lease_expiry_brakes_with_lease_reason(

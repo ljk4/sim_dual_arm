@@ -661,10 +661,12 @@ def main(argv: list[str] | None = None) -> int:
     episode = args.episode_dir.resolve()
     out = args.out.resolve()
     manifest = json.loads((episode / "manifest.json").read_text(encoding="utf-8"))
-    from dual_arm_runtime.audit import inspect_episode
-    from robot_contracts.profiles import profile_from_document
+    from robot_contracts.episodes import manifest_schema_path
+    from robot_contracts.profiles import profile_from_document, validate_document
 
-    inspect_episode(episode)
+    validate_document(manifest, manifest_schema_path(_PROJECT / "contracts/schemas", 1))
+    if not manifest["recording"]["complete"]:
+        raise ValueError(manifest["recording"]["failure_reason"])
     configuration = manifest.get("configuration", {})
     profile = profile_from_document(configuration["profile"], _PROJECT / "contracts/schemas")
     if profile.digest != manifest["robot_profile_hash"]:

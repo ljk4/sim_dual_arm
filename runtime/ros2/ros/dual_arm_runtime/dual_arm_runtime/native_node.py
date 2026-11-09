@@ -17,7 +17,6 @@ from pathlib import Path
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.node import Node
 from robot_api_msgs.msg import (
-    AcceptedReference,
     BackendInfo,
     CameraFrame,
     NativeCommand,
@@ -43,16 +42,9 @@ from robot_contracts.follower_reference import (
 )
 from robot_contracts.models import ContractError, RunContext
 from robot_contracts.native import (
-    NATIVE_MOTION,
-    NativeRequest,
-    validate_accepted_reference,
-)
-from robot_contracts.native import (
-    AcceptedReference as DomainAcceptedReference,
-)
-from robot_contracts.native import (
     NativeExecution as DomainNativeExecution,
 )
+from robot_contracts.native import NativeRequest
 from robot_ros_support.conversions import (
     context_from_message,
     context_message,
@@ -61,7 +53,6 @@ from robot_ros_support.conversions import (
 )
 from robot_ros_support.follower_conversions import follower_reference_from_message
 from robot_ros_support.native_conversions import (
-    accepted_reference_from_message,
     native_command_message,
     native_control_event_from_message,
     native_execution_from_message,
@@ -123,11 +114,9 @@ class NativeRuntimeNode(Node):
         self._terminal_chunk_events: set[tuple[str, int]] = set()
         self._overall_terminal_events: set[str] = set()
         self._last_task_state_seq = 0
-        self._accepted_digests: dict[str, set[str]] = {}
         self._follower_digests: dict[tuple[str, int], set[str]] = {}
         self._rejected = 0
         self._event_duplicates = 0
-        self._accepted_duplicates = 0
         self._execution_duplicates = 0
         self._max_accelerations = self._control_limits()
         self._follower_limits: FollowerValidationLimits | None = (
@@ -221,12 +210,6 @@ class NativeRuntimeNode(Node):
             NativeExecution,
             f"{self._root}/native_feedback",
             self._on_native_feedback,
-            EVENT_QOS,
-        )
-        self.create_subscription(
-            AcceptedReference,
-            f"{self._root}/accepted_references",
-            self._on_accepted_reference,
             EVENT_QOS,
         )
         if self._follower_limits is not None:
@@ -376,11 +359,9 @@ class NativeRuntimeNode(Node):
             self._terminal_chunk_events.clear()
             self._overall_terminal_events.clear()
             self._last_task_state_seq = 0
-            self._accepted_digests.clear()
             self._follower_digests.clear()
             self._rejected = 0
             self._event_duplicates = 0
-            self._accepted_duplicates = 0
             self._execution_duplicates = 0
             self._condition.notify_all()
 
@@ -454,20 +435,6 @@ class NativeRuntimeNode(Node):
         self._episode.record("/runtime/native/commands", message, timestamp_ns)
         self._native_commands.publish(message)
 
-    def record_accepted_reference(self, reference: DomainAcceptedReference) -> None:
-        command_id = reference.request.trajectory.command_id
-        with self._condition:
-            digests = self._accepted_digests.setdefault(command_id, set())
-            if reference.reference_digest in digests:
-                self._accepted_duplicates += 1
-                return
-            digests.add(reference.reference_digest or "")
-        self._episode.record(
-            f"{self._root}/accepted_references",
-            self._accepted_message(reference),
-            reference.accepted_sim_time_ns,
-        )
-
     def record_task_state(self, fact: object) -> None:
         message = fact
         if not isinstance(message, StackTaskStateMessage):
@@ -508,12 +475,6 @@ class NativeRuntimeNode(Node):
             follower_reference_message(reference),
             reference.accepted_sim_time_ns,
         )
-
-    @staticmethod
-    def _accepted_message(reference: DomainAcceptedReference):
-        from robot_ros_support.native_conversions import accepted_reference_message
-
-        return accepted_reference_message(reference)
 
     def record_execution(self, execution: DomainNativeExecution) -> None:
         signature = self._execution_identity(execution)
@@ -602,11 +563,6 @@ class NativeRuntimeNode(Node):
         """Called under the condition lock; DDS topics have independent delivery."""
         if command_id not in self._terminal_execution:
             return False
-        request = self._expected_requests.get(command_id)
-        if request is not None and request.kind == NATIVE_MOTION:
-            # Finite MOTION predates stream/chunk events. Its contract is the
-            # accepted reference plus measured terminal NativeExecution.
-            return bool(self._accepted_digests.get(command_id))
         if command_id not in self._overall_terminal_events:
             return False
         accepted = {key for key in self._accepted_chunk_events if key[0] == command_id}
@@ -635,7 +591,6 @@ class NativeRuntimeNode(Node):
             f"{self._root}/state": "robot_api_msgs/msg/RobotState",
             f"{self._root}/native_events": "robot_api_msgs/msg/NativeControlEvent",
             f"{self._root}/native_feedback": "robot_api_msgs/msg/NativeExecution",
-            f"{self._root}/accepted_references": "robot_api_msgs/msg/AcceptedReference",
             "/runtime/native/commands": "robot_api_msgs/msg/NativeCommand",
             "/runtime/observation_index": "robot_api_msgs/msg/ObservationIndex",
         }
@@ -914,28 +869,6 @@ class NativeRuntimeNode(Node):
             self.record_execution(execution)
         except ContractError as error:
             self._episode.report_control_fault(str(error))
-
-    def _on_accepted_reference(self, message: AcceptedReference) -> None:
-        context = self._episode_context()
-        try:
-            reference = accepted_reference_from_message(message)
-            if context is None or reference.request.trajectory.context != context:
-                self._rejected += 1
-                return
-            request = self._expected_requests.get(reference.request.trajectory.command_id)
-            if request is None or reference.request != request:
-                raise ContractError(
-                    "REFERENCE_REQUEST_MISMATCH", "accepted reference request differs"
-                )
-            validate_accepted_reference(reference, self.config.profile, self._max_accelerations)
-        except Exception as error:
-            if isinstance(error, ContractError) and error.reason == "EPISODE_STOPPED":
-                return
-            self._episode.report_control_fault(
-                str(error) if isinstance(error, ContractError) else f"INVALID_REFERENCE: {error}"
-            )
-            return
-        self.record_accepted_reference(reference)
 
     def _on_follower_reference(self, message: FollowerReferenceMessage) -> None:
         context = self._episode_context()

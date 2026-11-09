@@ -5,14 +5,16 @@ from pathlib import Path
 import pytest
 from robot_contracts.action_chunks import ActionWindow, ChunkAnchor
 from robot_contracts.control import ControlCommand
-from robot_contracts.models import ContractError, JointSpec, RunContext, Target
-from robot_contracts.reference import CubicSegment, ReferencePlan, ReferenceSample
+from robot_contracts.follower import PreparedFollowerPlan
+from robot_contracts.models import ContractError, RunContext, Target
+from robot_contracts.profiles import load_profile
+from robot_contracts.reference import ReferenceSample
 
-SIM_SRC = Path(__file__).resolve().parents[2] / "simulation/mujoco/src"
+ROOT = Path(__file__).resolve().parents[2]
+SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim.chunk_plan import PreparedChunk  # noqa: E402
 from robot_backend_sim.control_state import (  # noqa: E402
     ChunkHistory,
     ChunkRecord,
@@ -23,17 +25,26 @@ from robot_backend_sim.control_state import (  # noqa: E402
     LeaseBook,
     PreparedControlCommand,
 )
+from robot_backend_sim.follower_config import load_follower_config  # noqa: E402
+from robot_backend_sim.follower_plan import prepare_follower_plan  # noqa: E402
+from robot_backend_sim.motion_config import load_control_config  # noqa: E402
 
-PROFILE_DIGEST = "profile-digest"
-JOINTS = (
-    JointSpec("j1", "rad", -1.0, 1.0, 2.0, 0.0),
-    JointSpec("j2", "rad", -1.0, 1.0, 2.0, 0.0),
+ruckig = pytest.importorskip("ruckig")
+
+PROFILE = load_profile(
+    ROOT / "profiles/robots/panda_stack_v1/profile.json",
+    ROOT / "contracts/schemas/v1",
 )
+CONTROL = load_control_config(ROOT / "simulation/mujoco/configs/control/panda_control.yaml")
+FOLLOWER = load_follower_config(ROOT / "simulation/mujoco/configs/control/panda_follower.yaml")
+PROFILE_DIGEST = PROFILE.digest
+BASE = PROFILE.initial_positions
+JOINT_COUNT = len(BASE)
 
 
 def context(**changes) -> RunContext:
     value = RunContext(
-        "panda-stack",
+        PROFILE.robot_id,
         PROFILE_DIGEST,
         "backend-instance",
         "mujoco-sim",
@@ -54,45 +65,39 @@ def chunk_at(
     *,
     observation_id: int = 1,
     settle_at_end: bool = True,
-) -> PreparedChunk:
-    positions = (position, position)
-    plan = ReferencePlan(
-        ("j1", "j2"),
-        (
-            CubicSegment(100_000_000, positions, (0.0, 0.0), (0.0, 0.0), (0.0, 0.0)),
-            CubicSegment(900_000_000, positions, (0.0, 0.0), (0.0, 0.0), (0.0, 0.0)),
-        ),
+) -> PreparedFollowerPlan:
+    targets = []
+    for index in range(FOLLOWER.target_count):
+        values = list(BASE)
+        values[0] = position * (index + 1) / FOLLOWER.target_count
+        targets.append(Target((index + 1) * 50_000_000, tuple(values)))
+    window = ActionWindow(
+        observation_id,
+        0,
+        0,
+        tuple(targets),
+        FOLLOWER.target_count,
     )
     anchor = ChunkAnchor(
         "stream-1",
         0,
         0,
-        ReferenceSample(positions, (0.0, 0.0), (0.0, 0.0)),
+        ReferenceSample(BASE, (0.0,) * JOINT_COUNT, (0.0,) * JOINT_COUNT),
         PROFILE_DIGEST,
     )
-    window = ActionWindow(
-        observation_id,
-        0,
-        0,
-        (
-            Target(100_000_000, positions),
-            Target(1_000_000_000, positions),
-        ),
-        2,
-    )
-    return PreparedChunk(
-        anchor=anchor,
-        window=window,
-        plan=plan,
-        joints=JOINTS,
-        max_accelerations=(1.0, 1.0),
-        final_velocities=(0.0, 0.0),
-        settle_at_end=settle_at_end,
+    return prepare_follower_plan(
+        anchor,
+        window,
+        PROFILE,
+        CONTROL,
+        FOLLOWER,
+        is_final=settle_at_end,
+        duration_grid_ns=2_000_000,
     )
 
 
 def packet(
-    prepared: PreparedChunk | None = None,
+    prepared: PreparedFollowerPlan | None = None,
     *,
     command_value: ControlCommand | None = None,
 ) -> PreparedControlCommand:

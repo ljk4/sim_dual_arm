@@ -38,16 +38,13 @@ REQUIRED_MODULES = (
     "robot_api_msgs",
     "robot_api_msgs.msg",
     "robot_api_msgs.srv",
-    "robot_api_msgs.action",
 )
 INSPECT_MODULES = (
     "robot_contracts",
-    "robot_backend_core",
     "robot_ros_support",
     "robot_run_logging",
     "robot_api_msgs",
     "dual_arm_runtime",
-    "mock_robot_backend",
 )
 
 
@@ -511,11 +508,9 @@ def verify_workspace(project_root: Path, build_root: Path) -> dict[str, object]:
 def _import_paths(project_root: Path, build_root: Path) -> dict[str, str]:
     expected = {
         "robot_contracts": project_root / "contracts/python/src",
-        "robot_backend_core": project_root / "libraries/backend_core/src",
         "robot_ros_support": project_root / "libraries/ros_support/src",
         "robot_run_logging": project_root / "libraries/run_logging/src",
         "dual_arm_runtime": project_root / "runtime/ros2/ros/dual_arm_runtime",
-        "mock_robot_backend": project_root / "tests/doubles/ros/mock_robot_backend",
         "robot_api_msgs": build_root / "install",
     }
     paths: dict[str, str] = {}

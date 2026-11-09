@@ -112,16 +112,26 @@ def profile_schema_version(document: dict[str, Any], source: Path | str = "<prof
     return version
 
 
-def _schema_directory(schema_root: Path, version: int) -> Path:
-    """Accept either contracts/schemas or one version-specific schema directory."""
-    directory = f"v{version}"
+_PROFILE_SCHEMA_FILES = {
+    1: "robot_profile.schema.json",
+    2: "robot_profile_v2.schema.json",
+}
+
+
+def _schema_directory(schema_root: Path) -> Path:
+    """Accept either contracts/schemas or the single version-specific directory."""
     if schema_root.name in {"v1", "v2"}:
-        return schema_root.parent / directory
-    return schema_root / directory
+        return schema_root.parent / "v1"
+    return schema_root / "v1"
 
 
 def profile_schema_path(schema_root: Path, version: int) -> Path:
-    return _schema_directory(schema_root, version) / "robot_profile.schema.json"
+    filename = _PROFILE_SCHEMA_FILES.get(version)
+    if filename is None:
+        raise ContractError(
+            "SCHEMA_MISMATCH", f"unsupported profile schema version {version!r}"
+        )
+    return _schema_directory(schema_root) / filename
 
 
 def _field(document: dict[str, Any], name: str, source: Path | str) -> Any:
@@ -310,7 +320,7 @@ def validate_bindings(
     actions: dict[str, Any],
     schema_root: Path,
 ) -> None:
-    schemas = _schema_directory(schema_root, 1)
+    schemas = _schema_directory(schema_root)
     validate_document(observations, schemas / "observation.schema.json")
     validate_document(actions, schemas / "action.schema.json")
     for name, document in (("observation", observations), ("action", actions)):

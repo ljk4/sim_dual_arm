@@ -1,5 +1,5 @@
-# Independent accepted bounded-follower record.  This is deliberately not an
-# AcceptedReference: the follower curve is not required to pass through every
+# Independent accepted bounded-follower record.  It is not a strict-reference
+# record: the follower curve is not required to pass through every
 # raw prediction.  The complete raw NativeCommand (including any unselected
 # tail) is retained in `request`; the explicit curve, limits, terminal speeds,
 # versions and acceptance times are copied verbatim.

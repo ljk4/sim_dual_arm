@@ -5,7 +5,6 @@ from __future__ import annotations
 import sys
 from dataclasses import replace
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from robot_contracts.action_chunks import ActionWindow, ChunkAnchor
@@ -13,7 +12,7 @@ from robot_contracts.control import ControlCommand
 from robot_contracts.follower import FOLLOWER_ALGORITHM_VERSION, PreparedFollowerPlan
 from robot_contracts.follower_math import normalize_follower_positions
 from robot_contracts.models import ContractError, JointSpec, RunContext, Target
-from robot_contracts.reference import CubicSegment, ReferencePlan, ReferenceSample
+from robot_contracts.reference import ReferenceSample
 
 ROOT = Path(__file__).resolve().parents[2]
 for source in (ROOT / "simulation/mujoco/src", ROOT / "contracts/python/src"):
@@ -21,12 +20,9 @@ for source in (ROOT / "simulation/mujoco/src", ROOT / "contracts/python/src"):
         sys.path.insert(0, str(source))
 
 import robot_backend_sim.control_state as control_state_module  # noqa: E402
-from robot_backend_sim.chunk_plan import PreparedChunk  # noqa: E402
-from robot_backend_sim.chunk_types import chunk_kind  # noqa: E402
 from robot_backend_sim.control_state import PreparedControlCommand  # noqa: E402
 from robot_backend_sim.follower_config import load_follower_config  # noqa: E402
 from robot_backend_sim.follower_plan import prepare_follower_plan  # noqa: E402
-from robot_backend_sim.motion import PreparedMotion  # noqa: E402
 from robot_backend_sim.motion_config import load_control_config  # noqa: E402
 from robot_contracts.profiles import load_profile  # noqa: E402
 
@@ -41,18 +37,6 @@ FOLLOWER = load_follower_config(ROOT / "simulation/mujoco/configs/control/panda_
 BASE = PROFILE.initial_positions
 JOINT_COUNT = len(BASE)
 GRID_NS = 2_000_000
-
-# Captured from the accepted pre-DSH-030 implementation.  These hashes must not
-# change when the follower kind is added.
-LEGACY_CHUNK_FINGERPRINT = "9c6c0b590264c420397008e4897160cf853cd127a46ead8354e6bcf601df0223"
-LEGACY_MOTION_FINGERPRINT = "60d76172a8437a9b312802ce12f2cf4f59370b2ee9b9e0c16b6056b77ce1fecb"
-FIXTURE_JOINTS = (
-    JointSpec("j1", "rad", -1.0, 1.0, 2.0, 0.0),
-    JointSpec("j2", "rad", -1.0, 1.0, 2.0, 0.0),
-)
-FIXTURE_POSITIONS = (0.0, 0.0)
-FIXTURE_PROFILE_DIGEST = "profile-digest"
-
 
 def context() -> RunContext:
     return RunContext(
@@ -75,28 +59,6 @@ def command(observation_id: int = 1) -> ControlCommand:
         observation_id,
         10_000_000_000,
     )
-
-
-def fixture_context() -> RunContext:
-    return RunContext(
-        "panda-stack",
-        FIXTURE_PROFILE_DIGEST,
-        "backend-instance",
-        "mujoco-sim",
-        0,
-        episode_id="episode-1",
-        control_epoch=1,
-    )
-
-
-def fixture_command() -> ControlCommand:
-    return ControlCommand(
-        fixture_context(), "lease-1", "command-1", 1, 1, 5_000_000_000
-    )
-
-
-def fixture_packet(prepared) -> PreparedControlCommand:
-    return PreparedControlCommand(fixture_command(), prepared)
 
 
 def linear_source(amplitude: float = 1.0, *, tail: float | None = None) -> tuple[Target, ...]:
@@ -172,77 +134,15 @@ def packet(prepared, *, observation_id: int = 1) -> PreparedControlCommand:
     return PreparedControlCommand(command(observation_id), prepared)
 
 
-def fixture_chunk() -> PreparedChunk:
-    plan = ReferencePlan(
-        ("j1", "j2"),
-        (
-            CubicSegment(100_000_000, FIXTURE_POSITIONS, (0.0, 0.0), (0.0, 0.0), (0.0, 0.0)),
-            CubicSegment(900_000_000, FIXTURE_POSITIONS, (0.0, 0.0), (0.0, 0.0), (0.0, 0.0)),
-        ),
-    )
-    chunk_anchor = ChunkAnchor(
-        "stream-1",
-        0,
-        0,
-        ReferenceSample(FIXTURE_POSITIONS, (0.0, 0.0), (0.0, 0.0)),
-        FIXTURE_PROFILE_DIGEST,
-    )
-    action_window = ActionWindow(
-        1,
-        0,
-        0,
-        (
-            Target(100_000_000, FIXTURE_POSITIONS),
-            Target(1_000_000_000, FIXTURE_POSITIONS),
-        ),
-        2,
-    )
-    return PreparedChunk(
-        anchor=chunk_anchor,
-        window=action_window,
-        plan=plan,
-        joints=FIXTURE_JOINTS,
-        max_accelerations=(1.0, 1.0),
-        final_velocities=(0.0, 0.0),
-        settle_at_end=True,
-    )
-
-
-def fixture_motion() -> PreparedMotion:
-    return PreparedMotion(
-        joint_names=("j1", "j2"),
-        joints=FIXTURE_JOINTS,
-        initial_reference=FIXTURE_POSITIONS,
-        targets=(
-            Target(100_000_000, FIXTURE_POSITIONS),
-            Target(1_000_000_000, FIXTURE_POSITIONS),
-        ),
-        plan=fixture_chunk().plan,
-        max_accelerations=(1.0, 1.0),
-        profile_digest=FIXTURE_PROFILE_DIGEST,
-    )
-
-
 def test_follower_is_a_distinct_kind_and_settle_alias_is_derived() -> None:
     prepared = follower_plan()
     assert isinstance(prepared, PreparedFollowerPlan)
-    assert not isinstance(prepared, PreparedChunk)
-    assert chunk_kind(prepared) == "FOLLOWER"
     assert prepared.settle_at_end is prepared.is_final is False
     assert packet(prepared).kind == "FOLLOWER"
     assert packet(prepared).request is None
     assert follower_plan(
         source=final_extension_source(), handoff_ns=0, is_final=True
     ).settle_at_end is True
-
-    with pytest.raises(ContractError) as caught:
-        chunk_kind(SimpleNamespace(anchor=object()))
-    assert caught.value.reason == "INVALID_PREPARED_CHUNK"
-
-
-def test_legacy_motion_and_chunk_fingerprints_are_byte_stable() -> None:
-    assert fixture_packet(fixture_chunk()).fingerprint == LEGACY_CHUNK_FINGERPRINT
-    assert fixture_packet(fixture_motion()).fingerprint == LEGACY_MOTION_FINGERPRINT
 
 
 def test_follower_fingerprint_covers_unselected_tail_and_follower_limits() -> None:

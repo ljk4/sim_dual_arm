@@ -1,4 +1,4 @@
-"""One diagnostic native episode: reset, configured motions, stop and v3 record.
+"""One native streaming episode: reset, policy/teacher chunks, stop and record.
 
 This module owns only lifecycle and sequencing.  ROS entities and callbacks stay
 in ``native_node``; message conversion stays in the shared ROS support layer and
@@ -25,11 +25,10 @@ from robot_contracts.episodes import (
     TaskResult,
 )
 from robot_contracts.follower_reference import FollowerReference
-from robot_contracts.models import ContractError, RunContext, Target, Trajectory
-from robot_contracts.native import NATIVE_MOTION, AcceptedReference, NativeExecution, NativeRequest
+from robot_contracts.models import ContractError, RunContext
+from robot_contracts.native import NativeExecution, NativeRequest
 from robot_run_logging import EventContext, LogFailure, Scalar
 
-from dual_arm_runtime.episode import FailureLog, Recorder
 from dual_arm_runtime.native_config import NativeConfiguration
 from dual_arm_runtime.native_errors import FirstFollowerRejected
 from dual_arm_runtime.observation import ExactObservation
@@ -45,6 +44,86 @@ if TYPE_CHECKING:
     from robot_api_msgs.msg import BackendInfo
 
 
+class Recorder(Protocol):
+    """The small recorder surface owned by one episode."""
+
+    directory: Path
+
+    def append(self, topic: str, message: object, timestamp_ns: int) -> None: ...
+
+    def check_health(self) -> None: ...
+
+    def stats(self) -> RecordingStats: ...
+
+    def finish(
+        self,
+        runtime: RuntimeResult | None = None,
+        *,
+        current_runtime: Callable[[], RuntimeResult] | None = None,
+        task_result: TaskResult | None = None,
+    ) -> Path: ...
+
+
+class FailureLog:
+    """Aggregate the primary fault and later cleanup/recording reasons.
+
+    The lock protects only the string.  Setting the stop event and waking the ROS
+    condition happen outside it; no RPC, join or disk operation runs here.
+    """
+
+    def __init__(self, stop_requested: threading.Event, notify: Callable[[], None]) -> None:
+        self._lock = threading.Lock()
+        self._stop_requested = stop_requested
+        self._notify = notify
+        self._reason = ""
+
+    @property
+    def reason(self) -> str:
+        with self._lock:
+            return self._reason
+
+    def reset(self, reason: str = "") -> None:
+        with self._lock:
+            self._reason = reason
+
+    def fail(self, reason: str) -> None:
+        """Keep the first primary fault and request a stop."""
+        with self._lock:
+            if not self._reason:
+                self._reason = reason
+        self._stop_requested.set()
+        self._notify()
+
+    def request_stop(self) -> None:
+        """Ask the worker to stop without recording a fault."""
+        self._stop_requested.set()
+        self._notify()
+
+    def append(self, reason: str) -> None:
+        """Append a later cleanup reason without losing the primary fault."""
+        with self._lock:
+            if not reason or reason in self._reason:
+                return
+            if self._reason:
+                self._reason = f"{self._reason}; {reason}"
+            else:
+                self._reason = reason
+        self._stop_requested.set()
+        self._notify()
+
+    def merge(self, reason: str) -> None:
+        """Take a recorder's combined reason without duplicating the primary fault."""
+        with self._lock:
+            if not reason or reason in self._reason:
+                return
+            if self._reason and self._reason not in reason:
+                self._reason = f"{self._reason}; {reason}"
+            else:
+                self._reason = reason
+        self._stop_requested.set()
+        self._notify()
+
+
 class NativeControl(Protocol):
     @property
     def lease_id(self) -> str: ...
@@ -54,8 +133,6 @@ class NativeControl(Protocol):
     def acquire(self, context: RunContext) -> str: ...
 
     def reset(self, context: RunContext, lease_id: str, seed: int) -> RunContext: ...
-
-    def submit(self, request: NativeRequest) -> object: ...
 
     def query(
         self, context: RunContext, command_id: str, *, request: NativeRequest
@@ -91,8 +168,6 @@ class NativeEpisodeIO(Protocol):
     ) -> ExactObservation: ...
 
     def publish_native_command(self, request: NativeRequest, timestamp_ns: int) -> None: ...
-
-    def record_accepted_reference(self, reference: AcceptedReference) -> None: ...
 
     def record_follower_reference(self, reference: FollowerReference) -> None: ...
 
@@ -501,7 +576,10 @@ class NativeEpisodeRunner:
             elif self._configuration.recipe.action_source == "teacher":
                 self._run_teacher(episode_id, actual_context, task_id)
             else:
-                self._run_motions(episode_id, actual_context)
+                raise ContractError(
+                    "CONFIGURATION",
+                    "action_source must be 'policy' or 'teacher'",
+                )
         except Exception as error:
             if isinstance(error, LogFailure):
                 self.report_logging_failure(error)
@@ -526,81 +604,6 @@ class NativeEpisodeRunner:
                 )
         finally:
             self._finish(episode_id)
-
-    def _run_motions(self, episode_id: str, actual_context: RunContext) -> None:
-        previous_observation_id = 0
-        for sequence, motion in enumerate(self._configuration.recipe.motions, start=1):
-            check = self.check_recording_health()
-            if check:
-                raise ContractError("RECORDING_ERROR", check)
-            if self._stop_requested.is_set():
-                break
-            observation = self._io.wait_observation(
-                previous_observation_id,
-                self._configuration.recipe.call_timeout_s,
-                self._stop_requested,
-            )
-            previous_observation_id = observation.observation_id
-            if self._stop_requested.is_set():
-                break
-            command_id = f"{episode_id}-{sequence}"
-            request = NativeRequest(
-                trajectory=Trajectory(
-                    actual_context,
-                    self._control.lease_id,
-                    command_id,
-                    sequence,
-                    observation.observation_id,
-                    self._io.robot_time_ns() + self._configuration.recipe.command_acceptance_ns,
-                    self._configuration.profile.joint_names,
-                    (Target(motion.duration_ns, motion.positions),),
-                ),
-                kind=NATIVE_MOTION,
-            )
-            self._emit_best_effort(
-                "native.command.sending",
-                context=EventContext(
-                    episode_id=episode_id,
-                    clock_epoch=actual_context.clock_epoch,
-                    command_id=command_id,
-                    sim_time_ns=observation.stamp_ns,
-                ),
-                fields={
-                    "motion": motion.name,
-                    "command_seq": sequence,
-                    "observation_id": observation.observation_id,
-                    "target_count": len(motion.positions),
-                },
-            )
-            self._io.publish_native_command(request, self._io.robot_time_ns())
-            try:
-                result = self._control.submit(request)
-            except ContractError as error:
-                if error.reason in {
-                    "OUTCOME_UNKNOWN",
-                    "REFERENCE_UNAVAILABLE",
-                    "CALL_TIMEOUT",
-                    "EPISODE_STOPPED",
-                }:
-                    # The backend may still execute this exact command ID.
-                    # Keep it for the bounded stop-settled query in finish.
-                    self._sent_command_ids.append(command_id)
-                raise
-            self._sent_command_ids.append(command_id)
-            self._io.record_accepted_reference(result.reference)
-            self._io.record_execution(result.execution)
-            execution = result.execution
-            if execution.phase not in {"COMPLETED", "CANCELED", "FAILED"}:
-                execution = self._io.wait_native_terminal(
-                    command_id,
-                    self._configuration.recipe.control.terminal_timeout_s,
-                    self._stop_requested,
-                )
-            if execution.phase != "COMPLETED":
-                raise ContractError(
-                    "NATIVE_NOT_COMPLETED",
-                    f"{command_id}: {execution.phase} {execution.reason}".strip(),
-                )
 
     def _run_policy(self, episode_id: str, actual_context: RunContext, task_id: str) -> None:
         from dual_arm_runtime.native_stream import PolicyStreamRunner, follower_limits

@@ -9,7 +9,6 @@ frame, extra velocity/acceleration/effort, absent-anchor inconsistencies) raise
 
 from __future__ import annotations
 
-from robot_api_msgs.msg import AcceptedReference as AcceptedReferenceMessage
 from robot_api_msgs.msg import NativeChunkStatus as NativeChunkStatusMessage
 from robot_api_msgs.msg import NativeCommand as NativeCommandMessage
 from robot_api_msgs.msg import NativeControlEvent as NativeControlEventMessage
@@ -17,32 +16,28 @@ from robot_api_msgs.msg import NativeExecution as NativeExecutionMessage
 from robot_api_msgs.msg import NativeFinger as NativeFingerMessage
 from robot_api_msgs.msg import NativeGripper as NativeGripperMessage
 from robot_api_msgs.msg import ReferenceAnchor as ReferenceAnchorMessage
-from robot_api_msgs.msg import ReferenceSegment as ReferenceSegmentMessage
 from robot_contracts.action_chunks import ChunkAnchor
 from robot_contracts.models import ContractError, Trajectory
 from robot_contracts.native import (
-    AcceptedReference,
     NativeChunkStatus,
     NativeControlEvent,
     NativeExecution,
     NativeFinger,
     NativeGripper,
     NativeRequest,
-    plan_from_segments,
 )
-from robot_contracts.reference import CubicSegment, ReferenceSample
+from robot_contracts.reference import ReferenceSample
 
 from .conversions import (
-    command_from_message,
-    command_message,
     context_from_message,
     context_message,
+    stamp,
     time_ns,
+    trajectory_from_message,
+    trajectory_message,
 )
 
 __all__ = [
-    "accepted_reference_from_message",
-    "accepted_reference_message",
     "anchor_from_message",
     "anchor_message",
     "native_chunk_status_from_message",
@@ -100,32 +95,20 @@ def _anchor_absent(value: ReferenceAnchorMessage) -> bool:
     )
 
 
-def _trajectory_command(value: NativeCommandMessage) -> Trajectory:
-    command = value.command
-    header = command.trajectory.header
-    if header.frame_id:
-        raise ContractError(
-            "UNSUPPORTED_CAPABILITY", "TrajectoryCommand frame_id must be empty"
-        )
-    if time_ns(header.stamp) != 0:
-        raise ContractError(
-            "UNSUPPORTED_CAPABILITY", "TrajectoryCommand header stamp must be zero"
-        )
-    for point in command.trajectory.points:
-        if point.velocities or point.accelerations or point.effort:
-            raise ContractError(
-                "UNSUPPORTED_CAPABILITY", "Position targets only"
-            )
-    return command_from_message(command)
-
-
 def native_command_message(value: NativeRequest) -> NativeCommandMessage:
     if not isinstance(value, NativeRequest):
         raise ContractError("INVALID_NATIVE_REQUEST", "value must be a NativeRequest")
     anchor = ReferenceAnchorMessage() if value.anchor is None else anchor_message(value.anchor)
+    trajectory = value.trajectory
     return NativeCommandMessage(
         kind=value.kind,
-        command=command_message(value.trajectory),
+        context=context_message(trajectory.context),
+        lease_id=trajectory.lease_id,
+        command_id=trajectory.command_id,
+        command_seq=trajectory.command_seq,
+        observation_id=trajectory.observation_id,
+        accept_before=stamp(trajectory.accept_before_ns),
+        trajectory=trajectory_message(trajectory),
         anchor=anchor,
         observation_time_ns=value.observation_time_ns,
         target_count=value.target_count,
@@ -142,7 +125,17 @@ def native_command_from_message(value: NativeCommandMessage) -> NativeRequest:
         raise ContractError("INVALID_NATIVE_REQUEST", "value is not a NativeCommand message")
     if value.kind not in (1, 2, 3):
         raise ContractError("INVALID_NATIVE_REQUEST", f"unknown kind: {value.kind}")
-    trajectory = _trajectory_command(value)
+    joint_names, targets = trajectory_from_message(value.trajectory)
+    trajectory = Trajectory(
+        context_from_message(value.context),
+        value.lease_id,
+        value.command_id,
+        value.command_seq,
+        value.observation_id,
+        time_ns(value.accept_before),
+        joint_names,
+        targets,
+    )
     if _anchor_absent(value.anchor):
         anchor = None
     else:
@@ -164,70 +157,6 @@ def native_command_from_message(value: NativeCommandMessage) -> NativeRequest:
         target_count=value.target_count,
         settle_at_end=value.settle_at_end,
         final_velocities=final_velocities,
-    )
-
-
-def _segment_message(segment: CubicSegment) -> ReferenceSegmentMessage:
-    return ReferenceSegmentMessage(
-        duration_ns=segment.duration_ns,
-        c0=list(segment.c0),
-        c1=list(segment.c1),
-        c2=list(segment.c2),
-        c3=list(segment.c3),
-    )
-
-
-def accepted_reference_message(value: AcceptedReference) -> AcceptedReferenceMessage:
-    if not isinstance(value, AcceptedReference):
-        raise ContractError(
-            "INVALID_REFERENCE_RECORD", "value must be an AcceptedReference"
-        )
-    return AcceptedReferenceMessage(
-        request=native_command_message(value.request),
-        motion_seq=value.motion_seq,
-        accepted_sim_time_ns=value.accepted_sim_time_ns,
-        joint_names=list(value.joint_names),
-        segments=[_segment_message(segment) for segment in value.plan.segments],
-        initial_positions=list(value.initial_positions),
-        initial_velocities=list(value.initial_velocities),
-        final_velocities=list(value.final_velocities),
-        max_accelerations=list(value.max_accelerations),
-        selected_indices=list(value.selected_indices),
-        reference_digest=value.reference_digest or "",
-        interpolation_version=value.interpolation_version,
-    )
-
-
-def accepted_reference_from_message(value: AcceptedReferenceMessage) -> AcceptedReference:
-    if not isinstance(value, AcceptedReferenceMessage):
-        raise ContractError(
-            "INVALID_REFERENCE_RECORD", "value is not an AcceptedReference message"
-        )
-    request = native_command_from_message(value.request)
-    segments = tuple(
-        CubicSegment(
-            duration_ns=segment.duration_ns,
-            c0=tuple(segment.c0),
-            c1=tuple(segment.c1),
-            c2=tuple(segment.c2),
-            c3=tuple(segment.c3),
-        )
-        for segment in value.segments
-    )
-    plan = plan_from_segments(tuple(value.joint_names), segments)
-    return AcceptedReference(
-        request=request,
-        motion_seq=value.motion_seq,
-        accepted_sim_time_ns=value.accepted_sim_time_ns,
-        joint_names=tuple(value.joint_names),
-        plan=plan,
-        initial_positions=tuple(value.initial_positions),
-        initial_velocities=tuple(value.initial_velocities),
-        final_velocities=tuple(value.final_velocities),
-        max_accelerations=tuple(value.max_accelerations),
-        selected_indices=tuple(value.selected_indices),
-        interpolation_version=value.interpolation_version,
-        reference_digest=value.reference_digest,
     )
 
 

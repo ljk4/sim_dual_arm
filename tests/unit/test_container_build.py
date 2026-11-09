@@ -314,7 +314,12 @@ def test_compose_checker_rejects_variable_binds_and_requires_nested_writable_mou
                 "gpus": "all",
                 "networks": ["ros", "learning"],
                 "volumes": [
-                    {"type": "bind", "source": "${PROJECT_ROOT}", "target": "/workspace", "read_only": True},
+                    {
+                        "type": "bind",
+                        "source": "${PROJECT_ROOT}",
+                        "target": "/workspace",
+                        "read_only": True,
+                    },
                     {"type": "bind", "source": ".build", "target": "/build"},
                     {"type": "bind", "source": "var", "target": "/data"},
                     {

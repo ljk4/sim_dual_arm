@@ -134,7 +134,7 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--config",
         type=Path,
-        default=Path("learning/lerobot/configs/act_policy.yaml"),
+        default=Path("learning/lerobot/configs/act_policy_temporal.yaml"),
     )
     parser.add_argument("--bundle", type=Path)
     parser.add_argument("--profile", type=Path)

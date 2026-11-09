@@ -1,17 +1,8 @@
 """Explicit conversions between wire messages and immutable domain values."""
 
 from builtin_interfaces.msg import Duration, Time
-from robot_api_msgs.msg import CommandStatus as CommandStatusMessage
 from robot_api_msgs.msg import RunContext as ContextMessage
-from robot_api_msgs.msg import TrajectoryCommand
-from robot_contracts.models import (
-    CommandStatus,
-    ContractError,
-    RunContext,
-    Target,
-    Trajectory,
-)
-from robot_contracts.status import validate_command_status
+from robot_contracts.models import ContractError, RunContext, Target, Trajectory
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
 
@@ -64,86 +55,17 @@ def trajectory_message(value: Trajectory) -> JointTrajectory:
     return result
 
 
-def command_message(value: Trajectory) -> TrajectoryCommand:
-    return TrajectoryCommand(
-        context=context_message(value.context),
-        lease_id=value.lease_id,
-        command_id=value.command_id,
-        command_seq=value.command_seq,
-        observation_id=value.observation_id,
-        accept_before=stamp(value.accept_before_ns),
-        trajectory=trajectory_message(value),
-    )
-
-
-def command_from_message(value: TrajectoryCommand) -> Trajectory:
-    if time_ns(value.trajectory.header.stamp) != 0:
-        raise ContractError("UNSUPPORTED_CAPABILITY", "Only immediate trajectory starts in stage 2")
-    if any(
-        point.velocities or point.accelerations or point.effort for point in value.trajectory.points
-    ):
-        raise ContractError("UNSUPPORTED_CAPABILITY", "Position targets only")
-    return Trajectory(
-        context_from_message(value.context),
-        value.lease_id,
-        value.command_id,
-        value.command_seq,
-        value.observation_id,
-        time_ns(value.accept_before),
-        tuple(value.trajectory.joint_names),
-        tuple(
-            Target(time_ns(point.time_from_start), tuple(point.positions))
-            for point in value.trajectory.points
-        ),
-    )
-
-
-def command_status_message(value: CommandStatus) -> CommandStatusMessage:
-    """Serialize one immutable status snapshot; arrays stay in joint order."""
-    validate_command_status(value)
-    return CommandStatusMessage(
-        context=context_message(value.context),
-        command_id=value.command_id,
-        command_seq=value.command_seq,
-        observation_id=value.observation_id,
-        phase=value.phase,
-        reason=value.reason,
-        sample_time=stamp(value.sample_time_ns),
-        accepted_at=stamp(value.accepted_at_ns),
-        started_at=stamp(value.started_at_ns),
-        elapsed=duration(value.elapsed_ns),
-        execution_clock=value.execution_clock,
-        interpolation_version=value.interpolation_version,
-        joint_names=list(value.joint_names),
-        initial_positions=list(value.initial_positions),
-        reference_positions=list(value.reference_positions),
-        measured_positions=list(value.measured_positions),
-        tracking_error=list(value.tracking_error),
-        progress=float(value.progress),
-    )
-
-
-def command_status_from_message(value: CommandStatusMessage) -> CommandStatus:
-    """Deserialize and intrinsic-validate one status snapshot."""
-    status = CommandStatus(
-        context=context_from_message(value.context),
-        command_id=value.command_id,
-        command_seq=value.command_seq,
-        observation_id=value.observation_id,
-        phase=value.phase,
-        reason=value.reason,
-        sample_time_ns=time_ns(value.sample_time),
-        accepted_at_ns=time_ns(value.accepted_at),
-        started_at_ns=time_ns(value.started_at),
-        elapsed_ns=time_ns(value.elapsed),
-        execution_clock=value.execution_clock,
-        interpolation_version=value.interpolation_version,
-        joint_names=tuple(value.joint_names),
-        initial_positions=tuple(value.initial_positions),
-        reference_positions=tuple(value.reference_positions),
-        measured_positions=tuple(value.measured_positions),
-        tracking_error=tuple(value.tracking_error),
-        progress=float(value.progress),
-    )
-    validate_command_status(status)
-    return status
+def trajectory_from_message(value: JointTrajectory) -> tuple[tuple[str, ...], tuple[Target, ...]]:
+    """Decode a position-only target source, rejecting unsupported semantics."""
+    if time_ns(value.header.stamp) != 0:
+        raise ContractError(
+            "UNSUPPORTED_CAPABILITY", "only immediate trajectory starts are supported"
+        )
+    if value.header.frame_id:
+        raise ContractError("UNSUPPORTED_CAPABILITY", "trajectory frame_id must be empty")
+    targets: list[Target] = []
+    for point in value.points:
+        if point.velocities or point.accelerations or point.effort:
+            raise ContractError("UNSUPPORTED_CAPABILITY", "position targets only")
+        targets.append(Target(time_ns(point.time_from_start), tuple(point.positions)))
+    return tuple(value.joint_names), tuple(targets)

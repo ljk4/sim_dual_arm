@@ -6,7 +6,7 @@
 # control_constraints：执行器加速度、位置/速度容差和接触阈值。
 # follower_constraints：动作块跟随窗口与目标偏差预算。
 # robot_namespace：ROS 话题、服务和参数使用的命名空间。
-# action_source：动作来源，可选 policy、teacher 或 diagnostic_motion。
+# action_source：动作来源，可选 policy 或 teacher。
 # lease_duration_ns：控制租约有效期，单位 ns。
 # renew_interval_ns：租约续期周期，单位 ns。
 # command_acceptance_ns：命令接受时间窗口，单位 ns。

@@ -289,7 +289,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--template",
         type=Path,
-        default=ROOT / "learning/lerobot/configs/act_policy.yaml",
+        default=ROOT / "learning/lerobot/configs/act_policy_temporal.yaml",
     )
     parser.add_argument("--bundle", type=Path, required=True)
     parser.add_argument("--profile", type=Path)

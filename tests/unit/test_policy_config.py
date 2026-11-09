@@ -4,7 +4,6 @@ import pytest
 import yaml
 from dual_arm_learning.policy_config import (
     PolicyConfigError,
-    load_policy_config,
     parse_policy_config,
 )
 
@@ -52,4 +51,4 @@ def test_load_fake_config_keeps_provider_settings_out_of_the_service_schema():
     config, settings = load_fake_config(FAKE)
     assert isinstance(config, object)
     assert settings.fault == "none"
-    assert load_policy_config(ROOT / "learning/lerobot/configs/policy.yaml").chunk_size == 60
+    assert parse_policy_config(service_document()).chunk_size == 60

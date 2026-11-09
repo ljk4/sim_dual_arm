@@ -10,12 +10,10 @@ setup(
     ],
     install_requires=["setuptools"],
     zip_safe=False,
-    description="dual_arm_runtime stage 1-2 implementation",
+    description="dual_arm_runtime native streaming implementation",
     entry_points={
         "console_scripts": [
-            "runtime = dual_arm_runtime.node:main",
             "native_runtime = dual_arm_runtime.native_node:main",
-            "inspect_episode = dual_arm_runtime.audit:main",
         ]
     },
 )

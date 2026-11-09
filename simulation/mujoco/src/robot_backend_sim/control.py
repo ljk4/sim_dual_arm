@@ -29,8 +29,6 @@ from robot_contracts.control import (
 from robot_contracts.follower import PreparedFollowerPlan
 from robot_contracts.models import ContractError, RunContext
 
-from .chunk_plan import PreparedChunk
-from .chunk_types import PreparedStreamChunk
 from .control_state import (
     COMMAND_ACTIVE_PHASES,
     MAX_DEFERRED_EVENTS,
@@ -53,7 +51,6 @@ from .motion import (
     MotionSnapshot,
     NativeMotion,
     Phase,
-    PreparedMotion,
 )
 from .motion_config import PandaControlConfig
 from .panda_io import PandaIO
@@ -329,32 +326,22 @@ class NativeController:
             raise _invalid("CONTROL_BUSY", "a previous command is still active")
         if self._motion.phase in _NATIVE_ACTIVE:
             raise _invalid("CONTROL_BUSY", "native motion is active or stopping")
-        kind = packet.kind
-        if kind == "MOTION":
-            if not isinstance(packet.prepared, PreparedMotion):
-                raise _invalid("INVALID_PREPARED_COMMAND", "prepared is not a PreparedMotion")
-        elif kind == "CHUNK":
-            prepared = packet.prepared
-            assert isinstance(prepared, PreparedChunk)
-            if prepared.seq != 1 or prepared.anchor.predecessor_seq != 0:
-                raise _invalid("INVALID_CHUNK_ORDER", "first chunk must start the stream")
-        else:
-            prepared = packet.prepared
-            assert isinstance(prepared, PreparedFollowerPlan)
-            if prepared.seq != 1 or prepared.anchor.predecessor_seq != 0:
-                raise _invalid("INVALID_CHUNK_ORDER", "first follower must start the stream")
+        if packet.kind != "FOLLOWER":
+            raise _invalid(
+                "INVALID_PREPARED_COMMAND",
+                "submit requires a PreparedFollowerPlan",
+            )
+        prepared = packet.prepared
+        if prepared.seq != 1 or prepared.anchor.predecessor_seq != 0:
+            raise _invalid("INVALID_CHUNK_ORDER", "first follower must start the stream")
         if not self._commands.has_capacity():
             raise _invalid("HISTORY_FULL", "command history has no evictable terminal record")
-        if kind != "MOTION" and not self._chunks.has_capacity():
+        if not self._chunks.has_capacity():
             raise _invalid(
                 "CHUNK_HISTORY_FULL",
                 "chunk history has no evictable terminal record",
             )
-        if kind == "MOTION":
-            snapshot = self._motion.start(packet.prepared, wall)
-        else:
-            assert isinstance(packet.prepared, PreparedChunk | PreparedFollowerPlan)
-            snapshot = self._motion.start_stream(packet.prepared, wall)
+        snapshot = self._motion.start_stream(prepared, wall)
         accepted_sim = snapshot.measurement_sim_time_ns
         new_record = CommandRecord(
             packet=packet,
@@ -370,9 +357,7 @@ class NativeController:
         self._commands.add(new_record)
         self._current_command_id = command.command_id
         self._highest_sequence = command.command_seq
-        if kind != "MOTION":
-            assert isinstance(packet.prepared, PreparedChunk | PreparedFollowerPlan)
-            self._record_chunk(new_record, packet.prepared, snapshot, wall)
+        self._record_chunk(new_record, prepared, snapshot, wall)
         events.append(self._emit(new_record, _COMMAND_ACCEPTED, "", accepted_sim))
         self._sync_native(snapshot, wall, events)
         return self._reply(snapshot, events, accepted=True, reason=_COMMAND_ACCEPTED)
@@ -385,10 +370,10 @@ class NativeController:
         events: list[ControlEvent] = []
         if not isinstance(packet, PreparedControlCommand):
             raise _invalid("INVALID_PREPARED_COMMAND", "packet must be a PreparedControlCommand")
-        if packet.kind not in ("CHUNK", "FOLLOWER"):
+        if packet.kind != "FOLLOWER":
             raise _invalid(
                 "INVALID_PREPARED_COMMAND",
-                "queue_chunk requires a PreparedChunk or PreparedFollowerPlan",
+                "queue_chunk requires a PreparedFollowerPlan",
             )
         command = packet.command
         check_generation(command.context, self._context)
@@ -399,7 +384,7 @@ class NativeController:
         if packet.kind != record.kind:
             raise _invalid(
                 "STREAM_MODE_MISMATCH",
-                "a stream cannot mix strict chunks and bounded-follower chunks",
+                "a stream cannot change its prepared block kind",
             )
         if (
             command.context != record.command.context
@@ -411,7 +396,6 @@ class NativeController:
                 "successor context/lease/command_seq differs from the stream",
             )
         prepared = packet.prepared
-        assert isinstance(prepared, PreparedChunk | PreparedFollowerPlan)
         existing = self._chunks.get(command.command_id, prepared.seq)
         if existing is not None:
             self._require_lease(command.context, command.lease_id)
@@ -650,7 +634,7 @@ class NativeController:
     def _current_sim_ns(self) -> int:
         return round(float(self._scene.data.time) * 1_000_000_000)
 
-    def _candidate_would_latch(self, prepared: PreparedStreamChunk) -> bool:
+    def _candidate_would_latch(self, prepared: PreparedFollowerPlan) -> bool:
         config = self._stream_config
         if config is None:
             return False
@@ -900,7 +884,7 @@ class NativeController:
     def _record_chunk(
         self,
         record: CommandRecord,
-        prepared: PreparedStreamChunk,
+        prepared: PreparedFollowerPlan,
         snapshot: MotionSnapshot,
         wall: int,
     ) -> None:

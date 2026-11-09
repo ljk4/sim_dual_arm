@@ -26,7 +26,6 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim.chunk_plan import prepare_chunk  # noqa: E402
 from robot_backend_sim.follower_config import load_follower_config  # noqa: E402
 from robot_backend_sim.follower_plan import prepare_follower_plan  # noqa: E402
 from robot_backend_sim.motion_config import load_control_config  # noqa: E402
@@ -555,13 +554,9 @@ def counterexample_window(lead_ms: int = 250) -> ActionWindow:
     return make_window(targets, handoff_ns=lead_ms * 1_000_000)
 
 
-def test_strict_first_window_counterexample_and_bounded_follower():
+def test_first_window_counterexample_and_bounded_follower():
     window = counterexample_window(250)
     anchor = make_anchor(window, BASE, (0.0,) * JOINT_COUNT)
-    with pytest.raises(ContractError) as caught:
-        prepare_chunk(anchor, window, PROFILE, CONTROL)
-    assert caught.value.reason == "ACCELERATION_LIMIT"
-    assert "1.828475" in str(caught.value)
 
     prepared = prepare_follower_plan(
         anchor,
@@ -597,13 +592,6 @@ def test_two_radian_seven_second_fragment_with_three_leads(lead_ms):
     targets = make_source_targets(BASE, (BASE[0] + 2.0,) + BASE[1:], 7.0)
     window = make_window(targets, handoff_ns=lead_ms * 1_000_000)
     anchor = make_anchor(window, BASE, (0.0,) * JOINT_COUNT)
-
-    strict_reason = None
-    try:
-        prepare_chunk(anchor, window, PROFILE, CONTROL)
-    except ContractError as error:
-        strict_reason = error.reason
-    assert strict_reason == "ACCELERATION_LIMIT"
 
     for is_final in (False, True):
         prepared = prepare_follower_plan(

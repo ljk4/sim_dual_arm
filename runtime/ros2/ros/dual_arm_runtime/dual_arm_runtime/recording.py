@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import threading
@@ -22,13 +23,24 @@ from robot_contracts.episodes import (
 from robot_contracts.models import ContractError
 from robot_contracts.profiles import validate_document
 
-from dual_arm_runtime.audit import audit_recording, sha256_file
+from dual_arm_runtime.native_follower_audit import audit_follower_recording
 from dual_arm_runtime.recording_queue import (
     BoundedRecordingQueue,
     RecordingQueueError,
     RecordingSettings,
     RecordingStats,
 )
+
+_HASH_CHUNK_BYTES = 1024 * 1024
+
+
+def sha256_file(path: Path) -> str:
+    """Hash a file in fixed-size chunks; callers never read the whole file at once."""
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while chunk := stream.read(_HASH_CHUNK_BYTES):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 class _NativeWriter:
@@ -114,10 +126,8 @@ class EpisodeRecorder:
             raise ContractError("EPISODE_ERROR", "manifest source must be a non-empty string")
         if not isinstance(test_only, bool):
             raise ContractError("EPISODE_ERROR", "manifest test_only must be a boolean")
-        if isinstance(format_version, bool) or format_version not in (1, 2, 3, 4):
-            raise ContractError(
-                "EPISODE_ERROR", "manifest format_version must be one of 1, 2, 3 or 4"
-            )
+        if isinstance(format_version, bool) or format_version != 1:
+            raise ContractError("EPISODE_ERROR", "manifest format_version must be 1")
         self._format_version = format_version
         output_root.mkdir(parents=True, exist_ok=True)
         self._final = output_root / episode_id
@@ -248,11 +258,10 @@ class EpisodeRecorder:
             recording_failure = "RECORDING_ERROR: writer closed with accepted data not written"
         if not recording_failure:
             try:
-                report = audit_recording(
+                report = audit_follower_recording(
                     self.directory / "recording",
                     self._episode_id,
                     self._configuration,
-                    version=self._format_version,
                 )
                 if report["message_counts"] != dict(stats.written_counts):
                     recording_failure = "RECORDING_ERROR: message counts differ"

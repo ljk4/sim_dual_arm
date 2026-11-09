@@ -1,12 +1,12 @@
 """Single-threaded no-ROS motion state machine over PandaIO and real MuJoCo.
 
-The module composes an already validated cubic reference plan, the accepted
-named I/O layer and the actual physics data.  It does not implement ROS,
-lease/reset, command history, object success or a worker thread.  A caller must
-drive ``step`` with an explicit monotonic wall time and the scene's configured
-2 ms physics step; the machine writes only the sixteen ctrl targets through
-``PandaIO``, steps MuJoCo and refreshes contact evidence at the same
-measurement time.
+The module composes the accepted bounded-follower streaming schedule (one
+active plan plus at most one pending successor), the accepted named I/O layer
+and the actual physics data.  It does not implement ROS, lease/reset, command
+history, object success or a worker thread.  A caller must drive ``step`` with
+an explicit monotonic wall time and the scene's configured 2 ms physics step;
+the machine writes only the sixteen ctrl targets through ``PandaIO``, steps
+MuJoCo and refreshes contact evidence at the same measurement time.
 """
 
 from __future__ import annotations
@@ -22,17 +22,10 @@ from numbers import Integral, Real
 from robot_contracts.action_chunks import ChunkAnchor
 from robot_contracts.follower import PreparedFollowerPlan
 from robot_contracts.follower_math import normalize_follower_positions
-from robot_contracts.models import ContractError, JointSpec, RobotProfile, Target
-from robot_contracts.reference import (
-    MAX_HORIZON_NS,
-    ReferencePlan,
-    ReferenceSample,
-    verify_reference_plan,
-)
+from robot_contracts.models import ContractError
+from robot_contracts.reference import ReferenceSample
 
 from .braking import BrakingPlan, plan_braking
-from .chunk_plan import PreparedChunk
-from .chunk_types import PreparedStreamChunk, chunk_kind
 from .contact_unload import REFERENCE_VELOCITY_ATOL_M_S, ContactUnload
 from .contacts import (
     GripperCompletion,
@@ -44,7 +37,6 @@ from .contacts import (
 )
 from .motion_config import CONTROL_JOINT_NAMES, PandaControlConfig
 from .panda_io import Measurement, PandaIO
-from .reference_compiler import compile_reference_plan
 from .scene import Scene
 from .stream_config import StreamConfig
 from .stream_schedule import (
@@ -65,9 +57,7 @@ __all__ = [
     "MotionSnapshot",
     "NativeMotion",
     "Phase",
-    "PreparedMotion",
     "StopReason",
-    "prepare_motion",
 ]
 
 _MAX_NS = 2**63 - 1
@@ -156,113 +146,6 @@ def _sim_time_ns(data: object) -> int:
     if not math.isfinite(seconds) or seconds < 0.0 or seconds > _MAX_NS / 1e9:
         raise _invalid("INVALID_MEASUREMENT", "simulation time is not a finite non-negative time")
     return round(seconds * 1_000_000_000)
-
-
-@dataclass(frozen=True, slots=True)
-class PreparedMotion:
-    """Deeply immutable, fully verified motion ready for ``start``.
-
-    Constructing this object directly re-runs the shared mathematical plan
-    verification outside the physics loop.  ``prepare_motion`` additionally
-    compiles the original waypoints once with the accepted SciPy compiler.
-    """
-
-    joint_names: tuple[str, ...]
-    joints: tuple[JointSpec, ...]
-    initial_reference: tuple[float, ...]
-    targets: tuple[Target, ...]
-    plan: ReferencePlan
-    max_accelerations: tuple[float, ...]
-    profile_digest: str
-
-    def __post_init__(self) -> None:
-        try:
-            names = tuple(self.joint_names)
-            joints = tuple(self.joints)
-            targets = tuple(self.targets)
-        except TypeError as error:
-            raise _invalid(
-                "INVALID_PREPARED_MOTION", "names/joints/targets must be arrays"
-            ) from error
-        if not names or len(set(names)) != len(names):
-            raise _invalid("INVALID_PREPARED_MOTION", "joint_names must be unique and non-empty")
-        if not isinstance(self.plan, ReferencePlan):
-            raise _invalid("INVALID_PREPARED_MOTION", "plan must be a ReferencePlan")
-        if not isinstance(self.profile_digest, str) or not self.profile_digest:
-            raise _invalid("INVALID_PREPARED_MOTION", "profile_digest must be a non-empty string")
-        initial = _finite_vector(self.initial_reference, "initial_reference", len(names))
-        accelerations = _finite_vector(self.max_accelerations, "max_accelerations", len(names))
-        for index, acceleration in enumerate(accelerations):
-            if acceleration <= 0.0:
-                raise _invalid(
-                    "INVALID_PREPARED_MOTION",
-                    f"max_accelerations[{index}] must be positive",
-                )
-        # Validate raw targets (including time/position types) against the plan.
-        verify_reference_plan(
-            self.plan,
-            initial,
-            targets,
-            joints,
-            accelerations,
-        )
-        normalised_targets: list[Target] = []
-        for index, target in enumerate(targets):
-            if not isinstance(target, Target):
-                raise _invalid("INVALID_PREPARED_MOTION", f"targets[{index}] must be a Target")
-            positions = _finite_vector(target.positions, f"targets[{index}].positions", len(names))
-            normalised_targets.append(Target(target.time_ns, positions))
-        if tuple(joint.name for joint in joints) != names:
-            raise _invalid("INVALID_PREPARED_MOTION", "joint_names must match the joints array")
-        object.__setattr__(self, "joint_names", names)
-        object.__setattr__(self, "joints", joints)
-        object.__setattr__(self, "initial_reference", initial)
-        object.__setattr__(self, "targets", tuple(normalised_targets))
-        object.__setattr__(self, "max_accelerations", accelerations)
-        object.__setattr__(self, "profile_digest", str(self.profile_digest))
-
-    @property
-    def final_positions(self) -> tuple[float, ...]:
-        """Original final waypoint; never replaced by a measured opening."""
-        return self.targets[-1].positions
-
-    @property
-    def duration_ns(self) -> int:
-        return self.plan.duration_ns
-
-
-def prepare_motion(
-    initial_reference: Sequence[float],
-    targets: Sequence[Target],
-    profile: RobotProfile,
-    config: PandaControlConfig,
-) -> PreparedMotion:
-    """Compile and verify one motion once, before the physical loop starts."""
-    if not isinstance(profile, RobotProfile):
-        raise _invalid("INVALID_PREPARED_MOTION", "profile must be a RobotProfile")
-    if not isinstance(config, PandaControlConfig):
-        raise _invalid("INVALID_PREPARED_MOTION", "config must be a PandaControlConfig")
-    if tuple(profile.joint_names) != config.joint_names:
-        raise _invalid("PROFILE_MISMATCH", "profile joint order differs from control config")
-    initial = _finite_vector(initial_reference, "initial_reference", len(CONTROL_JOINT_NAMES))
-    target_items = tuple(targets)
-    plan = compile_reference_plan(
-        initial,
-        target_items,
-        profile.joints,
-        config.max_accelerations,
-    )
-    if plan.duration_ns > MAX_HORIZON_NS:
-        raise _invalid("INVALID_PREPARED_MOTION", "plan horizon exceeds the supported maximum")
-    return PreparedMotion(
-        joint_names=tuple(profile.joint_names),
-        joints=tuple(profile.joints),
-        initial_reference=initial,
-        targets=target_items,
-        plan=plan,
-        max_accelerations=config.max_accelerations,
-        profile_digest=profile.digest,
-    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -424,7 +307,6 @@ class NativeMotion:
         self._started_wall_ns: int | None = None
         self._started_sim_ns: int | None = None
         self._last_wall_ns: int | None = None
-        self._prepared: PreparedMotion | None = None
         self._result: MotionResult | None = None
         self._terminal_snapshot: MotionSnapshot | None = None
         self._last_snapshot: MotionSnapshot | None = None
@@ -479,86 +361,6 @@ class NativeMotion:
     def terminal_snapshot(self) -> MotionSnapshot | None:
         self._check_thread()
         return self._terminal_snapshot
-
-    def start(self, prepared: PreparedMotion, wall_time_ns: int) -> MotionSnapshot:
-        """Accept one already verified plan; the first step, not start, is started."""
-        self._check_thread()
-        self._events = []
-        wall = self._validate_wall(wall_time_ns)
-        if not isinstance(prepared, PreparedMotion):
-            raise _invalid("INVALID_PREPARED_MOTION", "prepared must be a PreparedMotion")
-        if self._phase in _ACTIVE_PHASES:
-            raise _invalid("MOTION_ACTIVE", "cannot overlap active/settling/stopping motion")
-        if self._phase is Phase.FAILED:
-            raise _invalid("FAILED_LATCHED", "a failed motion must be reset before a new start")
-        if prepared.joint_names != tuple(self._io.joint_names):
-            raise _invalid("PROFILE_MISMATCH", "prepared joint order differs from PandaIO")
-        if prepared.joint_names != self._config.joint_names:
-            raise _invalid("PROFILE_MISMATCH", "prepared joint order differs from control config")
-        if prepared.joints != tuple(self._io.profile.joints):
-            raise _invalid("PROFILE_MISMATCH", "prepared joints differ from the current profile")
-        if prepared.profile_digest != self._io.profile.digest:
-            raise _invalid(
-                "PROFILE_MISMATCH",
-                "prepared profile digest differs from the current profile",
-            )
-        if prepared.max_accelerations != self._config.max_accelerations:
-            raise _invalid(
-                "PROFILE_MISMATCH", "prepared accelerations differ from the current config"
-            )
-        for index, (initial, hold) in enumerate(
-            zip(prepared.initial_reference, self._hold_positions, strict=True)
-        ):
-            if not math.isclose(initial, hold, rel_tol=0.0, abs_tol=1e-9):
-                raise _invalid(
-                    "INITIAL_REFERENCE_MISMATCH",
-                    f"initial_reference[{index}] {initial!r} does not match hold {hold!r}",
-                )
-        self._accept_wall(wall)
-        # A legacy single-motion start retires any private stream scheduling
-        # state.  The old stream id is retained only to reject stale packages.
-        self._stream = None
-        self._stream_initial_positions = None
-        self._stream_final_positions = None
-        self._stream_final_targets = None
-        self._stream_final_end_ns = None
-        self._tracking_violation_since_ns = None
-        self._tracking_quality = "HOLD"
-        self._contact_unload = {side: ContactUnload() for side in ("left", "right")}
-        self._unloading_axes = frozenset()
-        self._motion_seq += 1
-        self._prepared = prepared
-        self._accepted_wall_ns = wall
-        self._started_wall_ns = None
-        self._started_sim_ns = None
-        self._result = None
-        self._terminal_snapshot = None
-        self._applied = None
-        self._stop_plan = None
-        self._stop_requested_wall_ns = None
-        self._stop_sim_start_ns = None
-        self._stop_reason = None
-        self._latched_failure = None
-        self._stable_since_ns = None
-        self._stable_signature = None
-        self._stop_stable_since_ns = None
-        self._phase = Phase.ACCEPTED
-        measurement = self._io.measure()
-        contacts = self._empty_contacts()
-        reference = _zero_sample(prepared.initial_reference)
-        snapshot = self._build_snapshot(
-            phase=Phase.ACCEPTED,
-            reason="",
-            reference=reference,
-            measurement=measurement,
-            reference_application_sim_time_ns=measurement.sim_time_ns,
-            elapsed_ns=0,
-            stable_for_ns=0,
-            contacts=contacts,
-            reference_kind="HOLD",
-        )
-        self._last_snapshot = snapshot
-        return snapshot
 
     def chunk_anchor(self, start_sim_time_ns: int | None = None) -> ChunkAnchor:
         """Return an immutable preview/successor hand-off anchor.
@@ -635,8 +437,8 @@ class NativeMotion:
             self._io.profile.digest,
         )
 
-    def start_stream(self, first: PreparedStreamChunk, wall_time_ns: int) -> MotionSnapshot:
-        """Admit a first chunk; hold until its aligned start is actually stepped."""
+    def start_stream(self, first: PreparedFollowerPlan, wall_time_ns: int) -> MotionSnapshot:
+        """Admit a first bounded-follower plan and hold until its aligned start."""
         self._check_thread()
         self._events = []
         wall = self._validate_wall(wall_time_ns)
@@ -644,9 +446,8 @@ class NativeMotion:
             raise _invalid(
                 "STREAM_NOT_CONFIGURED", "NativeMotion was created without a stream config"
             )
-        kind = chunk_kind(first)
-        if kind == "CHUNK" and not isinstance(first, PreparedChunk):
-            raise _invalid("INVALID_PREPARED_CHUNK", "first must be a PreparedChunk")
+        if not isinstance(first, PreparedFollowerPlan):
+            raise _invalid("INVALID_PREPARED_CHUNK", "first must be a PreparedFollowerPlan")
         if self._phase in _ACTIVE_PHASES:
             raise _invalid("MOTION_ACTIVE", "cannot overlap active/settling/stopping motion")
         if self._phase is Phase.FAILED:
@@ -671,18 +472,16 @@ class NativeMotion:
             raise _invalid("INVALID_CHUNK_START", "chunk start is not on the physics grid")
         if not grid_aligned(first.end_sim_time_ns, self._step_ns):
             raise _invalid("INVALID_CHUNK_GRID", "chunk end is not on the physics grid")
-        if kind == "FOLLOWER":
-            assert isinstance(first, PreparedFollowerPlan)
-            if first.duration_grid_ns != self._step_ns:
-                raise _invalid(
-                    "FOLLOWER_GRID_REQUIRED",
-                    "physical follower chunks must be prepared on the scene physics grid",
-                )
-            if first.plan.duration_ns % self._step_ns != 0:
-                raise _invalid(
-                    "INVALID_CHUNK_GRID",
-                    "follower plan duration is not a multiple of the physics step",
-                )
+        if first.duration_grid_ns != self._step_ns:
+            raise _invalid(
+                "FOLLOWER_GRID_REQUIRED",
+                "physical follower chunks must be prepared on the scene physics grid",
+            )
+        if first.plan.duration_ns % self._step_ns != 0:
+            raise _invalid(
+                "INVALID_CHUNK_GRID",
+                "follower plan duration is not a multiple of the physics step",
+            )
         now_sim_ns = _sim_time_ns(self._scene.data)
         if first.start_sim_time_ns < now_sim_ns:
             raise _invalid("INVALID_CHUNK_START", "chunk start is in the past")
@@ -710,7 +509,6 @@ class NativeMotion:
 
         self._accept_wall(wall)
         self._motion_seq += 1
-        self._prepared = None
         self._result = None
         self._terminal_snapshot = None
         self._applied = None
@@ -757,7 +555,7 @@ class NativeMotion:
         self._last_snapshot = snapshot
         return snapshot
 
-    def queue_chunk(self, successor: PreparedStreamChunk, wall_time_ns: int) -> ChunkSubmission:
+    def queue_chunk(self, successor: PreparedFollowerPlan, wall_time_ns: int) -> ChunkSubmission:
         """Queue at most one validated future successor at the active chunk end."""
         self._check_thread()
         self._events = []
@@ -766,22 +564,11 @@ class NativeMotion:
             raise _invalid(
                 "STREAM_NOT_CONFIGURED", "NativeMotion was created without a stream config"
             )
-        successor_kind = chunk_kind(successor)
-        if successor_kind == "CHUNK" and not isinstance(successor, PreparedChunk):
-            raise _invalid("INVALID_PREPARED_CHUNK", "successor must be a PreparedChunk")
+        if not isinstance(successor, PreparedFollowerPlan):
+            raise _invalid("INVALID_PREPARED_CHUNK", "successor must be a PreparedFollowerPlan")
         self._accept_wall(wall)
         self._advance_deadlines(wall)
         schedule = self._stream
-        if schedule is not None and schedule.kind != successor_kind:
-            self._events.append(
-                schedule.make_event(
-                    "REJECTED",
-                    successor,
-                    _sim_time_ns(self._scene.data),
-                    "STREAM_MODE_MISMATCH",
-                )
-            )
-            return ChunkSubmission(False, "STREAM_MODE_MISMATCH", self._snapshot_for_call())
         if self._phase in (Phase.STOPPING, *_TERMINAL_PHASES):
             if self._phase is Phase.COMPLETED:
                 reason = "STALE_STREAM"
@@ -821,16 +608,14 @@ class NativeMotion:
             reason = "FINAL_CHUNK"
             self._events.append(schedule.make_event("REJECTED", successor, now_sim_ns, reason))
             return ChunkSubmission(False, reason, self._snapshot_for_call())
-        if successor_kind == "FOLLOWER":
-            assert isinstance(successor, PreparedFollowerPlan)
-            if successor.duration_grid_ns != self._step_ns:
-                reason = "FOLLOWER_GRID_REQUIRED"
-                self._events.append(schedule.make_event("REJECTED", successor, now_sim_ns, reason))
-                return ChunkSubmission(False, reason, self._snapshot_for_call())
-            if successor.plan.duration_ns % self._step_ns != 0:
-                reason = "INVALID_CHUNK_GRID"
-                self._events.append(schedule.make_event("REJECTED", successor, now_sim_ns, reason))
-                return ChunkSubmission(False, reason, self._snapshot_for_call())
+        if successor.duration_grid_ns != self._step_ns:
+            reason = "FOLLOWER_GRID_REQUIRED"
+            self._events.append(schedule.make_event("REJECTED", successor, now_sim_ns, reason))
+            return ChunkSubmission(False, reason, self._snapshot_for_call())
+        if successor.plan.duration_ns % self._step_ns != 0:
+            reason = "INVALID_CHUNK_GRID"
+            self._events.append(schedule.make_event("REJECTED", successor, now_sim_ns, reason))
+            return ChunkSubmission(False, reason, self._snapshot_for_call())
 
         reason, latches = boundary_rejection(
             schedule.active,
@@ -865,64 +650,31 @@ class NativeMotion:
             assert self._terminal_snapshot is not None
             return self._terminal_snapshot
         application_sim_ns = _sim_time_ns(self._scene.data)
+        if self._phase is Phase.STOPPING:
+            return self._step_stop(wall, application_sim_ns)
         if self._stream is not None and self._phase in (
             Phase.ACCEPTED,
             Phase.RUNNING,
             Phase.SETTLING,
         ):
             return self._step_stream(wall, application_sim_ns)
-        return self._step_legacy(wall, application_sim_ns)
+        raise AssertionError("active motion has no stream schedule")
 
-    def _step_legacy(self, wall: int, application_sim_ns: int) -> MotionSnapshot:
-        if self._phase is Phase.STOPPING:
-            if self._stop_plan is None or self._stop_sim_start_ns is None:
-                raise AssertionError("STOPPING without a braking plan and origin")
-            if self._started_sim_ns is None:
-                self._started_sim_ns = application_sim_ns
-                self._started_wall_ns = wall
-            elapsed_ns = application_sim_ns - self._stop_sim_start_ns
-            reference = self._stop_plan.sample(elapsed_ns)
-            reference_kind = "BRAKE"
-        else:
-            if self._prepared is None:
-                raise AssertionError("active motion without a prepared plan")
-            if self._started_sim_ns is None:
-                self._started_sim_ns = application_sim_ns
-                self._started_wall_ns = wall
-            elapsed_ns = application_sim_ns - self._started_sim_ns
-            reference = self._prepared.plan.sample(elapsed_ns)
-            reference_kind = "HOLD" if elapsed_ns > self._prepared.duration_ns else "TRAJECTORY"
-
-        applied = self._apply_and_measure(reference, application_sim_ns, elapsed_ns, reference_kind)
+    def _step_stop(self, wall: int, application_sim_ns: int) -> MotionSnapshot:
+        """Apply one braking reference after an explicit stop request."""
+        if self._stop_plan is None or self._stop_sim_start_ns is None:
+            raise AssertionError("STOPPING without a braking plan and origin")
+        if self._started_sim_ns is None:
+            self._started_sim_ns = application_sim_ns
+            self._started_wall_ns = wall
+        elapsed_ns = application_sim_ns - self._stop_sim_start_ns
+        reference = self._stop_plan.sample(elapsed_ns)
+        applied = self._apply_and_measure(reference, application_sim_ns, elapsed_ns, "BRAKE")
         self._record_progress(applied, wall)
         measurement = applied.measurement
         contacts = applied.contacts
-
-        if self._phase is Phase.ACCEPTED:
-            self._phase = Phase.RUNNING
-        if self._phase in (Phase.RUNNING, Phase.SETTLING):
-            assert self._prepared is not None and self._started_sim_ns is not None
-            horizon_sim_ns = self._started_sim_ns + self._prepared.duration_ns
-            if measurement.sim_time_ns >= horizon_sim_ns:
-                self._phase = Phase.SETTLING
-            completions = self._completions(measurement, contacts)
-            self._update_normal_stability(measurement, completions, horizon_sim_ns)
-            if self._phase in (Phase.RUNNING, Phase.SETTLING):
-                settle_deadline_ns = horizon_sim_ns + self._config.settle_timeout_ns
-                if measurement.sim_time_ns >= settle_deadline_ns:
-                    self._begin_stop(
-                        wall,
-                        StopReason.TRACKING_TIMEOUT,
-                        FailedReason.TRACKING_TIMEOUT,
-                    )
-                    if self._phase is Phase.FAILED:
-                        assert self._terminal_snapshot is not None
-                        return self._terminal_snapshot
-        elif self._phase is Phase.STOPPING:
-            completions = self._completions(measurement, contacts)
-            self._update_stop_stability(measurement, elapsed_ns)
-        else:
-            completions = self._completions(measurement, contacts)
+        completions = self._completions(measurement, contacts)
+        self._update_stop_stability(measurement, elapsed_ns)
 
         if self._phase in _TERMINAL_PHASES:
             assert self._terminal_snapshot is not None
@@ -930,7 +682,7 @@ class NativeMotion:
         assert self._last_snapshot is not None
         snapshot = self._build_snapshot(
             phase=self._phase,
-            reason=self._stop_reason if self._phase is Phase.STOPPING else "",
+            reason=self._stop_reason or "",
             reference=reference,
             measurement=measurement,
             reference_application_sim_time_ns=application_sim_ns,
@@ -938,7 +690,7 @@ class NativeMotion:
             stable_for_ns=self._stable_for_ns(measurement),
             contacts=contacts,
             completions=completions,
-            reference_kind=reference_kind,
+            reference_kind="BRAKE",
         )
         self._last_snapshot = snapshot
         return snapshot
@@ -1009,7 +761,7 @@ class NativeMotion:
         return self._finish_stream_step(wall, applied, kind, first.seq if at_start else None)
 
     def _select_stream_boundary(
-        self, active: PreparedStreamChunk, application_sim_ns: int
+        self, active: PreparedFollowerPlan, application_sim_ns: int
     ) -> _BoundarySelection:
         """Pure choice of endpoint, successor start, or underrun endpoint."""
         schedule = self._stream
@@ -1036,7 +788,7 @@ class NativeMotion:
         self,
         wall: int,
         application_sim_ns: int,
-        active: PreparedStreamChunk,
+        active: PreparedFollowerPlan,
         boundary: _BoundarySelection,
     ) -> None:
         """Apply post-step boundary state/events for the one chosen reference."""
@@ -1046,10 +798,7 @@ class NativeMotion:
             self._phase = Phase.SETTLING
             self._hold_positions = boundary.reference.positions
             self._stream_final_positions = boundary.reference.positions
-            if schedule.kind == "FOLLOWER":
-                self._stream_final_targets = tuple(active.window.targets[-1].positions)
-            else:
-                self._stream_final_targets = boundary.reference.positions
+            self._stream_final_targets = tuple(active.window.targets[-1].positions)
             self._stream_final_end_ns = application_sim_ns
             self._events.append(
                 schedule.make_event("RETIRED", active, application_sim_ns, "FINAL_HOLD")
@@ -1121,13 +870,10 @@ class NativeMotion:
             chunk_seq,
         )
 
-    def _remember_final_chunk(self, chunk: PreparedStreamChunk) -> None:
+    def _remember_final_chunk(self, chunk: PreparedFollowerPlan) -> None:
         end = chunk.plan.sample_interval(chunk.plan.duration_ns)
         self._stream_final_positions = end.positions
-        if chunk_kind(chunk) == "FOLLOWER":
-            self._stream_final_targets = tuple(chunk.window.targets[-1].positions)
-        else:
-            self._stream_final_targets = end.positions
+        self._stream_final_targets = tuple(chunk.window.targets[-1].positions)
         self._stream_final_end_ns = chunk.end_sim_time_ns
 
     def _stream_snapshot(
@@ -1308,8 +1054,6 @@ class NativeMotion:
             if final is None:
                 final = self._hold_positions
             return self._stream_initial_positions, final
-        if self._prepared is not None:
-            return self._prepared.initial_reference, self._prepared.final_positions
         return self._hold_positions, self._hold_positions
 
     def _completions(
@@ -1450,22 +1194,19 @@ class NativeMotion:
             base = _zero_sample(self._hold_positions)
         else:
             base = self._applied.reference
-        if self._stream is not None:
-            canceled = self._stream.cancel_pending()
-            if canceled is not None:
-                self._events.append(
-                    self._stream.make_event(
-                        "CANCELED", canceled, _sim_time_ns(self._scene.data), str(reason)
-                    )
+        assert self._stream is not None
+        canceled = self._stream.cancel_pending()
+        if canceled is not None:
+            self._events.append(
+                self._stream.make_event(
+                    "CANCELED", canceled, _sim_time_ns(self._scene.data), str(reason)
                 )
-            joints = (
-                self._stream.active.joints
-                if self._stream.active is not None
-                else tuple(self._io.profile.joints)
             )
-        else:
-            assert self._prepared is not None
-            joints = self._prepared.joints
+        joints = (
+            self._stream.active.joints
+            if self._stream.active is not None
+            else tuple(self._io.profile.joints)
+        )
         try:
             stop_plan = plan_braking(
                 base.positions,
@@ -1499,57 +1240,35 @@ class NativeMotion:
             return True
         if self._phase in (Phase.ACCEPTED, Phase.RUNNING, Phase.SETTLING):
             assert self._accepted_wall_ns is not None
-            if self._stream is not None and self._stream_config is not None:
-                if wall - self._accepted_wall_ns >= self._stream_config.stream_wall_timeout_ns:
-                    self._begin_stop(wall, StopReason.WALL_TIMEOUT, FailedReason.WALL_TIMEOUT)
-                elif (
-                    self._last_progress_wall_ns is not None
-                    and self._last_progress_sim_ns is not None
-                    and wall - self._last_progress_wall_ns
-                    >= self._stream_config.progress_wall_timeout_ns
-                    and _sim_time_ns(self._scene.data) == self._last_progress_sim_ns
-                ):
-                    self._begin_stop(
-                        wall,
-                        FailedReason.PROGRESS_TIMEOUT.value,
-                        FailedReason.PROGRESS_TIMEOUT.value,
-                    )
-                if (
-                    self._phase in (Phase.RUNNING, Phase.SETTLING)
-                    and self._applied is not None
-                    and self._stream_final_end_ns is not None
-                    and self._applied.measurement.sim_time_ns
-                    >= self._stream_final_end_ns + self._config.settle_timeout_ns
-                ):
-                    self._begin_stop(
-                        wall,
-                        StopReason.TRACKING_TIMEOUT,
-                        FailedReason.TRACKING_TIMEOUT,
-                    )
-                    if self._phase is Phase.FAILED:
-                        return True
-            else:
-                if wall - self._accepted_wall_ns >= self._config.motion_wall_timeout_ns:
-                    self._begin_stop(wall, StopReason.WALL_TIMEOUT, FailedReason.WALL_TIMEOUT)
-                    if self._phase is Phase.FAILED:
-                        return True
-                if (
-                    self._phase in (Phase.RUNNING, Phase.SETTLING)
-                    and self._applied is not None
-                    and self._prepared is not None
-                    and self._started_sim_ns is not None
-                    and self._applied.measurement.sim_time_ns
-                    >= self._started_sim_ns
-                    + self._prepared.duration_ns
-                    + self._config.settle_timeout_ns
-                ):
-                    self._begin_stop(
-                        wall,
-                        StopReason.TRACKING_TIMEOUT,
-                        FailedReason.TRACKING_TIMEOUT,
-                    )
-                    if self._phase is Phase.FAILED:
-                        return True
+            assert self._stream is not None and self._stream_config is not None
+            if wall - self._accepted_wall_ns >= self._stream_config.stream_wall_timeout_ns:
+                self._begin_stop(wall, StopReason.WALL_TIMEOUT, FailedReason.WALL_TIMEOUT)
+            elif (
+                self._last_progress_wall_ns is not None
+                and self._last_progress_sim_ns is not None
+                and wall - self._last_progress_wall_ns
+                >= self._stream_config.progress_wall_timeout_ns
+                and _sim_time_ns(self._scene.data) == self._last_progress_sim_ns
+            ):
+                self._begin_stop(
+                    wall,
+                    FailedReason.PROGRESS_TIMEOUT.value,
+                    FailedReason.PROGRESS_TIMEOUT.value,
+                )
+            if (
+                self._phase in (Phase.RUNNING, Phase.SETTLING)
+                and self._applied is not None
+                and self._stream_final_end_ns is not None
+                and self._applied.measurement.sim_time_ns
+                >= self._stream_final_end_ns + self._config.settle_timeout_ns
+            ):
+                self._begin_stop(
+                    wall,
+                    StopReason.TRACKING_TIMEOUT,
+                    FailedReason.TRACKING_TIMEOUT,
+                )
+                if self._phase is Phase.FAILED:
+                    return True
         if self._phase is Phase.STOPPING:
             assert self._stop_requested_wall_ns is not None
             if wall - self._stop_requested_wall_ns >= self._config.stop_wall_timeout_ns:
@@ -1794,7 +1513,7 @@ class NativeMotion:
         reference_boundary_corrections: tuple[float, ...] = (),
     ) -> MotionSnapshot:
         if completions is None:
-            if self._stream is not None or self._prepared is not None:
+            if self._stream is not None:
                 completions = self._completions(measurement, contacts)
             else:
                 completions = self._hold_completions(measurement, contacts)

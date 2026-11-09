@@ -16,7 +16,7 @@ from concurrent.futures import Future
 
 from robot_contracts.follower_reference import FollowerReference
 from robot_contracts.models import ContractError, RobotProfile, RunContext
-from robot_contracts.native import NATIVE_MOTION, AcceptedReference, NativeRequest
+from robot_contracts.native import NativeRequest
 from robot_contracts.profiles import load_profile
 
 from .backend_config import BackendConfig
@@ -35,11 +35,6 @@ from .follower_protocol import (
 )
 from .kinematics_config import KinematicsCheckConfig, load_kinematics_config
 from .motion_config import PandaControlConfig, load_control_config
-from .protocol import (
-    accepted_reference_from_chunk_status,
-    accepted_reference_from_status,
-    prepare_request,
-)
 from .render_worker import (
     Capture,
     RenderCloseSummary,
@@ -60,7 +55,6 @@ from .task_config import StackTaskConfig, load_task_config, validate_scene_geome
 from .teacher import TeacherChunk, TeacherSnapshot, build_teacher_plan, sample_teacher_chunk
 from .worker_owner import (
     BackendClosed,
-    PlanningFacts,
     SubmitOutcome,
     WorkerFault,
     WorkerSummary,
@@ -71,7 +65,6 @@ from .worker_owner import (
 __all__ = [
     "BackendClosed",
     "NativeWorker",
-    "PlanningFacts",
     "SubmitOutcome",
     "WorkerFault",
     "WorkerSummary",
@@ -98,7 +91,7 @@ class _Planner:
         self._log = log
         self._follower_config: PandaFollowerConfig | None = follower_config
         self._duration_grid_ns = duration_grid_ns
-        self._queue: queue.Queue[tuple[NativeRequest, Future, str]] = queue.Queue(
+        self._queue: queue.Queue[tuple[NativeRequest, Future]] = queue.Queue(
             maxsize=config.planner_queue_capacity
         )
         self._lock = threading.Lock()
@@ -115,17 +108,12 @@ class _Planner:
         with self._lock:
             return self._busy_since_ns
 
-    def submit(self, request: NativeRequest, future: Future, mode: str = "NATIVE") -> None:
+    def submit(self, request: NativeRequest, future: Future) -> None:
         if self._closing.is_set():
             future.set_exception(BackendClosed("planner is closing"))
             return
-        if mode not in ("NATIVE", "FOLLOWER"):
-            future.set_exception(
-                ContractError("INVALID_PLANNER_MODE", f"unknown planner mode: {mode}")
-            )
-            return
         try:
-            self._queue.put_nowait((request, future, mode))
+            self._queue.put_nowait((request, future))
         except queue.Full as error:
             future.set_exception(
                 ContractError("BACKEND_BUSY", "planner queue is full; retry after querying")
@@ -138,13 +126,14 @@ class _Planner:
             self._thread.join(timeout=max(0.0, timeout_s))
         with self._lock:
             active = self._active_future
-        # Resolve the in-flight future even if SciPy cannot be interrupted; the
-        # caller must never wait on a planner that outlives the close budget.
+        # Resolve the in-flight future even if a planner call cannot be
+        # interrupted; the caller must never wait on a planner that outlives the
+        # close budget.
         if active is not None and not active.done():
             active.set_exception(BackendClosed("planner close budget expired"))
         while True:
             try:
-                _request, future, _mode = self._queue.get_nowait()
+                _request, future = self._queue.get_nowait()
             except queue.Empty:
                 break
             if not future.done():
@@ -154,7 +143,7 @@ class _Planner:
     def _run(self) -> None:
         while not self._closing.is_set():
             try:
-                request, future, mode = self._queue.get(timeout=0.05)
+                request, future = self._queue.get(timeout=0.05)
             except queue.Empty:
                 continue
             if not future.set_running_or_notify_cancel():
@@ -163,7 +152,7 @@ class _Planner:
                 self._busy_since_ns = time.monotonic_ns()
                 self._active_future = future
             try:
-                result = self._compile_and_admit(request, mode)
+                result = self._compile_and_admit(request)
                 if not future.done():
                     future.set_result(result)
             except BaseException as error:  # noqa: BLE001 - caller owns the outcome
@@ -174,7 +163,12 @@ class _Planner:
                     self._busy_since_ns = None
                     self._active_future = None
 
-    def _compile_and_admit(self, request: NativeRequest, mode: str) -> SubmitOutcome:
+    def _compile_and_admit(self, request: NativeRequest) -> SubmitOutcome:
+        if self._follower_config is None:
+            raise ContractError(
+                "FOLLOWER_DISABLED",
+                "follower protocol is not enabled by this backend configuration",
+            )
         context = request.command.context
         lookup = self._owner.submit(
             "lookup",
@@ -199,15 +193,10 @@ class _Planner:
                 raise ContractError(
                     "COMMAND_ID_CONFLICT", "same command_id has a different identity"
                 )
-            if mode == "FOLLOWER" and packet.kind != "FOLLOWER":
+            if packet.kind != "FOLLOWER":
                 raise ContractError(
                     "COMMAND_ID_CONFLICT",
-                    "same command_id was accepted through the strict native entry",
-                )
-            if mode == "NATIVE" and packet.kind == "FOLLOWER":
-                raise ContractError(
-                    "COMMAND_ID_CONFLICT",
-                    "same command_id was accepted through the follower entry",
+                    "same command_id was not accepted through the follower entry",
                 )
             # Idempotent replies still pass through the authoritative lease
             # and generation checks; a history lookup is not control authority.
@@ -215,80 +204,13 @@ class _Planner:
             status = reply.status
             if status is None or status.snapshot is None:
                 raise ContractError("RESULT_EXPIRED", "stored command has no immutable snapshot")
-            chunk = None
-            reference = None
-            if packet.kind in ("CHUNK", "FOLLOWER"):
-                prepared = packet.prepared
-                chunk = self._owner.submit(
-                    "query_chunk",
-                    (context, request.command.command_id, prepared.seq),  # type: ignore[union-attr]
-                    self._config.request_timeout_s,
-                )
-            if packet.request is not None:
-                if packet.kind == "FOLLOWER":
-                    if isinstance(chunk, ChunkStatus):
-                        reference = follower_reference_from_chunk_status(
-                            packet.request,
-                            packet,
-                            chunk,
-                            motion_seq=status.motion_seq or 0,
-                        )
-                    else:
-                        reference = follower_reference_from_status(packet.request, packet, status)
-                elif isinstance(chunk, ChunkStatus):
-                    reference = accepted_reference_from_chunk_status(
-                        packet.request,
-                        packet,
-                        chunk,
-                        motion_seq=status.motion_seq or 0,
-                    )
-                else:
-                    reference = accepted_reference_from_status(packet.request, packet, status)
-            return SubmitOutcome(
-                reply=reply,
-                execution=status,
-                chunk=chunk if isinstance(chunk, ChunkStatus) else None,
-                reference=reference,
-                idempotent=True,
-            )
-        facts = self._owner.submit("planning_facts", (), self._config.request_timeout_s)
-        if not isinstance(facts, PlanningFacts):
-            raise ContractError("INVALID_PLANNING_FACTS", "owner did not return planning facts")
-        initial_reference = facts.hold_reference if request.kind == NATIVE_MOTION else None
-        if mode == "FOLLOWER":
-            if self._follower_config is None:
-                raise ContractError(
-                    "FOLLOWER_DISABLED",
-                    "follower protocol is not enabled by this backend configuration",
-                )
-            packet = prepare_follower_request(
-                request,
-                self._profile,
-                self._control_config,
-                self._follower_config,
-                duration_grid_ns=self._duration_grid_ns,
-            )
-        else:
-            packet = prepare_request(
-                request,
-                self._profile,
-                self._control_config,
-                initial_reference=initial_reference,
-            )
-        reply = self._owner.submit("admit", (request, packet), self._config.request_timeout_s)
-        if not isinstance(reply, ControlReply):
-            raise ContractError("INVALID_ADMISSION", "owner returned an invalid reply")
-        status = reply.status
-        chunk = None
-        reference = None
-        if packet.kind in ("CHUNK", "FOLLOWER") and status is not None and reply.accepted:
             chunk = self._owner.submit(
                 "query_chunk",
-                (context, request.command.command_id, packet.prepared.seq),  # type: ignore[union-attr]
+                (context, request.command.command_id, packet.prepared.seq),
                 self._config.request_timeout_s,
             )
-        if reply.accepted and status is not None and packet.request is not None:
-            if packet.kind == "FOLLOWER":
+            reference = None
+            if packet.request is not None:
                 if isinstance(chunk, ChunkStatus):
                     reference = follower_reference_from_chunk_status(
                         packet.request,
@@ -298,15 +220,42 @@ class _Planner:
                     )
                 else:
                     reference = follower_reference_from_status(packet.request, packet, status)
-            elif isinstance(chunk, ChunkStatus):
-                reference = accepted_reference_from_chunk_status(
+            return SubmitOutcome(
+                reply=reply,
+                execution=status,
+                chunk=chunk if isinstance(chunk, ChunkStatus) else None,
+                reference=reference,
+                idempotent=True,
+            )
+        packet = prepare_follower_request(
+            request,
+            self._profile,
+            self._control_config,
+            self._follower_config,
+            duration_grid_ns=self._duration_grid_ns,
+        )
+        reply = self._owner.submit("admit", (request, packet), self._config.request_timeout_s)
+        if not isinstance(reply, ControlReply):
+            raise ContractError("INVALID_ADMISSION", "owner returned an invalid reply")
+        status = reply.status
+        chunk = None
+        reference = None
+        if status is not None and reply.accepted:
+            chunk = self._owner.submit(
+                "query_chunk",
+                (context, request.command.command_id, packet.prepared.seq),
+                self._config.request_timeout_s,
+            )
+        if reply.accepted and status is not None and packet.request is not None:
+            if isinstance(chunk, ChunkStatus):
+                reference = follower_reference_from_chunk_status(
                     packet.request,
                     packet,
                     chunk,
                     motion_seq=status.motion_seq or 0,
                 )
             else:
-                reference = accepted_reference_from_status(packet.request, packet, status)
+                reference = follower_reference_from_status(packet.request, packet, status)
         return SubmitOutcome(
             reply=reply,
             execution=status,
@@ -874,9 +823,6 @@ class NativeWorker:
             (reason,),
         )
 
-    def submit_native(self, request: NativeRequest) -> Future:
-        return self._submit(request, "NATIVE")
-
     def submit_follower(self, request: NativeRequest) -> Future:
         if self.follower_config is None:
             future: Future = Future()
@@ -887,7 +833,7 @@ class NativeWorker:
                 )
             )
             return future
-        return self._submit(request, "FOLLOWER")
+        return self._submit(request)
 
     def prepare_stack_task(
         self,
@@ -1006,7 +952,7 @@ class NativeWorker:
         if self._task_planner is not None:
             self._task_planner.clear_cache()
 
-    def _submit(self, request: NativeRequest, mode: str) -> Future:
+    def _submit(self, request: NativeRequest) -> Future:
         if self._closed:
             future: Future = Future()
             future.set_exception(BackendClosed("backend is closing"))
@@ -1019,7 +965,7 @@ class NativeWorker:
             return future
         future = Future()
         try:
-            self._planner.submit(request, future, mode)
+            self._planner.submit(request, future)
         except queue.Full:
             pass  # the planner already set BACKEND_BUSY on this future
         return future
@@ -1048,15 +994,6 @@ class NativeWorker:
         for _ in range(limit):
             try:
                 items.append(self._owner.events.get_nowait())
-            except queue.Empty:
-                break
-        return tuple(items)
-
-    def accepted_references(self, limit: int = 64) -> tuple[AcceptedReference, ...]:
-        items: list[AcceptedReference] = []
-        for _ in range(limit):
-            try:
-                items.append(self._owner.accepted.get_nowait())
             except queue.Empty:
                 break
         return tuple(items)

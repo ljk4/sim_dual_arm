@@ -6,18 +6,20 @@
     "schema_version": {
       "const": 1
     },
-    "complete": {
-      "type": "boolean"
-    },
-    "test_only": {
-      "const": true
-    },
-    "source": {
-      "const": "mock"
-    },
     "episode_id": {
       "type": "string",
       "minLength": 1
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source": {
+      "type": "string",
+      "minLength": 1
+    },
+    "test_only": {
+      "type": "boolean"
     },
     "robot_profile_hash": {
       "type": "string",
@@ -32,10 +34,12 @@
       "minLength": 1
     },
     "started_at_ns": {
-      "type": "integer"
+      "type": "integer",
+      "minimum": 0
     },
     "ended_at_ns": {
-      "type": "integer"
+      "type": "integer",
+      "minimum": 0
     },
     "message_counts": {
       "type": "object",
@@ -52,8 +56,147 @@
         "pattern": "^[0-9a-f]{64}$"
       }
     },
-    "failure_reason": {
-      "type": "string"
+    "recording": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "complete": {
+          "type": "boolean"
+        },
+        "failure_reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "complete",
+        "failure_reason"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "complete": {
+                "const": true
+              }
+            },
+            "required": [
+              "complete"
+            ]
+          },
+          "then": {
+            "properties": {
+              "failure_reason": {
+                "const": ""
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "complete": {
+                "const": false
+              }
+            },
+            "required": [
+              "complete"
+            ]
+          },
+          "then": {
+            "properties": {
+              "failure_reason": {
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "enum": [
+            "completed",
+            "stopped",
+            "interrupted",
+            "failed"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome",
+        "reason"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "completed"
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          },
+          "then": {
+            "properties": {
+              "reason": {
+                "const": ""
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "enum": [
+                  "stopped",
+                  "interrupted",
+                  "failed"
+                ]
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          },
+          "then": {
+            "properties": {
+              "reason": {
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "enum": [
+            "not_evaluated",
+            "succeeded",
+            "timed_out",
+            "failed"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome",
+        "reason"
+      ]
     },
     "configuration": {
       "type": "object"
@@ -61,10 +204,10 @@
   },
   "required": [
     "schema_version",
-    "complete",
-    "test_only",
-    "source",
     "episode_id",
+    "run_id",
+    "source",
+    "test_only",
     "robot_profile_hash",
     "observation_schema_hash",
     "action_schema_hash",
@@ -72,7 +215,9 @@
     "ended_at_ns",
     "message_counts",
     "files",
-    "failure_reason",
+    "recording",
+    "runtime",
+    "task",
     "configuration"
   ]
 }

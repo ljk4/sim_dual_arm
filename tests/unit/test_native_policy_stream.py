@@ -16,7 +16,7 @@ from robot_contracts.models import ContractError, RunContext
 from robot_contracts.reference import ReferenceSample
 
 ROOT = Path(__file__).resolve().parents[2]
-POLICY_CONFIG = ROOT / "runtime/ros2/configs/native_policy.yaml"
+POLICY_CONFIG = ROOT / "tests/fixtures/simulation/native_policy_unit.yaml"
 
 
 class _Image:
@@ -211,6 +211,7 @@ def policy_configuration(tmp_path, *, settle_ns, startup_timeout_s=None):
     ):
         value[field] = str((POLICY_CONFIG.parent / value[field]).resolve())
     value["policy"]["startup_settle_sim_ns"] = settle_ns
+    value["policy"]["max_chunks"] = 8
     if startup_timeout_s is not None:
         value["startup_timeout_s"] = startup_timeout_s
     path = tmp_path / "native_policy.yaml"
@@ -237,10 +238,8 @@ def _runner(configuration, io, control, log=None, *, stop=None, clock=None):
     )
 
 
-def test_eight_chunks_use_fresh_captures_keep_raw_60_and_settle_only_last():
-    configuration = load_native_configuration(
-        ROOT / "runtime/ros2/configs/native_policy.yaml", ROOT
-    )
+def test_eight_chunks_use_fresh_captures_keep_raw_60_and_settle_only_last(tmp_path):
+    configuration = policy_configuration(tmp_path, settle_ns=0)
     profile = configuration.profile
     policy = configuration.recipe.policy
     context = RunContext("panda_stack", profile.digest, "backend", "sim", 1, "episode", 1)
@@ -262,20 +261,21 @@ def test_eight_chunks_use_fresh_captures_keep_raw_60_and_settle_only_last():
     assert len(io.commands) == 8
     assert [command.trajectory.observation_id for command in io.commands] == list(range(1, 9))
     assert all(len(command.trajectory.targets) == 60 for command in io.commands)
-    assert all(command.target_count == 5 for command in io.commands)
+    assert all(command.target_count == policy.target_count for command in io.commands)
     assert io.commands[0].kind == 2
     assert all(command.kind == 3 for command in io.commands[1:])
     assert not any(command.settle_at_end for command in io.commands[:-1])
     assert io.commands[-1].settle_at_end is True
     assert all(
-        command.window is not None and len(command.window.selected_indices) == 5
+        command.window is not None
+        and len(command.window.selected_indices) == policy.target_count
         for command in io.commands
     )
     assert all(command.trajectory.targets[0].time_ns == 50_000_000 for command in io.commands)
 
 
-def test_zero_startup_settle_consumes_no_extra_observation(monkeypatch):
-    configuration = load_native_configuration(POLICY_CONFIG, ROOT)
+def test_zero_startup_settle_consumes_no_extra_observation(tmp_path, monkeypatch):
+    configuration = policy_configuration(tmp_path, settle_ns=0)
     profile = configuration.profile
     assert configuration.recipe.policy.startup_settle_sim_ns == 0
     io = _IO(profile)

@@ -54,7 +54,8 @@ def test_follower_config_resolves_relative_follower_file_and_queue():
     assert config.follower_path == FOLLOWER_PARAMS.resolve()
     assert config.follower_reference_queue_capacity == 64
     assert load_follower_config(config.follower_path).target_count == 5
-    assert config.scene_path == (ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml").resolve()
+    expected_scene = ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml"
+    assert config.scene_path == expected_scene.resolve()
 
 
 def test_missing_follower_file_is_rejected_not_disabled(tmp_path):

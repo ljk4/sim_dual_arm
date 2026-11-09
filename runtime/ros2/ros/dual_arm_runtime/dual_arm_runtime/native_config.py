@@ -29,7 +29,7 @@ from dual_arm_runtime.recording_queue import RecordingSettings
 
 MIN_LEASE_DURATION_NS = 100_000_000
 MAX_LEASE_DURATION_NS = 10_000_000_000
-_ACTION_SOURCES = ("diagnostic_motion", "policy", "teacher")
+_ACTION_SOURCES = ("policy", "teacher")
 _TERMINATION_MODES = ("finite_chunks", "task")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _POLICY_DEFAULTS = {
@@ -52,14 +52,14 @@ _POLICY_DEFAULTS = {
     "task_sim_budget_ns": 30_000_000_000,
 }
 _REQUIRED_CAPABILITIES = (
-    "native_motion",
+    "continuous_chunks",
     "exact_capture",
     "simulation_reset",
     "lease",
     "stop",
     "command_query",
     "native_events",
-    "accepted_reference",
+    "follower_reference",
 )
 
 
@@ -230,7 +230,7 @@ class NativeRecipe:
     observation: NativeObservation
     control: NativeControl
     motions: tuple[NativeMotion, ...]
-    action_source: str = "diagnostic_motion"
+    action_source: str = "policy"
     follower: NativeFollower | None = None
     policy: NativePolicy | None = None
     teacher: NativeTeacher | None = None
@@ -802,7 +802,7 @@ def load_native_configuration(config_path: Path, project_root: Path) -> NativeCo
         ),
     )
     action_source = _text(
-        document.get("action_source", "diagnostic_motion"),
+        _required(document, "action_source", location),
         f"{location}.action_source",
     )
     if action_source not in _ACTION_SOURCES:
@@ -820,16 +820,11 @@ def load_native_configuration(config_path: Path, project_root: Path) -> NativeCo
         raise _error(f"{location}.policy", "policy section requires action_source=policy")
     if action_source != "teacher" and teacher is not None:
         raise _error(f"{location}.teacher", "teacher section requires action_source=teacher")
-    motions = _build_motions(
-        document,
-        location,
-        profile,
-        allow_empty=action_source in {"policy", "teacher"},
-    )
-    if motions and command_timeout_s <= max(motion.duration_ns for motion in motions) / 1e9:
+    motions = _build_motions(document, location, profile, allow_empty=True)
+    if motions:
         raise _error(
-            f"{location}.command_timeout_s",
-            "must exceed every configured motion duration",
+            f"{location}.motions",
+            "must be empty; the streaming runtime has no diagnostic motions",
         )
     if control.terminal_timeout_s <= command_timeout_s:
         raise _error(

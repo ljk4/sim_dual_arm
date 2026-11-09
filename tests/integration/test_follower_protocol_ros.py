@@ -15,11 +15,9 @@ import pytest
 try:
     import rclpy
     from rclpy.serialization import deserialize_message, serialize_message
-    from robot_api_msgs.msg import AcceptedReference as AcceptedReferenceMessage
     from robot_api_msgs.msg import FollowerReference as FollowerReferenceMessage
     from robot_api_msgs.srv import (
         GetNativeAnchor,
-        QueryNativeChunk,
         QueryNativeCommand,
         SubmitFollower,
     )
@@ -157,15 +155,6 @@ def _query(stack: Stack, context: RunContext, command_id: str):
     )
 
 
-def _query_chunk(stack: Stack, context: RunContext, command_id: str, seq: int):
-    return stack.call(
-        "query_native_chunk",
-        QueryNativeChunk.Request(
-            context=context_message(context), command_id=command_id, chunk_seq=seq
-        ),
-    )
-
-
 def test_follower_reference_really_serializes_and_roundtrips():
     anchor_start = 1_000_000_000
     anchor = ChunkAnchor(
@@ -246,17 +235,10 @@ class FollowerStack(Stack):
     def __init__(self, tmp_path: Path) -> None:
         super().__init__(tmp_path, speed=1.0, config_path=FOLLOWER_CONFIG)
         self.follower_references: list[FollowerReferenceMessage] = []
-        self.accepted_references: list[AcceptedReferenceMessage] = []
         self.node.create_subscription(
             FollowerReferenceMessage,
             f"{self.namespace}/follower_references",
             self.follower_references.append,
-            10,
-        )
-        self.node.create_subscription(
-            AcceptedReferenceMessage,
-            f"{self.namespace}/accepted_references",
-            self.accepted_references.append,
             10,
         )
         self.clients["submit_follower"] = self.node.create_client(
@@ -332,7 +314,6 @@ def test_three_follower_blocks_over_real_ros_services(tmp_path):
             lambda: (
                 (response := _query(stack, context, "command-follower-ros")).success
                 and response.execution.has_started
-                and _query_chunk(stack, context, "command-follower-ros", 1).success
             ),
             timeout=20.0,
         )
@@ -363,8 +344,8 @@ def test_three_follower_blocks_over_real_ros_services(tmp_path):
 
         stack.wait_for(
             lambda: (
-                _query_chunk(stack, context, "command-follower-ros", 2).chunk.phase
-                == "STARTED"
+                (response := _query(stack, context, "command-follower-ros")).success
+                and response.execution.chunk_seq == 2
             ),
             timeout=20.0,
         )
@@ -403,14 +384,6 @@ def test_three_follower_blocks_over_real_ros_services(tmp_path):
             timeout=40.0,
         )
         assert terminal.execution.phase == "COMPLETED", terminal.execution.reason
-        chunk_phases = {
-            seq: _query_chunk(stack, context, "command-follower-ros", seq).chunk.phase
-            for seq in (1, 2, 3)
-        }
-        assert chunk_phases[1] == "RETIRED"
-        assert chunk_phases[2] == "RETIRED"
-        assert chunk_phases[3] == "RETIRED"
-
         records = {
             record.chunk_seq: record
             for record in (first_record, second_record, third_record)
@@ -428,7 +401,6 @@ def test_three_follower_blocks_over_real_ros_services(tmp_path):
         stack.wait_for(lambda: len(stack.follower_references) >= 3, timeout=10.0)
         published = [follower_reference_from_message(item) for item in stack.follower_references]
         assert {item.chunk_seq for item in published} == {1, 2, 3}
-        assert stack.accepted_references == []
     finally:
         code = stack.close()
         assert code == 0, stack._output()

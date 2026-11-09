@@ -4,8 +4,7 @@
 # user/working_dir/init/restart/stop_grace_period：容器运行身份、目录和生命周期。
 # runtime/gpus：NVIDIA 容器运行时和 GPU 请求。
 # env_file：仿真环境变量文件。
-# environment：X11 DISPLAY 和 XAUTHORITY，仅 viewer 使用。
-# volumes：源码、契约、profile、依赖、数据、ROS SDK 及 X11 socket 挂载。
+# volumes：源码、契约、profile、依赖、数据和 ROS SDK 挂载。
 # networks：接入 ros 网络。
 # Run docker compose from this directory.
 name: sim-dual-arm
@@ -23,18 +22,10 @@ services:
     runtime: nvidia
     gpus: all
     env_file: ../configs/container.env
-    # Optional host X11 access for the live MuJoCo viewer.  The backend itself
-    # remains headless; only `scripts/run.sh viewer` uses this display.
-    environment:
-      DISPLAY: ${DISPLAY:-}
-      XAUTHORITY: /tmp/.Xauthority
     volumes:
-      - /tmp/.X11-unix:/tmp/.X11-unix:rw
-      - ${XAUTHORITY:-/dev/null}:/tmp/.Xauthority:ro
       - ../:/app:ro
       - ../../../contracts:/contracts:ro
       - ../../../profiles:/profiles:ro
-      - ../../../libraries/backend_core/src:/deps/backend_core:ro
       - ../../../libraries/ros_support/src:/deps/ros_support:ro
       - ../../../libraries/run_logging/src:/deps/run_logging:ro
       - ../../../infrastructure/docker/setup.sh:/config/setup.sh:ro

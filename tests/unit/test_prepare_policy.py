@@ -24,7 +24,7 @@ def test_prepare_policy_uses_real_verified_bundle_and_new_output(tmp_path):
     bundle = make_act_bundle(tmp_path / "bundle", synthetic=True)
     output = tmp_path / "prepared"
     manifest = prepare_policy.prepare_policy(
-        template=ROOT / "learning/lerobot/configs/act_policy.yaml",
+        template=ROOT / "learning/lerobot/configs/act_policy_temporal.yaml",
         bundle=bundle,
         run_id="policy-1",
         output=output,
@@ -52,7 +52,7 @@ def test_prepare_policy_uses_real_verified_bundle_and_new_output(tmp_path):
     assert "/workspace/profiles/robots/panda_stack_learning_v1/profile.json" in policy
     with pytest.raises(prepare_policy.PrepareError, match="refusing to overwrite"):
         prepare_policy.prepare_policy(
-            template=ROOT / "learning/lerobot/configs/act_policy.yaml",
+            template=ROOT / "learning/lerobot/configs/act_policy_temporal.yaml",
             bundle=bundle,
             run_id="policy-2",
             output=output,
@@ -64,7 +64,7 @@ def test_prepare_policy_rejects_missing_or_synthetic_formal_bundle(tmp_path):
     missing = tmp_path / "missing"
     with pytest.raises(ActContractError, match="bundle directory is missing"):
         prepare_policy.prepare_policy(
-            template=ROOT / "learning/lerobot/configs/act_policy.yaml",
+            template=ROOT / "learning/lerobot/configs/act_policy_temporal.yaml",
             bundle=missing,
             run_id="bad",
             output=tmp_path / "out",
@@ -78,7 +78,7 @@ def test_prepare_policy_rejects_missing_or_synthetic_formal_bundle(tmp_path):
     bundle = make_act_bundle(tmp_path / "bundle", synthetic=True)
     with pytest.raises(ActContractError, match="synthetic"):
         prepare_policy.prepare_policy(
-            template=ROOT / "learning/lerobot/configs/act_policy.yaml",
+            template=ROOT / "learning/lerobot/configs/act_policy_temporal.yaml",
             bundle=bundle,
             run_id="formal",
             output=tmp_path / "formal-out",

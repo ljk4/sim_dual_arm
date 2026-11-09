@@ -23,14 +23,12 @@ from rclpy.task import Future
 from robot_api_msgs.srv import (
     AcquireControl,
     GetNativeAnchor,
-    QueryNativeChunk,
     QueryNativeCommand,
     ReleaseControl,
     RenewControl,
     ResetSimulation,
     Stop,
     SubmitFollower,
-    SubmitNative,
 )
 from robot_contracts.action_chunks import ChunkAnchor
 from robot_contracts.follower_reference import (
@@ -44,15 +42,12 @@ from robot_contracts.models import ContractError, RobotProfile, RunContext
 from robot_contracts.native import (
     NATIVE_STREAM_FIRST,
     NATIVE_STREAM_NEXT,
-    AcceptedReference,
     NativeExecution,
     NativeRequest,
-    validate_accepted_reference,
 )
 from robot_ros_support.conversions import context_from_message, context_message, duration
 from robot_ros_support.follower_conversions import follower_reference_from_message
 from robot_ros_support.native_conversions import (
-    accepted_reference_from_message,
     anchor_from_message,
     native_chunk_status_from_message,
     native_command_message,
@@ -69,7 +64,6 @@ _ServiceResponse = (
     | RenewControl.Response
     | ReleaseControl.Response
     | Stop.Response
-    | SubmitNative.Response
     | QueryNativeCommand.Response
     | ResetSimulation.Response
 )
@@ -78,17 +72,6 @@ _ServiceResponse = (
 class _SuccessResponse(Protocol):
     success: bool
     reason: str
-
-
-@dataclass(frozen=True)
-class NativeSubmitResult:
-    """One accepted native command with the real backend evidence."""
-
-    request: NativeRequest
-    reference: AcceptedReference
-    execution: NativeExecution
-    queried: bool
-    submit_attempts: int
 
 
 @dataclass(frozen=True)
@@ -150,11 +133,9 @@ class NativeControlClient:
             (RenewControl, "renew_control"),
             (ReleaseControl, "release_control"),
             (Stop, "stop"),
-            (SubmitNative, "submit_native"),
             (SubmitFollower, "submit_follower"),
             (GetNativeAnchor, "get_native_anchor"),
             (QueryNativeCommand, "query_native_command"),
-            (QueryNativeChunk, "query_native_chunk"),
             (ResetSimulation, "reset_simulation"),
         ):
             self._clients[name] = node.create_client(
@@ -316,123 +297,6 @@ class NativeControlClient:
 
     # ---- Native commands ----------------------------------------------------------
 
-    def submit(self, request: NativeRequest) -> NativeSubmitResult:
-        """Submit once and query the same ID on a timeout/unknown outcome."""
-        if not isinstance(request, NativeRequest):
-            raise ContractError("INVALID_NATIVE_REQUEST", "request must be a NativeRequest")
-        check_health(self._log)
-        if self._stop_requested.is_set():
-            raise ContractError("EPISODE_STOPPED", "native submit stopped")
-        context = request.trajectory.context
-        command_id = request.trajectory.command_id
-        if context != self.lease_context or request.trajectory.lease_id != self.lease_id:
-            raise ContractError("STALE_CONTEXT", "native request does not own the current lease")
-        event_context = self._event_context(context, command_id=command_id)
-        self._emit(
-            "native.command.submit_requested",
-            reason="NATIVE_SUBMIT_REQUESTED",
-            context=event_context,
-            fields={
-                "kind": request.mode,
-                "command_seq": request.trajectory.command_seq,
-                "observation_id": request.trajectory.observation_id,
-                "target_count": len(request.trajectory.targets),
-            },
-        )
-        attempts = 1 + self._recipe.control.submit_query_retries
-        unknown_reason = ""
-        for attempt in range(1, attempts + 1):
-            if attempt == 1:
-                try:
-                    response = cast(
-                        SubmitNative.Response,
-                        self._call(
-                            "submit_native",
-                            SubmitNative.Request(request=native_command_message(request)),
-                            # Once sent, resolve the bounded ACK even if End
-                            # arrives. Abandoning it loses whether Stop must
-                            # wait for this command's execution facts.
-                            cleanup=True,
-                            require_success=False,
-                        ),
-                    )
-                except ContractError as error:
-                    if error.reason == "EPISODE_STOPPED":
-                        raise
-                    unknown_reason = f"OUTCOME_UNKNOWN: {error}"
-                    response = None
-                except Exception as error:
-                    unknown_reason = f"OUTCOME_UNKNOWN: {error}"
-                    response = None
-                if response is not None:
-                    if response.accepted:
-                        return self._accepted(request, response, queried=False, attempts=attempt)
-                    if not _unknown_reason(response.reason):
-                        raise ContractError(
-                            response.reason or "NATIVE_REJECTED", "native submit rejected"
-                        )
-                    unknown_reason = response.reason
-            try:
-                execution = self.query(context, command_id, request=request)
-            except ContractError as error:
-                if error.reason == "EPISODE_STOPPED":
-                    raise
-                unknown_reason = f"{unknown_reason}; query: {error}"
-                if attempt < attempts:
-                    time.sleep(self._recipe.control.poll_interval_s)
-                continue
-            self._emit(
-                "native.command.query_recovered",
-                level="WARNING",
-                reason="NATIVE_SUBMIT_OUTCOME_QUERIED",
-                context=event_context,
-                fields={"attempt": attempt, "phase": execution.phase},
-            )
-            raise ContractError(
-                "REFERENCE_UNAVAILABLE",
-                f"command {command_id} was found by query but its accepted reference "
-                "payload cannot be recovered",
-            )
-        raise ContractError(
-            "OUTCOME_UNKNOWN",
-            f"native command {command_id} could not be confirmed: {unknown_reason}",
-        )
-
-    def _accepted(
-        self,
-        request: NativeRequest,
-        response: SubmitNative.Response,
-        *,
-        queried: bool,
-        attempts: int,
-    ) -> NativeSubmitResult:
-        context = request.trajectory.context
-        command_id = request.trajectory.command_id
-        if not response.has_reference:
-            raise ContractError(
-                "INVALID_REFERENCE_RECORD", "accepted native motion has no reference"
-            )
-        reference = accepted_reference_from_message(response.reference)
-        self._validate_reference(request, reference)
-        if not response.has_execution:
-            execution = self.query(context, command_id, request=request)
-        else:
-            execution = native_execution_from_message(response.execution)
-            self._validate_execution(request, execution)
-        self._emit(
-            "native.command.accepted",
-            reason="NATIVE_ACCEPTED",
-            context=self._event_context(context, command_id=command_id),
-            fields={
-                "kind": request.mode,
-                "queried": queried,
-                "attempts": attempts,
-                "reference_digest": reference.reference_digest,
-                "phase": execution.phase,
-            },
-        )
-        return NativeSubmitResult(request, reference, execution, queried, attempts)
-
     def query(
         self,
         context: RunContext,
@@ -458,11 +322,6 @@ class NativeControlClient:
             if execution.context != context or execution.command_id != command_id:
                 raise ContractError("STALE_CONTEXT", "native query identity differs")
         return execution
-
-    def _validate_reference(self, request: NativeRequest, reference: AcceptedReference) -> None:
-        if reference.request != request:
-            raise ContractError("REFERENCE_REQUEST_MISMATCH", "accepted reference request differs")
-        validate_accepted_reference(reference, self._profile, self._max_accelerations)
 
     def _validate_execution(self, request: NativeRequest, execution: NativeExecution) -> None:
         # Overall execution keeps the first block's observation identity even
@@ -592,7 +451,6 @@ class NativeControlClient:
             # resend the identical request so idempotence returns the original
             # FollowerReference rather than a new acceptance fact.
             try:
-                self._query_follower_chunk(request)
                 self.query(context, command_id, request=request, ignore_stop=True)
                 queried = True
             except ContractError as error:
@@ -627,11 +485,11 @@ class NativeControlClient:
         else:
             execution = native_execution_from_message(response.execution)
             self._validate_execution(request, execution)
-        chunk = (
-            native_chunk_status_from_message(response.chunk)
-            if response.has_chunk
-            else self._query_follower_chunk(request)
-        )
+        if not response.has_chunk:
+            raise ContractError(
+                "INVALID_FOLLOWER_RECEIPT", "accepted follower block has no chunk status"
+            )
+        chunk = native_chunk_status_from_message(response.chunk)
         trajectory = request.trajectory
         if (
             chunk.context != trajectory.context
@@ -661,32 +519,6 @@ class NativeControlClient:
             },
         )
         return NativeFollowerSubmitResult(request, reference, execution, queried, attempts)
-
-    def _query_follower_chunk(self, request: NativeRequest):
-        if request.anchor is None:
-            raise ContractError("INVALID_FOLLOWER_REQUEST", "chunk anchor is absent")
-        response = cast(
-            QueryNativeChunk.Response,
-            self._call(
-                "query_native_chunk",
-                QueryNativeChunk.Request(
-                    context=context_message(request.trajectory.context),
-                    command_id=request.trajectory.command_id,
-                    chunk_seq=request.anchor.predecessor_seq + 1,
-                ),
-                cleanup=True,
-            ),
-        )
-        chunk = native_chunk_status_from_message(response.chunk)
-        if (
-            chunk.context != request.trajectory.context
-            or chunk.command_id != request.trajectory.command_id
-            or chunk.command_seq != request.trajectory.command_seq
-            or chunk.observation_id != request.trajectory.observation_id
-            or chunk.chunk_seq != request.anchor.predecessor_seq + 1
-        ):
-            raise ContractError("INVALID_FOLLOWER_RECEIPT", "chunk query identity differs")
-        return chunk
 
     def _validate_follower_reference(
         self, request: NativeRequest, reference: FollowerReference

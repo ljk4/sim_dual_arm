@@ -10,8 +10,8 @@ ROOT="${PROJECT_ROOT:-$SCRIPT_ROOT}"
 DATA_ROOT="${DATA_ROOT:-/data}"
 ROS_SDK="${ROS_SDK_ROOT:-/opt/ros-dev}"
 POLICY_SDK="${POLICY_SDK_ROOT:-/opt/policy-sdk}"
-DEFAULT_RUNTIME_CONFIG="$ROOT/runtime/ros2/configs/native_collect.yaml"
-DEFAULT_POLICY_CONFIG="$ROOT/runtime/ros2/configs/native_policy.yaml"
+DEFAULT_RUNTIME_CONFIG="$ROOT/runtime/ros2/configs/native_teacher.yaml"
+DEFAULT_POLICY_CONFIG="$ROOT/runtime/ros2/configs/native_task_act_chunked.yaml"
 
 has_help=false
 for argument in "$@"; do
@@ -64,8 +64,6 @@ commands:
   collect         run one native ROS collection (requires --output)
   policy          run one native policy execution (requires --output)
   interactive     prompt, reset via episode start, run one policy episode, hold until Ctrl-C
-  control         use the public runtime status/start/end client
-  audit           inspect one committed episode (audit.main dispatches native v3)
   export          export one episode to labels/RGB/quality (stack_export.py)
   campaign        reserve and run one budgeted campaign attempt (stack_campaign.py)
   evaluate        build a read-only evaluation report (stack_evaluate.py)
@@ -76,10 +74,8 @@ Examples:
   runtime/ros2/scripts/run.sh build-policy-sdk
   runtime/ros2/scripts/run.sh prepare --help
   runtime/ros2/scripts/run.sh collect --config \
-    /workspace/runtime/ros2/configs/native_collect.yaml \
+    /workspace/runtime/ros2/configs/native_teacher.yaml \
     --run-id collect-001 --output /data/raw/collect-001
-  runtime/ros2/scripts/run.sh control --run-id dev-001 status
-  runtime/ros2/scripts/run.sh audit /data/raw/collect-001
   runtime/ros2/scripts/run.sh export --episode-dir /data/raw/e-001 \
     --out /data/exports/e-001
   runtime/ros2/scripts/run.sh test -q tests/unit
@@ -221,17 +217,6 @@ case "$command" in
       --episode-id "$run_id" \
       --output "$output_root/$run_id" \
       "${seed_args[@]}"
-    ;;
-  control)
-    check_ros_sdk
-    if [[ -n "${NATIVE_RUN_ID:-}" ]]; then
-      exec python3 -m dual_arm_runtime.cli --run-id "$NATIVE_RUN_ID" "$@"
-    fi
-    exec python3 -m dual_arm_runtime.cli "$@"
-    ;;
-  audit)
-    check_ros_sdk
-    exec python3 -m dual_arm_runtime.audit "$@"
     ;;
   export)
     check_ros_sdk

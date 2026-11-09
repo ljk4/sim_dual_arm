@@ -25,8 +25,6 @@ _SOURCE_DIRECTORIES = (
     "contracts",
     "profiles",
     "scripts",
-    # The mock backend is executable application code stored as a test fixture.
-    "tests/doubles/ros/mock_robot_backend",
 )
 _SOURCE_FILES = ("pyproject.toml",)
 _EXCLUDED_PARTS = frozenset(

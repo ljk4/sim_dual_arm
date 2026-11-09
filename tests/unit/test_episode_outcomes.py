@@ -20,16 +20,10 @@ ROOT = Path(__file__).resolve().parents[2]
 def test_manifest_schema_selection_is_an_explicit_version_mapping(tmp_path):
     base = tmp_path / "schemas"
     assert manifest_schema_path(base, 1) == base / "v1/episode_manifest.schema.json"
-    assert manifest_schema_path(base, 2) == base / "v2/episode_manifest.schema.json"
-    assert manifest_schema_path(base / "v2", 2) == base / "v2/episode_manifest.schema.json"
-    assert manifest_schema_path(base, 3) == base / "v3/episode_manifest.schema.json"
-    assert manifest_schema_path(base / "v3", 3) == base / "v3/episode_manifest.schema.json"
-    assert manifest_schema_path(base, 4) == base / "v4/episode_manifest.schema.json"
-    for version in (0, 5, True, "2"):
+    assert manifest_schema_path(base / "v1", 1) == base / "v1/episode_manifest.schema.json"
+    for version in (0, 2, 3, 4, True, "1"):
         with pytest.raises(ContractError, match="UNSUPPORTED_SCHEMA_VERSION"):
             manifest_schema_path(base, version)
-    with pytest.raises(ContractError, match="does not match version"):
-        manifest_schema_path(base / "v1", 2)
 
 
 def test_runtime_result_rejects_ambiguous_completed_and_missing_reason():
@@ -46,10 +40,10 @@ def test_runtime_result_rejects_ambiguous_completed_and_missing_reason():
         RecordingResult(False, "")
 
 
-def test_v2_schema_separates_dimensions_and_rejects_legacy_alias():
-    schema = ROOT / "contracts/schemas/v2/episode_manifest.schema.json"
+def test_v1_schema_separates_dimensions_and_rejects_legacy_alias():
+    schema = ROOT / "contracts/schemas/v1/episode_manifest.schema.json"
     manifest = {
-        "schema_version": 2,
+        "schema_version": 1,
         "episode_id": "episode-test",
         "run_id": "run-test",
         "source": "mock",

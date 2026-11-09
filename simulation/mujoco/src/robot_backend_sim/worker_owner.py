@@ -19,11 +19,7 @@ from typing import Protocol
 
 from robot_contracts.follower_reference import FollowerReference
 from robot_contracts.models import ContractError, RobotProfile, RunContext
-from robot_contracts.native import (
-    NATIVE_STREAM_NEXT,
-    AcceptedReference,
-    NativeRequest,
-)
+from robot_contracts.native import NATIVE_STREAM_NEXT, NativeRequest
 
 from .backend_config import BackendConfig
 from .control import NativeController
@@ -40,10 +36,6 @@ from .kinematics import extract_object_pose
 from .motion import Phase
 from .motion_config import PandaControlConfig
 from .panda_io import PandaIO
-from .protocol import (
-    accepted_reference_from_chunk_status,
-    accepted_reference_from_status,
-)
 from .render_worker import (
     Capture,
     RenderedCapture,
@@ -67,7 +59,6 @@ from .teacher import TeacherFeedback, TeacherProgress
 
 __all__ = [
     "BackendClosed",
-    "PlanningFacts",
     "SubmitOutcome",
     "WorkerFault",
     "WorkerSummary",
@@ -93,23 +84,13 @@ class WorkerFault:
 
 
 @dataclass(frozen=True, slots=True)
-class PlanningFacts:
-    """Immutable inputs the planner may use; never a live scene/controller."""
-
-    context: RunContext
-    phase: Phase
-    hold_reference: tuple[float, ...]
-    motion_seq: int
-
-
-@dataclass(frozen=True, slots=True)
 class SubmitOutcome:
-    """Successful admission result for one SubmitNative service call."""
+    """Successful admission result for one SubmitFollower service call."""
 
     reply: ControlReply
     execution: ControlStatus | None
     chunk: ChunkStatus | None
-    reference: AcceptedReference | FollowerReference | None
+    reference: FollowerReference | None
     idempotent: bool
 
 
@@ -194,9 +175,6 @@ class _Owner:
         self._captures: queue.Queue[Capture] = queue.Queue(maxsize=config.capture_queue_capacity)
         self._feedback = FeedbackMailbox(config.feedback_queue_capacity)
         self._events: queue.Queue[ControlEvent] = queue.Queue(maxsize=config.event_queue_capacity)
-        self._accepted: queue.Queue[AcceptedReference] = queue.Queue(
-            maxsize=config.accepted_reference_queue_capacity
-        )
         self._follower_references: queue.Queue[FollowerReference] = queue.Queue(
             maxsize=config.follower_reference_queue_capacity
         )
@@ -247,10 +225,6 @@ class _Owner:
     @property
     def events(self) -> queue.Queue[ControlEvent]:
         return self._events
-
-    @property
-    def accepted(self) -> queue.Queue[object]:
-        return self._accepted
 
     @property
     def follower_references(self) -> queue.Queue[FollowerReference]:
@@ -450,13 +424,6 @@ class _Owner:
             if self._stack is not None:
                 self._stack.fail_control(f"CONTROL_STOPPED:{reason}")
             return self._record_reply(controller, reply)
-        if name == "planning_facts":
-            return PlanningFacts(
-                context=controller.context,
-                phase=controller.phase,
-                hold_reference=controller.hold_reference(),
-                motion_seq=0,
-            )
         if name == "lookup":
             context, command_id, chunk_seq = payload
             packet = controller.prepared_command(context, command_id, chunk_seq)  # type: ignore[arg-type]
@@ -914,12 +881,6 @@ class _Owner:
         original = controller.prepared_command(
             request.command.context, request.command.command_id, chunk_seq
         )
-        if packet.kind == "MOTION" and original is None:
-            if packet.prepared.initial_reference != controller.hold_reference():  # type: ignore[union-attr]
-                raise ContractError(
-                    "INITIAL_REFERENCE_MISMATCH",
-                    "planner did not use the owner's current last-hold reference",
-                )
         reply = (
             controller.submit(packet, time.monotonic_ns())
             if request.kind != NATIVE_STREAM_NEXT
@@ -934,26 +895,16 @@ class _Owner:
             and status is not None
             and packet.request is not None
         ):
-            if packet.kind in ("CHUNK", "FOLLOWER"):
-                prepared = packet.prepared
-                chunk = controller.query_chunk(
-                    packet.command.context,
-                    packet.command.command_id,
-                    prepared.seq,  # type: ignore[union-attr]
-                )
-                if packet.kind == "FOLLOWER":
-                    reference = follower_reference_from_chunk_status(
-                        packet.request, packet, chunk, motion_seq=status.motion_seq or 0
-                    )
-                    self._offer(self._follower_references, reference, "follower_reference")
-                else:
-                    reference = accepted_reference_from_chunk_status(
-                        packet.request, packet, chunk, motion_seq=status.motion_seq or 0
-                    )
-                    self._offer(self._accepted, reference, "accepted_reference")
-            else:
-                reference = accepted_reference_from_status(packet.request, packet, status)
-                self._offer(self._accepted, reference, "accepted_reference")
+            prepared = packet.prepared
+            chunk = controller.query_chunk(
+                packet.command.context,
+                packet.command.command_id,
+                prepared.seq,
+            )
+            reference = follower_reference_from_chunk_status(
+                packet.request, packet, chunk, motion_seq=status.motion_seq or 0
+            )
+            self._offer(self._follower_references, reference, "follower_reference")
         return reply
 
     def _record_reply(self, controller: NativeController, reply: ControlReply) -> ControlReply:
@@ -983,8 +934,8 @@ class _Owner:
             return
         except queue.Full:
             pass
-        if label in ("event", "accepted_reference", "follower_reference"):
-            # Control transitions and accepted references must never disappear
+        if label in ("event", "follower_reference"):
+            # Control transitions and follower references must never disappear
             # silently.  Latch a hard fault and stop the backend instead of
             # dropping the fact; the node reports the nonzero run failure.
             fault = self.latch_fault(

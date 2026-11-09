@@ -19,7 +19,6 @@ from typing import Any
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.node import Node
 from robot_api_msgs.msg import (
-    AcceptedReference,
     BackendInfo,
     CameraFrame,
     FollowerReference,
@@ -36,7 +35,6 @@ from robot_api_msgs.srv import (
     GetStackTaskState,
     GetTeacherChunk,
     PrepareStackTask,
-    QueryNativeChunk,
     QueryNativeCommand,
     ReleaseControl,
     RenewControl,
@@ -44,16 +42,13 @@ from robot_api_msgs.srv import (
     StartStackTask,
     Stop,
     SubmitFollower,
-    SubmitNative,
 )
 from robot_contracts.follower_reference import FollowerReference as FollowerReferenceRecord
 from robot_contracts.models import CameraSpec, ContractError, RunContext
-from robot_contracts.native import AcceptedReference as AcceptedReferenceRecord
 from robot_contracts.native import NativeExecution as NativeExecutionRecord
 from robot_ros_support.conversions import context_from_message, context_message, stamp, time_ns
 from robot_ros_support.follower_conversions import follower_reference_message
 from robot_ros_support.native_conversions import (
-    accepted_reference_message,
     anchor_message,
     native_chunk_status_message,
     native_command_from_message,
@@ -66,7 +61,7 @@ from sensor_msgs.msg import CameraInfo, Image, JointState
 from std_msgs.msg import Float64MultiArray, Header
 
 from .backend_config import BackendConfig
-from .control_state import ChunkStatus, ControlStatus
+from .control_state import ControlStatus
 from .protocol import chunk_feedback, control_event, execution_feedback
 from .render_worker import RenderedCapture, RendererFactory
 from .ros_bridge import RosFutureBridge
@@ -78,7 +73,6 @@ from .worker import BackendClosed, NativeWorker, SubmitOutcome, WorkerSummary
 __all__ = ["NativeBackendNode", "main"]
 
 _CAPABILITIES = (
-    "native_motion",
     "continuous_chunks",
     "exact_capture",
     "simulation_reset",
@@ -86,7 +80,6 @@ _CAPABILITIES = (
     "stop",
     "command_query",
     "native_events",
-    "accepted_reference",
     "follower_reference",
 )
 _STACK_CAPABILITIES = ("stack_task", "stack_task_state")
@@ -170,9 +163,6 @@ class NativeBackendNode(Node):
         self._feedback_pub = self.create_publisher(
             NativeExecution, f"{self._root}/native_feedback", EVENT_QOS
         )
-        self._accepted_pub = self.create_publisher(
-            AcceptedReference, f"{self._root}/accepted_references", EVENT_QOS
-        )
         self._follower_pub = self.create_publisher(
             FollowerReference, f"{self._root}/follower_references", EVENT_QOS
         )
@@ -188,11 +178,9 @@ class NativeBackendNode(Node):
             (RenewControl, "renew_control", self._renew),
             (ReleaseControl, "release_control", self._release),
             (Stop, "stop", self._stop),
-            (SubmitNative, "submit_native", self._submit_native),
             (SubmitFollower, "submit_follower", self._submit_follower),
             (GetNativeAnchor, "get_native_anchor", self._get_anchor),
             (QueryNativeCommand, "query_native_command", self._query_command),
-            (QueryNativeChunk, "query_native_chunk", self._query_chunk),
             (ResetSimulation, "reset_simulation", self._reset),
             (PrepareStackTask, "prepare_stack_task", self._prepare_stack_task),
             (StartStackTask, "start_stack_task", self._start_stack_task),
@@ -364,13 +352,6 @@ class NativeBackendNode(Node):
                 )
             except Exception as error:  # noqa: BLE001 - a control fact must not vanish
                 self._worker.latch_fault("EVENT_PUBLISH_FAILED", f"{type(error).__name__}: {error}")
-        for reference in self._worker.accepted_references():
-            try:
-                self._accepted_pub.publish(accepted_reference_message(reference))  # type: ignore[arg-type]
-            except Exception as error:  # noqa: BLE001 - invalid reference is a hard fault
-                self._worker.latch_fault(
-                    "REFERENCE_PUBLISH_FAILED", f"{type(error).__name__}: {error}"
-                )
         for follower in self._worker.follower_references():
             try:
                 self._follower_pub.publish(follower_reference_message(follower))
@@ -692,78 +673,6 @@ class NativeBackendNode(Node):
             return self._failure_response(response, error)
         return response
 
-    async def _submit_native(self, request: object, response: object) -> object:
-        try:
-            native = native_command_from_message(request.request)  # type: ignore[attr-defined]
-            outcome = await self._await(self._worker.submit_native(native), submit=True)
-        except TimeoutError as error:
-            response.accepted = False  # type: ignore[attr-defined]
-            response.reason = str(error)  # type: ignore[attr-defined]
-            response.has_execution = False  # type: ignore[attr-defined]
-            response.has_chunk = False  # type: ignore[attr-defined]
-            response.has_reference = False  # type: ignore[attr-defined]
-            return response
-        except BaseException as error:  # noqa: BLE001 - SubmitNative has no success field
-            if isinstance(error, ContractError):
-                reason = error.reason
-            elif isinstance(error, BackendClosed):
-                reason = "BACKEND_CLOSED"
-            else:
-                reason = "INTERNAL_ERROR"
-                self._emit(
-                    "backend.submit.error",
-                    level="ERROR",
-                    reason="INTERNAL_ERROR",
-                    message=type(error).__name__,
-                    exception=error,
-                )
-            response.accepted = False  # type: ignore[attr-defined]
-            response.reason = reason  # type: ignore[attr-defined]
-            response.has_execution = False  # type: ignore[attr-defined]
-            response.has_chunk = False  # type: ignore[attr-defined]
-            response.has_reference = False  # type: ignore[attr-defined]
-            return response
-        assert isinstance(outcome, SubmitOutcome)
-        response.accepted = bool(outcome.reply.accepted)  # type: ignore[attr-defined]
-        response.reason = outcome.reply.reason  # type: ignore[attr-defined]
-        response.has_execution = outcome.execution is not None  # type: ignore[attr-defined]
-        if outcome.execution is not None and outcome.execution.snapshot is not None:
-            response.execution = native_execution_message(  # type: ignore[attr-defined]
-                execution_feedback(outcome.execution)
-            )
-        response.has_chunk = outcome.chunk is not None  # type: ignore[attr-defined]
-        if outcome.chunk is not None:
-            response.chunk = native_chunk_status_message(  # type: ignore[attr-defined]
-                chunk_feedback(outcome.chunk)
-            )
-        response.has_reference = outcome.reference is not None  # type: ignore[attr-defined]
-        if outcome.reference is not None:
-            if not isinstance(outcome.reference, AcceptedReferenceRecord):
-                response.accepted = False  # type: ignore[attr-defined]
-                response.reason = "STREAM_MODE_MISMATCH"  # type: ignore[attr-defined]
-                response.has_reference = False  # type: ignore[attr-defined]
-                return response
-            response.reference = accepted_reference_message(  # type: ignore[attr-defined]
-                outcome.reference
-            )
-        self._emit(
-            "backend.submit",
-            message="accepted" if response.accepted else "rejected",
-            reason=response.reason or None,
-            context=EventContext(
-                episode_id=native.trajectory.context.episode_id or None,
-                command_id=native.trajectory.command_id,
-                clock_epoch=native.trajectory.context.clock_epoch,
-            ),
-            fields={
-                "command_id": native.trajectory.command_id,
-                "kind": native.mode,
-                "idempotent": outcome.idempotent,
-                "has_reference": response.has_reference,
-            },
-        )
-        return response
-
     async def _submit_follower(self, request: object, response: object) -> object:
         try:
             native = native_command_from_message(request.request)  # type: ignore[attr-defined]
@@ -881,24 +790,6 @@ class NativeBackendNode(Node):
             response.execution = native_execution_message(  # type: ignore[attr-defined]
                 execution_feedback(status)
             )
-            response.success = True  # type: ignore[attr-defined]
-            response.reason = ""  # type: ignore[attr-defined]
-        except BaseException as error:  # noqa: BLE001
-            return self._failure_response(response, error)
-        return response
-
-    async def _query_chunk(self, request: object, response: object) -> object:
-        try:
-            chunk = await self._await(
-                self._worker.query_chunk(
-                    context_from_message(request.context),  # type: ignore[attr-defined]
-                    request.command_id,  # type: ignore[attr-defined]
-                    int(request.chunk_seq),  # type: ignore[attr-defined]
-                )
-            )
-            if not isinstance(chunk, ChunkStatus):
-                raise ContractError("CHUNK_RESULT_EXPIRED", "no chunk status")
-            response.chunk = native_chunk_status_message(chunk_feedback(chunk))  # type: ignore[attr-defined]
             response.success = True  # type: ignore[attr-defined]
             response.reason = ""  # type: ignore[attr-defined]
         except BaseException as error:  # noqa: BLE001

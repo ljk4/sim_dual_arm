@@ -11,10 +11,9 @@ select = ["E", "F", "I", "B", "UP"]
 testpaths = ["tests/unit"]
 pythonpath = [
   "contracts/python/src",
-  "libraries/backend_core/src",
   "libraries/run_logging/src",
   "simulation/mujoco/src",
   "runtime/ros2/ros/dual_arm_runtime",
   "learning/lerobot/src",
-  "tests/doubles/policy",
+  "tests/fakes/policy",
 ]

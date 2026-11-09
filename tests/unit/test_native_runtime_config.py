@@ -14,7 +14,7 @@ from robot_contracts.episodes import (
 from robot_contracts.models import ContractError
 
 ROOT = Path(__file__).resolve().parents[2]
-CONFIG = ROOT / "runtime/ros2/configs/native_collect.yaml"
+CONFIG = ROOT / "tests/fixtures/simulation/native_policy_unit.yaml"
 
 
 def document():
@@ -42,14 +42,13 @@ def test_native_config_snapshot_has_complete_constraints_and_motions():
     snapshot = configuration.snapshot
     assert snapshot["profile_hash"] == configuration.profile.digest
     assert snapshot["recipe"]["reset"]["seed"] == 0
-    assert len(snapshot["recipe"]["motions"]) == 2
-    first = snapshot["recipe"]["motions"][0]
-    assert len(first["positions"]) == len(configuration.profile.joints)
+    assert snapshot["recipe"]["motions"] == []
     assert snapshot["recipe"]["control_constraints"]["max_accelerations"]
+    assert snapshot["recipe"]["follower"]["target_count"] > 0
     assert snapshot["observation"]["camera_names"] == list(configuration.profile.camera_names)
     # A fresh snapshot cannot mutate runtime configuration.
-    snapshot["recipe"]["motions"][0]["positions"][0] = 99.0
-    assert configuration.snapshot["recipe"]["motions"][0]["positions"][0] != 99.0
+    snapshot["recipe"]["reset"]["seed"] = 99
+    assert configuration.snapshot["recipe"]["reset"]["seed"] != 99
 
 
 def test_unknown_key_and_bool_integer_are_rejected(tmp_path):
@@ -63,7 +62,7 @@ def test_unknown_key_and_bool_integer_are_rejected(tmp_path):
         load_native_configuration(write(tmp_path, value), ROOT)
 
 
-def test_lease_renew_and_motion_dimensions_are_checked(tmp_path):
+def test_lease_renew_and_follower_dimensions_are_checked(tmp_path):
     value = document()
     value["lease_duration_ns"] = MAX_LEASE_DURATION_NS + 1
     with pytest.raises(ContractError, match="lease_duration_ns"):
@@ -73,8 +72,13 @@ def test_lease_renew_and_motion_dimensions_are_checked(tmp_path):
     with pytest.raises(ContractError, match="less than half"):
         load_native_configuration(write(tmp_path, value), ROOT)
     value = document()
-    value["motions"][0]["positions"] = value["motions"][0]["positions"][:-1]
-    with pytest.raises(ContractError, match="expected 16 values"):
+    follower_path = (CONFIG.parent / value["follower_constraints"]).resolve()
+    follower_document = yaml.safe_load(follower_path.read_text(encoding="utf-8"))
+    follower_document["max_target_deviations"] = follower_document["max_target_deviations"][:-1]
+    follower_file = tmp_path / "follower-short.yaml"
+    follower_file.write_text(yaml.safe_dump(follower_document), encoding="utf-8")
+    value["follower_constraints"] = str(follower_file)
+    with pytest.raises(ContractError, match="must match the profile joints"):
         load_native_configuration(write(tmp_path, value), ROOT)
 
 
@@ -85,30 +89,20 @@ def test_missing_referenced_file_fails_with_source(tmp_path):
         load_native_configuration(write(tmp_path, value, absolute=False), ROOT)
 
 
-def test_v3_v4_are_explicit_and_mock_default_stays_v2():
-    assert NATIVE_EPISODE_SCHEMA_VERSION == 3
-    assert POLICY_EPISODE_SCHEMA_VERSION == 4
+def test_manifest_schema_is_a_single_v1():
+    assert NATIVE_EPISODE_SCHEMA_VERSION == 1
+    assert POLICY_EPISODE_SCHEMA_VERSION == 1
     assert (
-        manifest_schema_path(ROOT / "contracts/schemas", 3)
+        manifest_schema_path(ROOT / "contracts/schemas", 1)
         .as_posix()
-        .endswith("v3/episode_manifest.schema.json")
-    )
-    assert (
-        manifest_schema_path(ROOT / "contracts/schemas", 2)
-        .as_posix()
-        .endswith("v2/episode_manifest.schema.json")
-    )
-    assert (
-        manifest_schema_path(ROOT / "contracts/schemas", 4)
-        .as_posix()
-        .endswith("v4/episode_manifest.schema.json")
+        .endswith("v1/episode_manifest.schema.json")
     )
     with pytest.raises(ContractError, match="not supported"):
-        manifest_schema_path(ROOT / "contracts/schemas", 5)
+        manifest_schema_path(ROOT / "contracts/schemas", 2)
 
 
 def test_policy_max_chunks_can_cover_a_120_chunk_task(tmp_path):
-    policy_config = ROOT / "runtime/ros2/configs/native_policy.yaml"
+    policy_config = CONFIG
     value = yaml.safe_load(policy_config.read_text(encoding="utf-8"))
     for field in (
         "robot_profile",
@@ -132,13 +126,13 @@ def test_policy_max_chunks_can_cover_a_120_chunk_task(tmp_path):
 
 
 def policy_document():
-    return yaml.safe_load(
-        (ROOT / "runtime/ros2/configs/native_policy.yaml").read_text(encoding="utf-8")
-    )
+    value = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
+    value["policy"].pop("startup_settle_sim_ns", None)
+    return value
 
 
 def write_policy(tmp_path, value):
-    base = ROOT / "runtime/ros2/configs/native_policy.yaml"
+    base = CONFIG
     for field in (
         "robot_profile",
         "observation_schema",
@@ -153,10 +147,8 @@ def write_policy(tmp_path, value):
     return path
 
 
-def test_policy_startup_settle_defaults_to_disabled():
-    configuration = load_native_configuration(
-        ROOT / "runtime/ros2/configs/native_policy.yaml", ROOT
-    )
+def test_policy_startup_settle_defaults_to_disabled(tmp_path):
+    configuration = load_native_configuration(write_policy(tmp_path, policy_document()), ROOT)
     assert configuration.recipe.policy.startup_settle_sim_ns == 0
     assert configuration.snapshot["recipe"]["policy"]["startup_settle_sim_ns"] == 0
 

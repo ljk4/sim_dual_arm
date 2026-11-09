@@ -3,13 +3,11 @@
 `container.env` 集中声明容器内项目路径、ROS 设置与 Python 源码路径，由 Compose
 加载；宿主 bind 来源由本端 Compose 决定。
 
-`native_collect.yaml` 是原生采集入口；`native_policy.yaml`、
-`native_task_act*.yaml`、`native_teacher.yaml` 分别选择连续 Policy、任务 ACT 和
-teacher 运行。`native_replay.yaml`、`replay_policy.yaml` 只保留测试回放模板，不再有
-默认宿主启动器。所有配置引用 `simulation/mujoco/configs/` 的场景/控制文件和
-`profiles/` 的机器人语义。
+`native_teacher.yaml` 是 teacher 采集入口；`native_task_act_chunked.yaml` 是当前
+连续 ACT Policy 运行配方。所有配置引用 `simulation/mujoco/configs/` 的场景/控制
+文件和 `profiles/` 的机器人语义。
 
-`native_task_act*.yaml` 中的 `FROM_VERIFIED_ACT_BUNDLE` 是显式占位，只能由
+`native_task_act_chunked.yaml` 中的 `FROM_VERIFIED_ACT_BUNDLE` 是显式占位，只能由
 `runtime/ros2/scripts/run.sh prepare` 从 learning 端真实 bundle 生成的
 `policy_binding.json` 替换；直接启动未绑定模板必须失败。
 

@@ -71,7 +71,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project-root", type=Path, default=Path("/workspace"))
     parser.add_argument(
-        "--config", type=Path, default=Path("/workspace/runtime/ros2/configs/native_collect.yaml")
+        "--config",
+        type=Path,
+        default=Path("/workspace/runtime/ros2/configs/native_task_act_chunked.yaml"),
     )
     parser.add_argument("--output", type=Path, default=Path("/data/raw"))
     parser.add_argument("--run-id", default=None)

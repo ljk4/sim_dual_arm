@@ -80,28 +80,26 @@ scripts/run.sh backend \
 
 ## 实时 MuJoCo 可视化
 
-backend 保持无窗口 EGL 渲染；另开一个 simulation 容器终端启动 viewer：
+backend 保持无窗口 EGL 渲染；需要实时窗口时，用宿主机 X11 显式运行一次性
+viewer 容器（默认 Compose 不注入宿主变量或 X11 挂载）：
 
 ```bash
-scripts/run.sh viewer \
-  --config /data/prepared/prep-001/backend.yaml
-```
-
-viewer 是独立进程，订阅后端发布的只读完整物理快照并显示，不参与物理步进。
-在宿主机启动 Compose 前确保 `DISPLAY` 和 `XAUTHORITY` 指向当前 X11 会话：
-
-```bash
+cd /path/to/sim_dual_arm/simulation/mujoco/docker
 echo "DISPLAY=$DISPLAY"
 echo "XAUTHORITY=$XAUTHORITY"
 # 如果 XAUTHORITY 未设置，按实际桌面会话设置，例如：
 # export XAUTHORITY=/run/user/$(id -u)/gdm/Xauthority
-cd /path/to/sim_dual_arm/simulation/mujoco/docker
-docker compose up -d
+docker compose run --rm \
+  -e DISPLAY="$DISPLAY" \
+  -e XAUTHORITY=/tmp/.Xauthority \
+  -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
+  -v "${XAUTHORITY:-/dev/null}:/tmp/.Xauthority:ro" \
+  simulation scripts/run.sh viewer \
+  --config /data/prepared/prep-001/backend.yaml
 ```
 
-Compose 会把宿主 `/tmp/.X11-unix` 和 `XAUTHORITY` 只读挂入 simulation 容器；
-若 `XAUTHORITY` 未设置则挂载 `/dev/null`，不会影响无 GUI 的 backend 运行。
-viewer 只对当前仿真端有效，不进入 runtime 或 learning 容器。
+viewer 是独立进程，订阅后端发布的只读完整物理快照并显示，不参与物理步进。
+它只对当前仿真端有效，不进入 runtime 或 learning 容器。
 
 ## 停止与排查
 

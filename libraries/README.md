@@ -2,7 +2,6 @@
 
 有明确调用方的轻量实现，避免把同一语义复制到组件：
 
-- `backend_core/`：与 ROS 无关的后端控制核心。
 - `ros_support/`：ROS 消息与公共 DTO 的显式转换、QoS。
 - `run_logging/`：结构化事件、有界队列和 JSONL 轮转。
 

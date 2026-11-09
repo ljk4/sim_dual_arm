@@ -1,7 +1,7 @@
-"""Pure bounded scheduling helpers for continuous chunk streams.
+"""Pure bounded scheduling helpers for continuous follower streams.
 
 No MuJoCo, clock, thread, IO or SciPy call lives here.  ``StreamSchedule`` only
-composes the single active chunk and the single optional successor plus the
+composes the single active plan and the single optional successor plus the
 monotonic per-stream event sequence; :class:`~robot_backend_sim.motion.NativeMotion`
 owns the physical state and performs the one real step.
 """
@@ -13,8 +13,7 @@ from dataclasses import dataclass
 from numbers import Integral
 
 from robot_contracts.action_chunks import ActionWindow
-
-from .chunk_types import PreparedStreamChunk, known_chunk_kind
+from robot_contracts.follower import PreparedFollowerPlan
 
 __all__ = [
     "ChunkEvent",
@@ -109,8 +108,8 @@ def _matches(left: float, right: float) -> bool:
 
 
 def boundary_rejection(
-    active: PreparedStreamChunk,
-    successor: PreparedStreamChunk,
+    active: PreparedFollowerPlan,
+    successor: PreparedFollowerPlan,
     *,
     stream_id: str,
     profile_digest: str,
@@ -123,20 +122,12 @@ def boundary_rejection(
 ) -> tuple[str | None, bool]:
     """Validate a successor enough to queue it without re-fitting the curve.
 
-    Returns ``(reason, latches_fault)``.  Identity/order/profile/mode/boundary
+    Returns ``(reason, latches_fault)``.  Identity/order/profile/boundary
     errors are invalid packages and only reject.  A package that is otherwise a
     legal continuation of this stream but is late or based on a stale/future
     observation latches a bounded fault so the current plan cannot silently
-    continue unserved.  Strict and follower chunks never mix in one stream.
+    continue unserved.
     """
-    active_kind = known_chunk_kind(active)
-    successor_kind = known_chunk_kind(successor)
-    if (
-        active_kind is not None
-        and successor_kind is not None
-        and active_kind != successor_kind
-    ):
-        return "STREAM_MODE_MISMATCH", False
     if successor.anchor.stream_id != stream_id:
         return "STALE_STREAM", False
     if successor.anchor.predecessor_seq != active.seq:
@@ -178,9 +169,8 @@ class StreamSchedule:
             raise ValueError("motion_seq must be an integer")
         self.stream_id = stream_id
         self.motion_seq = int(motion_seq)
-        self.kind: str | None = None
-        self.active: PreparedStreamChunk | None = None
-        self.pending: PreparedStreamChunk | None = None
+        self.active: PreparedFollowerPlan | None = None
+        self.pending: PreparedFollowerPlan | None = None
         self.started = False
         self.terminal = False
         self._event_seq = 0
@@ -188,7 +178,7 @@ class StreamSchedule:
     def make_event(
         self,
         phase: str,
-        chunk: PreparedStreamChunk,
+        chunk: PreparedFollowerPlan,
         sim_time_ns: int,
         reason: str = "",
     ) -> ChunkEvent:
@@ -207,27 +197,17 @@ class StreamSchedule:
             reason=reason,
         )
 
-    def install_start(self, chunk: PreparedStreamChunk) -> None:
+    def install_start(self, chunk: PreparedFollowerPlan) -> None:
         if self.active is not None or self.started:
             raise ValueError("stream already has an active chunk")
-        kind = known_chunk_kind(chunk)
-        if self.kind is not None and kind is not None and self.kind != kind:
-            raise ValueError("stream cannot mix strict and follower chunks")
-        if kind is not None:
-            self.kind = kind
         self.active = chunk
 
-    def install_pending(self, chunk: PreparedStreamChunk) -> None:
+    def install_pending(self, chunk: PreparedFollowerPlan) -> None:
         if self.active is None or self.pending is not None:
             raise ValueError("stream cannot accept a pending chunk")
-        kind = known_chunk_kind(chunk)
-        if self.kind is not None and kind is not None and self.kind != kind:
-            raise ValueError("stream cannot mix strict and follower chunks")
-        if kind is not None and self.kind is None:
-            self.kind = kind
         self.pending = chunk
 
-    def handoff(self) -> tuple[PreparedStreamChunk, PreparedStreamChunk]:
+    def handoff(self) -> tuple[PreparedFollowerPlan, PreparedFollowerPlan]:
         if self.active is None or self.pending is None:
             raise ValueError("handoff requires active and pending chunks")
         retired, started = self.active, self.pending
@@ -235,7 +215,7 @@ class StreamSchedule:
         self.pending = None
         return retired, started
 
-    def cancel_pending(self) -> PreparedStreamChunk | None:
+    def cancel_pending(self) -> PreparedFollowerPlan | None:
         canceled = self.pending
         self.pending = None
         return canceled

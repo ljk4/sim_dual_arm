@@ -252,7 +252,7 @@ def check_compose_document(document: object, *, name: str) -> list[str]:
                 if not mount or mount.get("read_only") is True:
                     issues.append(f"{name}: service {service_name} must mount {target} writable")
             readonly = {
-                "/app", "/contracts", "/profiles", "/deps/backend_core",
+                "/app", "/contracts", "/profiles",
                 "/deps/ros_support", "/deps/run_logging", "/config/setup.sh",
                 "/config/check_ros_sdk.py", "/config/fastdds.xml",
                 "/opt/ros-dev",

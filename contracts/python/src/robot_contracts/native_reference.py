@@ -575,7 +575,7 @@ def _backward_final_velocities(window: ActionWindow) -> tuple[float, ...]:
 
 
 def expected_final_velocities(request: NativeRequest) -> tuple[float, ...]:
-    """Derive the SRID stream final velocity exactly as prepare_chunk does."""
+    """Derive the stream final velocity from the last two source targets."""
     if request.kind == NATIVE_MOTION:
         return (0.0,) * len(request.trajectory.joint_names)
     assert request.anchor is not None

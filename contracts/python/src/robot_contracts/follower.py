@@ -94,7 +94,7 @@ class FollowerLimitFlags:
 
 @dataclass(frozen=True)
 class PreparedFollowerPlan:
-    """One immutable bounded-follower chunk; never a :class:`PreparedChunk`.
+    """One immutable bounded-follower block for the continuous stream.
 
     ``window`` and ``anchor`` are retained unchanged, including every original
     source prediction.  ``plan`` is the explicit cubic curve actually followed.

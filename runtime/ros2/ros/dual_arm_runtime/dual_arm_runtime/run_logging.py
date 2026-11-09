@@ -18,7 +18,7 @@ import re
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import Protocol
 
 from robot_run_logging import (
     EventContext,
@@ -27,9 +27,6 @@ from robot_run_logging import (
     LogSettings,
     Scalar,
 )
-
-if TYPE_CHECKING:
-    from dual_arm_runtime.configuration import Configuration
 
 _RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _DEPENDENCY_DISTRIBUTIONS = (
@@ -169,7 +166,7 @@ def check_health(sink: EventSink | None) -> None:
 
 
 def initialize_run(
-    configuration: Configuration,
+    configuration: object,
     *,
     run_id: str,
     runs_output: Path,
@@ -219,7 +216,7 @@ def initialize_run(
 
 
 def collect_versions(
-    configuration: Configuration,
+    configuration: object,
     *,
     run_id: str,
     instance_id: str,
