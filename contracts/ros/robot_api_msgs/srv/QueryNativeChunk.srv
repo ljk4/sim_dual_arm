@@ -1,7 +1,0 @@
-robot_api_msgs/RunContext context
-string command_id
-uint64 chunk_seq
----
-bool success
-string reason
-robot_api_msgs/NativeChunkStatus chunk
