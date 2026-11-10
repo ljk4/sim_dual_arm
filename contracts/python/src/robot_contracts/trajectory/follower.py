@@ -141,80 +141,136 @@ class PreparedFollowerPlan(StrictContractModel):
     flags: FollowerLimitFlags | None = Field(default=None, exclude=True)
     extension_ns: int = Field(default=0, exclude=True)
 
-    @model_validator(mode="after")
-    def _plan(self) -> Self:
+    def _validate_lengths(self) -> Self:
         count = len(self.joints)
-        for name in ("max_accelerations", "max_target_deviation_limits",
-                     "raw_terminal_velocities", "restricted_terminal_velocities"):
+        for name in (
+            "max_accelerations",
+            "max_target_deviation_limits",
+            "raw_terminal_velocities",
+            "restricted_terminal_velocities",
+        ):
             values = getattr(self, name)
             if len(values) != count:
                 raise contract_error(name, "must contain one value per joint")
         for name in ("max_accelerations", "max_target_deviation_limits"):
             if any(value <= 0.0 for value in getattr(self, name)):
                 raise contract_error(name, "must be positive")
+        return self
+
+    def _validate_terminals(self):
         restricted = validate_velocity_boundaries(
-            self.restricted_terminal_velocities, self.joints,
-            "restricted_terminal_velocities")
+            self.restricted_terminal_velocities,
+            self.joints,
+            "restricted_terminal_velocities",
+        )
         inputs = validate_reference_inputs(
-            self.anchor.reference.positions, self.window.source_targets, self.joints,
-            self.max_accelerations, initial_velocities=self.anchor.reference.velocities,
-            final_velocities=restricted)
+            self.anchor.reference.positions,
+            self.window.source_targets,
+            self.joints,
+            self.max_accelerations,
+            initial_velocities=self.anchor.reference.velocities,
+            final_velocities=restricted,
+        )
         derived_raw = estimate_raw_terminal_velocities(self.window.targets)
         for axis, (stored, derived) in enumerate(
-                zip(self.raw_terminal_velocities, derived_raw, strict=True)):
+            zip(self.raw_terminal_velocities, derived_raw, strict=True)
+        ):
             if not math.isclose(stored, derived, rel_tol=0.0, abs_tol=_DEVIATION_ATOL):
-                raise contract_error(f"raw_terminal_velocities[{axis}]",
-                                     "must equal the backward difference of raw targets")
+                raise contract_error(
+                    f"raw_terminal_velocities[{axis}]",
+                    "must equal the backward difference of raw targets",
+                )
         expected = restrict_terminal_velocities(
-            derived_raw, inputs.initial_positions, inputs.initial_velocities,
-            self.window.targets[-1].positions, inputs.joints, inputs.max_accelerations,
-            is_final=self.is_final)
+            derived_raw,
+            inputs.initial_positions,
+            inputs.initial_velocities,
+            self.window.targets[-1].positions,
+            inputs.joints,
+            inputs.max_accelerations,
+            is_final=self.is_final,
+        )
         for axis, (stored, wanted) in enumerate(zip(restricted, expected, strict=True)):
             if not math.isclose(stored, wanted, rel_tol=0.0, abs_tol=_DEVIATION_ATOL):
-                raise contract_error(f"restricted_terminal_velocities[{axis}]",
-                                     "differs from the generic speed/boundary rule")
-        _require(self.plan.joint_names == inputs.joint_names, "plan.joint_names",
-                 "must match the follower joint order")
-        _require(self.window.handoff_time_ns == self.anchor.start_sim_time_ns,
-                 "anchor.start_sim_time_ns", "must equal window.handoff_time_ns")
-        _require(self.requested_window_ns == self.window.end_time_ns,
-                 "requested_window_ns", "must equal window.end_time_ns")
-        _require(self.ruckig_duration_ns >= self.plan.duration_ns,
-                 "ruckig_duration_ns", "must cover the exported plan duration")
+                raise contract_error(
+                    f"restricted_terminal_velocities[{axis}]",
+                    "differs from the generic speed/boundary rule",
+                )
+        return inputs, restricted
+
+    def _validate_timing(self, inputs) -> None:
+        _require(
+            self.plan.joint_names == inputs.joint_names,
+            "plan.joint_names",
+            "must match the follower joint order",
+        )
+        _require(
+            self.window.handoff_time_ns == self.anchor.start_sim_time_ns,
+            "anchor.start_sim_time_ns",
+            "must equal window.handoff_time_ns",
+        )
+        _require(
+            self.requested_window_ns == self.window.end_time_ns,
+            "requested_window_ns",
+            "must equal window.end_time_ns",
+        )
+        _require(
+            self.ruckig_duration_ns >= self.plan.duration_ns,
+            "ruckig_duration_ns",
+            "must cover the exported plan duration",
+        )
         if self.duration_grid_ns is not None:
             grid = self.duration_grid_ns
-            _require(not self.is_final or self.ruckig_duration_ns % grid == 0,
-                     "ruckig_duration_ns", "a discrete final duration must lie on the grid")
-            _require(self.is_final or self.requested_window_ns % grid == 0,
-                     "requested_window_ns", "a non-final hand-off must lie on the grid")
-            _require(self.plan.duration_ns % grid == 0, "plan.duration_ns",
-                     "the exported plan duration must lie on the grid")
+            _require(
+                not self.is_final or self.ruckig_duration_ns % grid == 0,
+                "ruckig_duration_ns",
+                "a discrete final duration must lie on the grid",
+            )
+            _require(
+                self.is_final or self.requested_window_ns % grid == 0,
+                "requested_window_ns",
+                "a non-final hand-off must lie on the grid",
+            )
+            _require(
+                self.plan.duration_ns % grid == 0,
+                "plan.duration_ns",
+                "the exported plan duration must lie on the grid",
+            )
         if self.is_final:
             if self.plan.duration_ns < self.requested_window_ns:
                 raise contract_error("plan.duration_ns", "a final plan must cover the window")
-            if any(abs(velocity) > VELOCITY_ATOL for velocity in restricted):
-                raise contract_error("restricted_terminal_velocities",
-                                     "must be zero for a final plan")
         elif self.plan.duration_ns != self.requested_window_ns:
             raise contract_error("plan.duration_ns", "a non-final plan must end at the hand-off")
+
+    def _validate_segments(self, count: int) -> None:
         for index in range(1, len(self.plan.segments)):
             previous, current = self.plan.segments[index - 1], self.plan.segments[index]
             previous_positions, previous_velocities, _ = _state_at(
-                previous, previous.duration_s, f"segments[{index - 1}]")
+                previous, previous.duration_s, f"segments[{index - 1}]"
+            )
             current_positions, current_velocities, _ = _state_at(
-                current, 0.0, f"segments[{index}]")
+                current, 0.0, f"segments[{index}]"
+            )
             for axis in range(count):
-                if not _close(previous_positions[axis], current_positions[axis], POSITION_ATOL):
-                    raise contract_error(f"segments[{index}].start_positions[{axis}]",
-                                         "position is not C1 continuous")
-                if not _close(previous_velocities[axis], current_velocities[axis], VELOCITY_ATOL):
-                    raise contract_error(f"segments[{index}].start_velocities[{axis}]",
-                                         "velocity is not C1 continuous")
-        extremes = compute_reference_extremes(self.plan)
-        check_continuous_limits(extremes, inputs.joints, inputs.max_accelerations)
+                if not _close(
+                    previous_positions[axis], current_positions[axis], POSITION_ATOL
+                ):
+                    raise contract_error(
+                        f"segments[{index}].start_positions[{axis}]",
+                        "position is not C1 continuous",
+                    )
+                if not _close(
+                    previous_velocities[axis], current_velocities[axis], VELOCITY_ATOL
+                ):
+                    raise contract_error(
+                        f"segments[{index}].start_velocities[{axis}]",
+                        "velocity is not C1 continuous",
+                    )
+
+    def _validate_end(self, inputs) -> object:
         end = self.plan.sample_interval(self.plan.duration_ns)
         for axis, (joint, acceleration) in enumerate(
-                zip(inputs.joints, inputs.max_accelerations, strict=True)):
+            zip(inputs.joints, inputs.max_accelerations, strict=True)
+        ):
             velocity = end.velocities[axis]
             if velocity == 0.0:
                 continue
@@ -222,53 +278,101 @@ class PreparedFollowerPlan(StrictContractModel):
             if velocity > 0.0:
                 upper = float(joint.maximum)
                 if end.positions[axis] + stop_distance > upper + _limit_tolerance(upper):
-                    raise ContractError("FOLLOWER_BRAKING_INFEASIBLE",
-                                        f"joint {joint.name!r} cannot brake inside maximum")
+                    raise ContractError(
+                        "FOLLOWER_BRAKING_INFEASIBLE",
+                        f"joint {joint.name!r} cannot brake inside maximum",
+                    )
             else:
                 lower = float(joint.minimum)
                 if end.positions[axis] - stop_distance < lower - _limit_tolerance(lower):
-                    raise ContractError("FOLLOWER_BRAKING_INFEASIBLE",
-                                        f"joint {joint.name!r} cannot brake inside minimum")
+                    raise ContractError(
+                        "FOLLOWER_BRAKING_INFEASIBLE",
+                        f"joint {joint.name!r} cannot brake inside minimum",
+                    )
         if self.is_final:
             if any(abs(velocity) > VELOCITY_ATOL for velocity in end.velocities):
                 raise contract_error("plan", "a final plan must end at zero velocity")
             for axis, (position, target) in enumerate(
-                    zip(end.positions, self.window.targets[-1].positions, strict=True)):
+                zip(end.positions, self.window.targets[-1].positions, strict=True)
+            ):
                 if not _close(position, target, POSITION_ATOL):
-                    raise contract_error(f"plan.actual_terminal_positions[{axis}]",
-                                         "a final plan must reach the last target")
+                    raise contract_error(
+                        f"plan.actual_terminal_positions[{axis}]",
+                        "a final plan must reach the last target",
+                    )
+        return end
+
+    def _validate_deviations(self, inputs) -> tuple[float, ...]:
         deviations = compute_follower_deviations(
-            self.plan, inputs.initial_positions, self.window.targets, self.is_final)
+            self.plan, inputs.initial_positions, self.window.targets, self.is_final
+        )
         for axis, (deviation, limit) in enumerate(
-                zip(deviations, self.max_target_deviation_limits, strict=True)):
+            zip(deviations, self.max_target_deviation_limits, strict=True)
+        ):
             if deviation > limit + _DEVIATION_ATOL:
-                raise ContractError("FOLLOWER_DEVIATION_EXCEEDED",
-                                    f"axis {inputs.joint_names[axis]!r} deviation "
-                                    f"{deviation!r} exceeds {limit!r}")
+                raise ContractError(
+                    "FOLLOWER_DEVIATION_EXCEEDED",
+                    f"axis {inputs.joint_names[axis]!r} deviation "
+                    f"{deviation!r} exceeds {limit!r}",
+                )
+        return deviations
+
+    def _assign_evidence(self, inputs, restricted, end, deviations, extremes) -> None:
         last_target = self.window.targets[-1].positions
         velocity_flags: list[bool] = []
         acceleration_flags: list[bool] = []
         boundary_flags: list[bool] = []
-        for axis, (joint, item) in enumerate(zip(inputs.joints, extremes.joints, strict=True)):
-            moving = (item.maximum_velocity > VELOCITY_ATOL
-                      or item.maximum_position - item.minimum_position > POSITION_ATOL)
-            terminal = not _close(self.raw_terminal_velocities[axis], restricted[axis],
-                                  _DEVIATION_ATOL)
+        for axis, (joint, item) in enumerate(
+            zip(inputs.joints, extremes.joints, strict=True)
+        ):
+            moving = (
+                item.maximum_velocity > VELOCITY_ATOL
+                or item.maximum_position - item.minimum_position > POSITION_ATOL
+            )
+            terminal = not _close(
+                self.raw_terminal_velocities[axis], restricted[axis], _DEVIATION_ATOL
+            )
             velocity_flags.append(
-                terminal or (moving and item.maximum_velocity >= float(joint.max_velocity) - 1e-9))
+                terminal
+                or (moving and item.maximum_velocity >= float(joint.max_velocity) - 1e-9)
+            )
             acceleration_flags.append(
-                moving and item.maximum_acceleration >= inputs.max_accelerations[axis] - 1e-9)
-            boundary_flags.append(_close(end.positions[axis], last_target[axis], POSITION_ATOL))
-        flags = FollowerLimitFlags(tuple(velocity_flags), tuple(acceleration_flags),
-                                   tuple(boundary_flags))
+                moving and item.maximum_acceleration >= inputs.max_accelerations[axis] - 1e-9
+            )
+            boundary_flags.append(
+                _close(end.positions[axis], last_target[axis], POSITION_ATOL)
+            )
+        flags = FollowerLimitFlags(
+            tuple(velocity_flags), tuple(acceleration_flags), tuple(boundary_flags)
+        )
         object.__setattr__(self, "actual_terminal_positions", end.positions)
         object.__setattr__(self, "actual_terminal_velocities", end.velocities)
         object.__setattr__(self, "actual_terminal_accelerations", end.accelerations)
         object.__setattr__(self, "max_target_deviations", deviations)
         object.__setattr__(self, "extremes", extremes)
         object.__setattr__(self, "flags", flags)
-        object.__setattr__(self, "extension_ns",
-                           max(0, self.plan.duration_ns - self.requested_window_ns))
+        object.__setattr__(
+            self,
+            "extension_ns",
+            max(0, self.plan.duration_ns - self.requested_window_ns),
+        )
+
+    @model_validator(mode="after")
+    def _plan(self) -> Self:
+        count = len(self.joints)
+        self._validate_lengths()
+        inputs, restricted = self._validate_terminals()
+        self._validate_timing(inputs)
+        if self.is_final and any(abs(velocity) > VELOCITY_ATOL for velocity in restricted):
+            raise contract_error(
+                "restricted_terminal_velocities", "must be zero for a final plan"
+            )
+        self._validate_segments(count)
+        extremes = compute_reference_extremes(self.plan)
+        check_continuous_limits(extremes, inputs.joints, inputs.max_accelerations)
+        end = self._validate_end(inputs)
+        deviations = self._validate_deviations(inputs)
+        self._assign_evidence(inputs, restricted, end, deviations, extremes)
         return self
 
     seq = property(lambda self: self.anchor.seq)

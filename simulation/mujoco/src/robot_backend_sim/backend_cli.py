@@ -93,8 +93,27 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def run(argv: list[str] | None = None) -> int:
-    parsed = _parser().parse_args(argv)
+def _configuration_sources(config) -> dict[str, dict[str, str]]:
+    return {
+        name: {
+            "path": str(path.resolve()),
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "content": path.read_text(),
+        }
+        for name, path in {
+            "backend": config.source,
+            "scene": config.scene_path,
+            "control": config.control_path,
+            "stream": config.stream_path,
+            "profile": config.profile_path,
+            "follower": config.follower_path,
+            "task": config.task_path,
+        }.items()
+        if path is not None
+    }
+
+
+def _prepare_run(parsed: argparse.Namespace):
     config = load_backend_config(parsed.config)
     run_id = _validate_run_id(parsed.run_id)
     run_root = parsed.run_root.resolve()
@@ -119,6 +138,10 @@ def run(argv: list[str] | None = None) -> int:
             console=config.log.console,
         ),
     )
+    return config, run_id, run_dir, logger
+
+
+def _write_run_document(run_dir: Path, config, run_id: str) -> None:
     _write_json(
         run_dir / "run.json",
         {
@@ -127,23 +150,7 @@ def run(argv: list[str] | None = None) -> int:
             "config": str(config.source),
             "panda_model": str(assets.model_paths()[1]),
             "effective_configuration": config.canonical_dict(),
-            "configuration_sources": {
-                name: {
-                    "path": str(path.resolve()),
-                    "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-                    "content": path.read_text(),
-                }
-                for name, path in {
-                    "backend": config.source,
-                    "scene": config.scene_path,
-                    "control": config.control_path,
-                    "stream": config.stream_path,
-                    "profile": config.profile_path,
-                    "follower": config.follower_path,
-                    "task": config.task_path,
-                }.items()
-                if path is not None
-            },
+            "configuration_sources": _configuration_sources(config),
             "code_provenance": code_provenance(),
             "namespace": config.namespace,
             "seed": config.seed,
@@ -161,43 +168,40 @@ def run(argv: list[str] | None = None) -> int:
             },
         },
     )
-    signals = _Signals()
-    previous = {signum: signal.getsignal(signum) for signum in (signal.SIGINT, signal.SIGTERM)}
-    for signum in previous:
-        signal.signal(signum, signals)
-    rclpy.init(args=None, signal_handler_options=SignalHandlerOptions.NO)
-    executor = SingleThreadedExecutor()
+
+
+def _emit_backend_start(logger, config, run_id: str) -> None:
+    logger.emit(
+        "backend.start",
+        message="backend ready",
+        fields={
+            "namespace": config.namespace,
+            "backend_kind": "mujoco",
+            "capture_hz": config.capture_hz,
+            "realtime_speed": config.realtime_speed,
+            "velocity_feedforward": config.velocity_feedforward,
+            "reliable_sensors": config.reliable_sensors,
+            "profile": config.profile_path.name,
+            "scene": config.scene_path.name,
+            "control": config.control_path.name,
+            "stream": config.stream_path.name,
+            "follower": None if config.follower_path is None else config.follower_path.name,
+            "run_id": run_id,
+            "config": str(config.source),
+            "panda_model": str(assets.model_paths()[1]),
+        },
+    )
+
+
+def _serve_node(config, logger, run_id: str, signals, executor) -> tuple[object, str | None, int]:
     node: BackendNode | None = None
     summary: WorkerSummary | None = None
     failure: str | None = None
     exit_code = _EXIT_OK
-    started = time.monotonic()
     try:
-        node = BackendNode(
-            config,
-            log=logger,
-        )
+        node = BackendNode(config, log=logger)
         executor.add_node(node)
-        logger.emit(
-            "backend.start",
-            message="backend ready",
-            fields={
-                "namespace": config.namespace,
-                "backend_kind": "mujoco",
-                "capture_hz": config.capture_hz,
-                "realtime_speed": config.realtime_speed,
-                "velocity_feedforward": config.velocity_feedforward,
-                "reliable_sensors": config.reliable_sensors,
-                "profile": config.profile_path.name,
-                "scene": config.scene_path.name,
-                "control": config.control_path.name,
-                "stream": config.stream_path.name,
-                "follower": None if config.follower_path is None else config.follower_path.name,
-                "run_id": run_id,
-                "config": str(config.source),
-                "panda_model": str(assets.model_paths()[1]),
-            },
-        )
+        _emit_backend_start(logger, config, run_id)
         while rclpy.ok() and not signals.requested and not node.should_stop:
             executor.spin_once(timeout_sec=0.05)
         if node.should_stop:
@@ -240,53 +244,78 @@ def run(argv: list[str] | None = None) -> int:
             except BaseException as close_error:  # noqa: BLE001 - preserve primary failure
                 failure = f"{failure}; close failed: {close_error}"
         exit_code = _EXIT_FAILURE
-    finally:
-        for signum, handler in previous.items():
-            signal.signal(signum, handler)
-        if not executor.shutdown(timeout_sec=1.0):
-            failure = failure or "EXECUTOR_CLOSE_TIMEOUT"
+    return (node, summary), failure, exit_code
+
+
+def _summary_document(summary: WorkerSummary | None) -> dict | None:
+    if summary is None:
+        return None
+    return {
+        "closed": summary.closed,
+        "physics_stopped": summary.physics_stopped,
+        "reason": summary.reason,
+        "fault": None
+        if summary.fault is None
+        else {"reason": summary.fault.reason, "detail": summary.fault.detail},
+        "phase": summary.phase,
+        "accepted_commands": summary.accepted_commands,
+        "events_emitted": summary.events_emitted,
+        "captures": summary.captures,
+        "dropped_captures": summary.dropped_captures,
+        "dropped_snapshots": summary.dropped_snapshots,
+        "dropped_outputs": summary.dropped_outputs,
+        "stale_outputs": summary.stale_outputs,
+        "rendered": summary.rendered,
+        "renderer_closed": summary.renderer_closed,
+        "planner_stopped": summary.planner_stopped,
+    }
+
+
+def _teardown(executor, node, logger, previous, failure, exit_code) -> tuple[str | None, int]:
+    for signum, handler in previous.items():
+        signal.signal(signum, handler)
+    if not executor.shutdown(timeout_sec=1.0):
+        failure = failure or "EXECUTOR_CLOSE_TIMEOUT"
+        exit_code = _EXIT_FAILURE
+    if node is not None:
+        node.destroy_node()
+    if rclpy.ok():
+        rclpy.shutdown()
+    try:
+        logger.close()
+    except LogFailure as error:
+        if exit_code == _EXIT_OK:
             exit_code = _EXIT_FAILURE
-        if node is not None:
-            node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
-        try:
-            logger.close()
-        except LogFailure as error:
-            if exit_code == _EXIT_OK:
-                exit_code = _EXIT_FAILURE
-            failure = failure or f"LOGGER_CLOSE_FAILED: {error}"
-            sys.stderr.write(f"backend logger close failed: {error}\n")
-        status = {
-            "run_id": run_id,
-            "finished_utc": _now_utc(),
-            "elapsed_s": round(time.monotonic() - started, 3),
-            "success": exit_code == _EXIT_OK and failure is None,
-            "exit_code": exit_code,
-            "failure": failure,
-            "summary": None
-            if summary is None
-            else {
-                "closed": summary.closed,
-                "physics_stopped": summary.physics_stopped,
-                "reason": summary.reason,
-                "fault": None if summary.fault is None else {
-                    "reason": summary.fault.reason, "detail": summary.fault.detail
-                },
-                "phase": summary.phase,
-                "accepted_commands": summary.accepted_commands,
-                "events_emitted": summary.events_emitted,
-                "captures": summary.captures,
-                "dropped_captures": summary.dropped_captures,
-                "dropped_snapshots": summary.dropped_snapshots,
-                "dropped_outputs": summary.dropped_outputs,
-                "stale_outputs": summary.stale_outputs,
-                "rendered": summary.rendered,
-                "renderer_closed": summary.renderer_closed,
-                "planner_stopped": summary.planner_stopped,
-            },
-        }
-        _write_json(run_dir / "status.json", status)
+        failure = failure or f"LOGGER_CLOSE_FAILED: {error}"
+        sys.stderr.write(f"backend logger close failed: {error}\n")
+    return failure, exit_code
+
+
+def run(argv: list[str] | None = None) -> int:
+    parsed = _parser().parse_args(argv)
+    config, run_id, run_dir, logger = _prepare_run(parsed)
+    _write_run_document(run_dir, config, run_id)
+    signals = _Signals()
+    previous = {signum: signal.getsignal(signum) for signum in (signal.SIGINT, signal.SIGTERM)}
+    for signum in previous:
+        signal.signal(signum, signals)
+    rclpy.init(args=None, signal_handler_options=SignalHandlerOptions.NO)
+    executor = SingleThreadedExecutor()
+    started = time.monotonic()
+    (node, summary), failure, exit_code = _serve_node(
+        config, logger, run_id, signals, executor
+    )
+    failure, exit_code = _teardown(executor, node, logger, previous, failure, exit_code)
+    status = {
+        "run_id": run_id,
+        "finished_utc": _now_utc(),
+        "elapsed_s": round(time.monotonic() - started, 3),
+        "success": exit_code == _EXIT_OK and failure is None,
+        "exit_code": exit_code,
+        "failure": failure,
+        "summary": _summary_document(summary),
+    }
+    _write_json(run_dir / "status.json", status)
     return exit_code
 
 

@@ -9,11 +9,9 @@ does not step physics, start ROS or move objects in a live scene.
 from __future__ import annotations
 
 import argparse
-import math
 import os
 import platform
 import re
-import statistics
 import sys
 import time
 import uuid
@@ -41,13 +39,23 @@ from ..diagnostics import (
 )
 from ..scene_config import SceneConfig, SceneConfigError, load_scene_config
 from ..visibility import (
-    LayoutSpec,
-    LayoutVisibility,
     SceneCheckConfig,
     SceneCheckConfigError,
     load_check_config,
 )
 from . import probe_environment
+from .check_scene_common import SceneCheckFailure, SceneCheckUsageError
+from .check_scene_views import (
+    _actual_object_poses,
+    _boundary_object_poses,
+    _boundary_updates,
+    _first_visibility_failure,
+    _layout_document,
+    _measure_throughput,
+    _save_rgb_images,
+    _select_contact_layouts,  # noqa: F401 - re-exported for tests
+    _write_contact_sheet,
+)
 
 COMPONENT = "scene_check"
 KIND = "scene"
@@ -58,17 +66,8 @@ _RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _LABEL_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
-class SceneCheckUsageError(ValueError):
-    """Invalid invocation before the run directory is created."""
 
 
-class SceneCheckFailure(RuntimeError):
-    """A stable scene-check failure with a bounded message."""
-
-    def __init__(self, reason: str, message: str = "") -> None:
-        super().__init__(message or reason)
-        self.reason = reason
-        self.message = message or reason
 
 
 @dataclass(frozen=True, slots=True)
@@ -243,139 +242,70 @@ def _gl_document(gl: object) -> dict[str, object]:
     }
 
 
-def _actual_object_poses(scene: object, scene_config: SceneConfig) -> list[dict[str, object]]:
-    poses: list[dict[str, object]] = []
-    for obj in scene_config.objects:
-        address = scene.indices.object_free_joint_qpos[obj.name]
-        qpos = scene.data.qpos[address : address + 7]
-        yaw = 2.0 * math.atan2(float(qpos[6]), float(qpos[3]))
-        poses.append(
-            {
-                "name": obj.name,
-                "x": float(qpos[0]),
-                "y": float(qpos[1]),
-                "z": float(qpos[2]),
-                "yaw_deg": math.degrees(yaw),
-            }
-        )
-    return poses
 
 
-def _boundary_object_poses(
-    layout: LayoutSpec, scene_config: SceneConfig
-) -> list[dict[str, object]]:
-    by_name = {placement.name: placement for placement in layout.placements}
-    poses: list[dict[str, object]] = []
-    for obj in scene_config.objects:
-        placement = by_name[obj.name]
-        poses.append(
-            {
-                "name": obj.name,
-                "x": placement.x,
-                "y": placement.y,
-                "z": scene_config.table.top_z + obj.half_extents[2],
-                "yaw_deg": placement.yaw_deg,
-            }
-        )
-    return poses
 
 
-def _boundary_updates(
-    layout: LayoutSpec, scene: object, scene_config: SceneConfig
-) -> dict[int, tuple[float, ...]]:
-    by_name = {placement.name: placement for placement in layout.placements}
-    updates: dict[int, tuple[float, ...]] = {}
-    for obj in scene_config.objects:
-        placement = by_name[obj.name]
-        address = scene.indices.object_free_joint_qpos[obj.name]
-        z = scene_config.table.top_z + obj.half_extents[2]
-        updates[address] = (
-            placement.x,
-            placement.y,
-            z,
-            *visibility.yaw_quaternion(placement.yaw_deg),
-        )
-    return updates
 
 
-def _save_rgb_images(
+
+
+
+
+
+
+def _layout_result(
     run_dir: Path,
-    layout: LayoutSpec,
-    rgb: dict[str, object],
-) -> dict[str, str]:
-    from PIL import Image
-
-    directory = run_dir / "artifacts" / "layouts" / layout.layout_id
+    layout,
+    scene: object,
+    scene_config: SceneConfig,
+    check_config: SceneCheckConfig,
+    renderer: object,
+    logger: object,
+    object_geom_ids,
+    boundary_base,
+):
     try:
-        directory.mkdir(parents=True, exist_ok=False)
-    except FileExistsError as error:
-        raise SceneCheckFailure(
-            "artifact_path_exists",
-            f"layout artifact directory already exists: {directory}",
-        ) from error
-    except OSError as error:
-        raise SceneCheckFailure(
-            "artifact_write_failed",
-            f"cannot create layout artifact directory {directory}: {error}",
-        ) from error
-    paths: dict[str, str] = {}
-    for camera, image in rgb.items():
-        path = directory / f"{camera}.png"
+        if layout.kind == "boundary":
+            assert boundary_base is not None
+            snapshot = renderer.derive_snapshot(
+                boundary_base, _boundary_updates(layout, scene, scene_config)
+            )
+            poses = _boundary_object_poses(layout, scene_config)
+        else:
+            scene.reset(layout.seed)
+            snapshot = renderer.capture(scene.data)
+            poses = _actual_object_poses(scene, scene_config)
+        rgb = renderer.render_rgb(snapshot)
+        rgb_paths = _save_rgb_images(run_dir, layout, rgb)
+        segmentation = renderer.render_segmentation(snapshot)
+        result = visibility.summarize_layout(
+            layout,
+            segmentation,
+            object_geom_ids,
+            check_config.min_visible_pixels,
+            check_config.camera_resolutions,
+        )
+    except Exception as error:
+        if isinstance(error, SceneCheckFailure):
+            raise
+        reason = getattr(error, "reason", "render_failed")
+        message = getattr(error, "message", f"{type(error).__name__}: {error}")
         try:
-            Image.fromarray(image, mode="RGB").save(path, format="PNG")
-        except Exception as error:
+            logger.emit(
+                "render_failed",
+                message="scene layout rendering failed",
+                reason=reason,
+                fields={"layout": layout.layout_id},
+                critical=True,
+            )
+        except Exception as log_error:
             raise SceneCheckFailure(
-                "artifact_write_failed",
-                f"cannot write {path}: {type(error).__name__}: {error}",
-            ) from error
-        paths[camera] = path.relative_to(run_dir).as_posix()
-    return paths
-
-
-def _layout_document(
-    layout: LayoutSpec,
-    result: LayoutVisibility,
-    poses: list[dict[str, object]],
-    rgb_paths: dict[str, str],
-) -> dict[str, object]:
-    return {
-        "layout_id": layout.layout_id,
-        "kind": layout.kind,
-        "seed": layout.seed,
-        "objects": poses,
-        "cameras": [
-            {
-                "camera": camera.camera,
-                "width": camera.width,
-                "height": camera.height,
-                "total_pixels": camera.total_pixels,
-                "passed": camera.passed,
-                "objects": [
-                    {
-                        "object": item.object,
-                        "geom_id": item.geom_id,
-                        "pixels": item.pixels,
-                        "threshold": item.threshold,
-                        "passed": item.passed,
-                    }
-                    for item in camera.objects
-                ],
-            }
-            for camera in result.cameras
-        ],
-        "total_pixels": result.total_pixels,
-        "minimum_margin": result.minimum_margin,
-        "passed": result.passed,
-        "rgb": rgb_paths,
-    }
-
-
-def _first_visibility_failure(result: LayoutVisibility) -> tuple[str, str, int, int] | None:
-    for camera in result.cameras:
-        for item in camera.objects:
-            if not item.passed:
-                return (result.layout_id, camera.camera, item.object, item.pixels)
-    return None
+                "event_log_failed",
+                f"render_failed: {type(log_error).__name__}: {log_error}",
+            ) from log_error
+        raise SceneCheckFailure(str(reason), str(message)) from error
+    return result, poses, rgb_paths
 
 
 def _run_layouts(
@@ -397,46 +327,17 @@ def _run_layouts(
     results: list[dict[str, object]] = []
     first_failure: SceneCheckFailure | None = None
     for layout in layouts:
-        try:
-            if layout.kind == "boundary":
-                assert boundary_base is not None
-                snapshot = renderer.derive_snapshot(
-                    boundary_base, _boundary_updates(layout, scene, scene_config)
-                )
-                poses = _boundary_object_poses(layout, scene_config)
-            else:
-                scene.reset(layout.seed)
-                snapshot = renderer.capture(scene.data)
-                poses = _actual_object_poses(scene, scene_config)
-            rgb = renderer.render_rgb(snapshot)
-            rgb_paths = _save_rgb_images(run_dir, layout, rgb)
-            segmentation = renderer.render_segmentation(snapshot)
-            result = visibility.summarize_layout(
-                layout,
-                segmentation,
-                object_geom_ids,
-                check_config.min_visible_pixels,
-                check_config.camera_resolutions,
-            )
-        except Exception as error:
-            if isinstance(error, SceneCheckFailure):
-                raise
-            reason = getattr(error, "reason", "render_failed")
-            message = getattr(error, "message", f"{type(error).__name__}: {error}")
-            try:
-                logger.emit(
-                    "render_failed",
-                    message="scene layout rendering failed",
-                    reason=reason,
-                    fields={"layout": layout.layout_id},
-                    critical=True,
-                )
-            except Exception as log_error:
-                raise SceneCheckFailure(
-                    "event_log_failed",
-                    f"render_failed: {type(log_error).__name__}: {log_error}",
-                ) from log_error
-            raise SceneCheckFailure(str(reason), str(message)) from error
+        result, poses, rgb_paths = _layout_result(
+            run_dir,
+            layout,
+            scene,
+            scene_config,
+            check_config,
+            renderer,
+            logger,
+            object_geom_ids,
+            boundary_base,
+        )
         document = _layout_document(layout, result, poses, rgb_paths)
         results.append(document)
         fields = {
@@ -471,132 +372,14 @@ def _run_layouts(
     return first_failure
 
 
-def _percentile(values: list[float], fraction: float) -> float:
-    ordered = sorted(values)
-    index = max(0, math.ceil(fraction * len(ordered)) - 1)
-    return ordered[index]
 
 
-def _measure_throughput(
-    renderer: object,
-    snapshot: object,
-    check_config: SceneCheckConfig,
-) -> dict[str, object]:
-    for _ in range(check_config.throughput.warmup_groups):
-        views = renderer.render_rgb(snapshot)
-        del views
-    durations: list[float] = []
-    started = time.perf_counter()
-    for _ in range(check_config.throughput.measure_groups):
-        group_started = time.perf_counter()
-        views = renderer.render_rgb(snapshot)
-        durations.append(time.perf_counter() - group_started)
-        del views
-    wall = time.perf_counter() - started
-    gl = renderer.gl_info
-    return {
-        "group_definition": "one RGB render of all three named cameras from one snapshot",
-        "warmup_groups": check_config.throughput.warmup_groups,
-        "measure_groups": check_config.throughput.measure_groups,
-        "measured_groups": len(durations),
-        "width": renderer.width,
-        "height": renderer.height,
-        "cameras": list(renderer.camera_names),
-        "wall_s": round(wall, 6),
-        "mean_s": round(statistics.fmean(durations), 6),
-        "p50_s": round(statistics.median(durations), 6),
-        "p95_s": round(_percentile(durations, 0.95), 6),
-        "rgb_only": True,
-        "gpu": {
-            "vendor": gl.vendor,
-            "renderer": gl.renderer,
-            "version": gl.version,
-        },
-        "note": (
-            "Pure render throughput only; this is not evidence that 500 Hz physics "
-            "plus 20 Hz cameras are concurrently achieved."
-        ),
-    }
 
 
-def _select_contact_layouts(results: list[dict[str, object]]) -> list[dict[str, object]]:
-    if not results:
-        return []
-    first = results[0]
-    worst = min(
-        results,
-        key=lambda item: (
-            int(item["minimum_margin"]),
-            int(item["total_pixels"]),
-            str(item["layout_id"]),
-        ),
-    )
-    if worst["layout_id"] == first["layout_id"]:
-        return [first, first]
-    return [first, worst]
 
 
-def _write_contact_sheet(
-    run_dir: Path, results: list[dict[str, object]], check_config: SceneCheckConfig
-) -> str:
-    try:
-        return _compose_contact_sheet(run_dir, results, check_config)
-    except SceneCheckFailure:
-        raise
-    except Exception as error:
-        raise SceneCheckFailure(
-            "contact_sheet_write_failed",
-            f"cannot write contact sheet: {type(error).__name__}: {error}",
-        ) from error
 
 
-def _compose_contact_sheet(
-    run_dir: Path, results: list[dict[str, object]], check_config: SceneCheckConfig
-) -> str:
-    from PIL import Image, ImageDraw
-
-    selected = _select_contact_layouts(results)
-    cameras = list(check_config.camera_names)
-    opened: list[list[Image.Image]] = []
-    for layout in selected:
-        row: list[Image.Image] = []
-        for camera in cameras:
-            with Image.open(run_dir / str(layout["rgb"][camera])) as source:
-                row.append(source.convert("RGB"))
-        opened.append(row)
-    tile_width = max(image.width for row in opened for image in row)
-    tile_height = max(image.height for row in opened for image in row)
-    margin = 8
-    gap = 6
-    header = 16
-    label = 14
-    columns = len(cameras)
-    rows = len(selected)
-    sheet_width = margin * 2 + columns * (tile_width + gap) - gap
-    sheet_height = margin * 2 + rows * (header + tile_height + label + gap) - gap
-    sheet = Image.new("RGB", (sheet_width, sheet_height), (245, 245, 245))
-    draw = ImageDraw.Draw(sheet)
-    for row_index, (layout, images) in enumerate(zip(selected, opened, strict=True)):
-        top = margin + row_index * (header + tile_height + label + gap)
-        draw.text(
-            (margin, top),
-            f"{layout['layout_id']}  kind={layout['kind']}  "
-            f"total_pixels={layout['total_pixels']}  passed={layout['passed']}",
-            fill=(0, 0, 0),
-        )
-        image_top = top + header
-        for column, (camera, image) in enumerate(zip(cameras, images, strict=True)):
-            left = margin + column * (tile_width + gap)
-            sheet.paste(image, (left, image_top))
-            draw.rectangle(
-                (left, image_top, left + 110, image_top + label),
-                fill=(0, 0, 0),
-            )
-            draw.text((left + 3, image_top + 1), camera, fill=(255, 255, 255))
-    path = run_dir / "artifacts" / "contact_sheet.png"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    sheet.save(path, format="PNG")
-    return path.relative_to(run_dir).as_posix()
 
 
 def _open_logger(run_dir: Path, run_id: str, instance_id: str) -> object:
@@ -619,15 +402,8 @@ def _open_logger(run_dir: Path, run_id: str, instance_id: str) -> object:
     )
 
 
-def run(arguments: SceneCheckArguments) -> int:
-    run_dir = arguments.report_root / arguments.run_id
-    if os.path.lexists(run_dir):
-        raise SceneCheckUsageError(f"report run directory already exists: {run_dir}")
-    arguments.report_root.mkdir(parents=True, exist_ok=True)
-    run_dir.mkdir(exist_ok=False)
-    started = time.monotonic()
-    instance_id = str(uuid.uuid4())
-    report: dict[str, object] = {
+def _report_template(arguments: SceneCheckArguments, instance_id: str) -> dict[str, object]:
+    return {
         "schema_version": REPORT_SCHEMA_VERSION,
         "kind": KIND,
         "component": COMPONENT,
@@ -664,124 +440,135 @@ def run(arguments: SceneCheckArguments) -> int:
         "logger_close_error": None,
         "error": None,
     }
-    logger: object | None = None
-    failure: SceneCheckFailure | None = None
-    renderer: object | None = None
-    try:
-        logger = _open_logger(run_dir, arguments.run_id, instance_id)
-        report["log_directory"] = Path(logger.directory).relative_to(run_dir).as_posix()
-        _emit(logger, "scene_check_start", "scene visibility check started")
-        scene_config, check_config = _load_configs(arguments)
-        report["configs"] = {
-            "scene": {
-                "path": str(arguments.scene_config),
-                "sha256": _sha256_file(arguments.scene_config),
-                "resolved": _scene_config_document(scene_config),
-            },
-            "check": {
-                "path": str(arguments.check_config),
-                "sha256": _sha256_file(arguments.check_config),
-                "resolved": _check_config_document(check_config),
-            },
-        }
-        _emit(
-            logger,
-            "configs_loaded",
-            "scene and check configurations validated and frozen before GL",
-            {
-                "seeds": len(check_config.seeds),
-                "boundary_layouts": check_config.boundary_layout_count,
-                "layouts": check_config.layout_count,
-            },
-        )
-        dependencies = probe_environment.check_dependencies()
-        probe_environment._verify_mounted_source(dependencies)
-        report["dependencies"] = dependencies
-        report["source"] = {"model_directory": str(assets.MODEL_DIR), "code": _code_provenance()}
-        scene = _build_scene(scene_config)
-        report["scene"] = _scene_info(scene, scene_config)
-        _emit(
-            logger,
-            "model_loaded",
-            "local Panda model compiled into the scene",
-            {"model_directory": str(assets.MODEL_DIR)},
-        )
-        renderer = _make_renderer(scene, scene_config)
-        report["gl"] = _gl_document(renderer.gl_info)
-        _emit(
-            logger,
-            "renderer_ready",
-            "EGL renderer created with the local NVIDIA driver",
-            {
-                "vendor": str(report["gl"]["vendor"]),
-                "renderer": str(report["gl"]["renderer"]),
-                "width": int(renderer.width),
-                "height": int(renderer.height),
-            },
-        )
-        layout_failure = _run_layouts(
-            run_dir, scene, scene_config, check_config, renderer, logger, report
-        )
-        report["throughput"] = _measure_throughput(
-            renderer,
-            renderer.capture(scene.data),
-            check_config,
-        )
-        _emit(
-            logger,
-            "throughput_measured",
-            "RGB-only three-camera render throughput measured",
-            {
-                "groups": int(report["throughput"]["measured_groups"]),
-                "p50_s": float(report["throughput"]["p50_s"]),
-                "p95_s": float(report["throughput"]["p95_s"]),
-            },
-        )
-        contact = _write_contact_sheet(run_dir, report["layouts"], check_config)
-        report["artifact"] = contact
-        report["artifacts"] = {
-            "contact_sheet": contact,
-            "layout_rgb_root": "artifacts/layouts",
-            "layout_png_count": sum(len(result["rgb"]) for result in report["layouts"]),
-        }
-        if layout_failure is not None:
-            raise layout_failure
-    except SceneCheckFailure as error:
-        failure = error
-    except probe_environment.ProbeFailure as error:
-        failure = SceneCheckFailure(error.reason, error.message)
-    except SceneConfigError as error:
-        failure = SceneCheckFailure("scene_config_invalid", str(error))
-    except SceneCheckConfigError as error:
-        failure = SceneCheckFailure("check_config_invalid", str(error))
-    except Exception as error:
-        if logger is None:
-            failure = SceneCheckFailure("logger_init_failed", f"{type(error).__name__}: {error}")
-        else:
-            failure = SceneCheckFailure("unexpected_error", f"{type(error).__name__}: {error}")
-    finally:
-        if logger is not None:
-            try:
-                _emit(
-                    logger,
-                    "finalizing",
-                    "scene check finalizing resources",
-                    {"failed": failure is not None},
+
+
+def _load_and_report_configs(arguments, report):
+    scene_config, check_config = _load_configs(arguments)
+    report["configs"] = {
+        "scene": {
+            "path": str(arguments.scene_config),
+            "sha256": _sha256_file(arguments.scene_config),
+            "resolved": _scene_config_document(scene_config),
+        },
+        "check": {
+            "path": str(arguments.check_config),
+            "sha256": _sha256_file(arguments.check_config),
+            "resolved": _check_config_document(check_config),
+        },
+    }
+    return scene_config, check_config
+
+
+def _execute_checks(arguments, run_dir: Path, report: dict, logger: object):
+    _emit(logger, "scene_check_start", "scene visibility check started")
+    scene_config, check_config = _load_and_report_configs(arguments, report)
+    _emit(
+        logger,
+        "configs_loaded",
+        "scene and check configurations validated and frozen before GL",
+        {
+            "seeds": len(check_config.seeds),
+            "boundary_layouts": check_config.boundary_layout_count,
+            "layouts": check_config.layout_count,
+        },
+    )
+    dependencies = probe_environment.check_dependencies()
+    probe_environment._verify_mounted_source(dependencies)
+    report["dependencies"] = dependencies
+    report["source"] = {"model_directory": str(assets.MODEL_DIR), "code": _code_provenance()}
+    scene = _build_scene(scene_config)
+    report["scene"] = _scene_info(scene, scene_config)
+    _emit(
+        logger,
+        "model_loaded",
+        "local Panda model compiled into the scene",
+        {"model_directory": str(assets.MODEL_DIR)},
+    )
+    renderer = _make_renderer(scene, scene_config)
+    report["gl"] = _gl_document(renderer.gl_info)
+    _emit(
+        logger,
+        "renderer_ready",
+        "EGL renderer created with the local NVIDIA driver",
+        {
+            "vendor": str(report["gl"]["vendor"]),
+            "renderer": str(report["gl"]["renderer"]),
+            "width": int(renderer.width),
+            "height": int(renderer.height),
+        },
+    )
+    layout_failure = _run_layouts(
+        run_dir, scene, scene_config, check_config, renderer, logger, report
+    )
+    report["throughput"] = _measure_throughput(
+        renderer,
+        renderer.capture(scene.data),
+        check_config,
+    )
+    _emit(
+        logger,
+        "throughput_measured",
+        "RGB-only three-camera render throughput measured",
+        {
+            "groups": int(report["throughput"]["measured_groups"]),
+            "p50_s": float(report["throughput"]["p50_s"]),
+            "p95_s": float(report["throughput"]["p95_s"]),
+        },
+    )
+    contact = _write_contact_sheet(run_dir, report["layouts"], check_config)
+    report["artifact"] = contact
+    report["artifacts"] = {
+        "contact_sheet": contact,
+        "layout_rgb_root": "artifacts/layouts",
+        "layout_png_count": sum(len(result["rgb"]) for result in report["layouts"]),
+    }
+    if layout_failure is not None:
+        raise layout_failure
+    return renderer
+
+
+def _classify_failure(logger, error: BaseException) -> SceneCheckFailure:
+    if isinstance(error, SceneCheckFailure):
+        return error
+    if isinstance(error, probe_environment.ProbeFailure):
+        return SceneCheckFailure(error.reason, error.message)
+    if isinstance(error, SceneConfigError):
+        return SceneCheckFailure("scene_config_invalid", str(error))
+    if isinstance(error, SceneCheckConfigError):
+        return SceneCheckFailure("check_config_invalid", str(error))
+    if logger is None:
+        return SceneCheckFailure("logger_init_failed", f"{type(error).__name__}: {error}")
+    return SceneCheckFailure("unexpected_error", f"{type(error).__name__}: {error}")
+
+
+def _close_resources(logger, renderer, failure, report) -> SceneCheckFailure | None:
+    if logger is not None:
+        try:
+            _emit(
+                logger,
+                "finalizing",
+                "scene check finalizing resources",
+                {"failed": failure is not None},
+            )
+        except SceneCheckFailure as error:
+            if failure is None:
+                failure = error
+    if renderer is not None:
+        try:
+            renderer.close()
+        except Exception as error:
+            report["renderer_close_error"] = (
+                f"{getattr(error, 'reason', 'renderer_close_failed')}: {error}"
+            )
+            if failure is None:
+                failure = SceneCheckFailure(
+                    "renderer_close_failed", report["renderer_close_error"]
                 )
-            except SceneCheckFailure as error:
-                if failure is None:
-                    failure = error
-        if renderer is not None:
-            try:
-                renderer.close()
-            except Exception as error:
-                report["renderer_close_error"] = (
-                    f"{getattr(error, 'reason', 'renderer_close_failed')}: {error}"
-                )
-                if failure is None:
-                    failure = SceneCheckFailure(
-                        "renderer_close_failed", report["renderer_close_error"]
-                    )
+    return failure
+
+
+def _close_logger(logger, failure):
+    log_close_error: str | None = None
     try:
         if logger is not None:
             if failure is None:
@@ -803,7 +590,6 @@ def run(arguments: SceneCheckArguments) -> int:
             failure = SceneCheckFailure(
                 "event_log_failed", f"logger finalization: {type(error).__name__}: {error}"
             )
-    log_close_error: str | None = None
     if logger is not None:
         try:
             logger.close()
@@ -813,7 +599,13 @@ def run(arguments: SceneCheckArguments) -> int:
                 failure = SceneCheckFailure(
                     "logger_close_failed", f"event logger close failed: {log_close_error}"
                 )
-    report["logs_closed"] = logger is not None and log_close_error is None
+    return failure, log_close_error
+
+
+def _finalize_report(
+    report, failure, run_dir: Path, started: float, log_close_error, logger_present: bool
+) -> int:
+    report["logs_closed"] = logger_present and log_close_error is None
     report["logger_close_error"] = log_close_error
     report["elapsed_s"] = round(time.monotonic() - started, 3)
     report["finished_at_utc"] = _utc_now()
@@ -825,10 +617,7 @@ def run(arguments: SceneCheckArguments) -> int:
         report["status"] = "failed"
         report["exit_code"] = 1
         report["reason"] = failure.reason
-        report["error"] = {
-            "type": type(failure).__name__,
-            "message": failure.message[:2000],
-        }
+        report["error"] = {"type": type(failure).__name__, "message": failure.message[:2000]}
     report_path = run_dir / "report.json"
     try:
         _write_json_atomic(report_path, report)
@@ -837,6 +626,32 @@ def run(arguments: SceneCheckArguments) -> int:
         return 1
     print(f"report: {report_path}")
     return int(report["exit_code"])
+
+
+def run(arguments: SceneCheckArguments) -> int:
+    run_dir = arguments.report_root / arguments.run_id
+    if os.path.lexists(run_dir):
+        raise SceneCheckUsageError(f"report run directory already exists: {run_dir}")
+    arguments.report_root.mkdir(parents=True, exist_ok=True)
+    run_dir.mkdir(exist_ok=False)
+    started = time.monotonic()
+    instance_id = str(uuid.uuid4())
+    report = _report_template(arguments, instance_id)
+    logger: object | None = None
+    failure: SceneCheckFailure | None = None
+    renderer: object | None = None
+    try:
+        logger = _open_logger(run_dir, arguments.run_id, instance_id)
+        report["log_directory"] = Path(logger.directory).relative_to(run_dir).as_posix()
+        renderer = _execute_checks(arguments, run_dir, report, logger)
+    except BaseException as error:
+        failure = _classify_failure(logger, error)
+    finally:
+        failure = _close_resources(logger, renderer, failure, report)
+    failure, log_close_error = _close_logger(logger, failure)
+    return _finalize_report(
+        report, failure, run_dir, started, log_close_error, logger is not None
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

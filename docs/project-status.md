@@ -1,6 +1,6 @@
 # 总目标与当前阶段
 
-更新：2026-11-04。本文件统一维护目标、约束、阶段与下一步。
+更新：2026-11-10。本文件统一维护目标、约束、阶段与下一步。
 运行方法见[根 README](../README.md)，维护规则见[项目规范](standards.md)。
 本页不充当训练监控面板，运行事实以带时间的日志、台账和最终报告为准。
 
@@ -55,6 +55,20 @@ API 切换真机与仿真，通过独立 Policy API 切换模型；机器人、�
 | DSH-058 | 删除自定义镜像版本报告层及三处检查入口的报告依赖 | 实际构建、105 项测试及环境/场景/运动学/后端收尾检查通过 |
 | DSH-059 | Docker 内使用通用依赖文件名和本地构建上下文 | 实际构建、57 项测试及真实环境/三相机场景通过；不同宿主 cwd 解析一致 |
 | DSH-060 | 容器资产变量通用化、删除四个冗余标记，运行 ENV 放在依赖安装后 | 实际构建、138 项测试及环境/场景/运动学/后端启停通过 |
+| 阶段6重构 | 训练默认 PyAV + 默认张量批处理 + 多 worker/`pin_memory`/AMP；拆分学习与运行端千行模块 | 全仓 `.py` 均 ≤720 行、函数均 ≤85 行；学习 733 项、运行/仿真 691/784 项单测通过；全仓非测试总行数仍高于任务书的 35k 目标，见下文 |
+
+阶段 6 重构（2026-11-10）把 ACT 训练切换为 PyAV 解码、DataLoader 默认
+`default_collate` 张量批处理、多 worker、`pin_memory` 和 CUDA
+`torch.amp.autocast`/`GradScaler`；训练配置新增 `num_workers`、`pin_memory`、
+`prefetch_factor`、`use_amp`、`amp_dtype`。学习端拆分为
+`dataset_common/dataset_export/dataset_manifest`、`sample_filter_rules/mask`、
+`training_manifest/training_engine/training_support`；运行端拆分为
+`episode_runner_io/episode_streams/episode_finalization`、`audit_stream/follower_audit`、
+`runtime_callbacks/identity/limits`、`control_cli_support`，脚本拆分为
+`evaluation_metrics/media`、`campaign_ledger/execution`、`export_quality/media`。
+拆分后全仓 `.py` 均 ≤720 行、函数均 ≤85 行；但任务书 35,000 行总行数目标在
+阶段 5 基线（43,540 行）时已不可达，本阶段拆分又增加了必要的模块脚手架，
+当前约 46,200 行。未通过删除功能或压缩格式来伪造该指标。
 
 详细计划、执行和结果已压缩为[历史总览](history/README.md)，
 每个 DSH 编号保留一条关键结论；需要原文时通过 Git 历史追溯。

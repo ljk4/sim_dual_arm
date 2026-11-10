@@ -93,6 +93,76 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _snapshot(config: PolicyServiceConfig, adapter: object, summary: dict) -> dict:
+    return {
+        "schema_version": 1,
+        "bundle": summary,
+        "service": config.to_document(),
+        "provider": adapter.summary(),
+        "task_id": config.task_id,
+        "task_text": config.task_text,
+        "source": {
+            "bundle_root": str(config.bundle_dir),
+            "profile": str(config.robot_profile_path),
+            "observation_schema": str(config.observation_schema_path),
+            "action_schema": str(config.action_schema_path),
+            "device": config.device,
+        },
+    }
+
+
+def _serve(
+    config: PolicyServiceConfig,
+    adapter: object,
+    startup: dict,
+    snapshot: dict,
+    args: object,
+    config_path: Path,
+) -> int:
+    run_id = args.run_id or "act-policy-" + uuid.uuid4().hex[:12]
+    code = serve_forever(
+        config,
+        adapter,
+        log_directory=args.log_directory,
+        prediction_directory=args.log_directory / "predictions",
+        prediction_max_bytes=config.logging.max_total_bytes,
+        run_id=run_id,
+        startup_fields=startup,
+        snapshot=snapshot,
+        snapshot_name=args.snapshot_name,
+    )
+    if code != 0:
+        _write_startup_failure(
+            args.log_directory,
+            stage="serve",
+            error=RuntimeError(f"policy service exited {code}"),
+            config_path=config_path,
+            config=config,
+        )
+    return code
+
+
+def _fail(
+    args: object,
+    stage: str,
+    error: BaseException,
+    config_path: Path,
+    config: PolicyServiceConfig | None,
+) -> int:
+    _write_startup_failure(
+        args.log_directory,
+        stage=stage,
+        error=error,
+        config_path=config_path,
+        config=config,
+        bundle_dir=args.bundle_dir,
+    )
+    if args.debug:
+        raise error
+    print(f"act_policy: {type(error).__name__}: {error}", file=sys.stderr)
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_arguments(argv)
     config_path = args.config if args.config.is_absolute() else _project_root() / args.config
@@ -119,69 +189,13 @@ def main(argv: list[str] | None = None) -> int:
                 "test_only": config.test_only,
             }
         )
-        snapshot = {
-            "schema_version": 1,
-            "bundle": summary,
-            "service": config.to_document(),
-            "provider": adapter.summary(),
-            "task_id": config.task_id,
-            "task_text": config.task_text,
-            "source": {
-                "bundle_root": str(config.bundle_dir),
-                "profile": str(config.robot_profile_path),
-                "observation_schema": str(config.observation_schema_path),
-                "action_schema": str(config.action_schema_path),
-                "device": config.device,
-            },
-        }
-        run_id = args.run_id or "act-policy-" + uuid.uuid4().hex[:12]
         stage = "serve"
-        code = serve_forever(
-            config,
-            adapter,
-            log_directory=args.log_directory,
-            prediction_directory=args.log_directory / "predictions",
-            prediction_max_bytes=config.logging.max_total_bytes,
-            run_id=run_id,
-            startup_fields=startup,
-            snapshot=snapshot,
-            snapshot_name=args.snapshot_name,
-        )
-        if code != 0:
-            _write_startup_failure(
-                args.log_directory,
-                stage="serve",
-                error=RuntimeError(f"policy service exited {code}"),
-                config_path=config_path,
-                config=config,
-            )
-        return code
+        snapshot = _snapshot(config, adapter, summary)
+        return _serve(config, adapter, startup, snapshot, args, config_path)
     except (PolicyConfigError, PolicyError, BundleError, OSError, ValueError) as error:
-        _write_startup_failure(
-            args.log_directory,
-            stage=stage,
-            error=error,
-            config_path=config_path,
-            config=config,
-            bundle_dir=args.bundle_dir,
-        )
-        if args.debug:
-            raise
-        print(f"act_policy: {type(error).__name__}: {error}", file=sys.stderr)
-        return 1
+        return _fail(args, stage, error, config_path, config)
     except Exception as error:  # noqa: BLE001 - startup must fail visibly
-        _write_startup_failure(
-            args.log_directory,
-            stage=stage,
-            error=error,
-            config_path=config_path,
-            config=config,
-            bundle_dir=args.bundle_dir,
-        )
-        if args.debug:
-            raise
-        print(f"act_policy: {type(error).__name__}: {error}", file=sys.stderr)
-        return 1
+        return _fail(args, stage, error, config_path, config)
 
 
 __all__ = ["main", "parse_arguments"]

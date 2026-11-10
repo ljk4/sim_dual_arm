@@ -49,7 +49,7 @@ lerobot:
     g: 2
     crf: 18
     preset: veryfast
-  video_backend: torchcodec
+  video_backend: pyav
   video_files_size_mb: 256
   data_files_size_mb: 256
   encoder_threads: 1

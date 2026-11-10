@@ -226,6 +226,10 @@ learning/lerobot/scripts/run.sh convert
 learning/lerobot/scripts/run.sh train --mode full
 ```
 
+训练默认用 PyAV 解码视频、DataLoader 默认 `default_collate` 直接产出批张量，
+并启用 `num_workers`、`pin_memory`、`prefetch_factor` 和 CUDA AMP（bfloat16）。
+这些参数在 `learning/lerobot/configs/act_training*.yaml` 的 `training` 段显式配置。
+
 从输出中记录 `run_dir`，例如：
 
 ```text

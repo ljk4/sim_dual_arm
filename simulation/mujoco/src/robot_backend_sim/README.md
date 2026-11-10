@@ -14,9 +14,9 @@ MuJoCo 后端 Python 包。按状态所有权分组：
   `stream_schedule.py`：受限跟随、连续流调度和预编译。
 - `tasks/`：通用 `SimTaskPlugin` 协议与 `tasks/stack/` 堆叠插件（判定、teacher、
   ROS 适配、配置）。
-- `tools/check_scene.py`、`tools/check_kinematics.py`、`tools/probe_environment.py`、
-  `diagnostics.py`、
-  `ruckig_export.py`：一次性检查、诊断和 Ruckig 导出。
+- `tools/check_scene*.py`、`tools/check_kinematics*.py`、`tools/probe_environment.py`、
+  `diagnostics.py`、`ruckig_export.py`：一次性检查、诊断和 Ruckig 导出；检查工具
+  按公共失败类型、视图/布局检查和报告发布拆分为小型模块。
 
 入口 `backend_cli.py` 解析配置并启动 node；所有长期状态由组合根显式创建。
 

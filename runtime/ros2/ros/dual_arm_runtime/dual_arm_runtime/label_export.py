@@ -70,6 +70,52 @@ class RawPrediction:
     positions: tuple[tuple[float, ...], ...]
 
 
+def _ordered_observations(
+    observations: list[ObservationFact], max_labels: int
+) -> list[ObservationFact]:
+    if len(observations) > max_labels:
+        raise ContractError(
+            "LABEL_EXPORT_LIMIT",
+            f"{len(observations)} exact frames exceed the configured {max_labels} bound",
+        )
+    ordered = sorted(observations, key=lambda item: item.sim_time_ns)
+    for left, right in zip(ordered, ordered[1:], strict=False):
+        if right.sim_time_ns <= left.sim_time_ns:
+            raise ContractError("LABEL_EXPORT_ORDER", "observations are not strictly increasing")
+    return ordered
+
+
+def _label_row(
+    observation: ObservationFact,
+    label_time: int,
+    block: AppliedBlock,
+    prediction: RawPrediction,
+    applied: object,
+    period_ns: int,
+) -> dict[str, object]:
+    return {
+        "observation_id": observation.observation_id,
+        "state_seq": observation.state_seq,
+        "capture_source": observation.source,
+        "observation_sim_time_ns": observation.sim_time_ns,
+        "label_sim_time_ns": label_time,
+        "observation_period_ns": period_ns,
+        "chunk_seq": block.chunk_seq,
+        "command_id": block.command_id,
+        "started_sim_time_ns": block.started_sim_time_ns,
+        "block_end_sim_time_ns": block.effective_end_ns(),
+        "applied_positions": list(applied.applied_positions),
+        "sampled_positions": list(applied.sampled_positions),
+        "applied_velocities": list(applied.sampled_velocities),
+        "measured_positions": list(observation.measured_positions),
+        "measured_velocities": list(observation.measured_velocities),
+        "frame_seqs": list(observation.frame_seqs),
+        "raw_chunk_seq": prediction.chunk_seq,
+        "raw_source_observation_id": prediction.source_observation_id,
+        "raw_source_observation_time_ns": prediction.source_observation_time_ns,
+    }
+
+
 def build_labels(
     observations: list[ObservationFact],
     blocks: list[AppliedBlock],
@@ -84,15 +130,7 @@ def build_labels(
     """Return bounded label rows plus an explicit rejection summary."""
     if isinstance(max_labels, bool) or not 1 <= max_labels <= MAX_LABELS_HARD:
         raise ContractError("LABEL_EXPORT_LIMIT", f"max_labels must be within 1..{MAX_LABELS_HARD}")
-    if len(observations) > max_labels:
-        raise ContractError(
-            "LABEL_EXPORT_LIMIT",
-            f"{len(observations)} exact frames exceed the configured {max_labels} bound",
-        )
-    ordered = sorted(observations, key=lambda item: item.sim_time_ns)
-    for left, right in zip(ordered, ordered[1:], strict=False):
-        if right.sim_time_ns <= left.sim_time_ns:
-            raise ContractError("LABEL_EXPORT_ORDER", "observations are not strictly increasing")
+    ordered = _ordered_observations(observations, max_labels)
     rows: list[dict[str, object]] = []
     rejected: dict[str, int] = {
         "no_started_block": 0,
@@ -134,27 +172,7 @@ def build_labels(
             rejected["non_uniform_observation_period"] += 1
             continue
         rows.append(
-            {
-                "observation_id": observation.observation_id,
-                "state_seq": observation.state_seq,
-                "capture_source": observation.source,
-                "observation_sim_time_ns": observation.sim_time_ns,
-                "label_sim_time_ns": label_time,
-                "observation_period_ns": period_ns,
-                "chunk_seq": block.chunk_seq,
-                "command_id": block.command_id,
-                "started_sim_time_ns": block.started_sim_time_ns,
-                "block_end_sim_time_ns": block.effective_end_ns(),
-                "applied_positions": list(applied.applied_positions),
-                "sampled_positions": list(applied.sampled_positions),
-                "applied_velocities": list(applied.sampled_velocities),
-                "measured_positions": list(observation.measured_positions),
-                "measured_velocities": list(observation.measured_velocities),
-                "frame_seqs": list(observation.frame_seqs),
-                "raw_chunk_seq": prediction.chunk_seq,
-                "raw_source_observation_id": prediction.source_observation_id,
-                "raw_source_observation_time_ns": prediction.source_observation_time_ns,
-            }
+            _label_row(observation, label_time, block, prediction, applied, period_ns)
         )
         if len(rows) >= max_labels:
             break

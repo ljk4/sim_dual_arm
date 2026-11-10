@@ -8,6 +8,8 @@ ROS-free 的 ACT 策略服务、协议适配、bundle/checkpoint 校验、数据
   `policy.yaml`；模型/processor/profile/schema 摘要均由 bundle 与 shipped 文件计算。
 - `convert`、`validate`、`filter`、`train`、`bundle`、`verify-bundle`、`budget`：
   复用原 `dual_arm_learning.cli` 的转换、数据校验、筛选、训练预算、模型包能力。
+  训练默认使用 PyAV 视频解码、默认张量批处理 collate、`num_workers`/`pin_memory`
+  多进程预取和 CUDA `torch.amp` 混合精度；这些参数都在 `act_training*.yaml` 中显式配置。
 - `policy`：启动 ROS-free Policy 服务；runtime 默认绑定 `learning:50051`，binding 可配置一致端口的 host:port。
 - `test`：固定关闭自动插件收集的 pytest 入口。
 

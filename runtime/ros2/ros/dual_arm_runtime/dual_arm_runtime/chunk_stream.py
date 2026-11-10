@@ -13,10 +13,8 @@ from __future__ import annotations
 
 import threading
 import time
-from collections.abc import Callable, Sequence
-from typing import Protocol
+from collections.abc import Callable
 
-from robot_contracts.execution_feedback import ExecutionFeedback
 from robot_contracts.models import ContractError, RobotProfile, RunContext, Target
 from robot_contracts.stream_request import (
     REQUEST_STREAM_FIRST,
@@ -27,6 +25,7 @@ from robot_contracts.stream_request import (
 from robot_contracts.trajectory import FollowerValidationLimits
 from robot_run_logging import EventContext, Scalar
 
+from dual_arm_runtime.follower_limits import follower_limits  # noqa: F401 - re-export
 from dual_arm_runtime.observation import ExactObservation
 from dual_arm_runtime.policy_client import (
     PolicyClient,
@@ -35,81 +34,13 @@ from dual_arm_runtime.policy_client import (
 )
 from dual_arm_runtime.run_logging import EventSink, emit_best_effort
 from dual_arm_runtime.runtime_config import PolicyConfig, RuntimeConfiguration
+from dual_arm_runtime.stream_protocols import StreamControl, StreamIO, TaskMonitor  # noqa: F401
 from dual_arm_runtime.target_source import (
     Prediction,
     TargetSource,
     TaskTerminal,
     task_terminal_fact,
 )
-
-
-class StreamControl(Protocol):
-    @property
-    def lease_id(self) -> str: ...
-
-    def get_anchor(self, context: RunContext, start_sim_time_ns: int | None = None): ...
-
-    def submit_follower(self, request: StreamRequest): ...
-
-
-class StreamIO(Protocol):
-    def wait_observation(
-        self, after_id: int, timeout_s: float, stop: threading.Event
-    ) -> ExactObservation: ...
-
-    def publish_command(self, request: StreamRequest, timestamp_ns: int) -> None: ...
-
-    def record_follower_reference(self, reference: object) -> None: ...
-
-    def record_execution(self, execution: ExecutionFeedback) -> None: ...
-
-    def wait_terminal(
-        self, command_id: str, timeout_s: float, stop: threading.Event
-    ) -> ExecutionFeedback: ...
-
-    def robot_time_ns(self) -> int: ...
-
-
-class TaskMonitor(Protocol):
-    """Bounded evaluation-only task lifecycle used by task-terminated streams."""
-
-    def prepare(
-        self,
-        context: RunContext,
-        episode_id: str,
-        request_id: str,
-        lease_id: str,
-        seed: int,
-    ) -> object: ...
-
-    def start(
-        self,
-        context: RunContext,
-        episode_id: str,
-        request_id: str,
-        lease_id: str,
-        task_epoch: int,
-        plan_digest: str,
-    ) -> int: ...
-
-    def state(self, context: RunContext, task_epoch: int = 0) -> object: ...
-
-
-def follower_limits(
-    configuration: RuntimeConfiguration, max_accelerations: Sequence[float]
-) -> FollowerValidationLimits:
-    """Build the concrete 031 validation limits from configuration only."""
-    follower = configuration.recipe.follower
-    if follower is None:
-        raise ContractError("FOLLOWER_DISABLED", "follower constraints are absent")
-    return FollowerValidationLimits(
-        joint_names=configuration.profile.joint_names,
-        max_accelerations=tuple(float(value) for value in max_accelerations),
-        max_target_deviations=follower.max_target_deviations,
-        target_count=follower.target_count,
-        max_terminal_tail_duration_ns=follower.max_terminal_tail_duration_ns,
-        duration_grid_ns=follower.duration_grid_ns,
-    )
 
 
 class PolicyTargetSource:

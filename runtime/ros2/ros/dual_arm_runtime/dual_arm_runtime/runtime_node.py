@@ -2,12 +2,12 @@
 
 The node owns ROS entities, exact-capture state, callback validation and the
 process/executor lifecycle.  Episode sequencing, command transport and
-MCAP auditing live in their own modules.
+MCAP auditing live in their own modules.  Subscription callbacks live in
+:mod:`runtime_callbacks` and execution identity in :mod:`runtime_identity`.
 """
 
 from __future__ import annotations
 
-import hashlib
 import threading
 import time
 from collections.abc import Sequence
@@ -24,35 +24,25 @@ from robot_api_msgs.msg import (
     RuntimeStatus,
     StreamCommand,
 )
-from robot_api_msgs.msg import (
-    ExecutionFeedback as ExecutionFeedbackMessage,
-)
+from robot_api_msgs.msg import ExecutionFeedback as ExecutionFeedbackMessage
 from robot_api_msgs.msg import FollowerReference as FollowerReferenceMessage
 from robot_api_msgs.msg import TaskState as TaskStateMessage
 from robot_api_msgs.srv import EndEpisode, StartEpisode
 from robot_contracts.execution_feedback import ExecutionFeedback
 from robot_contracts.models import ContractError, RunContext
 from robot_contracts.stream_request import StreamRequest
-from robot_contracts.trajectory import (
-    FollowerReference as DomainFollowerReference,
-)
-from robot_contracts.trajectory import (
-    FollowerValidationLimits,
-)
-from robot_contracts.trajectory import (
-    validate as validate_follower_reference,
-)
+from robot_contracts.trajectory import FollowerReference as DomainFollowerReference
+from robot_contracts.trajectory import FollowerValidationLimits
 from robot_ros_support.conversions import (
     context_from_message,
     context_message,
     stamp,
     time_ns,
 )
-from robot_ros_support.follower_conversions import follower_reference_from_message
+from robot_ros_support.follower_conversions import follower_reference_message
 from robot_ros_support.qos import EVENT_QOS, INFO_QOS, RELIABLE_SENSOR_QOS, SENSOR_QOS
 from robot_ros_support.stream_conversions import (
-    control_event_from_message,
-    execution_feedback_from_message,
+    execution_feedback_message,
     stream_command_message,
 )
 
@@ -60,16 +50,16 @@ from dual_arm_runtime.chunk_stream import follower_limits
 from dual_arm_runtime.episode_runner import EpisodeRunner
 from dual_arm_runtime.observation import ExactCaptureBuffer, ExactObservation
 from dual_arm_runtime.robot_control_client import RobotControlClient
-from dual_arm_runtime.run_logging import (
-    EventSink,
-)
+from dual_arm_runtime.run_logging import EventSink
+from dual_arm_runtime.runtime_callbacks import RuntimeCallbacks
 from dual_arm_runtime.runtime_config import RuntimeConfiguration
+from dual_arm_runtime.runtime_identity import execution_identity
+from dual_arm_runtime.runtime_limits import control_limits, task_enabled
 from dual_arm_runtime.task_client import TaskClient
 
 _TERMINAL = frozenset({"COMPLETED", "CANCELED", "FAILED"})
 _MAX_EXPECTED_COMMANDS = 64
 _MAX_EXPECTED_CHUNKS = 512
-_MAX_CONTROL_EVENTS = 4096
 
 
 def _terminal(execution: ExecutionFeedback) -> bool:
@@ -98,6 +88,12 @@ class RuntimeNode(Node):
         self._root = self._recipe.robot_namespace.rstrip("/")
         self._group = ReentrantCallbackGroup()
         self._condition = threading.Condition()
+        self._init_stream_state(configuration)
+        self._init_episode(configuration, output, log, run_id, initial_episode_id)
+        self._callbacks = RuntimeCallbacks(self)
+        self._setup_ros(auto_start)
+
+    def _init_stream_state(self, configuration: RuntimeConfiguration) -> None:
         self._info: BackendInfo | None = None
         self._last_observation: ExactObservation | None = None
         self._last_index_id = 0
@@ -115,7 +111,7 @@ class RuntimeNode(Node):
         self._rejected = 0
         self._event_duplicates = 0
         self._execution_duplicates = 0
-        self._max_accelerations = self._control_limits()
+        self._max_accelerations = control_limits(configuration)
         self._follower_limits: FollowerValidationLimits | None = (
             follower_limits(configuration, self._max_accelerations)
             if configuration.recipe.follower is not None
@@ -129,6 +125,15 @@ class RuntimeNode(Node):
             ),
             capacity=configuration.recipe.observation.capacity,
         )
+
+    def _init_episode(
+        self,
+        configuration: RuntimeConfiguration,
+        output: Path,
+        log: EventSink | None,
+        run_id: str,
+        initial_episode_id: str | None,
+    ) -> None:
         self._episode = EpisodeRunner(
             configuration,
             output,
@@ -168,21 +173,23 @@ class RuntimeNode(Node):
                 log=log,
                 stop_requested=self._control.stop_requested,
             )
-            if self._task_enabled()
+            if task_enabled(configuration)
             else None
         )
         self._cameras = {camera.name: camera for camera in configuration.profile.cameras}
+
+    def _setup_ros(self, auto_start: bool) -> None:
         self._status = self.create_publisher(RuntimeStatus, "/runtime/status", INFO_QOS)
-        self._commands = self.create_publisher(
-            StreamCommand, "/runtime/commands", EVENT_QOS
-        )
+        self._commands = self.create_publisher(StreamCommand, "/runtime/commands", EVENT_QOS)
         self._indices = self.create_publisher(
             ObservationIndex, "/runtime/observation_index", EVENT_QOS
         )
         self.create_subscription(BackendInfo, f"{self._root}/info", self._on_info, INFO_QOS)
         sensor_qos = RELIABLE_SENSOR_QOS if self._recipe.observation.reliable else SENSOR_QOS
         self.create_subscription(RobotState, f"{self._root}/state", self._on_state, sensor_qos)
-        self._camera_topics = {name: f"{self._root}/cameras/{name}/frame" for name in self._cameras}
+        self._camera_topics = {
+            name: f"{self._root}/cameras/{name}/frame" for name in self._cameras
+        }
         for name, topic in self._camera_topics.items():
             self.create_subscription(
                 CameraFrame,
@@ -195,10 +202,7 @@ class RuntimeNode(Node):
                 TaskStateMessage, f"{self._root}/task_state", self._on_task_state, EVENT_QOS
             )
         self.create_subscription(
-            ControlEvent,
-            f"{self._root}/control_events",
-            self._on_event,
-            EVENT_QOS,
+            ControlEvent, f"{self._root}/control_events", self._on_event, EVENT_QOS
         )
         self.create_subscription(
             ExecutionFeedbackMessage,
@@ -224,40 +228,6 @@ class RuntimeNode(Node):
         self.publish_status("IDLE", "", "", "")
         if auto_start:
             self._auto_timer = self.create_timer(0.1, self._auto_start)
-
-    def _task_enabled(self) -> bool:
-        recipe = self._recipe
-        stream = recipe.policy if recipe.action_source == "policy" else recipe.teacher
-        return recipe.action_source == "teacher" or (
-            stream is not None and stream.termination_mode == "task"
-        )
-
-    def _control_limits(self) -> tuple[float, ...]:
-        names = self.config.control_document.get("joint_names")
-        limits = self.config.control_document.get("max_accelerations")
-        if list(names or ()) != list(self.config.profile.joint_names):
-            raise ContractError(
-                "SCHEMA_MISMATCH", "control joint_names differ from the robot profile"
-            )
-        if not isinstance(limits, list) or len(limits) != len(self.config.profile.joints):
-            raise ContractError(
-                "SCHEMA_MISMATCH", "control max_accelerations must match the profile joints"
-            )
-        result: list[float] = []
-        for index, value in enumerate(limits):
-            if isinstance(value, bool) or not isinstance(value, int | float):
-                raise ContractError(
-                    "SCHEMA_MISMATCH", f"max_accelerations[{index}] must be a number"
-                )
-            number = float(value)
-            if not number >= 0.0:
-                raise ContractError(
-                    "SCHEMA_MISMATCH", f"max_accelerations[{index}] must be non-negative"
-                )
-            result.append(number)
-        return tuple(result)
-
-    # ---- Shared lifecycle surface -------------------------------------------------
 
     @property
     def done(self) -> threading.Event:
@@ -305,8 +275,6 @@ class RuntimeNode(Node):
     def shutdown_details(self) -> dict[str, str]:
         return self._episode.shutdown_details()
 
-    # ---- EpisodeIO ----------------------------------------------------------
-
     @property
     def info_topic(self) -> str:
         return f"{self._root}/info"
@@ -333,8 +301,9 @@ class RuntimeNode(Node):
             raise ContractError("SCHEMA_MISMATCH", "backend joints")
         if tuple(info.camera_names) != self.config.profile.camera_names:
             raise ContractError("SCHEMA_MISMATCH", "backend cameras")
-        context = context_from_message(info.context).model_copy(update={
-            "episode_id": episode_id, "control_epoch": 1})
+        context = context_from_message(info.context).model_copy(
+            update={"episode_id": episode_id, "control_epoch": 1}
+        )
         return context, info
 
     def bind_context(self, context: RunContext) -> None:
@@ -429,29 +398,18 @@ class RuntimeNode(Node):
         self._commands.publish(message)
 
     def record_task_state(self, fact: object) -> None:
-        message = fact
-        if not isinstance(message, TaskStateMessage):
+        if not isinstance(fact, TaskStateMessage):
             raise ContractError("TASK_STATE_MISMATCH", "task fact is not a ROS state message")
-        sample_ns = time_ns(message.sample_time)
+        sample_ns = time_ns(fact.sample_time)
         with self._condition:
-            sequence = int(message.state_seq)
+            sequence = int(fact.state_seq)
             if sequence <= self._last_task_state_seq:
                 return
             self._last_task_state_seq = sequence
-        self._episode.record(f"{self._root}/task_state", message, sample_ns)
+        self._episode.record(f"{self._root}/task_state", fact, sample_ns)
 
     def task_client(self) -> object:
         return self._task_client
-
-    def _on_task_state(self, message: TaskStateMessage) -> None:
-        context = self._episode_context()
-        if context is None or context_from_message(message.context) != context:
-            self._rejected += 1
-            return
-        try:
-            self.record_task_state(message)
-        except ContractError as error:
-            self._episode.report_control_fault(str(error))
 
     def record_follower_reference(self, reference: DomainFollowerReference) -> None:
         command_id = reference.command_id
@@ -461,8 +419,6 @@ class RuntimeNode(Node):
             if reference.reference_digest in digests:
                 return
             digests.add(reference.reference_digest or "")
-        from robot_ros_support.follower_conversions import follower_reference_message
-
         self._episode.record(
             f"{self._root}/follower_references",
             follower_reference_message(reference),
@@ -470,14 +426,14 @@ class RuntimeNode(Node):
         )
 
     def record_execution(self, execution: ExecutionFeedback) -> None:
-        signature = self._execution_identity(execution)
+        signature = execution_identity(execution)
         with self._condition:
             frozen = self._terminal_execution.get(execution.command_id)
             if frozen is not None:
                 # Query and DDS are independent delivery paths. An older
                 # nonterminal reply can arrive after a true terminal fact;
                 # it must not replace the frozen fact or its identity.
-                if _terminal(execution) and self._execution_identity(frozen) != signature:
+                if _terminal(execution) and execution_identity(frozen) != signature:
                     raise ContractError(
                         "INVALID_EXECUTION_FEEDBACK",
                         f"terminal execution changed after freeze: {execution.command_id}",
@@ -487,8 +443,6 @@ class RuntimeNode(Node):
             if self._execution_signature.get(execution.command_id) == signature:
                 self._execution_duplicates += 1
                 return
-            from robot_ros_support.stream_conversions import execution_feedback_message
-
             # Make recorder enqueue precede the observable completion fact.
             # Otherwise finish can close the writer between these two actions.
             self._episode.record(
@@ -518,9 +472,8 @@ class RuntimeNode(Node):
 
     def wait_stop_settled(self, command_ids: Sequence[str], timeout_s: float) -> None:
         deadline = time.monotonic() + timeout_s
-        missing = set(command_ids)
         with self._condition:
-            missing = {name for name in missing if not self._control_facts_complete(name)}
+            missing = {name for name in command_ids if not self._control_facts_complete(name)}
         while missing:
             if time.monotonic() >= deadline:
                 raise ContractError(
@@ -603,301 +556,35 @@ class RuntimeNode(Node):
         with self._condition:
             self._condition.notify_all()
 
-    # ---- Callbacks ---------------------------------------------------------------
-
-    def _episode_context(self) -> RunContext | None:
-        return self._episode.context
-
-    def _matches(self, message: object) -> bool:
-        context = self._episode_context()
-        if context is None:
-            return False
-        try:
-            return context_from_message(message.context) == context  # type: ignore[attr-defined]
-        except Exception:
-            return False
-
     def _on_info(self, message: BackendInfo) -> None:
-        context = self._episode_context()
-        incoming = context_from_message(message.context)
-        if context is not None and incoming.generation != context.generation:
-            self._episode.report_control_fault("STALE_CONTEXT: backend restarted")
-        with self._condition:
-            self._info = message
-            self._condition.notify_all()
-        if context is not None and incoming == context:
-            self._episode.record(self.info_topic, message, 0)
+        self._callbacks.on_info(message)
 
     def _on_state(self, message: RobotState) -> None:
-        context = self._episode_context()
-        if context is None or context_from_message(message.context) != context:
-            self._rejected += 1
-            return
-        names = list(message.joints.name)
-        if names != list(self.config.profile.joint_names):
-            self._episode.report_control_fault("STATE_JOINTS_DIFFER")
-            return
-        if len(message.joints.position) != len(names):
-            self._episode.report_control_fault("STATE_POSITION_COUNT_DIFFERS")
-            return
-        stamp_ns = time_ns(message.stamp)
-        if time_ns(message.joints.header.stamp) != stamp_ns:
-            self._episode.report_control_fault("STATE_STAMP_MISMATCH")
-            return
-        self._episode.record(f"{self._root}/state", message, stamp_ns)
-        accepted = self._buffer.add(
-            "state",
-            context,
-            int(message.state_seq),
-            stamp_ns,
-            message,
-            wall_arrival_ns=time.monotonic_ns(),
-            fingerprint=(stamp_ns, tuple(message.joints.position), tuple(message.joints.velocity)),
-        )
-        if not accepted and self._buffer.conflict_reason:
-            self._episode.report_control_fault(
-                f"OBSERVATION_CONFLICT: {self._buffer.conflict_reason}"
-            )
-        self.notify()
-
-    def _validate_frame(self, camera_name: str, message: CameraFrame) -> None:
-        camera = self._cameras[camera_name]
-        image = message.image
-        info = message.camera_info
-        stamp_ns = time_ns(image.header.stamp)
-        if (image.width, image.height) != (camera.width, camera.height):
-            raise ContractError("SCHEMA_MISMATCH", f"{camera_name}: image dimensions")
-        if image.encoding != "rgb8" or image.step != camera.width * 3:
-            raise ContractError("SCHEMA_MISMATCH", f"{camera_name}: RGB encoding/step")
-        if len(image.data) != camera.width * camera.height * 3:
-            raise ContractError("SCHEMA_MISMATCH", f"{camera_name}: RGB payload size")
-        if image.header.frame_id != camera.frame_id:
-            raise ContractError("SCHEMA_MISMATCH", f"{camera_name}: image frame_id")
-        if time_ns(info.header.stamp) != stamp_ns or info.header.frame_id != camera.frame_id:
-            raise ContractError("SCHEMA_MISMATCH", f"{camera_name}: CameraInfo header")
-        if (info.width, info.height) != (camera.width, camera.height):
-            raise ContractError("SCHEMA_MISMATCH", f"{camera_name}: CameraInfo dimensions")
-        if message.calibration_digest != camera.calibration_digest:
-            raise ContractError("SCHEMA_MISMATCH", f"{camera_name}: calibration digest")
+        self._callbacks.on_state(message)
 
     def _on_frame(self, camera_name: str, message: CameraFrame) -> None:
-        context = self._episode_context()
-        if context is None or context_from_message(message.context) != context:
-            self._rejected += 1
-            return
-        try:
-            self._validate_frame(camera_name, message)
-        except ContractError as error:
-            self._episode.report_control_fault(str(error))
-            return
-        stamp_ns = time_ns(message.image.header.stamp)
-        self._episode.record(self._camera_topics[camera_name], message, stamp_ns)
-        digest = hashlib.sha256(bytes(message.image.data)).digest()
-        accepted = self._buffer.add(
-            camera_name,
-            context,
-            int(message.frame_seq),
-            stamp_ns,
-            message,
-            wall_arrival_ns=time.monotonic_ns(),
-            fingerprint=(stamp_ns, digest),
-        )
-        if not accepted and self._buffer.conflict_reason:
-            self._episode.report_control_fault(
-                f"OBSERVATION_CONFLICT: {self._buffer.conflict_reason}"
-            )
-        self.notify()
+        self._callbacks.on_frame(camera_name, message)
 
-    def _on_event(self, message: ControlEvent) -> None:
-        context = self._episode_context()
-        if context is None or context_from_message(message.context) != context:
-            self._rejected += 1
-            return
-        try:
-            event = control_event_from_message(message)
-            if event.is_chunk:
-                request = self._expected_chunks.get((event.command_id, event.chunk_seq))
-            else:
-                request = self._expected_requests.get(event.command_id)
-            if request is None:
-                raise ContractError(
-                    "INVALID_CONTROL_EVENT", f"event for unknown command/chunk {event.command_id}"
-                )
-            trajectory = request.trajectory
-            if (
-                event.command_seq != trajectory.command_seq
-                or event.observation_id != trajectory.observation_id
-            ):
-                raise ContractError("INVALID_CONTROL_EVENT", "event command identity differs")
-        except ContractError as error:
-            self._episode.report_control_fault(str(error))
-            return
-        signature = (
-            event.context,
-            event.event_seq,
-            event.command_id,
-            event.is_chunk,
-            event.chunk_seq,
-            event.phase,
-            event.reason,
-            event.sim_time_ns,
-        )
-        with self._condition:
-            previous = self._events.get(event.event_seq)
-            if previous == signature:
-                self._event_duplicates += 1
-                return
-            if previous is not None:
-                self._episode.report_control_fault(
-                    f"CONTROL_EVENT_CONFLICT: sequence {event.event_seq}"
-                )
-                return
-            if len(self._events) >= _MAX_CONTROL_EVENTS:
-                self._episode.report_control_fault("CONTROL_EVENT_CACHE_FULL")
-                return
-            self._events[event.event_seq] = signature
-        self._episode.record(f"{self._root}/control_events", message, event.sim_time_ns)
-        with self._condition:
-            key = (event.command_id, event.chunk_seq)
-            if event.is_chunk:
-                if event.phase == "ACCEPTED":
-                    self._accepted_chunk_events.add(key)
-                if event.phase in {"RETIRED", "CANCELED", "REJECTED"}:
-                    self._terminal_chunk_events.add(key)
-            elif event.phase in _TERMINAL:
-                self._overall_terminal_events.add(event.command_id)
-            self._condition.notify_all()
-
-    def _execution_identity(self, execution: ExecutionFeedback) -> tuple[object, ...]:
-        return (
-            execution.phase,
-            execution.reason,
-            execution.stop_reason,
-            execution.accepted_sim_time_ns,
-            execution.accepted_wall_time_ns,
-            execution.has_started,
-            execution.started_sim_time_ns,
-            execution.started_wall_time_ns,
-            execution.has_finished,
-            execution.finished_sim_time_ns,
-            execution.finished_wall_time_ns,
-            execution.motion_seq,
-            execution.stream_id,
-            execution.chunk_seq,
-            execution.motion_phase,
-            execution.reference_application_sim_time_ns,
-            execution.measurement_sim_time_ns,
-            execution.reference_elapsed_ns,
-            execution.stable_for_ns,
-            tuple(execution.reference_positions),
-            tuple(execution.reference_velocities),
-            tuple(execution.reference_accelerations),
-            tuple(execution.measured_positions),
-            tuple(execution.measured_velocities),
-            tuple(execution.position_errors),
-            tuple(execution.velocity_errors),
-            execution.reference_kind,
-            execution.tracking_quality,
-            execution.tracking_violation_ns,
-            tuple(
-                (
-                    gripper.side,
-                    gripper.mode,
-                    gripper.position_ok,
-                    gripper.contact_ok,
-                    gripper.contact_object,
-                    gripper.ambiguous,
-                    gripper.target_position_m,
-                    gripper.initial_reference_m,
-                    gripper.final_reference_m,
-                    gripper.measured_position_m,
-                    gripper.measured_velocity_m_s,
-                    gripper.target_error_m,
-                    tuple(
-                        (
-                            finger.finger_index,
-                            finger.body_name,
-                            finger.joint_speed_m_s,
-                            tuple(finger.object_names),
-                            tuple(finger.normal_forces),
-                            tuple(finger.contact_counts),
-                        )
-                        for finger in gripper.fingers
-                    ),
-                )
-                for gripper in execution.grippers
-            ),
-        )
+    def _on_event(self, message: object) -> None:
+        self._callbacks.on_event(message)
 
     def _on_feedback(self, message: ExecutionFeedbackMessage) -> None:
-        context = self._episode_context()
-        if context is None or context_from_message(message.context) != context:
-            self._rejected += 1
-            return
-        try:
-            execution = execution_feedback_from_message(message)
-            request = self._expected_requests.get(execution.command_id)
-            if (
-                execution.chunk_seq > 0
-                and (execution.command_id, execution.chunk_seq) not in self._expected_chunks
-            ):
-                raise ContractError(
-                    "INVALID_EXECUTION_FEEDBACK", "feedback names an unknown applied chunk"
-                )
-            if request is None:
-                raise ContractError(
-                    "INVALID_EXECUTION_FEEDBACK",
-                    f"feedback for unknown command/chunk {execution.command_id}",
-                )
-            trajectory = request.trajectory
-            if (
-                execution.command_seq != trajectory.command_seq
-                or execution.observation_id != trajectory.observation_id
-                or execution.joint_names != trajectory.joint_names
-            ):
-                raise ContractError("INVALID_EXECUTION_FEEDBACK", "feedback identity differs")
-        except ContractError as error:
-            self._episode.report_control_fault(str(error))
-            return
-        try:
-            self.record_execution(execution)
-        except ContractError as error:
-            self._episode.report_control_fault(str(error))
+        self._callbacks.on_feedback(message)
 
     def _on_follower_reference(self, message: FollowerReferenceMessage) -> None:
-        context = self._episode_context()
-        try:
-            reference = follower_reference_from_message(message)
-            if context is None or reference.context != context:
-                self._rejected += 1
-                return
-            if self._follower_limits is None:
-                raise ContractError("FOLLOWER_DISABLED", "no follower limits configured")
-            request = self._expected_chunks.get((reference.command_id, reference.chunk_seq))
-            if request is None or reference.request != request:
-                raise ContractError(
-                    "REFERENCE_REQUEST_MISMATCH", "follower reference request differs"
-                )
-            validate_follower_reference(reference, self.config.profile, self._follower_limits)
-        except Exception as error:
-            if isinstance(error, ContractError) and error.reason == "EPISODE_STOPPED":
-                return
-            self._episode.report_control_fault(
-                str(error)
-                if isinstance(error, ContractError)
-                else f"INVALID_FOLLOWER_REFERENCE: {error}"
-            )
-            return
-        self.record_follower_reference(reference)
+        self._callbacks.on_follower_reference(message)
+
+    def _on_task_state(self, message: TaskStateMessage) -> None:
+        self._callbacks.on_task_state(message)
 
     def _simulation_now_ns(self) -> int:
-        stamp = self._buffer.latest_state_stamp()
-        return 0 if stamp is None else stamp
+        stamp_value = self._buffer.latest_state_stamp()
+        return 0 if stamp_value is None else stamp_value
 
     def _publish_observation(self) -> None:
         if self._episode.check_recording_health():
             return
-        context = self._episode_context()
+        context = self._episode.context
         if context is None:
             return
         try:
@@ -927,8 +614,6 @@ class RuntimeNode(Node):
         )
         self._episode.record("/runtime/observation_index", message, observation.stamp_ns)
         self._indices.publish(message)
-
-    # ---- Services and start --------------------------------------------------------
 
     def _start_service(self, request, response):
         try:

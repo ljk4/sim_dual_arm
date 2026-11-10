@@ -9,247 +9,34 @@ rule hash, phase/gate event hashes and every episode's original index list.
 from __future__ import annotations
 
 import json
-import os
 import time
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-from .config_yaml import (
-    ConfigError,
-    integer,
-    load_yaml,
-    mapping,
-    number,
-    reject_unknown,
-    require,
-    text,
+from .config_yaml import integer, text
+from .dataset_common import file_sha256
+from .sample_filter_mask import (  # noqa: F401 - public re-exports
+    FILTER_FORMAT,
+    SampleFilterMask,
+    load_filter_mask,
+    mask_digest,
+    read_filter_json,
+    write_filter_manifest,
 )
-from .dataset import canonical_hash, file_sha256
-
-FILTER_FORMAT = "dual-arm-act-sample-filter-v1"
-REASON_REDUNDANT = "redundant_static_anchor"
-LEAD_NS = 50_000_000
-PERIOD_NS = 50_000_000
-STATE_DIM = 16
-RIGHT_ARM = (8, 9, 10, 11, 12, 13, 14)
-GRIPPERS = (7, 15)
-KNOWN_PHASES = (
-    "pregrasp",
-    "grasp",
-    "close",
-    "lift",
-    "transport",
-    "lower",
-    "open",
-    "retreat",
-    "stable",
+from .sample_filter_rules import (  # noqa: F401 - public re-exports
+    GRIPPERS,
+    KNOWN_PHASES,
+    LEAD_NS,
+    PERIOD_NS,
+    REASON_REDUNDANT,
+    RIGHT_ARM,
+    STATE_DIM,
+    FilterError,
+    FilterRule,
+    load_filter_rule,
 )
-
-
-class FilterError(ValueError):
-    """The filter rule or mask cannot be trusted."""
-
-
-@dataclass(frozen=True, slots=True)
-class FilterRule:
-    schema_version: int
-    fps: int
-    chunk_size: int
-    right_arm_indices: tuple[int, ...]
-    gripper_indices: tuple[int, ...]
-    max_right_step_rad: float
-    max_right_velocity_rad_s: float
-    max_gripper_step_m: float
-    max_gripper_velocity_m_s: float
-    min_static_run_frames: int
-    keep_edge_frames: int
-    interior_anchor_stride: int
-    phase_boundary_frames: int
-    episode_boundary_frames: int
-    min_episode_kept_frames: int
-    known_phases: tuple[str, ...]
-    tracking_gate: str
-    reason: str
-    source: Path
-
-    @property
-    def sha256(self) -> str:
-        return file_sha256(self.source)
-
-
-@dataclass(frozen=True, slots=True)
-class SampleFilterMask:
-    path: Path
-    file_sha256: str
-    digest: str
-    eligible_indices: tuple[int, ...]
-    source_frames: int
-    excluded_frames: int
-    document: dict[str, Any]
-
-    def summary(self) -> dict[str, Any]:
-        return {
-            "path": str(self.path),
-            "sha256": self.file_sha256,
-            "digest": self.digest,
-            "source_frames": self.source_frames,
-            "eligible_frames": len(self.eligible_indices),
-            "excluded_frames": self.excluded_frames,
-            "reduction_ratio": self.excluded_frames / self.source_frames,
-        }
-
-
-def _indices(value: object, location: str, *, count: int) -> tuple[int, ...]:
-    if not isinstance(value, list):
-        raise ConfigError(location, "must be an array of joint indices")
-    result = tuple(
-        integer(item, f"{location}[{index}]", 0, STATE_DIM - 1) for index, item in enumerate(value)
-    )
-    if len(result) != count:
-        raise ConfigError(location, f"must contain exactly {count} joint indices")
-    if len(set(result)) != len(result):
-        raise ConfigError(location, "must be unique")
-    return result
-
-
-def load_filter_rule(path: str | Path) -> FilterRule:
-    source = Path(path).resolve()
-    value = mapping(load_yaml(source), "<sample_filter>")
-    reject_unknown(
-        value,
-        {
-            "schema_version",
-            "fps",
-            "chunk_size",
-            "right_arm",
-            "grippers",
-            "static_runs",
-            "phase_gate",
-        },
-        "<sample_filter>",
-    )
-    right = mapping(require(value, "right_arm", "<sample_filter>"), "right_arm")
-    reject_unknown(right, {"joint_indices", "max_step_rad", "max_velocity_rad_s"}, "right_arm")
-    grippers = mapping(require(value, "grippers", "<sample_filter>"), "grippers")
-    reject_unknown(grippers, {"joint_indices", "max_step_m", "max_velocity_m_s"}, "grippers")
-    runs = mapping(require(value, "static_runs", "<sample_filter>"), "static_runs")
-    reject_unknown(
-        runs,
-        {
-            "min_frames",
-            "edge_frames",
-            "interior_stride",
-            "phase_boundary_frames",
-            "episode_boundary_frames",
-            "min_episode_kept_frames",
-            "reason",
-        },
-        "static_runs",
-    )
-    phase = mapping(require(value, "phase_gate", "<sample_filter>"), "phase_gate")
-    reject_unknown(phase, {"known_phases", "tracking_gate"}, "phase_gate")
-    known = require(phase, "known_phases", "phase_gate")
-    if not isinstance(known, list):
-        raise ConfigError("phase_gate.known_phases", "must be an array")
-    known_phases = tuple(
-        text(item, f"phase_gate.known_phases[{i}]") for i, item in enumerate(known)
-    )
-    if len(set(known_phases)) != len(known_phases):
-        raise ConfigError("phase_gate.known_phases", "must be unique")
-    if set(KNOWN_PHASES) - set(known_phases):
-        raise ConfigError("phase_gate.known_phases", "must contain every panda stack phase")
-    right_indices = _indices(
-        require(right, "joint_indices", "right_arm"), "right_arm.joint_indices", count=7
-    )
-    gripper_indices = _indices(
-        require(grippers, "joint_indices", "grippers"), "grippers.joint_indices", count=2
-    )
-    if right_indices != RIGHT_ARM:
-        raise ConfigError("right_arm.joint_indices", "must be the seven right arm rad axes")
-    if gripper_indices != GRIPPERS:
-        raise ConfigError("grippers.joint_indices", "must be the left/right gripper metre axes")
-    reason = text(require(runs, "reason", "static_runs"), "static_runs.reason")
-    if reason != REASON_REDUNDANT:
-        raise ConfigError("static_runs.reason", f"must be {REASON_REDUNDANT}")
-    rule = FilterRule(
-        schema_version=integer(
-            require(value, "schema_version", "<sample_filter>"), "schema_version", 1, 1
-        ),
-        fps=integer(require(value, "fps", "<sample_filter>"), "fps", 20, 20),
-        chunk_size=integer(require(value, "chunk_size", "<sample_filter>"), "chunk_size", 60, 60),
-        right_arm_indices=right_indices,
-        gripper_indices=gripper_indices,
-        max_right_step_rad=number(
-            require(right, "max_step_rad", "right_arm"), "right_arm.max_step_rad", maximum=1.0
-        ),
-        max_right_velocity_rad_s=number(
-            require(right, "max_velocity_rad_s", "right_arm"),
-            "right_arm.max_velocity_rad_s",
-            maximum=100.0,
-        ),
-        max_gripper_step_m=number(
-            require(grippers, "max_step_m", "grippers"), "grippers.max_step_m", maximum=1.0
-        ),
-        max_gripper_velocity_m_s=number(
-            require(grippers, "max_velocity_m_s", "grippers"),
-            "grippers.max_velocity_m_s",
-            maximum=100.0,
-        ),
-        min_static_run_frames=integer(
-            require(runs, "min_frames", "static_runs"), "static_runs.min_frames", 2, 100_000
-        ),
-        keep_edge_frames=integer(
-            require(runs, "edge_frames", "static_runs"), "static_runs.edge_frames", 0, 100_000
-        ),
-        interior_anchor_stride=integer(
-            require(runs, "interior_stride", "static_runs"),
-            "static_runs.interior_stride",
-            1,
-            100_000,
-        ),
-        phase_boundary_frames=integer(
-            require(runs, "phase_boundary_frames", "static_runs"),
-            "static_runs.phase_boundary_frames",
-            0,
-            100_000,
-        ),
-        episode_boundary_frames=integer(
-            require(runs, "episode_boundary_frames", "static_runs"),
-            "static_runs.episode_boundary_frames",
-            0,
-            100_000,
-        ),
-        min_episode_kept_frames=integer(
-            require(runs, "min_episode_kept_frames", "static_runs"),
-            "static_runs.min_episode_kept_frames",
-            0,
-            100_000,
-        ),
-        known_phases=known_phases,
-        tracking_gate=text(
-            require(phase, "tracking_gate", "phase_gate"), "phase_gate.tracking_gate"
-        ),
-        reason=reason,
-        source=source,
-    )
-    if rule.keep_edge_frames * 2 >= rule.min_static_run_frames:
-        raise ConfigError(
-            "static_runs", "min_frames must exceed twice edge_frames so a run has an interior"
-        )
-    return rule
-
-
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise FilterError(f"{path}: cannot read JSON: {error}") from error
-    if not isinstance(value, dict):
-        raise FilterError(f"{path}: expected an object")
-    return value
 
 
 def _single_parquet(split_root: Path) -> tuple[Path, str]:
@@ -324,7 +111,22 @@ def _split(
         )
     if sum(int(episode.get("frame_count", 0)) for episode in episodes) != int(split["frame_count"]):
         raise FilterError(f"{name}: manifest episode frame counts disagree with the split")
-    entries = select.get(name)
+    selected = _selected_attempts(select.get(name), name, episodes)
+    return {
+        "split": split,
+        "root": split_root,
+        "parquet_path": parquet_path,
+        "parquet_relative": relative,
+        "parquet_sha256": parquet_sha,
+        "rows": rows,
+        "episodes": episodes,
+        "selected": selected,
+    }
+
+
+def _selected_attempts(
+    entries: object, name: str, episodes: list[dict[str, Any]]
+) -> dict[str, dict[str, Any]]:
     if not isinstance(entries, list) or len(entries) != len(episodes):
         raise FilterError(f"{name}: select split does not contain {len(episodes)} attempts")
     selected: dict[str, dict[str, Any]] = {}
@@ -344,16 +146,7 @@ def _split(
     }
     if set(selected) != manifest_ids:
         raise FilterError(f"{name}: select and manifest attempt ids disagree")
-    return {
-        "split": split,
-        "root": split_root,
-        "parquet_path": parquet_path,
-        "parquet_relative": relative,
-        "parquet_sha256": parquet_sha,
-        "rows": rows,
-        "episodes": episodes,
-        "selected": selected,
-    }
+    return selected
 
 
 def _source_paths(attempt_dir: Path) -> tuple[Path, list[Path]]:
@@ -380,10 +173,7 @@ def _phase_gate_map(paths: list[Path]) -> dict[int, tuple[str | None, str | None
                 event = json.loads(line)
             except json.JSONDecodeError as error:
                 raise FilterError(f"{path}:{line_number}: invalid JSON: {error}") from error
-            if (
-                not isinstance(event, dict)
-                or event.get("event") != "follower.chunk_accepted"
-            ):
+            if not isinstance(event, dict) or event.get("event") != "follower.chunk_accepted":
                 continue
             fields = event.get("fields")
             if not isinstance(fields, dict):
@@ -589,7 +379,7 @@ def _counts(values: list[str | None], keys: list[str]) -> dict[str, int]:
     return result
 
 
-def _filter_episode(
+def _episode_inputs(
     *,
     episode: dict[str, Any],
     split: dict[str, Any],
@@ -604,15 +394,13 @@ def _filter_episode(
     selection = selected[attempt_id]
     if selection["seed"] != seed:
         raise FilterError(f"{attempt_id}: select seed disagrees with the manifest")
-    attempt_dir = selection["attempt_dir"]
-    labels_path, event_paths = _source_paths(attempt_dir)
-    labels_document = _read_json(labels_path)
+    labels_path, event_paths = _source_paths(selection["attempt_dir"])
+    labels_document = read_filter_json(labels_path)
     if labels_document.get("seed") != seed:
         raise FilterError(f"{labels_path}: label seed disagrees with the manifest")
     if labels_document.get("episode_id") != attempt_id.replace(":", "-"):
         raise FilterError(f"{labels_path}: label episode_id disagrees with the attempt")
-    profile_hash = labels_document.get("robot_profile_hash")
-    if profile_hash != split["manifest_profile_sha256"]:
+    if labels_document.get("robot_profile_hash") != split["manifest_profile_sha256"]:
         raise FilterError(f"{labels_path}: robot profile hash disagrees with the manifest")
     labels = labels_document.get("labels")
     if not isinstance(labels, list) or len(labels) != int(episode.get("frame_count", -1)):
@@ -649,7 +437,26 @@ def _filter_episode(
         np.asarray([label.get("applied_velocities") for label in ordered], dtype=np.float64),
         rule,
     )
-    keep, reasons, runs = _choose_anchors(edges, phase, gate, rule)
+    return {
+        "episode_index": episode_index,
+        "global_index": global_index,
+        "attempt_id": attempt_id,
+        "seed": seed,
+        "source_indices": source_indices,
+        "arrays": arrays,
+        "ordered": ordered,
+        "phase": phase,
+        "gate": gate,
+        "edges": edges,
+        "labels_path": labels_path,
+        "event_paths": event_paths,
+    }
+
+
+def _episode_report(inputs: dict[str, Any], rule: FilterRule) -> dict[str, Any]:
+    keep, reasons, runs = _choose_anchors(
+        inputs["edges"], inputs["phase"], inputs["gate"], rule
+    )
     kept_count = int(keep.sum())
     fallback = None
     if kept_count < rule.min_episode_kept_frames:
@@ -657,6 +464,7 @@ def _filter_episode(
         keep[:] = True
         reasons = [""] * len(reasons)
         kept_count = len(keep)
+    source_indices = inputs["source_indices"]
     kept_indices = [index for index, saved in zip(source_indices, keep, strict=True) if saved]
     excluded_indices = [
         index for index, saved in zip(source_indices, keep, strict=True) if not saved
@@ -667,10 +475,10 @@ def _filter_episode(
     phase_keys = list(rule.known_phases)
     gate_keys = [rule.tracking_gate, "WAITING_FOR_FEEDBACK", "HOLDING"]
     return {
-        "dataset_episode_index": episode_index,
-        "global_success_index": global_index,
-        "attempt_id": attempt_id,
-        "seed": seed,
+        "dataset_episode_index": inputs["episode_index"],
+        "global_success_index": inputs["global_index"],
+        "attempt_id": inputs["attempt_id"],
+        "seed": inputs["seed"],
         "source_frame_count": len(source_indices),
         "kept_count": kept_count,
         "excluded_count": len(excluded_indices),
@@ -679,14 +487,14 @@ def _filter_episode(
         "excluded_indices": excluded_indices,
         "excluded_reasons": {REASON_REDUNDANT: len(excluded_indices)} if excluded_indices else {},
         "phase_counts": {
-            "source": _counts(phase, phase_keys),
-            "kept": _counts([phase[i] for i in kept_flags], phase_keys),
-            "excluded": _counts([phase[i] for i in excluded_flags], phase_keys),
+            "source": _counts(inputs["phase"], phase_keys),
+            "kept": _counts([inputs["phase"][i] for i in kept_flags], phase_keys),
+            "excluded": _counts([inputs["phase"][i] for i in excluded_flags], phase_keys),
         },
         "gate_counts": {
-            "source": _counts(gate, gate_keys),
-            "kept": _counts([gate[i] for i in kept_flags], gate_keys),
-            "excluded": _counts([gate[i] for i in excluded_flags], gate_keys),
+            "source": _counts(inputs["gate"], gate_keys),
+            "kept": _counts([inputs["gate"][i] for i in kept_flags], gate_keys),
+            "excluded": _counts([inputs["gate"][i] for i in excluded_flags], gate_keys),
         },
         "static_runs": {
             "total": len(runs),
@@ -694,11 +502,28 @@ def _filter_episode(
             "frames_in_long_runs": sum(end - start + 1 for start, end in long_runs),
         },
         "fallback": fallback,
-        "labels": {"path": str(labels_path), "sha256": file_sha256(labels_path)},
+        "labels": {
+            "path": str(inputs["labels_path"]),
+            "sha256": file_sha256(inputs["labels_path"]),
+        },
         "phase_gate_sources": [
-            {"path": str(path), "sha256": file_sha256(path)} for path in event_paths
+            {"path": str(path), "sha256": file_sha256(path)} for path in inputs["event_paths"]
         ],
     }
+
+
+def _filter_episode(
+    *,
+    episode: dict[str, Any],
+    split: dict[str, Any],
+    selected: dict[str, Any],
+    lead_ns: int,
+    rule: FilterRule,
+) -> dict[str, Any]:
+    inputs = _episode_inputs(
+        episode=episode, split=split, selected=selected, lead_ns=lead_ns, rule=rule
+    )
+    return _episode_report(inputs, rule)
 
 
 def _total_counts(
@@ -714,26 +539,52 @@ def _total_counts(
     return result
 
 
-def _mask_digest(document: dict[str, Any]) -> str:
-    payload = {
-        key: value
-        for key, value in document.items()
-        if key not in {"filter_digest", "created_wall_time_ns"}
+def _source_document(
+    root: Path, manifest_path: Path, select_source: Path, rule: FilterRule
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    dataset = {
+        "root": str(root),
+        "manifest": {"path": str(manifest_path), "sha256": file_sha256(manifest_path)},
+        "select": {"path": str(select_source), "sha256": file_sha256(select_source)},
     }
-    return canonical_hash(payload)
+    rule_document = {
+        "path": str(rule.source),
+        "sha256": rule.sha256,
+        "resolved": {
+            "schema_version": rule.schema_version,
+            "fps": rule.fps,
+            "chunk_size": rule.chunk_size,
+            "right_arm_indices": list(rule.right_arm_indices),
+            "gripper_indices": list(rule.gripper_indices),
+            "max_right_step_rad": rule.max_right_step_rad,
+            "max_right_velocity_rad_s": rule.max_right_velocity_rad_s,
+            "max_gripper_step_m": rule.max_gripper_step_m,
+            "max_gripper_velocity_m_s": rule.max_gripper_velocity_m_s,
+            "min_static_run_frames": rule.min_static_run_frames,
+            "keep_edge_frames": rule.keep_edge_frames,
+            "interior_anchor_stride": rule.interior_anchor_stride,
+            "phase_boundary_frames": rule.phase_boundary_frames,
+            "episode_boundary_frames": rule.episode_boundary_frames,
+            "min_episode_kept_frames": rule.min_episode_kept_frames,
+            "known_phases": list(rule.known_phases),
+            "tracking_gate": rule.tracking_gate,
+            "reason": rule.reason,
+        },
+    }
+    return dataset, rule_document
 
 
-def build_filter_manifest(
-    *, rule_path: str | Path, dataset_root: str | Path, select_path: str | Path
-) -> dict[str, Any]:
+def _filter_inputs(
+    rule_path: str | Path, dataset_root: str | Path, select_path: str | Path
+) -> tuple[Path, FilterRule, Path, Path, dict, dict, int, str]:
     root = Path(dataset_root).resolve()
     rule = load_filter_rule(rule_path)
     manifest_path = root / "manifest.json"
-    manifest = _read_json(manifest_path)
+    manifest = read_filter_json(manifest_path)
     if manifest.get("status") != "complete" or manifest.get("synthetic"):
         raise FilterError("source dataset manifest is not a complete formal dataset")
     select_source = Path(select_path).resolve()
-    select = _read_json(select_source)
+    select = read_filter_json(select_source)
     if select.get("status") != "SELECTED":
         raise FilterError("formal select file is not SELECTED")
     lead_ns = int(manifest.get("lerobot", {}).get("action_lead_ns", -1))
@@ -751,16 +602,28 @@ def build_filter_manifest(
     if train_globals & validation_globals:
         raise FilterError("training and validation episodes overlap")
     training["manifest_profile_sha256"] = profile_hash
-    episodes = [
-        _filter_episode(
-            episode=episode,
-            split=training,
-            selected=training["selected"],
-            lead_ns=lead_ns,
-            rule=rule,
-        )
-        for episode in training["episodes"]
-    ]
+    return (
+        root,
+        rule,
+        manifest_path,
+        select_source,
+        training,
+        validation,
+        lead_ns,
+        profile_hash,
+    )
+
+
+def _filter_document(
+    *,
+    root: Path,
+    rule: FilterRule,
+    manifest_path: Path,
+    select_source: Path,
+    training: dict,
+    validation: dict,
+    episodes: list[dict[str, Any]],
+) -> dict[str, Any]:
     source_frames = sum(episode["source_frame_count"] for episode in episodes)
     if source_frames != int(training["split"]["frame_count"]):
         raise FilterError("filtered episodes do not cover the training Parquet frame count")
@@ -768,38 +631,14 @@ def build_filter_manifest(
     excluded = source_frames - eligible
     phase_keys = list(rule.known_phases)
     gate_keys = [rule.tracking_gate, "WAITING_FOR_FEEDBACK", "HOLDING"]
+    dataset_document, rule_document = _source_document(
+        root, manifest_path, select_source, rule
+    )
     document: dict[str, Any] = {
         "format": FILTER_FORMAT,
         "created_wall_time_ns": time.time_ns(),
-        "dataset": {
-            "root": str(root),
-            "manifest": {"path": str(manifest_path), "sha256": file_sha256(manifest_path)},
-            "select": {"path": str(select_source), "sha256": file_sha256(select_source)},
-        },
-        "rule": {
-            "path": str(rule.source),
-            "sha256": rule.sha256,
-            "resolved": {
-                "schema_version": rule.schema_version,
-                "fps": rule.fps,
-                "chunk_size": rule.chunk_size,
-                "right_arm_indices": list(rule.right_arm_indices),
-                "gripper_indices": list(rule.gripper_indices),
-                "max_right_step_rad": rule.max_right_step_rad,
-                "max_right_velocity_rad_s": rule.max_right_velocity_rad_s,
-                "max_gripper_step_m": rule.max_gripper_step_m,
-                "max_gripper_velocity_m_s": rule.max_gripper_velocity_m_s,
-                "min_static_run_frames": rule.min_static_run_frames,
-                "keep_edge_frames": rule.keep_edge_frames,
-                "interior_anchor_stride": rule.interior_anchor_stride,
-                "phase_boundary_frames": rule.phase_boundary_frames,
-                "episode_boundary_frames": rule.episode_boundary_frames,
-                "min_episode_kept_frames": rule.min_episode_kept_frames,
-                "known_phases": list(rule.known_phases),
-                "tracking_gate": rule.tracking_gate,
-                "reason": rule.reason,
-            },
-        },
+        "dataset": dataset_document,
+        "rule": rule_document,
         "training": {
             "source_frames": source_frames,
             "eligible_frames": eligible,
@@ -832,148 +671,42 @@ def build_filter_manifest(
             },
         },
     }
-    document["filter_digest"] = _mask_digest(document)
+    document["filter_digest"] = mask_digest(document)
     return document
 
 
-def write_filter_manifest(document: dict[str, Any], output: str | Path) -> Path:
-    target = Path(output)
-    if target.exists():
-        raise FilterError(f"{target}: output already exists; refusing to overwrite")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = target.with_suffix(target.suffix + ".tmp")
-    payload = json.dumps(document, indent=2, allow_nan=False) + "\n"
-    temporary.write_text(payload, encoding="utf-8")
-    os.replace(temporary, target)
-    return target
-
-
-def _verify_sources(document: dict[str, Any]) -> None:
-    dataset = document.get("dataset", {})
-    for key in ("manifest", "select"):
-        record = dataset.get(key, {})
-        path = Path(str(record.get("path", "")))
-        if not path.is_file() or file_sha256(path) != record.get("sha256"):
-            raise FilterError(f"{path}: bound source hash changed")
-    rule = document.get("rule", {})
-    rule_path = Path(str(rule.get("path", "")))
-    if not rule_path.is_file() or file_sha256(rule_path) != rule.get("sha256"):
-        raise FilterError(f"{rule_path}: bound filter rule changed")
-    for section in ("training", "validation"):
-        record = document.get(section, {}).get("parquet", {})
-        path = Path(str(record.get("path", "")))
-        if not path.is_file() or file_sha256(path) != record.get("sha256"):
-            raise FilterError(f"{path}: bound Parquet hash changed")
-    for episode in document.get("training", {}).get("episodes", []):
-        labels = episode.get("labels", {})
-        path = Path(str(labels.get("path", "")))
-        if not path.is_file() or file_sha256(path) != labels.get("sha256"):
-            raise FilterError(f"{path}: bound labels hash changed")
-        for source in episode.get("phase_gate_sources", []):
-            path = Path(str(source.get("path", "")))
-            if not path.is_file() or file_sha256(path) != source.get("sha256"):
-                raise FilterError(f"{path}: bound phase/gate source hash changed")
-
-
-def load_filter_mask(path: str | Path, *, verify_source: bool = True) -> SampleFilterMask:
-    source = Path(path).resolve()
-    document = _read_json(source)
-    if document.get("format") != FILTER_FORMAT:
-        raise FilterError(f"{source}: unknown sample filter format")
-    if document.get("filter_digest") != _mask_digest(document):
-        raise FilterError(f"{source}: filter digest does not match its contents")
-    training = document.get("training")
-    validation = document.get("validation")
-    if not isinstance(training, dict) or not isinstance(validation, dict):
-        raise FilterError(f"{source}: training/validation sections are missing")
-    if validation.get("filtered") is not False:
-        raise FilterError(f"{source}: validation set must not be filtered")
-    attempt_ids = validation.get("attempt_ids")
-    seeds = validation.get("seeds")
-    if (
-        not isinstance(attempt_ids, list)
-        or not isinstance(seeds, list)
-        or validation.get("episode_count") != len(attempt_ids)
-        or len(attempt_ids) != len(seeds)
-    ):
-        raise FilterError(f"{source}: validation episode identity is inconsistent")
-    if (
-        validation.get("kept_frames") != validation.get("source_frames")
-        or validation.get("excluded_frames") != 0
-    ):
-        raise FilterError(f"{source}: validation split is not preserved")
-    episodes = training.get("episodes")
-    if not isinstance(episodes, list) or not episodes:
-        raise FilterError(f"{source}: training episodes are missing")
-    seen: set[int] = set()
-    eligible: list[int] = []
-    source_total = 0
-    for episode in episodes:
-        if not isinstance(episode, dict):
-            raise FilterError(f"{source}: episode entry is not an object")
-        source_indices = episode.get("source_indices")
-        kept_indices = episode.get("kept_indices")
-        excluded_indices = episode.get("excluded_indices")
-        if not all(
-            isinstance(item, list) for item in (source_indices, kept_indices, excluded_indices)
-        ):
-            raise FilterError(f"{source}: episode index lists are missing")
-        if episode.get("source_frame_count") != len(source_indices):
-            raise FilterError(f"{source}: source frame count disagrees with its index list")
-        if episode.get("kept_count") != len(kept_indices):
-            raise FilterError(f"{source}: kept count disagrees with its index list")
-        if episode.get("excluded_count") != len(excluded_indices):
-            raise FilterError(f"{source}: excluded count disagrees with its index list")
-        if len(kept_indices) < 1:
-            raise FilterError(f"{source}: an episode has no training anchors")
-        for name, values in (
-            ("source", source_indices),
-            ("kept", kept_indices),
-            ("excluded", excluded_indices),
-        ):
-            if any(isinstance(value, bool) or not isinstance(value, int) for value in values):
-                raise FilterError(f"{source}: {name} indices must be integers")
-            if values != sorted(values):
-                raise FilterError(f"{source}: {name} indices are not sorted")
-        if set(kept_indices) & set(excluded_indices):
-            raise FilterError(f"{source}: kept and excluded indices overlap")
-        if set(kept_indices) | set(excluded_indices) != set(source_indices):
-            raise FilterError(f"{source}: kept/excluded indices do not partition the source")
-        reasons = episode.get("excluded_reasons", {})
-        if not isinstance(reasons, dict) or any(
-            reason != "redundant_static_anchor" for reason in reasons
-        ):
-            raise FilterError(f"{source}: excluded reasons are not recognised")
-        if sum(reasons.values()) != len(excluded_indices):
-            raise FilterError(f"{source}: excluded reason count disagrees with the index list")
-        for value in source_indices:
-            if value in seen:
-                raise FilterError(f"{source}: duplicate original index {value}")
-            seen.add(value)
-        eligible.extend(kept_indices)
-        source_total += len(source_indices)
-    if any(value < 0 or value >= source_total for value in seen):
-        raise FilterError(f"{source}: original index is out of range")
-    if training.get("source_frames") != source_total:
-        raise FilterError(f"{source}: training source frame total disagrees")
-    if training.get("eligible_frames") != len(eligible):
-        raise FilterError(f"{source}: eligible frame total disagrees")
-    if training.get("excluded_frames") != source_total - len(eligible):
-        raise FilterError(f"{source}: excluded frame total disagrees")
-    if len(set(eligible)) != len(eligible):
-        raise FilterError(f"{source}: duplicate eligible index")
-    if verify_source:
-        _verify_sources(document)
-    return SampleFilterMask(
-        path=source,
-        file_sha256=file_sha256(source),
-        digest=str(document["filter_digest"]),
-        eligible_indices=tuple(eligible),
-        source_frames=source_total,
-        excluded_frames=source_total - len(eligible),
-        document=document,
+def build_filter_manifest(
+    *, rule_path: str | Path, dataset_root: str | Path, select_path: str | Path
+) -> dict[str, Any]:
+    (
+        root,
+        rule,
+        manifest_path,
+        select_source,
+        training,
+        validation,
+        lead_ns,
+        _profile_hash,
+    ) = _filter_inputs(rule_path, dataset_root, select_path)
+    episodes = [
+        _filter_episode(
+            episode=episode,
+            split=training,
+            selected=training["selected"],
+            lead_ns=lead_ns,
+            rule=rule,
+        )
+        for episode in training["episodes"]
+    ]
+    return _filter_document(
+        root=root,
+        rule=rule,
+        manifest_path=manifest_path,
+        select_source=select_source,
+        training=training,
+        validation=validation,
+        episodes=episodes,
     )
-
 
 __all__ = [
     "FILTER_FORMAT",

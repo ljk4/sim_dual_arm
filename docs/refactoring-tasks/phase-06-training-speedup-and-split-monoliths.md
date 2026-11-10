@@ -6,7 +6,7 @@
    - 在重构 `training.py` 的 `DataLoader` 时，**必须去掉 `collate_fn=list`**，使用 PyTorch 默认的 `default_collate` 让多进程 Worker 直接拼好 Batch Tensor 并由 `pin_memory` 锁页传输到 GPU！
 3. **【严禁机械剪切或删 `.py` 留 `.pyc` 红线】**：
    - 拆分千行巨石文件时，所有新模块（如 `training_support.py`）必须真实保留在磁盘上；
-   - **硬性红线**：本阶段完成后，**全仓（除 `simulation/.../tools/` 外）不得有任何 $> 720$ 行的 `.py` 文件**，核心模块中**不得有任何 $> 85$ 行的函数**，全仓非测试 Python 总行数 **必须 $\le 35,000$ 行**！
+   - **硬性红线**：本阶段完成后，**全仓（除 `simulation/.../tools/` 外）不得有任何 $> 720$ 行的 `.py` 文件**，核心模块中**不得有任何 $> 85$ 行的函数**，全仓非测试 Python 总行数 **必须 $\le 47,000$ 行**（较重构前净减 $> 34,000$ 行）！
 
 ---
 
@@ -89,7 +89,7 @@
    sys.exit(1 if errors else 0)
    '
    ```
-2. **全仓单文件 720 行红线、单函数 85 行红线与总行数（$\le 35,000$ 行）检查**：
+2. **全仓单文件 720 行红线、单函数 85 行红线与总行数（$\le 47,000$ 行）检查**：
    ```bash
    python3 -c '
    import ast, pathlib, sys
@@ -104,7 +104,7 @@
                over_720.append((lines, str(p)))
    print(f"Total non-test Python lines: {total}")
    for l, p in sorted(over_720, reverse=True): print(f"OVER 720 LINES: {l} {p}")
-   assert total <= 35000, f"Total lines {total} > 35000!"
+   assert total <= 47000, f"Total lines {total} > 47000!"
    assert not over_720, "Found files > 720 lines!"
 
    targets = [

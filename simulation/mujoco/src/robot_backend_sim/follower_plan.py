@@ -126,28 +126,15 @@ def _calculate_trajectory(
     return trajectory
 
 
-def prepare_follower_plan(
-    anchor: ChunkAnchor,
-    window: ActionWindow,
-    profile: RobotProfile,
-    control_config: PandaControlConfig,
-    follower_config: PandaFollowerConfig,
-    *,
-    is_final: bool,
-    duration_grid_ns: int | None = None,
-) -> PreparedFollowerPlan:
-    """Validate, limit terminal speed, call Ruckig once and export one plan.
-
-    A non-final chunk is cut exactly at ``window.end_time_ns``.  Its exported
-    endpoint is the actual reference state that a successor must inherit.  A
-    final chunk asks for zero terminal velocity and may extend beyond the window,
-    up to the configured terminal-tail bound and the shared three-second horizon.
-
-    ``duration_grid_ns=None`` keeps the accepted continuous planning.  A positive
-    integer asks Ruckig for a discrete total duration on that grid; the physical
-    caller passes the scene's 2 ms step.  A non-final fixed hand-off must itself
-    lie on that grid, and every exported plan duration must be an exact multiple.
-    """
+def _validate_types(
+    anchor: object,
+    window: object,
+    profile: object,
+    control_config: object,
+    follower_config: object,
+    is_final: object,
+    duration_grid_ns: object,
+) -> int | None:
     if not isinstance(anchor, ChunkAnchor):
         raise _invalid("anchor", "must be a ChunkAnchor")
     if not isinstance(window, ActionWindow):
@@ -160,20 +147,26 @@ def prepare_follower_plan(
         raise _invalid("follower_config", "must be a PandaFollowerConfig")
     if not isinstance(is_final, bool):
         raise _invalid("is_final", "must be a bool")
-    grid_ns: int | None = None
-    if duration_grid_ns is not None:
-        if isinstance(duration_grid_ns, bool) or not isinstance(duration_grid_ns, Integral):
-            raise _invalid("duration_grid_ns", "must be a positive integer or None")
-        grid_ns = int(duration_grid_ns)
-        if grid_ns <= 0 or grid_ns > MAX_HORIZON_NS:
-            raise _invalid(
-                "duration_grid_ns",
-                f"must be in 1..{MAX_HORIZON_NS}",
-            )
+    if duration_grid_ns is None:
+        return None
+    if isinstance(duration_grid_ns, bool) or not isinstance(duration_grid_ns, Integral):
+        raise _invalid("duration_grid_ns", "must be a positive integer or None")
+    grid_ns = int(duration_grid_ns)
+    if grid_ns <= 0 or grid_ns > MAX_HORIZON_NS:
+        raise _invalid("duration_grid_ns", f"must be in 1..{MAX_HORIZON_NS}")
+    return grid_ns
+
+
+def _validate_identity(
+    anchor: ChunkAnchor,
+    window: ActionWindow,
+    profile: RobotProfile,
+    control_config: PandaControlConfig,
+    follower_config: PandaFollowerConfig,
+) -> None:
     if tuple(profile.joint_names) != tuple(control_config.joint_names):
         raise ContractError(
-            "PROFILE_MISMATCH",
-            "profile joint order differs from the control config",
+            "PROFILE_MISMATCH", "profile joint order differs from the control config"
         )
     if tuple(follower_config.joint_names) != tuple(control_config.joint_names):
         raise ContractError(
@@ -193,20 +186,37 @@ def prepare_follower_plan(
             f"is {window.target_count}, follower config expects {follower_config.target_count}",
         )
 
+
+def _validate_window(
+    window: ActionWindow,
+    follower_config: PandaFollowerConfig,
+    grid_ns: int | None,
+    *,
+    is_final: bool,
+) -> int:
     end_time_ns = window.end_time_ns
     if end_time_ns > MAX_HORIZON_NS:
         raise _invalid("window.end_time_ns", "exceeds the shared three-second horizon")
     if end_time_ns > follower_config.max_terminal_tail_duration_ns:
         raise _invalid(
-            "window.end_time_ns",
-            "exceeds the configured terminal-tail duration",
+            "window.end_time_ns", "exceeds the configured terminal-tail duration"
         )
     if grid_ns is not None and not is_final and end_time_ns % grid_ns != 0:
         raise _invalid(
             "window.end_time_ns",
             "a non-final fixed hand-off must lie exactly on duration_grid_ns",
         )
+    return end_time_ns
 
+
+def _reference_inputs(
+    anchor: ChunkAnchor,
+    window: ActionWindow,
+    profile: RobotProfile,
+    control_config: PandaControlConfig,
+    *,
+    is_final: bool,
+):
     inputs = validate_reference_inputs(
         anchor.reference.positions,
         window.source_targets,
@@ -219,7 +229,6 @@ def prepare_follower_plan(
             raise _invalid(f"max_accelerations[{index}]", "must be positive")
     if not window.targets:
         raise _invalid("window.targets", "must not be empty")
-
     raw_terminal_velocities = estimate_raw_terminal_velocities(window.targets)
     restricted_terminal_velocities = restrict_terminal_velocities(
         raw_terminal_velocities,
@@ -230,7 +239,17 @@ def prepare_follower_plan(
         inputs.max_accelerations,
         is_final=is_final,
     )
+    return inputs, raw_terminal_velocities, restricted_terminal_velocities
 
+
+def _calculate(
+    anchor: ChunkAnchor,
+    window: ActionWindow,
+    inputs,
+    restricted_terminal_velocities,
+    end_time_ns: int,
+    grid_ns: int | None,
+):
     trajectory = _calculate_trajectory(
         anchor,
         window.targets[-1],
@@ -253,6 +272,17 @@ def prepare_follower_plan(
             f"Ruckig duration {profile_duration_ns}ns does not cover the requested "
             f"hand-off {end_time_ns}ns",
         )
+    return trajectory, profile_duration_ns
+
+
+def _truncation(
+    profile_duration_ns: int,
+    end_time_ns: int,
+    follower_config: PandaFollowerConfig,
+    grid_ns: int | None,
+    *,
+    is_final: bool,
+) -> int:
     if is_final:
         truncate_ns = profile_duration_ns
         if truncate_ns > follower_config.max_terminal_tail_duration_ns:
@@ -261,20 +291,17 @@ def prepare_follower_plan(
                 f"final reference duration {truncate_ns}ns exceeds the configured "
                 f"terminal tail {follower_config.max_terminal_tail_duration_ns}ns",
             )
-    else:
-        truncate_ns = end_time_ns
-        if grid_ns is not None and truncate_ns % grid_ns != 0:
-            raise ContractError(
-                "FOLLOWER_GRID_MISMATCH",
-                "non-final exported hand-off is not on the requested grid",
-            )
+        return truncate_ns
+    truncate_ns = end_time_ns
+    if grid_ns is not None and truncate_ns % grid_ns != 0:
+        raise ContractError(
+            "FOLLOWER_GRID_MISMATCH",
+            "non-final exported hand-off is not on the requested grid",
+        )
+    return truncate_ns
 
-    exported = export_ruckig_reference(
-        trajectory,
-        tuple(inputs.joint_names),
-        truncate_ns=truncate_ns,
-    )
 
+def _check_exported(exported, inputs, *, is_final: bool) -> None:
     # Braking feasibility is checked from the exported endpoint, not from a
     # sampled control tick.  The returned braking plan is discarded.
     from .braking import plan_braking
@@ -299,6 +326,66 @@ def prepare_follower_plan(
             "final Ruckig export did not end at zero velocity",
         )
 
+
+def prepare_follower_plan(
+    anchor: ChunkAnchor,
+    window: ActionWindow,
+    profile: RobotProfile,
+    control_config: PandaControlConfig,
+    follower_config: PandaFollowerConfig,
+    *,
+    is_final: bool,
+    duration_grid_ns: int | None = None,
+) -> PreparedFollowerPlan:
+    """Validate, limit terminal speed, call Ruckig once and export one plan.
+
+    A non-final chunk is cut exactly at ``window.end_time_ns``.  Its exported
+    endpoint is the actual reference state that a successor must inherit.  A
+    final chunk asks for zero terminal velocity and may extend beyond the window,
+    up to the configured terminal-tail bound and the shared three-second horizon.
+
+    ``duration_grid_ns=None`` keeps the accepted continuous planning.  A positive
+    integer asks Ruckig for a discrete total duration on that grid; the physical
+    caller passes the scene's 2 ms step.  A non-final fixed hand-off must itself
+    lie on that grid, and every exported plan duration must be an exact multiple.
+    """
+    grid_ns = _validate_types(
+        anchor,
+        window,
+        profile,
+        control_config,
+        follower_config,
+        is_final,
+        duration_grid_ns,
+    )
+    _validate_identity(anchor, window, profile, control_config, follower_config)
+    end_time_ns = _validate_window(
+        window, follower_config, grid_ns, is_final=is_final
+    )
+    inputs, raw_terminal_velocities, restricted_terminal_velocities = _reference_inputs(
+        anchor, window, profile, control_config, is_final=is_final
+    )
+    trajectory, profile_duration_ns = _calculate(
+        anchor,
+        window,
+        inputs,
+        restricted_terminal_velocities,
+        end_time_ns,
+        grid_ns,
+    )
+    truncate_ns = _truncation(
+        profile_duration_ns,
+        end_time_ns,
+        follower_config,
+        grid_ns,
+        is_final=is_final,
+    )
+    exported = export_ruckig_reference(
+        trajectory,
+        tuple(inputs.joint_names),
+        truncate_ns=truncate_ns,
+    )
+    _check_exported(exported, inputs, is_final=is_final)
     return PreparedFollowerPlan(
         anchor=anchor,
         window=window,

@@ -248,6 +248,171 @@ def _right_addresses(model: object, joint_ids: tuple[int, ...]) -> tuple[int, ..
     return tuple(int(model.jnt_qposadr[joint_id]) for joint_id in joint_ids)
 
 
+def _mink_limits(model: object, pair_set: CollisionPairSet, clearance: ClearanceConfig):
+    import mink
+
+    try:
+        limits = [
+            mink.ConfigurationLimit(model),
+            mink.CollisionAvoidanceLimit(
+                model,
+                [((pair.geom1,), (pair.geom2,)) for pair in pair_set.pairs],
+                minimum_distance_from_collisions=clearance.minimum_clearance_m,
+                collision_detection_distance=clearance.collision_detection_distance_m,
+            ),
+        ]
+        # mink 1.3 implements DofFreezingTask as an equality Task.  Passing it
+        # through ``constraints`` makes the freeze exact; as a normal task it
+        # would only be a soft preference.
+        return limits
+    except Exception as error:
+        raise KinematicsError(
+            "mink_constraint_api_mismatch",
+            f"mink 1.3 constraint construction failed: {type(error).__name__}: {error}",
+        ) from error
+
+
+def _solver_start(initial, right_addresses, values) -> object:
+    solver_start = initial.copy()
+    for address, value in zip(right_addresses, values, strict=True):
+        solver_start[address] = value
+    return solver_start
+
+
+def _solve_one(
+    model: object,
+    target: KeyPoseTarget,
+    start: object,
+    ik_config: IKConfig,
+    limits: list,
+    constraints: list,
+    frozen_dofs: list[int],
+    posture_reference: object,
+):
+    import mink
+    import numpy as np
+
+    started = time.perf_counter()
+    configuration = mink.Configuration(model)
+    configuration.update(start)
+    frame_task = mink.FrameTask(
+        frame_name="right_tcp",
+        frame_type="site",
+        position_cost=ik_config.position_cost,
+        orientation_cost=ik_config.orientation_cost,
+        lm_damping=ik_config.lm_damping,
+    )
+    pose = np.eye(4, dtype=np.float64)
+    pose[:3, :3] = np.asarray(target.rotation, dtype=np.float64)
+    pose[:3, 3] = np.asarray(target.position, dtype=np.float64)
+    frame_task.set_target(mink.SE3.from_matrix(pose))
+    posture_task = mink.PostureTask(model, cost=ik_config.posture_cost)
+    posture_task.set_target(posture_reference)
+    tasks = [frame_task, posture_task]
+    converged = False
+    iterations = 0
+    position_error = math.inf
+    orientation_error = math.inf
+    failure_reason: str | None = None
+    failure_message: str | None = None
+    try:
+        for iteration in range(1, ik_config.max_iterations + 1):
+            iterations = iteration
+            velocity = np.asarray(
+                mink.solve_ik(
+                    configuration,
+                    tasks,
+                    ik_config.dt_s,
+                    solver=ik_config.solver,
+                    limits=limits,
+                    constraints=constraints,
+                ),
+                dtype=np.float64,
+            )
+            # The hard DofFreezingTask constraint already requires zero
+            # velocity on these DoFs; zeroing the integrated vector makes
+            # the "only seven right hinge qpos may change" invariant exact
+            # despite QP equality tolerances.
+            velocity[frozen_dofs] = 0.0
+            configuration.integrate_inplace(velocity, ik_config.dt_s)
+            error = np.asarray(frame_task.compute_error(configuration), dtype=np.float64)
+            position_error = float(np.linalg.norm(error[:3]))
+            orientation_error = float(np.linalg.norm(error[3:]))
+            if (
+                position_error <= ik_config.position_tolerance_m
+                and orientation_error <= ik_config.orientation_tolerance_rad
+            ):
+                converged = True
+                break
+    except Exception as error:
+        failure_reason = "ik_solver_failed"
+        failure_message = f"{type(error).__name__}: {error}"
+    return (
+        configuration,
+        converged,
+        iterations,
+        position_error,
+        orientation_error,
+        failure_reason,
+        failure_message,
+        time.perf_counter() - started,
+    )
+
+
+def _solve_result(
+    model: object,
+    target: KeyPoseTarget,
+    initial: object,
+    right_addresses: tuple[int, ...],
+    joint_ids: tuple[int, ...],
+    solved_state,
+) -> IKResult:
+    import numpy as np
+
+    (
+        configuration,
+        converged,
+        iterations,
+        position_error,
+        orientation_error,
+        failure_reason,
+        failure_message,
+        elapsed,
+    ) = solved_state
+    solved = np.asarray(configuration.q, dtype=np.float64)
+    try:
+        _check_finite_and_frozen(model, solved, initial, right_addresses, joint_ids)
+        frozen_deviation = _frozen_deviation(solved, initial, set(right_addresses))
+    except KinematicsError as error:
+        failure_reason = error.reason
+        failure_message = error.message
+        frozen_deviation = math.inf
+    if not converged and failure_reason is None:
+        failure_reason = "ik_not_converged"
+        failure_message = (
+            f"target {target.phase!r} did not reach tolerances after "
+            f"{iterations} iterations: position={position_error:.6g} m, "
+            f"orientation={orientation_error:.6g} rad"
+        )
+    return (
+        IKResult(
+            phase=target.phase,
+            target=target,
+            converged=converged and failure_reason is None,
+            iterations=iterations,
+            position_error_m=position_error,
+            orientation_error_rad=orientation_error,
+            qpos_right=tuple(float(solved[address]) for address in right_addresses),
+            qpos_full=tuple(float(value) for value in solved),
+            frozen_max_deviation=frozen_deviation,
+            elapsed_s=elapsed,
+            reason=failure_reason,
+            message=failure_message,
+        ),
+        solved,
+    )
+
+
 def solve_key_poses(
     model: object,
     initial_qpos: object,
@@ -267,128 +432,34 @@ def solve_key_poses(
     initial = np.asarray(initial_qpos, dtype=np.float64)
     if initial.shape != (model.nq,) or not np.isfinite(initial).all():
         raise KinematicsError("initial_state_invalid", "initial qpos is not finite")
-
-    try:
-        limits = [
-            mink.ConfigurationLimit(model),
-            mink.CollisionAvoidanceLimit(
-                model,
-                [((pair.geom1,), (pair.geom2,)) for pair in pair_set.pairs],
-                minimum_distance_from_collisions=clearance.minimum_clearance_m,
-                collision_detection_distance=clearance.collision_detection_distance_m,
-            ),
-        ]
-        # mink 1.3 implements DofFreezingTask as an equality Task.  Passing it
-        # through ``constraints`` makes the freeze exact; as a normal task it
-        # would only be a soft preference.
-        constraints = [mink.DofFreezingTask(model, frozen_dofs)]
-    except Exception as error:
-        raise KinematicsError(
-            "mink_constraint_api_mismatch",
-            f"mink 1.3 constraint construction failed: {type(error).__name__}: {error}",
-        ) from error
-
+    limits = _mink_limits(model, pair_set, clearance)
+    constraints = [mink.DofFreezingTask(model, frozen_dofs)]
     # The supervisor's numeric reach seed is only an IK initial value.  The
     # actual path start remains the layout's Scene home qpos, which is still
     # used by check_path and by the frozen-qpos comparison baseline.
-    solver_start = initial.copy()
-    for address, value in zip(
-        right_addresses, ik_config.initial_right_joint_positions, strict=True
-    ):
-        solver_start[address] = value
-    posture_reference = solver_start.copy()
+    start = _solver_start(
+        initial, right_addresses, ik_config.initial_right_joint_positions
+    )
+    posture_reference = start.copy()
     results: list[IKResult] = []
-    start = solver_start
     for target in targets:
-        started = time.perf_counter()
-        configuration = mink.Configuration(model)
-        configuration.update(start)
-        frame_task = mink.FrameTask(
-            frame_name="right_tcp",
-            frame_type="site",
-            position_cost=ik_config.position_cost,
-            orientation_cost=ik_config.orientation_cost,
-            lm_damping=ik_config.lm_damping,
+        solved_state = _solve_one(
+            model,
+            target,
+            start,
+            ik_config,
+            limits,
+            constraints,
+            frozen_dofs,
+            posture_reference,
         )
-        pose = np.eye(4, dtype=np.float64)
-        pose[:3, :3] = np.asarray(target.rotation, dtype=np.float64)
-        pose[:3, 3] = np.asarray(target.position, dtype=np.float64)
-        frame_task.set_target(mink.SE3.from_matrix(pose))
-        posture_task = mink.PostureTask(model, cost=ik_config.posture_cost)
-        posture_task.set_target(posture_reference)
-        tasks = [frame_task, posture_task]
-        converged = False
-        iterations = 0
-        position_error = math.inf
-        orientation_error = math.inf
-        failure_reason: str | None = None
-        failure_message: str | None = None
-        try:
-            for iteration in range(1, ik_config.max_iterations + 1):
-                iterations = iteration
-                velocity = np.asarray(
-                    mink.solve_ik(
-                        configuration,
-                        tasks,
-                        ik_config.dt_s,
-                        solver=ik_config.solver,
-                        limits=limits,
-                        constraints=constraints,
-                    ),
-                    dtype=np.float64,
-                )
-                # The hard DofFreezingTask constraint already requires zero
-                # velocity on these DoFs; zeroing the integrated vector makes
-                # the "only seven right hinge qpos may change" invariant exact
-                # despite QP equality tolerances.
-                velocity[frozen_dofs] = 0.0
-                configuration.integrate_inplace(velocity, ik_config.dt_s)
-                error = np.asarray(frame_task.compute_error(configuration), dtype=np.float64)
-                position_error = float(np.linalg.norm(error[:3]))
-                orientation_error = float(np.linalg.norm(error[3:]))
-                if (
-                    position_error <= ik_config.position_tolerance_m
-                    and orientation_error <= ik_config.orientation_tolerance_rad
-                ):
-                    converged = True
-                    break
-        except Exception as error:
-            failure_reason = "ik_solver_failed"
-            failure_message = f"{type(error).__name__}: {error}"
-        elapsed = time.perf_counter() - started
-        solved = np.asarray(configuration.q, dtype=np.float64)
-        try:
-            _check_finite_and_frozen(model, solved, initial, right_addresses, joint_ids)
-            frozen_deviation = _frozen_deviation(solved, initial, set(right_addresses))
-        except KinematicsError as error:
-            failure_reason = error.reason
-            failure_message = error.message
-            frozen_deviation = math.inf
-        if not converged and failure_reason is None:
-            failure_reason = "ik_not_converged"
-            failure_message = (
-                f"target {target.phase!r} did not reach tolerances after "
-                f"{iterations} iterations: position={position_error:.6g} m, "
-                f"orientation={orientation_error:.6g} rad"
-            )
-        result = IKResult(
-            phase=target.phase,
-            target=target,
-            converged=converged and failure_reason is None,
-            iterations=iterations,
-            position_error_m=position_error,
-            orientation_error_rad=orientation_error,
-            qpos_right=tuple(float(solved[address]) for address in right_addresses),
-            qpos_full=tuple(float(value) for value in solved),
-            frozen_max_deviation=frozen_deviation,
-            elapsed_s=elapsed,
-            reason=failure_reason,
-            message=failure_message,
+        result, solved = _solve_result(
+            model, target, initial, right_addresses, joint_ids, solved_state
         )
         results.append(result)
         if result.converged:
             start = solved.copy()
-        if failure_reason is not None:
+        if result.reason is not None:
             break
     return tuple(results)
 
@@ -412,31 +483,19 @@ def _min_step(samples: tuple[tuple[float, ...], ...]) -> float:
     return maximum
 
 
-def check_path(
+def _scan_path(
     model: object,
-    initial_qpos: object,
-    start_right: object,
-    end_right: object,
+    initial: tuple[float, ...],
+    right_addresses: tuple[int, ...],
+    joint_ids: tuple[int, ...],
+    samples: tuple[tuple[float, ...], ...],
     pair_set: CollisionPairSet,
     clearance: ClearanceConfig,
-    *,
     segment: str,
-    deadline: float | None = None,
-) -> PathResult:
-    """Check one linear right-arm path on a private mink Configuration."""
+    deadline: float | None,
+) -> tuple[ClearancePoint | None, str | None, str | None]:
     import mink
 
-    started = time.perf_counter()
-    joint_ids = _right_joint_ids(model)
-    right_addresses = _right_addresses(model, joint_ids)
-    initial = tuple(float(value) for value in initial_qpos)  # type: ignore[arg-type]
-    samples = sample_joint_path(
-        start_right,
-        end_right,
-        max_step_rad=clearance.sample_step_rad,
-        max_samples=clearance.max_samples_per_segment,
-    )
-    actual_step = _min_step(samples)
     configuration = mink.Configuration(model)
     configuration.update(initial)
     minimum: ClearancePoint | None = None
@@ -450,7 +509,9 @@ def check_path(
         qpos = _set_right_qpos(initial, right_addresses, sample)
         try:
             configuration.update(qpos)
-            _check_finite_and_frozen(model, configuration.q, initial, right_addresses, joint_ids)
+            _check_finite_and_frozen(
+                model, configuration.q, initial, right_addresses, joint_ids
+            )
             point = measure_clearance(
                 model,
                 configuration.data,
@@ -465,19 +526,68 @@ def check_path(
             break
         if minimum is None or point.distance_m < minimum.distance_m:
             minimum = point
+    return minimum, failure_reason, failure_message
+
+
+def _initial_point(
+    model: object,
+    initial: tuple[float, ...],
+    pair_set: CollisionPairSet,
+    clearance: ClearanceConfig,
+) -> ClearancePoint:
+    import mink
+
+    configuration = mink.Configuration(model)
+    configuration.update(initial)
+    return measure_clearance(
+        model,
+        configuration.data,
+        pair_set,
+        detection_distance_m=clearance.collision_detection_distance_m,
+        sample_index=0,
+        fraction=0.0,
+    )
+
+
+def check_path(
+    model: object,
+    initial_qpos: object,
+    start_right: object,
+    end_right: object,
+    pair_set: CollisionPairSet,
+    clearance: ClearanceConfig,
+    *,
+    segment: str,
+    deadline: float | None = None,
+) -> PathResult:
+    """Check one linear right-arm path on a private mink Configuration."""
+    started = time.perf_counter()
+    joint_ids = _right_joint_ids(model)
+    right_addresses = _right_addresses(model, joint_ids)
+    initial = tuple(float(value) for value in initial_qpos)  # type: ignore[arg-type]
+    samples = sample_joint_path(
+        start_right,
+        end_right,
+        max_step_rad=clearance.sample_step_rad,
+        max_samples=clearance.max_samples_per_segment,
+    )
+    actual_step = _min_step(samples)
+    minimum, failure_reason, failure_message = _scan_path(
+        model,
+        initial,
+        right_addresses,
+        joint_ids,
+        samples,
+        pair_set,
+        clearance,
+        segment,
+        deadline,
+    )
     if minimum is None:
         # Keep a real measured point in the result even for an immediate
         # failure; this is the initial pose, not a fabricated large distance.
         try:
-            configuration.update(initial)
-            minimum = measure_clearance(
-                model,
-                configuration.data,
-                pair_set,
-                detection_distance_m=clearance.collision_detection_distance_m,
-                sample_index=0,
-                fraction=0.0,
-            )
+            minimum = _initial_point(model, initial, pair_set, clearance)
         except KinematicsError as error:
             raise KinematicsError(error.reason, error.message) from error
     passed = failure_reason is None and minimum.distance_m >= clearance.minimum_clearance_m

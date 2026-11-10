@@ -5,7 +5,8 @@
 
 - `act_dataset*.yaml`：MCAP 到 LeRobot 数据集的转换与容器路径。
 - `act_training*.yaml`：ACT 训练配方，`.container.yaml` 使用 `/data` 共享产物
-  与 `/opt/learning-cache` 只读权重。
+  与 `/opt/learning-cache` 只读权重；`training` 段显式配置 batch、worker、
+  `pin_memory`、`prefetch_factor`、`use_amp`、`amp_dtype` 和日志/验证间隔。
 - `act_sample_filter.yaml`：训练起点静止冗余筛选。
 - `policy_temporal.yaml`：真实 ACT Policy 服务模板；`prepare-policy` 读取它并
   写出带真实 bundle 路径/摘要的服务配置。它打开按绝对仿真时间对齐的预测融合

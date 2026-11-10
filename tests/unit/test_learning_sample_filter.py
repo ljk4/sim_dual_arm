@@ -435,13 +435,17 @@ def test_future_action_chunks_keep_their_original_interval_and_validation_is_unf
         num_workers=0,
     )
     loader = training._loader(_Dataset(), config, training=True, indices=[2, 7, 19])
-    samples = [sample for batch in loader for sample in batch]
-    assert sorted(sample["anchor"] for sample in samples) == [2, 7, 19]
-    for sample in samples:
-        assert sample["action"].shape == (60, 16)
-        assert torch.equal(sample["action"], torch.full((60, 16), float(sample["anchor"])))
+    batches = list(loader)
+    anchors = sorted(int(value) for batch in batches for value in batch["anchor"])
+    assert anchors == [2, 7, 19]
+    for batch in batches:
+        assert batch["action"].shape[1:] == (60, 16)
+        for row, anchor in enumerate(batch["anchor"]):
+            assert torch.equal(batch["action"][row], torch.full((60, 16), float(anchor)))
     validation = training._loader(_Dataset(), config, training=False)
-    assert [sample["anchor"] for batch in validation for sample in batch] == list(range(20))
+    assert [
+        int(value) for batch in validation for value in batch["anchor"]
+    ] == list(range(20))
 
 
 def test_old_unfiltered_binding_is_byte_for_byte_compatible(tmp_path):

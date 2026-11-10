@@ -110,58 +110,36 @@ class ServiceAdapter:
         response.reason = ""  # type: ignore[attr-defined]
         return response
 
-    async def submit_follower(self, request: object, response: object) -> object:
-        try:
-            record = stream_command_from_message(request.request)  # type: ignore[attr-defined]
-            if record.kind not in (2, 3):
-                raise ContractError(
-                    "INVALID_FOLLOWER_REQUEST",
-                    "SubmitFollower accepts only STREAM_FIRST or STREAM_NEXT",
-                )
-            outcome = await self._node._await(self._worker.submit_follower(record), submit=True)
-        except TimeoutError as error:
-            response.accepted = False  # type: ignore[attr-defined]
-            response.reason = str(error)  # type: ignore[attr-defined]
-            response.has_execution = False  # type: ignore[attr-defined]
-            response.has_chunk = False  # type: ignore[attr-defined]
-            response.has_reference = False  # type: ignore[attr-defined]
-            return response
-        except BaseException as error:  # noqa: BLE001 - SubmitFollower has no success field
-            if isinstance(error, ContractError):
-                reason = error.reason
-                self._node._emit(
-                    "backend.submit_follower.rejected",
-                    level="WARNING",
-                    reason=reason,
-                    message=str(error),
-                )
-            elif isinstance(error, BackendClosed):
-                reason = "BACKEND_CLOSED"
-            else:
-                reason = "INTERNAL_ERROR"
-                self._node._emit(
-                    "backend.submit_follower.error",
-                    level="ERROR",
-                    reason="INTERNAL_ERROR",
-                    message=type(error).__name__,
-                    exception=error,
-                )
-            response.accepted = False  # type: ignore[attr-defined]
-            response.reason = reason  # type: ignore[attr-defined]
-            response.has_execution = False  # type: ignore[attr-defined]
-            response.has_chunk = False  # type: ignore[attr-defined]
-            response.has_reference = False  # type: ignore[attr-defined]
-            return response
-        assert isinstance(outcome, SubmitOutcome)
-        if outcome.reference is not None and not isinstance(
-            outcome.reference, FollowerReferenceRecord
-        ):
-            response.accepted = False  # type: ignore[attr-defined]
-            response.reason = "STREAM_MODE_MISMATCH"  # type: ignore[attr-defined]
-            response.has_execution = False  # type: ignore[attr-defined]
-            response.has_chunk = False  # type: ignore[attr-defined]
-            response.has_reference = False  # type: ignore[attr-defined]
-            return response
+    @staticmethod
+    def _reject_follower(response: object, reason: str) -> object:
+        response.accepted = False  # type: ignore[attr-defined]
+        response.reason = reason  # type: ignore[attr-defined]
+        response.has_execution = False  # type: ignore[attr-defined]
+        response.has_chunk = False  # type: ignore[attr-defined]
+        response.has_reference = False  # type: ignore[attr-defined]
+        return response
+
+    def _follower_failure(self, error: BaseException) -> str:
+        if isinstance(error, ContractError):
+            self._node._emit(
+                "backend.submit_follower.rejected",
+                level="WARNING",
+                reason=error.reason,
+                message=str(error),
+            )
+            return error.reason
+        if isinstance(error, BackendClosed):
+            return "BACKEND_CLOSED"
+        self._node._emit(
+            "backend.submit_follower.error",
+            level="ERROR",
+            reason="INTERNAL_ERROR",
+            message=type(error).__name__,
+            exception=error,
+        )
+        return "INTERNAL_ERROR"
+
+    def _fill_follower(self, response: object, outcome: SubmitOutcome) -> object:
         response.accepted = bool(outcome.reply.accepted)  # type: ignore[attr-defined]
         response.reason = outcome.reply.reason  # type: ignore[attr-defined]
         response.has_execution = outcome.execution is not None  # type: ignore[attr-defined]
@@ -179,6 +157,9 @@ class ServiceAdapter:
             response.reference = follower_reference_message(  # type: ignore[attr-defined]
                 outcome.reference
             )
+        return response
+
+    def _emit_follower(self, record, response, outcome: SubmitOutcome) -> None:
         self._node._emit(
             "backend.submit_follower",
             message="accepted" if response.accepted else "rejected",
@@ -196,6 +177,27 @@ class ServiceAdapter:
                 "has_reference": response.has_reference,
             },
         )
+
+    async def submit_follower(self, request: object, response: object) -> object:
+        try:
+            record = stream_command_from_message(request.request)  # type: ignore[attr-defined]
+            if record.kind not in (2, 3):
+                raise ContractError(
+                    "INVALID_FOLLOWER_REQUEST",
+                    "SubmitFollower accepts only STREAM_FIRST or STREAM_NEXT",
+                )
+            outcome = await self._node._await(self._worker.submit_follower(record), submit=True)
+        except TimeoutError as error:
+            return self._reject_follower(response, str(error))
+        except BaseException as error:  # noqa: BLE001 - SubmitFollower has no success field
+            return self._reject_follower(response, self._follower_failure(error))
+        assert isinstance(outcome, SubmitOutcome)
+        if outcome.reference is not None and not isinstance(
+            outcome.reference, FollowerReferenceRecord
+        ):
+            return self._reject_follower(response, "STREAM_MODE_MISMATCH")
+        self._fill_follower(response, outcome)
+        self._emit_follower(record, response, outcome)
         return response
 
     @_service

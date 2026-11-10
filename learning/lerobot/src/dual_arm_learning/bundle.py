@@ -211,21 +211,9 @@ def _actual_sample(config: TrainingConfig, train_root: Path) -> dict[str, Any]:
     }
 
 
-def export_bundle(
-    *,
-    config: TrainingConfig,
-    run_dir: Path,
-    output_dir: Path,
-    checkpoint_name: str = "best.pt",
-    allow_synthetic: bool = False,
-) -> dict[str, Any]:
-    """Export the trained policy plus processors/stats/references as a bundle."""
-    import torch
-    from safetensors.torch import save_file
-
-    configure_local_caches(config.cache_root, data_root=config.data_root)
-    if output_dir.exists():
-        raise BundleError(f"{output_dir}: bundle output already exists")
+def _export_inputs(
+    config: TrainingConfig, run_dir: Path, checkpoint_name: str, allow_synthetic: bool
+) -> tuple[Any, dict[str, Any], Any]:
     audit = verify_dataset_manifest(config, allow_synthetic=allow_synthetic)
     if audit.synthetic and not allow_synthetic:
         raise BundleError("refusing to export a bundle from synthetic data")
@@ -244,9 +232,13 @@ def export_bundle(
         sample_filter = load_filter_mask(config.sample_filter)
         if checkpoint.get("training_binding") != training_binding(config):
             raise BundleError("checkpoint was not trained with this sample filter")
+    return audit, checkpoint, sample_filter
 
-    output_dir.parent.mkdir(parents=True, exist_ok=True)
-    output_dir.mkdir(parents=True, exist_ok=False)
+
+def _save_policy(config: TrainingConfig, checkpoint: dict[str, Any], output_dir: Path):
+    import torch
+    from safetensors.torch import save_file
+
     act_config = build_act_config(config, device="cpu")
     from lerobot.policies.act.modeling_act import ACTPolicy
 
@@ -264,11 +256,24 @@ def export_bundle(
     save_file(
         policy.state_dict(),
         output_dir / "model.safetensors",
-        metadata={"format": BUNDLE_FORMAT, "policy": "act", "step": str(checkpoint.get("step", 0))},
+        metadata={
+            "format": BUNDLE_FORMAT,
+            "policy": "act",
+            "step": str(checkpoint.get("step", 0)),
+        },
     )
     if act_config.pretrained_backbone_weights is not None:
         raise BundleError("bundle config would request an implicit backbone download")
     act_config._save_pretrained(output_dir)
+    return act_config, policy
+
+
+def _copy_metadata(
+    config: TrainingConfig,
+    output_dir: Path,
+    checkpoint: dict[str, Any],
+    sample_filter: Any,
+) -> tuple[Path, dict[str, Any]]:
     dataset_root = config.data_root
     processors = dataset_root / "processors"
     if not processors.is_dir():
@@ -278,13 +283,14 @@ def export_bundle(
     metadata.mkdir()
     profile = _json(config.dataset.profile_path)
     _write_json(metadata / "profile.json", profile)
-    dataset_manifest_path = dataset_root / config.manifest_name
-    shutil.copy2(dataset_manifest_path, metadata / "dataset_manifest.json")
+    shutil.copy2(dataset_root / config.manifest_name, metadata / "dataset_manifest.json")
     shutil.copy2(config.source, metadata / "training_config.yaml")
     if sample_filter is not None:
         _write_json(metadata / "sample_filter.json", sample_filter.document)
-    stats_document = _json(processors / "train_stats_summary.json")
-    _write_json(metadata / "train_stats_summary.json", stats_document)
+    _write_json(
+        metadata / "train_stats_summary.json",
+        _json(processors / "train_stats_summary.json"),
+    )
     _write_json(
         metadata / "checkpoint.json",
         {
@@ -300,27 +306,40 @@ def export_bundle(
             "seed": checkpoint.get("seed"),
         },
     )
-    joint_names = list(profile.get("joints", []))
-    cameras = list(config.dataset.camera_names)
+    return metadata, profile
+
+
+def _schema(config: TrainingConfig, profile: dict[str, Any]) -> tuple[dict, dict]:
+    joints = list(profile.get("joints", []))
     observation = {
         "state_dim": config.dataset.state_dim,
-        "state_names": [item.get("name") for item in joint_names],
-        "state_units": [item.get("unit") for item in joint_names],
-        "cameras": cameras,
+        "state_names": [item.get("name") for item in joints],
+        "state_units": [item.get("unit") for item in joints],
+        "cameras": list(config.dataset.camera_names),
         "image_height": config.dataset.camera_height,
         "image_width": config.dataset.camera_width,
         "channels": 3,
     }
     action = {
         "dim": config.dataset.state_dim,
-        "names": [item.get("name") for item in joint_names],
-        "units": [item.get("unit") for item in joint_names],
+        "names": [item.get("name") for item in joints],
+        "units": [item.get("unit") for item in joints],
         "chunk_size": config.dataset.chunk_size,
         "action_lead_ns": config.dataset.action_lead_ns,
         "fps": config.dataset.fps,
     }
-    _write_json(metadata / "schema.json", {"observation": observation, "action": action})
+    return observation, action
 
+
+def _verify_round_trip(
+    config: TrainingConfig,
+    audit: Any,
+    output_dir: Path,
+    policy: Any,
+    metadata: Path,
+    observation: dict,
+    act_config: Any,
+) -> tuple[int, ...]:
     pre_copy, post_copy = _load_processors(output_dir / "processors")
     handle = BundleHandle(
         root=output_dir,
@@ -354,14 +373,16 @@ def export_bundle(
             "chunk_complete": True,
         },
     )
-    files = tree_hashes(output_dir)
-    dataset_document = _json(metadata / "dataset_manifest.json")
-    archive_sha256 = config.dataset.lerobot_source_archive_sha256 or str(
-        dataset_document.get("lerobot", {}).get("source_archive_sha256", "")
-    )
-    model_sha = files["model.safetensors"]["sha256"]
-    processor_digest = _processor_digest(output_dir / "processors")
-    dataset_record: dict[str, Any] = {
+    return tuple(before.shape)
+
+
+def _dataset_record(
+    config: TrainingConfig,
+    audit: Any,
+    sample_filter: Any,
+    files: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    record: dict[str, Any] = {
         "manifest": "metadata/dataset_manifest.json",
         "manifest_sha256": files["metadata/dataset_manifest.json"]["sha256"],
         "train_episodes": 45 if not audit.synthetic else len(audit.train_episodes),
@@ -374,7 +395,7 @@ def export_bundle(
         "stats_source": "processors/train_stats_summary.json",
     }
     if sample_filter is not None:
-        dataset_record["sample_filter"] = {
+        record["sample_filter"] = {
             "path": "metadata/sample_filter.json",
             "sha256": files["metadata/sample_filter.json"]["sha256"],
             "digest": sample_filter.digest,
@@ -382,7 +403,25 @@ def export_bundle(
             "eligible_frames": len(sample_filter.eligible_indices),
             "excluded_frames": sample_filter.excluded_frames,
         }
-    manifest = {
+    return record
+
+
+def _manifest_document(
+    config: TrainingConfig,
+    metadata: Path,
+    audit: Any,
+    sample_filter: Any,
+    files: dict[str, dict[str, Any]],
+    observation: dict,
+    action: dict,
+    processor_digest: str,
+) -> dict[str, Any]:
+    dataset_document = _json(metadata / "dataset_manifest.json")
+    archive_sha256 = config.dataset.lerobot_source_archive_sha256 or str(
+        dataset_document.get("lerobot", {}).get("source_archive_sha256", "")
+    )
+    model_sha = files["model.safetensors"]["sha256"]
+    return {
         "format": BUNDLE_FORMAT,
         "created_wall_time_ns": time.time_ns(),
         "policy": "act",
@@ -392,11 +431,8 @@ def export_bundle(
         "observation": observation,
         "action": action,
         "checkpoint": _json(metadata / "checkpoint.json"),
-        "config": {
-            "path": "config.json",
-            "sha256": files["config.json"]["sha256"],
-        },
-        "dataset": dataset_record,
+        "config": {"path": "config.json", "sha256": files["config.json"]["sha256"]},
+        "dataset": _dataset_record(config, audit, sample_filter, files),
         "profile": {
             "path": "metadata/profile.json",
             "sha256": files["metadata/profile.json"]["sha256"],
@@ -406,7 +442,9 @@ def export_bundle(
             "root": "processors",
             "digest": processor_digest,
             "files": {
-                name: record for name, record in files.items() if name.startswith("processors/")
+                name: record
+                for name, record in files.items()
+                if name.startswith("processors/")
             },
         },
         "source": {
@@ -426,6 +464,42 @@ def export_bundle(
             "privileged_inputs": [],
         },
     }
+
+
+def export_bundle(
+    *,
+    config: TrainingConfig,
+    run_dir: Path,
+    output_dir: Path,
+    checkpoint_name: str = "best.pt",
+    allow_synthetic: bool = False,
+) -> dict[str, Any]:
+    """Export the trained policy plus processors/stats/references as a bundle."""
+    configure_local_caches(config.cache_root, data_root=config.data_root)
+    if output_dir.exists():
+        raise BundleError(f"{output_dir}: bundle output already exists")
+    audit, checkpoint, sample_filter = _export_inputs(
+        config, run_dir, checkpoint_name, allow_synthetic
+    )
+    output_dir.parent.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=False)
+    act_config, policy = _save_policy(config, checkpoint, output_dir)
+    metadata, profile = _copy_metadata(config, output_dir, checkpoint, sample_filter)
+    observation, action = _schema(config, profile)
+    _write_json(metadata / "schema.json", {"observation": observation, "action": action})
+    _verify_round_trip(config, audit, output_dir, policy, metadata, observation, act_config)
+    files = tree_hashes(output_dir)
+    processor_digest = _processor_digest(output_dir / "processors")
+    manifest = _manifest_document(
+        config,
+        metadata,
+        audit,
+        sample_filter,
+        files,
+        observation,
+        action,
+        processor_digest,
+    )
     manifest["bundle_digest"] = hashlib.sha256(
         json.dumps(manifest, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
     ).hexdigest()

@@ -279,9 +279,90 @@ class PolicyService:
             raise _bad("SCHEMA_MISMATCH", "action schema command space differs")
         return {camera.name: camera.calibration_digest for camera in robot.cameras}
 
-    def predict(self, request: object, deadline_ns: int | None = None) -> object:
+    def _adapter_branch(
+        self,
+        session: object,
+        request_id: str,
+        context: ProviderContext,
+        observation: ProviderObservation,
+        started: int,
+        deadline_ns: int | None,
+    ) -> tuple[ProviderPrediction, PipelineResult]:
+        if observation.observation_id <= session.last_observation_id:
+            raise _bad("INVALID_OBSERVATION", "observations must advance monotonically")
+        try:
+            pipeline_result = session.pipeline.predict(  # type: ignore[union-attr]
+                identity=session.session_id + ":" + request_id,
+                observation_id=observation.observation_id,
+                observation_time_ns=observation.reference_robot_time_ns,
+                cameras=observation.cameras,
+                joint_positions=observation.joints.positions,
+            )
+        except PolicyError:
+            raise
+        except Exception as error:  # noqa: BLE001
+            raise _bad("PROVIDER_ERROR", f"pipeline predict failed: {error}") from error
+        limit_ns = int(self.config.predict_deadline_s * 1_000_000_000)
+        limit_ns = limit_ns if deadline_ns is None else min(limit_ns, deadline_ns)
+        if time.monotonic_ns() - started > limit_ns:
+            raise _bad("DEADLINE_EXCEEDED", "prediction exceeded its deadline")
+        prediction = self._adapter_prediction(
+            pipeline_result, session.session_id, request_id, context, observation
+        )
+        return prediction, pipeline_result
+
+    def _provider_branch(
+        self,
+        session: object,
+        request_id: str,
+        context: ProviderContext,
+        observation: ProviderObservation,
+        started: int,
+        deadline_ns: int | None,
+    ) -> ProviderPrediction:
+        try:
+            prediction = self.provider.predict(  # type: ignore[union-attr]
+                session.session_id, request_id, context, observation
+            )
+        except PolicyError:
+            raise
+        except Exception as error:  # noqa: BLE001
+            raise _bad("PROVIDER_ERROR", f"provider predict failed: {error}") from error
+        elapsed = time.monotonic_ns() - started
+        if deadline_ns is not None and elapsed > deadline_ns:
+            raise _bad("DEADLINE_EXCEEDED", "provider prediction exceeded its deadline")
+        return prediction
+
+    def _reply(
+        self,
+        session: object,
+        request_id: str,
+        observation: ProviderObservation,
+        prediction: ProviderPrediction,
+        inference_duration: int,
+    ) -> object:
         from dual_arm_policy.v1 import policy_pb2
 
+        return policy_pb2.PredictReply(
+            session_id=session.session_id,
+            request_id=request_id,
+            context=self._context_message(session.context),
+            observation_id=observation.observation_id,
+            model_bundle_digest=self.info.model_bundle_digest,
+            action=policy_pb2.ActionChunk(
+                joint_names=list(self.info.action_joint_names),
+                targets=[
+                    policy_pb2.JointTarget(
+                        time_from_observation_ns=target.time_from_observation_ns,
+                        positions=list(target.positions),
+                    )
+                    for target in prediction.targets
+                ],
+            ),
+            inference_duration_ns=inference_duration,
+        )
+
+    def predict(self, request: object, deadline_ns: int | None = None) -> object:
         session = self._session(str(request.session_id))  # type: ignore[attr-defined]
         request_id = str(request.request_id)  # type: ignore[attr-defined]
         if not request_id:
@@ -304,39 +385,13 @@ class PolicyService:
             started = time.monotonic_ns()
             pipeline_result: PipelineResult | None = None
             if self.adapter is not None:
-                if observation.observation_id <= session.last_observation_id:
-                    raise _bad("INVALID_OBSERVATION", "observations must advance monotonically")
-                try:
-                    pipeline_result = session.pipeline.predict(  # type: ignore[union-attr]
-                        identity=session.session_id + ":" + request_id,
-                        observation_id=observation.observation_id,
-                        observation_time_ns=observation.reference_robot_time_ns,
-                        cameras=observation.cameras,
-                        joint_positions=observation.joints.positions,
-                    )
-                except PolicyError:
-                    raise
-                except Exception as error:  # noqa: BLE001
-                    raise _bad("PROVIDER_ERROR", f"pipeline predict failed: {error}") from error
-                limit_ns = int(self.config.predict_deadline_s * 1_000_000_000)
-                limit_ns = limit_ns if deadline_ns is None else min(limit_ns, deadline_ns)
-                if time.monotonic_ns() - started > limit_ns:
-                    raise _bad("DEADLINE_EXCEEDED", "prediction exceeded its deadline")
-                prediction = self._adapter_prediction(
-                    pipeline_result, session.session_id, request_id, context, observation
+                prediction, pipeline_result = self._adapter_branch(
+                    session, request_id, context, observation, started, deadline_ns
                 )
             else:
-                try:
-                    prediction = self.provider.predict(  # type: ignore[union-attr]
-                        session.session_id, request_id, context, observation
-                    )
-                except PolicyError:
-                    raise
-                except Exception as error:  # noqa: BLE001
-                    raise _bad("PROVIDER_ERROR", f"provider predict failed: {error}") from error
-                elapsed = time.monotonic_ns() - started
-                if deadline_ns is not None and elapsed > deadline_ns:
-                    raise _bad("DEADLINE_EXCEEDED", "provider prediction exceeded its deadline")
+                prediction = self._provider_branch(
+                    session, request_id, context, observation, started, deadline_ns
+                )
             target_count, inference_duration = self._validate_prediction(
                 prediction, observation, context, session.session_id, request_id
             )
@@ -344,24 +399,7 @@ class PolicyService:
                 session.pipeline.commit(pipeline_result)  # type: ignore[union-attr]
                 session.last_observation_id = observation.observation_id
                 session.predictions += 1
-            reply = policy_pb2.PredictReply(
-                session_id=session.session_id,
-                request_id=request_id,
-                context=self._context_message(session.context),
-                observation_id=observation.observation_id,
-                model_bundle_digest=self.info.model_bundle_digest,
-                action=policy_pb2.ActionChunk(
-                    joint_names=list(self.info.action_joint_names),
-                    targets=[
-                        policy_pb2.JointTarget(
-                            time_from_observation_ns=target.time_from_observation_ns,
-                            positions=list(target.positions),
-                        )
-                        for target in prediction.targets
-                    ],
-                ),
-                inference_duration_ns=inference_duration,
-            )
+            reply = self._reply(session, request_id, observation, prediction, inference_duration)
             assert len(reply.action.targets) == target_count
             session.request_cache[request_id] = (digest, reply)
             return reply

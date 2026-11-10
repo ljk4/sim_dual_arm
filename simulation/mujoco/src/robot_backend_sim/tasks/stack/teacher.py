@@ -324,28 +324,17 @@ def _gripper_pose_clearance(
     )
 
 
-def build_teacher_plan(
-    model: Any,
+def _teacher_ik(
+    model,
     snapshot: TeacherSnapshot,
-    profile: RobotProfile,
     control_config: PandaControlConfig,
     kinematics_config: KinematicsCheckConfig,
-    task_config: StackTaskConfig,
+    teacher,
     *,
-    deadline: float | None = None,
-) -> TeacherPlan:
-    """Solve six private key poses and build the bounded timed plan.
-
-    The caller supplies an immutable snapshot and a read-only model.  The
-    private mink ``Configuration`` owns its own ``MjData``; the live scene is
-    never updated or stepped.
-    """
-    started = time.monotonic()
-    teacher = task_config.teacher
-    budget_deadline = started + teacher.plan_wall_timeout_s if deadline is None else deadline
-    ik_deadline = started + teacher.ik_wall_timeout_s
-    if not teacher.enabled:
-        raise _error("TEACHER_DISABLED", "teacher planning is disabled by task configuration")
+    started: float,
+    ik_deadline: float,
+    budget_deadline: float,
+):
     try:
         targets = build_targets(
             snapshot.source,
@@ -380,7 +369,17 @@ def build_teacher_plan(
         )
     if time.monotonic() > min(budget_deadline, ik_deadline):
         raise _error("TEACHER_IK_TIMEOUT", "IK preparation exceeded its wall budget")
+    del control_config, teacher, started
+    return targets, results, pair_set, allowed_contact_pairs
 
+
+def _teacher_segments(
+    snapshot: TeacherSnapshot,
+    teacher,
+    results,
+    profile: RobotProfile,
+    control_config: PandaControlConfig,
+) -> tuple[list[TeacherSegment], float]:
     right_home = snapshot.right_positions
     left = snapshot.left_positions
     left_gripper = snapshot.left_gripper_opening_m
@@ -433,7 +432,10 @@ def build_teacher_plan(
     add("open", tuple(results[4].qpos_right), release, phase_min["open"])
     add("retreat", tuple(results[5].qpos_right), release, phase_min["retreat"])
     add("stable", tuple(results[5].qpos_right), release, teacher.stable_hold_s)
+    return segments, segments[-1].end_s
 
+
+def _validate_plan_length(segments, task_config, teacher) -> None:
     total = segments[-1].end_s
     if total > teacher.max_plan_duration_s + 1e-12:
         raise _error(
@@ -444,6 +446,19 @@ def build_teacher_plan(
     if total > task_config.success.max_task_sim_duration_s - 1e-9:
         raise _error("TEACHER_PLAN_TOO_LONG", "plan leaves no task-budget margin")
 
+
+def _teacher_collisions(
+    model,
+    snapshot: TeacherSnapshot,
+    segments,
+    results,
+    pair_set,
+    clearance,
+    *,
+    budget_deadline: float,
+    close_target: float,
+    release: float,
+) -> list[PathResult]:
     collision_results: list[PathResult] = []
     for segment in segments:
         if segment.kind != "joint":
@@ -456,7 +471,7 @@ def build_teacher_plan(
             segment.start_positions[8:15],
             segment.end_positions[8:15],
             pair_set,
-            kinematics_config.clearance,
+            clearance,
             segment=f"teacher:{segment.phase}",
             deadline=budget_deadline,
         )
@@ -480,13 +495,60 @@ def build_teacher_plan(
             right_positions,
             opening,
             pair_set,
-            kinematics_config.clearance,
+            clearance,
             segment=segment,
         )
         collision_results.append(path)
         if not path.passed:
             raise _error("TEACHER_COLLISION", f"{segment}: {path.failure_message}")
+    return collision_results
 
+
+def build_teacher_plan(
+    model: Any,
+    snapshot: TeacherSnapshot,
+    profile: RobotProfile,
+    control_config: PandaControlConfig,
+    kinematics_config: KinematicsCheckConfig,
+    task_config: StackTaskConfig,
+    *,
+    deadline: float | None = None,
+) -> TeacherPlan:
+    """Solve six private key poses and build the bounded timed plan.
+
+    The caller supplies an immutable snapshot and a read-only model.  The
+    private mink ``Configuration`` owns its own ``MjData``; the live scene is
+    never updated or stepped.
+    """
+    started = time.monotonic()
+    teacher = task_config.teacher
+    budget_deadline = started + teacher.plan_wall_timeout_s if deadline is None else deadline
+    ik_deadline = started + teacher.ik_wall_timeout_s
+    if not teacher.enabled:
+        raise _error("TEACHER_DISABLED", "teacher planning is disabled by task configuration")
+    targets, results, pair_set, allowed_contact_pairs = _teacher_ik(
+        model,
+        snapshot,
+        control_config,
+        kinematics_config,
+        teacher,
+        started=started,
+        ik_deadline=ik_deadline,
+        budget_deadline=budget_deadline,
+    )
+    segments, total = _teacher_segments(snapshot, teacher, results, profile, control_config)
+    _validate_plan_length(segments, task_config, teacher)
+    collision_results = _teacher_collisions(
+        model,
+        snapshot,
+        segments,
+        results,
+        pair_set,
+        kinematics_config.clearance,
+        budget_deadline=budget_deadline,
+        close_target=0.0,
+        release=teacher.release_gripper_opening_m,
+    )
     plan = _plan_digest(task_config, snapshot, tuple(segments), allowed_contact_pairs)
     return TeacherPlan(
         context=snapshot.context,
@@ -501,6 +563,70 @@ def build_teacher_plan(
         allowed_contact_pairs=allowed_contact_pairs,
         source_center=snapshot.source.center,
     )
+
+
+def _teacher_gate(plan, gate, feedback, capture_seq, observation_time_ns, chunk_size, period_ns):
+    if chunk_size != 60 or period_ns != 50_000_000:
+        raise _error("INVALID_TEACHER_CLOCK", "teacher chunks are exactly 60 points at 50 ms")
+    if feedback.capture_seq != capture_seq or feedback.sim_time_ns != observation_time_ns:
+        raise _error(
+            "TEACHER_FEEDBACK_MISMATCH",
+            "feedback does not belong to the retained capture/observation",
+        )
+    if gate.failure:
+        raise _error("TEACHER_GATE_FAILED", gate.failure)
+    if gate.status == "FAILED":
+        raise _error("TEACHER_GATE_FAILED", gate.failure)
+    if gate.phase_index >= len(plan.segments):
+        raise _error("TEACHER_PLAN_COMPLETE", "all gated phases have passed")
+    segment = plan.segments[gate.phase_index]
+    actual_start = gate.actual_start_sim_time_ns
+    if actual_start < 0:
+        raise _error("TEACHER_NOT_STARTED", "no measured phase start exists")
+    return segment, actual_start
+
+
+def _teacher_positions(segment, actual_start, observation_time_ns, chunk_size, period_ns):
+    positions = []
+    phases = []
+    times = []
+    for index in range(chunk_size):
+        target_time_ns = observation_time_ns + (index + 1) * period_ns
+        elapsed = target_time_ns - actual_start
+        if (
+            segment.phase == "stable"
+            or segment.duration_s <= 0
+            or elapsed >= segment.duration_s * 1e9
+        ):
+            position = segment.end_positions
+        else:
+            u = max(0.0, min(1.0, elapsed / (segment.duration_s * 1e9)))
+            smooth = u * u * (3.0 - 2.0 * u)
+            position = tuple(
+                left + (right - left) * smooth
+                for left, right in zip(
+                    segment.start_positions, segment.end_positions, strict=True
+                )
+            )
+        positions.append(position)
+        phases.append(segment.phase)
+        times.append((index + 1) * period_ns)
+    return positions, phases, times
+
+
+def _teacher_chunk_document(
+    plan, gate, capture_seq, observation_time_ns, positions, segment
+) -> tuple[dict, str]:
+    payload = {
+        "plan_digest": plan.plan_digest,
+        "capture_seq": capture_seq,
+        "observation_time_ns": observation_time_ns,
+        "positions": positions,
+        "phase": segment.phase,
+        "gate": gate.status,
+    }
+    text = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return payload, hashlib.sha256(text.encode()).hexdigest()
 
 
 def sample_teacher_chunk(
@@ -522,45 +648,12 @@ def sample_teacher_chunk(
     Points never cross an unpassed gate.  Gate evidence is the immutable
     per-capture feedback, not a wall clock or the nominal plan time.
     """
-    if chunk_size != 60 or period_ns != 50_000_000:
-        raise _error("INVALID_TEACHER_CLOCK", "teacher chunks are exactly 60 points at 50 ms")
-    if feedback.capture_seq != capture_seq or feedback.sim_time_ns != observation_time_ns:
-        raise _error(
-            "TEACHER_FEEDBACK_MISMATCH",
-            "feedback does not belong to the retained capture/observation",
-        )
-    if gate.failure:
-        raise _error("TEACHER_GATE_FAILED", gate.failure)
-    if gate.status == "FAILED":
-        raise _error("TEACHER_GATE_FAILED", gate.failure)
-    if gate.phase_index >= len(plan.segments):
-        raise _error("TEACHER_PLAN_COMPLETE", "all gated phases have passed")
-    segment = plan.segments[gate.phase_index]
-    actual_start = gate.actual_start_sim_time_ns
-    if actual_start < 0:
-        raise _error("TEACHER_NOT_STARTED", "no measured phase start exists")
-    positions = []
-    phases = []
-    times = []
-    for index in range(chunk_size):
-        target_time_ns = observation_time_ns + (index + 1) * period_ns
-        elapsed = target_time_ns - actual_start
-        if (
-            segment.phase == "stable"
-            or segment.duration_s <= 0
-            or elapsed >= segment.duration_s * 1e9
-        ):
-            position = segment.end_positions
-        else:
-            u = max(0.0, min(1.0, elapsed / (segment.duration_s * 1e9)))
-            smooth = u * u * (3.0 - 2.0 * u)
-            position = tuple(
-                left + (right - left) * smooth
-                for left, right in zip(segment.start_positions, segment.end_positions, strict=True)
-            )
-        positions.append(position)
-        phases.append(segment.phase)
-        times.append((index + 1) * period_ns)
+    segment, actual_start = _teacher_gate(
+        plan, gate, feedback, capture_seq, observation_time_ns, chunk_size, period_ns
+    )
+    positions, phases, times = _teacher_positions(
+        segment, actual_start, observation_time_ns, chunk_size, period_ns
+    )
     first = positions[0]
     if not all(math.isfinite(value) for position in positions for value in position):
         raise _error("INVALID_TEACHER_TARGET", "teacher produced a non-finite target")
@@ -576,16 +669,9 @@ def sample_teacher_chunk(
     for position in positions:
         if position[:8] != plan.start_positions[:8]:
             raise _error("LEFT_ARM_MOVED", "teacher may not move the left arm")
-    payload = {
-        "plan_digest": plan.plan_digest,
-        "capture_seq": capture_seq,
-        "observation_time_ns": observation_time_ns,
-        "positions": positions,
-        "phase": segment.phase,
-        "gate": gate.status,
-    }
-    text = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
-    digest = hashlib.sha256(text.encode()).hexdigest()
+    _payload, digest = _teacher_chunk_document(
+        plan, gate, capture_seq, observation_time_ns, positions, segment
+    )
     return TaskChunk(
         request_id=request_id,
         task_epoch=task_epoch,

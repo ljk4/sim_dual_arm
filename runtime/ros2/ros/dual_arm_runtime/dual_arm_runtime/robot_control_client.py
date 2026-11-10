@@ -51,9 +51,12 @@ from robot_ros_support.stream_conversions import (
 )
 from robot_run_logging import EventContext, Scalar
 
+from dual_arm_runtime.follower_submit import (
+    rejection_type,
+    validate_follower_request,
+)
 from dual_arm_runtime.run_logging import EventSink, check_health, emit_best_effort, emit_event
 from dual_arm_runtime.runtime_config import RuntimeRecipe
-from dual_arm_runtime.runtime_errors import FirstFollowerRejected
 
 _ServiceResponse = (
     AcquireControl.Response
@@ -364,41 +367,11 @@ class RobotControlClient:
             raise ContractError("PROFILE_MISMATCH", "anchor request profile differs")
         return anchor
 
-    def submit_follower(self, request: StreamRequest) -> FollowerSubmitResult:
-        """Submit one block; an unknown ACK is queried and retried with the same ID.
-
-        The command ID *and* the derived chunk sequence stay unchanged.  A legal
-        backend retry returns the original accepted_sim/wall times and digest,
-        so the caller never invents a new identity to hide an unknown ACK.
-        """
-        if not isinstance(request, StreamRequest):
-            raise ContractError("INVALID_FOLLOWER_REQUEST", "request must be a StreamRequest")
-        if self._follower_limits is None:
-            raise ContractError("FOLLOWER_DISABLED", "follower limits are not configured")
-        check_health(self._log)
-        if self._stop_requested.is_set():
-            raise ContractError("EPISODE_STOPPED", "follower submit stopped")
-        context = request.trajectory.context
-        command_id = request.trajectory.command_id
-        if context != self.lease_context or request.trajectory.lease_id != self.lease_id:
-            raise ContractError("STALE_CONTEXT", "follower request does not own the current lease")
-        origin = self._stream_origins.get(command_id)
-        if request.kind == REQUEST_STREAM_FIRST:
-            if origin is not None and origin != request:
-                raise ContractError("COMMAND_ID_CONFLICT", "stream origin changed")
-            if origin is None and len(self._stream_origins) >= self._stream_origin_capacity:
-                raise ContractError(
-                    "CONTROL_BUSY",
-                    f"stream origin cache is full ({self._stream_origin_capacity})",
-                )
-            self._stream_origins.setdefault(command_id, request)
-        elif origin is None:
-            raise ContractError("STALE_STREAM", "successor has no local stream origin")
-        event_context = self._event_context(context, command_id=command_id)
+    def _emit_follower_submit(self, request: StreamRequest, context, command_id: str) -> None:
         self._emit(
             "follower.submit_requested",
             reason="FOLLOWER_SUBMIT_REQUESTED",
-            context=event_context,
+            context=self._event_context(context, command_id=command_id),
             fields={
                 "kind": request.mode,
                 "command_seq": request.trajectory.command_seq,
@@ -407,38 +380,47 @@ class RobotControlClient:
                 "target_count": request.target_count,
             },
         )
+
+    def _submit_once(self, request: StreamRequest):
+        try:
+            response = cast(
+                SubmitFollower.Response,
+                self._call(
+                    "submit_follower",
+                    SubmitFollower.Request(request=stream_command_message(request)),
+                    require_success=False,
+                ),
+            )
+        except ContractError as error:
+            if error.reason == "EPISODE_STOPPED":
+                raise
+            return None, f"OUTCOME_UNKNOWN: {error}"
+        except Exception as error:
+            return None, f"OUTCOME_UNKNOWN: {error}"
+        return response, ""
+
+    def submit_follower(self, request: StreamRequest) -> FollowerSubmitResult:
+        """Submit one block; an unknown ACK is queried and retried with the same ID.
+
+        The command ID *and* the derived chunk sequence stay unchanged.  A legal
+        backend retry returns the original accepted_sim/wall times and digest,
+        so the caller never invents a new identity to hide an unknown ACK.
+        """
+        context, command_id = validate_follower_request(self, request)
+        self._emit_follower_submit(request, context, command_id)
         attempts = 1 + self._recipe.control.submit_query_retries
         unknown_reason = ""
         queried = False
         for attempt in range(1, attempts + 1):
-            try:
-                response = cast(
-                    SubmitFollower.Response,
-                    self._call(
-                        "submit_follower",
-                        SubmitFollower.Request(request=stream_command_message(request)),
-                        require_success=False,
-                    ),
-                )
-            except ContractError as error:
-                if error.reason == "EPISODE_STOPPED":
-                    raise
-                unknown_reason = f"OUTCOME_UNKNOWN: {error}"
-                response = None
-            except Exception as error:
-                unknown_reason = f"OUTCOME_UNKNOWN: {error}"
-                response = None
+            response, failure = self._submit_once(request)
+            unknown_reason = failure or unknown_reason
             if response is not None:
                 if response.accepted:
                     return self._follower_accepted(
                         request, response, queried=queried, attempts=attempt
                     )
                 if not _unknown_reason(response.reason):
-                    rejection = (
-                        FirstFollowerRejected
-                        if attempt == 1 and not response.has_execution
-                        else ContractError
-                    )
+                    rejection = rejection_type(response, attempt)
                     raise rejection(
                         response.reason or "FOLLOWER_REJECTED", "follower submit rejected"
                     )
@@ -459,6 +441,7 @@ class RobotControlClient:
             "OUTCOME_UNKNOWN",
             f"follower command {command_id} could not be confirmed: {unknown_reason}",
         )
+
 
     def _follower_accepted(
         self,

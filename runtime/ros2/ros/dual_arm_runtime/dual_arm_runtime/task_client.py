@@ -132,6 +132,32 @@ class TaskClient:
             if not client.wait_for_service(timeout_sec=self._call_timeout_s):
                 raise ContractError("NOT_READY", f"task service {name}")
 
+    @staticmethod
+    def _prepare_fact(response: object) -> PrepareFact:
+        try:
+            metrics = json.loads(response.metrics_json or "{}")
+        except (TypeError, ValueError) as error:
+            raise ContractError("INVALID_TASK_PREPARE", "metrics_json is not JSON") from error
+        if not isinstance(metrics, dict):
+            raise ContractError("INVALID_TASK_PREPARE", "prepare metrics is not an object")
+        fact = PrepareFact(
+            int(response.task_epoch),
+            str(response.task_type),
+            str(response.task_config_digest),
+            str(response.plan_digest),
+            str(response.prepare_kind),
+            metrics,
+        )
+        if not fact.plan_digest or not fact.task_config_digest:
+            raise ContractError("INVALID_TASK_PREPARE", "prepare fact has no digest")
+        if not fact.task_type:
+            raise ContractError("INVALID_TASK_PREPARE", "prepare fact has no task type")
+        if fact.prepare_kind not in {"teacher", "evaluation_only"}:
+            raise ContractError(
+                "INVALID_TASK_PREPARE", f"unknown prepare_kind {fact.prepare_kind!r}"
+            )
+        return fact
+
     def prepare(
         self,
         context: RunContext,
@@ -188,25 +214,7 @@ class TaskClient:
                         last_rejection=last_rejection, request_id=request_id,
                     )
                 continue
-            try:
-                metrics = json.loads(response.metrics_json or "{}")
-            except (TypeError, ValueError) as error:
-                raise ContractError("INVALID_TASK_PREPARE", "metrics_json is not JSON") from error
-            if not isinstance(metrics, dict):
-                raise ContractError("INVALID_TASK_PREPARE", "prepare metrics is not an object")
-            fact = PrepareFact(
-                int(response.task_epoch), str(response.task_type),
-                str(response.task_config_digest), str(response.plan_digest),
-                str(response.prepare_kind), metrics,
-            )
-            if not fact.plan_digest or not fact.task_config_digest:
-                raise ContractError("INVALID_TASK_PREPARE", "prepare fact has no digest")
-            if not fact.task_type:
-                raise ContractError("INVALID_TASK_PREPARE", "prepare fact has no task type")
-            if fact.prepare_kind not in {"teacher", "evaluation_only"}:
-                raise ContractError(
-                    "INVALID_TASK_PREPARE", f"unknown prepare_kind {fact.prepare_kind!r}"
-                )
+            fact = self._prepare_fact(response)
             if waiting_logged:
                 self.emit(
                     "task.prepare_succeeded",

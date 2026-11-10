@@ -170,29 +170,7 @@ def _load_binding(path: Path) -> dict[str, Any]:
     return document
 
 
-def prepare_run(
-    *,
-    template: Path,
-    binding: Path,
-    seed: int,
-    run_id: str,
-    output: Path,
-    project_root: Path = ROOT,
-) -> dict[str, Any]:
-    """Write runtime.yaml and run_manifest.json into a new output directory."""
-    if not isinstance(seed, int) or isinstance(seed, bool):
-        raise PrepareError("seed must be an integer")
-    if RUN_ID.fullmatch(run_id) is None or ".." in run_id:
-        raise PrepareError("run_id must be a safe 1..128 character path segment")
-    template_path = Path(template).resolve()
-    binding_path = Path(binding).resolve()
-    document = _load_yaml(template_path, "runtime template")
-    bound = _load_binding(binding_path)
-    if bound["run_id"] != run_id:
-        raise PrepareError(
-            f"binding.run_id {bound['run_id']!r} differs from runtime run_id {run_id!r}"
-        )
-    model = bound["model"]
+def _bind_policy(document: dict[str, Any], bound: dict[str, Any], model: dict[str, Any]) -> None:
     policy = document.get("policy")
     if not isinstance(policy, dict):
         raise PrepareError("runtime template has no policy object")
@@ -217,8 +195,11 @@ def prepare_run(
                 f"binding.service.{field} differs from runtime template {policy[field]!r}"
             )
     policy["connect_timeout_s"] = max(float(policy.get("connect_timeout_s", 2.0)), 5.0)
-    if PLACEHOLDER in yaml.safe_dump(document):
-        raise PrepareError(f"runtime template still contains unresolved {PLACEHOLDER}")
+
+
+def _resolve_bound_paths(
+    document: dict[str, Any], bound: dict[str, Any], template_path: Path, project_root: Path
+) -> None:
     bound_paths: dict[str, str] = {}
     for name, record in (
         ("robot_profile", bound["profile"]),
@@ -244,19 +225,19 @@ def prepare_run(
         if not source.exists():
             raise PrepareError(f"{field} is missing: {source}")
         document[field] = _container_path(source, project_root)
-    reset = document.get("reset")
-    if not isinstance(reset, dict):
-        reset = {}
-    reset.update({"enabled": True, "seed": seed})
-    document["reset"] = reset
 
-    destination = Path(output).resolve()
-    if destination.exists():
-        raise PrepareError(f"output already exists; refusing to overwrite: {destination}")
-    destination.mkdir(parents=True)
-    runtime_path = destination / "runtime.yaml"
-    runtime_path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
-    manifest = {
+
+def _run_manifest(
+    *,
+    run_id: str,
+    seed: int,
+    bound: dict[str, Any],
+    model: dict[str, Any],
+    template_path: Path,
+    binding_path: Path,
+    runtime_path: Path,
+) -> dict[str, Any]:
+    return {
         "schema_version": 1,
         "kind": "runtime_prepare",
         "run_id": run_id,
@@ -282,6 +263,55 @@ def prepare_run(
             "runtime_sha256": _sha256(runtime_path),
         },
     }
+
+
+def prepare_run(
+    *,
+    template: Path,
+    binding: Path,
+    seed: int,
+    run_id: str,
+    output: Path,
+    project_root: Path = ROOT,
+) -> dict[str, Any]:
+    """Write runtime.yaml and run_manifest.json into a new output directory."""
+    if not isinstance(seed, int) or isinstance(seed, bool):
+        raise PrepareError("seed must be an integer")
+    if RUN_ID.fullmatch(run_id) is None or ".." in run_id:
+        raise PrepareError("run_id must be a safe 1..128 character path segment")
+    template_path = Path(template).resolve()
+    binding_path = Path(binding).resolve()
+    document = _load_yaml(template_path, "runtime template")
+    bound = _load_binding(binding_path)
+    if bound["run_id"] != run_id:
+        raise PrepareError(
+            f"binding.run_id {bound['run_id']!r} differs from runtime run_id {run_id!r}"
+        )
+    model = bound["model"]
+    _bind_policy(document, bound, model)
+    if PLACEHOLDER in yaml.safe_dump(document):
+        raise PrepareError(f"runtime template still contains unresolved {PLACEHOLDER}")
+    _resolve_bound_paths(document, bound, template_path, project_root)
+    reset = document.get("reset")
+    if not isinstance(reset, dict):
+        reset = {}
+    reset.update({"enabled": True, "seed": seed})
+    document["reset"] = reset
+    destination = Path(output).resolve()
+    if destination.exists():
+        raise PrepareError(f"output already exists; refusing to overwrite: {destination}")
+    destination.mkdir(parents=True)
+    runtime_path = destination / "runtime.yaml"
+    runtime_path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+    manifest = _run_manifest(
+        run_id=run_id,
+        seed=seed,
+        bound=bound,
+        model=model,
+        template_path=template_path,
+        binding_path=binding_path,
+        runtime_path=runtime_path,
+    )
     (destination / "run_manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False) + "\n",
         encoding="utf-8",

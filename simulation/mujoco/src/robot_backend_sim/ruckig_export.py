@@ -280,18 +280,7 @@ def _evaluate(piece: _Phase, time_ns: int) -> tuple[float, float, float, float]:
     return _phase_state(piece, time_ns / _NS_PER_S - piece.start_s)
 
 
-def export_ruckig_reference(
-    trajectory: object,
-    joint_names: tuple[str, ...],
-    *,
-    truncate_ns: int | None = None,
-) -> RuckigExportedReference:
-    """Export one calculated public Ruckig trajectory as an explicit plan.
-
-    ``truncate_ns`` is the fixed hand-off for a non-final chunk.  It must not
-    exceed the calculated profile duration.  The caller remains responsible for
-    invoking Ruckig exactly once per execution window.
-    """
+def _validate_request(trajectory: object, joint_names: tuple[str, ...], truncate_ns):
     try:
         names = tuple(joint_names)
     except TypeError as error:
@@ -300,7 +289,6 @@ def export_ruckig_reference(
         raise _invalid("joint_names: must be a non-empty unique array")
     if any(not isinstance(name, str) or not name for name in names):
         raise _invalid("joint_names: every name must be a non-empty string")
-
     try:
         duration_s = _finite(trajectory.duration, "trajectory.duration")  # type: ignore[attr-defined]
         profiles = tuple(trajectory.profiles)  # type: ignore[attr-defined]
@@ -329,40 +317,39 @@ def export_ruckig_reference(
         or truncate_ns > profile_duration_ns
     ):
         raise _invalid("truncate_ns: must be a positive integer within the profile duration")
+    return names, duration_s, section, profile_duration_ns, truncate_ns
 
+
+def _hold_phase(profile, axis: int, duration_s: float, profile_duration_ns: int) -> _Phase:
+    try:
+        hold_p = _finite(profile.p[0], f"profiles[0][{axis}].p[0]")
+        hold_v = _finite(profile.v[0], f"profiles[0][{axis}].v[0]")
+        hold_a = _finite(profile.a[0], f"profiles[0][{axis}].a[0]")
+        hold_j = _finite(profile.j[0], f"profiles[0][{axis}].j[0]")
+    except (AttributeError, IndexError, TypeError) as error:
+        raise _invalid(f"profiles[0][{axis}]: cannot read the hold state") from error
+    return _Phase(
+        start_s=0.0,
+        end_s=duration_s,
+        start_ns=0,
+        end_ns=profile_duration_ns,
+        p=hold_p,
+        v=hold_v,
+        a=hold_a,
+        j=hold_j,
+    )
+
+
+def _axis_pieces(section, names, duration_s: float, profile_duration_ns: int):
     axis_pieces: list[list[_Phase]] = []
     for axis in range(len(names)):
         pieces, cumulative_s, brake_start = _phase_pieces(section[axis], axis)
         if not pieces:
             # A truly static axis can be represented as one hold phase at its
             # public initial value.
-            public_profile = section[axis]
-            try:
-                hold_p = _finite(public_profile.p[0], f"profiles[0][{axis}].p[0]")
-                hold_v = _finite(public_profile.v[0], f"profiles[0][{axis}].v[0]")
-                hold_a = _finite(public_profile.a[0], f"profiles[0][{axis}].a[0]")
-                hold_j = _finite(public_profile.j[0], f"profiles[0][{axis}].j[0]")
-            except (AttributeError, IndexError, TypeError) as error:
-                raise _invalid(f"profiles[0][{axis}]: cannot read the hold state") from error
-            pieces = [
-                _Phase(
-                    start_s=0.0,
-                    end_s=duration_s,
-                    start_ns=0,
-                    end_ns=profile_duration_ns,
-                    p=hold_p,
-                    v=hold_v,
-                    a=hold_a,
-                    j=hold_j,
-                )
-            ]
+            pieces = [_hold_phase(section[axis], axis, duration_s, profile_duration_ns)]
             cumulative_s = duration_s
-        if not math.isclose(
-            cumulative_s,
-            duration_s,
-            rel_tol=1e-9,
-            abs_tol=2e-9,
-        ):
+        if not math.isclose(cumulative_s, duration_s, rel_tol=1e-9, abs_tol=2e-9):
             raise _invalid(
                 f"profiles[0][{axis}]: phase durations do not cover the trajectory",
             )
@@ -398,7 +385,10 @@ def export_ruckig_reference(
         if assigned[-1].end_ns != profile_duration_ns:
             raise _invalid(f"profiles[0][{axis}]: exported phases end before the horizon")
         axis_pieces.append(assigned)
+    return axis_pieces
 
+
+def _boundaries(axis_pieces, truncate_ns: int) -> list[int]:
     boundaries = {0, truncate_ns}
     for pieces in axis_pieces:
         for piece in pieces:
@@ -406,8 +396,24 @@ def export_ruckig_reference(
                 boundaries.add(piece.start_ns)
             if piece.end_ns <= truncate_ns:
                 boundaries.add(piece.end_ns)
-    ordered = sorted(boundaries)
+    return sorted(boundaries)
 
+
+def _coefficients(axis_pieces, axis: int, start_ns: int, end_ns: int):
+    active = [piece for piece in axis_pieces[axis] if piece.start_ns <= start_ns < piece.end_ns]
+    if not active:
+        raise _invalid(f"profiles[0][{axis}]: no phase covers {start_ns}ns")
+    piece = active[-1]
+    if end_ns > piece.end_ns:
+        raise _invalid(
+            f"profiles[0][{axis}]: interval {start_ns}..{end_ns}ns crosses a phase",
+        )
+    position, velocity, acceleration, jerk = _evaluate(piece, start_ns)
+    return position, velocity, acceleration / 2.0, jerk / 6.0
+
+
+def _export_segments(axis_pieces, truncate_ns: int):
+    ordered = _boundaries(axis_pieces, truncate_ns)
     segments: list[CubicSegment] = []
     previous_end: tuple[tuple[float, ...], tuple[float, ...]] | None = None
     for start_ns, nominal_end_ns in zip(ordered, ordered[1:], strict=False):
@@ -420,26 +426,16 @@ def export_ruckig_reference(
         c1: list[float] = []
         c2: list[float] = []
         c3: list[float] = []
-        for axis, pieces in enumerate(axis_pieces):
-            active = [
-                piece for piece in pieces if piece.start_ns <= start_ns < piece.end_ns
-            ]
-            if not active:
-                raise _invalid(
-                    f"profiles[0][{axis}]: no phase covers {start_ns}ns",
-                )
-            piece = active[-1]
-            if end_ns > piece.end_ns:
-                raise _invalid(
-                    f"profiles[0][{axis}]: interval {start_ns}..{end_ns}ns crosses a phase",
-                )
-            position, velocity, acceleration, jerk = _evaluate(piece, start_ns)
+        for axis in range(len(axis_pieces)):
+            position, velocity, acceleration, jerk = _coefficients(
+                axis_pieces, axis, start_ns, end_ns
+            )
             if previous_end is not None:
                 position, velocity = previous_end[0][axis], previous_end[1][axis]
             c0.append(position)
             c1.append(velocity)
-            c2.append(acceleration / 2.0)
-            c3.append(jerk / 6.0)
+            c2.append(acceleration)
+            c3.append(jerk)
         segment = CubicSegment(
             duration_ns=end_ns - start_ns,
             c0=tuple(c0),
@@ -450,7 +446,40 @@ def export_ruckig_reference(
         end_positions, end_velocities, _ = _segment_state_local(segment, segment.duration_s)
         previous_end = (end_positions, end_velocities)
         segments.append(segment)
+    return segments, previous_end
 
+
+def _validate_endpoint(plan: ReferencePlan, names, previous_end) -> object:
+    end = plan.sample_interval(plan.duration_ns)
+    if previous_end is None:
+        raise _invalid("exported plan has no endpoint")
+    for axis in range(len(names)):
+        if not math.isclose(
+            end.positions[axis], previous_end[0][axis], rel_tol=1e-12, abs_tol=1e-12
+        ) or not math.isclose(
+            end.velocities[axis], previous_end[1][axis], rel_tol=1e-12, abs_tol=1e-12
+        ):
+            raise _invalid("exported endpoint differs from the last segment")
+    return end
+
+
+def export_ruckig_reference(
+    trajectory: object,
+    joint_names: tuple[str, ...],
+    *,
+    truncate_ns: int | None = None,
+) -> RuckigExportedReference:
+    """Export one calculated public Ruckig trajectory as an explicit plan.
+
+    ``truncate_ns`` is the fixed hand-off for a non-final chunk.  It must not
+    exceed the calculated profile duration.  The caller remains responsible for
+    invoking Ruckig exactly once per execution window.
+    """
+    names, duration_s, section, profile_duration_ns, truncate_ns = _validate_request(
+        trajectory, joint_names, truncate_ns
+    )
+    axis_pieces = _axis_pieces(section, names, duration_s, profile_duration_ns)
+    segments, previous_end = _export_segments(axis_pieces, truncate_ns)
     if not segments:
         raise _invalid("truncate_ns: produced no exported segments")
     plan = ReferencePlan(names, tuple(segments))
@@ -458,22 +487,7 @@ def export_ruckig_reference(
         raise _invalid(
             f"exported horizon {plan.duration_ns}ns differs from {truncate_ns}ns",
         )
-    end = plan.sample_interval(plan.duration_ns)
-    if previous_end is None:
-        raise _invalid("exported plan has no endpoint")
-    for axis in range(len(names)):
-        if not math.isclose(
-            end.positions[axis],
-            previous_end[0][axis],
-            rel_tol=1e-12,
-            abs_tol=1e-12,
-        ) or not math.isclose(
-            end.velocities[axis],
-            previous_end[1][axis],
-            rel_tol=1e-12,
-            abs_tol=1e-12,
-        ):
-            raise _invalid("exported endpoint differs from the last segment")
+    end = _validate_endpoint(plan, names, previous_end)
     return RuckigExportedReference(
         plan=plan,
         profile_duration_ns=profile_duration_ns,

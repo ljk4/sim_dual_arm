@@ -180,8 +180,8 @@ class DatasetConfig(StrictMappingModel):
         validation_alias=AliasPath("lerobot", "source_revision"))
     lerobot_source_archive_sha256: OptionalSha = Field(
         default="", validation_alias=AliasPath("lerobot", "source_archive_sha256"))
-    video_backend: Literal["torchcodec"] = Field(
-        validation_alias=AliasPath("lerobot", "video_backend"))
+    video_backend: Literal["pyav", "torchcodec"] = Field(
+        default="pyav", validation_alias=AliasPath("lerobot", "video_backend"))
     video_files_size_mb: Annotated[int, Field(strict=True, ge=16, le=16384)] = Field(
         validation_alias=AliasPath("lerobot", "video_files_size_mb"))
     data_files_size_mb: Annotated[int, Field(strict=True, ge=16, le=16384)] = Field(
@@ -237,7 +237,13 @@ class TrainingConfig(StrictMappingModel):
     batch_size: Annotated[PositiveInt, Field(le=256)] = Field(
         validation_alias=AliasPath("training", "batch_size"))
     num_workers: Annotated[NonNegativeInt, Field(le=32)] = Field(
-        validation_alias=AliasPath("training", "num_workers"))
+        default=4, validation_alias=AliasPath("training", "num_workers"))
+    pin_memory: bool = Field(default=True, validation_alias=AliasPath("training", "pin_memory"))
+    prefetch_factor: Annotated[PositiveInt, Field(le=32)] = Field(
+        default=2, validation_alias=AliasPath("training", "prefetch_factor"))
+    use_amp: bool = Field(default=True, validation_alias=AliasPath("training", "use_amp"))
+    amp_dtype: Literal["bfloat16", "float16"] = Field(
+        default="bfloat16", validation_alias=AliasPath("training", "amp_dtype"))
     lr: Annotated[PositiveFloat, Field(ge=1e-12)] = Field(
         validation_alias=AliasPath("training", "lr"))
     weight_decay: NonNegativeFloat = Field(
@@ -252,8 +258,6 @@ class TrainingConfig(StrictMappingModel):
         validation_alias=AliasPath("training", "save_every_steps"))
     val_batches: Annotated[PositiveInt, Field(le=10000)] = Field(
         validation_alias=AliasPath("training", "val_batches"))
-    dtype: Literal["float32"] = Field(validation_alias=AliasPath("training", "dtype"))
-    amp: Literal[False] = Field(validation_alias=AliasPath("training", "amp"))
     deterministic: bool = Field(validation_alias=AliasPath("training", "deterministic"))
     modes: dict[str, ModeSpec]
     model: ModelSpec
@@ -338,9 +342,10 @@ def training_before(data: object) -> object:
         unknown(block, {"config", "root", "manifest", "train_dir", "validation_dir",
                         "verify_hashes", "sample_filter"}, "data")
         data["data"] = block
-    unknown(data.get("training"), {"batch_size", "num_workers", "lr", "weight_decay",
-                                   "grad_clip_norm", "log_every_steps", "val_every_steps",
-                                   "save_every_steps", "val_batches", "dtype", "amp",
+    unknown(data.get("training"), {"batch_size", "num_workers", "pin_memory",
+                                   "prefetch_factor", "use_amp", "amp_dtype", "lr",
+                                   "weight_decay", "grad_clip_norm", "log_every_steps",
+                                   "val_every_steps", "save_every_steps", "val_batches",
                                    "deterministic"}, "training")
     model = data.get("model")
     if isinstance(model, dict):

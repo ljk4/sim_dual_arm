@@ -213,71 +213,39 @@ class EpisodeRecorder:
             return RuntimeResult(RuntimeOutcome.FAILED, reason)
         return runtime
 
-    def finish(
-        self,
-        runtime: RuntimeResult | None = None,
-        *,
-        current_runtime: Callable[[], RuntimeResult] | None = None,
-        task_result: TaskResult | None = None,
-    ) -> Path:
-        """Drain/close within the budget, then audit and commit on this thread.
-
-        ``current_runtime`` is re-read after draining, auditing and hashing, and
-        once more after publication.  An end request or signal that arrives while
-        the finalizer is busy therefore updates ``runtime.outcome`` instead of
-        being silently recorded as ``completed``.
-
-        A writer close failure or timeout keeps the directory recognizable as a
-        partial episode and raises; this method never force-closes the
-        handle and never publishes a success manifest for a timed-out writer.
-        """
-        with self._finish_lock:
-            if self._finalized:
-                raise RuntimeError("Episode has already been finalized")
-            self._finalized = True
-
-        initial_runtime = RuntimeResult.completed() if runtime is None else runtime
-        if not isinstance(initial_runtime, RuntimeResult):
-            raise TypeError("runtime must be a RuntimeResult")
-        task_result = TaskResult() if task_result is None else task_result
-        if not isinstance(task_result, TaskResult):
-            raise TypeError("task_result must be a TaskResult")
-
-        def latest_runtime() -> RuntimeResult:
-            value = current_runtime() if current_runtime is not None else initial_runtime
-            if not isinstance(value, RuntimeResult):
-                raise TypeError("current_runtime must return a RuntimeResult")
-            return value
-
+    def _close_queue(self):
         try:
             stats = self._queue.close(self._settings.close_timeout_s)
         except RecordingQueueError as error:
             raise ContractError("RECORDING_ERROR", f"writer close failed: {error}") from error
-        recording_failure = ""
         if stats.accepted != stats.written or stats.pending_items or stats.pending_bytes:
-            recording_failure = "RECORDING_ERROR: writer closed with accepted data not written"
-        if not recording_failure:
-            try:
-                report = audit_follower_recording(
-                    self.directory / "recording",
-                    self._episode_id,
-                    self._configuration,
-                )
-                if report["message_counts"] != dict(stats.written_counts):
-                    recording_failure = "RECORDING_ERROR: message counts differ"
-            except ContractError as error:
-                recording_failure = str(error) if error.reason else f"RECORDING_ERROR: {error}"
-            except Exception as error:
-                recording_failure = f"RECORDING_ERROR: {error}"
-        files = {
+            return stats, "RECORDING_ERROR: writer closed with accepted data not written"
+        return stats, ""
+
+    def _audit(self, stats) -> str:
+        try:
+            report = audit_follower_recording(
+                self.directory / "recording",
+                self._episode_id,
+                self._configuration,
+            )
+            if report["message_counts"] != dict(stats.written_counts):
+                return "RECORDING_ERROR: message counts differ"
+        except ContractError as error:
+            return str(error) if error.reason else f"RECORDING_ERROR: {error}"
+        except Exception as error:
+            return f"RECORDING_ERROR: {error}"
+        return ""
+
+    def _revision_files(self) -> dict[str, str]:
+        return {
             path.relative_to(self.directory).as_posix(): sha256_file(path)
             for path in sorted((self.directory / "recording").rglob("*"))
             if path.is_file()
         }
-        recording_complete = not recording_failure
-        recording_result = RecordingResult(recording_complete, recording_failure)
-        runtime_result = self._effective_runtime(latest_runtime(), recording_failure)
-        manifest = {
+
+    def _manifest_document(self, stats, files, recording_result, runtime_result, task_result):
+        return {
             "schema_version": self._format_version,
             "episode_id": self._episode_id,
             "run_id": self._run_id,
@@ -305,33 +273,77 @@ class EpisodeRecorder:
             "configuration": self._configuration,
         }
 
-        def write_manifest() -> None:
+    def _write_manifest(self, manifest: dict) -> None:
+        validate_document(
+            manifest,
+            manifest_schema_path(self._schemas, self._format_version),
+        )
+        temporary = self.directory / "manifest.json.tmp"
+        with temporary.open("w") as stream:
+            json.dump(manifest, stream, indent=2, allow_nan=False)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+
+    def _commit_manifest(self, manifest: dict) -> None:
+        self._write_manifest(manifest)
+        (self.directory / "manifest.json.tmp").replace(self.directory / "manifest.json")
+
+    def finish(
+        self,
+        runtime: RuntimeResult | None = None,
+        *,
+        current_runtime: Callable[[], RuntimeResult] | None = None,
+        task_result: TaskResult | None = None,
+    ) -> Path:
+        """Drain/close within the budget, then audit and commit on this thread.
+
+        ``current_runtime`` is re-read after draining, auditing and hashing, and
+        once more after publication.  An end request or signal that arrives while
+        the finalizer is busy therefore updates ``runtime.outcome`` instead of
+        being silently recorded as ``completed``.
+
+        A writer close failure or timeout keeps the directory recognizable as a
+        partial episode and raises; this method never force-closes the
+        handle and never publishes a success manifest for a timed-out writer.
+        """
+        with self._finish_lock:
+            if self._finalized:
+                raise RuntimeError("Episode has already been finalized")
+            self._finalized = True
+        initial_runtime = RuntimeResult.completed() if runtime is None else runtime
+        if not isinstance(initial_runtime, RuntimeResult):
+            raise TypeError("runtime must be a RuntimeResult")
+        task_result = TaskResult() if task_result is None else task_result
+        if not isinstance(task_result, TaskResult):
+            raise TypeError("task_result must be a TaskResult")
+
+        def latest_runtime() -> RuntimeResult:
+            value = current_runtime() if current_runtime is not None else initial_runtime
+            if not isinstance(value, RuntimeResult):
+                raise TypeError("current_runtime must return a RuntimeResult")
+            return value
+
+        stats, recording_failure = self._close_queue()
+        if not recording_failure:
+            recording_failure = self._audit(stats)
+        files = self._revision_files()
+        recording_result = RecordingResult(not recording_failure, recording_failure)
+        runtime_result = self._effective_runtime(latest_runtime(), recording_failure)
+        manifest = self._manifest_document(
+            stats, files, recording_result, runtime_result, task_result
+        )
+        self._write_manifest(manifest)
+        latest = self._effective_runtime(latest_runtime(), recording_failure)
+        if latest != runtime_result:
+            runtime_result = latest
             manifest["runtime"] = {
                 "outcome": runtime_result.outcome.value,
                 "reason": runtime_result.reason,
             }
-            validate_document(
-                manifest,
-                manifest_schema_path(self._schemas, self._format_version),
-            )
-            temporary = self.directory / "manifest.json.tmp"
-            with temporary.open("w") as stream:
-                json.dump(manifest, stream, indent=2, allow_nan=False)
-                stream.write("\n")
-                stream.flush()
-                os.fsync(stream.fileno())
-
-        def commit_manifest() -> None:
-            write_manifest()
-            (self.directory / "manifest.json.tmp").replace(self.directory / "manifest.json")
-
-        write_manifest()
-        latest = self._effective_runtime(latest_runtime(), recording_failure)
-        if latest != runtime_result:
-            runtime_result = latest
-            write_manifest()
+            self._write_manifest(manifest)
         (self.directory / "manifest.json.tmp").replace(self.directory / "manifest.json")
-        if recording_complete:
+        if recording_result.complete:
             self.directory.rename(self._final)
             self.directory = self._final
         # Re-check once after publication as well: a signal may have arrived while
@@ -339,5 +351,9 @@ class EpisodeRecorder:
         latest = self._effective_runtime(latest_runtime(), recording_failure)
         if latest != runtime_result:
             runtime_result = latest
-            commit_manifest()
+            manifest["runtime"] = {
+                "outcome": runtime_result.outcome.value,
+                "reason": runtime_result.reason,
+            }
+            self._commit_manifest(manifest)
         return self.directory

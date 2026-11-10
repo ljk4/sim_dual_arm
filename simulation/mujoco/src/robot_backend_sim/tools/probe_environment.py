@@ -300,37 +300,37 @@ def _gl_string(name: int) -> str | None:
     return str(value)
 
 
-def _render_preview(run_dir: Path) -> dict[str, object]:
+def _prepare_render():
     import mujoco
-    import numpy as np
-    from PIL import Image
 
     if os.environ.get("MUJOCO_GL") != "egl":
         raise ProbeFailure("egl_not_selected", "MUJOCO_GL must be 'egl'")
     if os.environ.get("PYOPENGL_PLATFORM") != "egl":
         raise ProbeFailure("egl_not_selected", "PYOPENGL_PLATFORM must be 'egl'")
     scene_path, _panda_path = assets.model_paths()
-    info: dict[str, object] = {}
-    renderer = None
-    failure: ProbeFailure | None = None
+    model = mujoco.MjModel.from_xml_path(str(scene_path))
+    data = mujoco.MjData(model)
+    data.qpos[:] = model.key_qpos[0]
+    data.qvel[:] = 0.0
+    if model.nu:
+        data.ctrl[:] = model.key_ctrl[0]
+    mujoco.mj_forward(model, data)
+    camera = 0 if model.ncam else -1
+    info: dict[str, object] = {
+        "width": PREVIEW_WIDTH,
+        "height": PREVIEW_HEIGHT,
+        "camera": camera,
+        "camera_count": int(model.ncam),
+    }
+    return model, data, camera, info
+
+
+def _capture_render(model, data, camera, info):
+    import mujoco
+    import numpy as np
+
+    renderer = mujoco.Renderer(model, height=PREVIEW_HEIGHT, width=PREVIEW_WIDTH)
     try:
-        model = mujoco.MjModel.from_xml_path(str(scene_path))
-        data = mujoco.MjData(model)
-        data.qpos[:] = model.key_qpos[0]
-        data.qvel[:] = 0.0
-        if model.nu:
-            data.ctrl[:] = model.key_ctrl[0]
-        mujoco.mj_forward(model, data)
-        camera = 0 if model.ncam else -1
-        info.update(
-            {
-                "width": PREVIEW_WIDTH,
-                "height": PREVIEW_HEIGHT,
-                "camera": camera,
-                "camera_count": int(model.ncam),
-            }
-        )
-        renderer = mujoco.Renderer(model, height=PREVIEW_HEIGHT, width=PREVIEW_WIDTH)
         renderer.update_scene(data, camera=camera)
         frame = np.array(renderer.render(), copy=True)
         try:
@@ -343,65 +343,103 @@ def _render_preview(run_dir: Path) -> dict[str, object]:
                 f"{type(error).__name__}: {error}",
                 details={"render": info},
             ) from error
-        info.update(
-            {
-                "vendor": vendor,
-                "renderer": renderer_name,
-                "version": version,
-            }
+    except BaseException:
+        renderer.close()
+        raise
+    info.update({"vendor": vendor, "renderer": renderer_name, "version": version})
+    return renderer, frame
+
+
+def _validate_frame(frame, info) -> ProbeFailure | None:
+    import numpy as np
+
+    if frame.dtype != np.uint8 or frame.shape != (PREVIEW_HEIGHT, PREVIEW_WIDTH, 3):
+        return ProbeFailure(
+            "render_frame_invalid",
+            f"unexpected RGB frame dtype/shape: {frame.dtype} {frame.shape}",
+            details={"render": info},
         )
-        if frame.dtype != np.uint8 or frame.shape != (PREVIEW_HEIGHT, PREVIEW_WIDTH, 3):
-            failure = ProbeFailure(
-                "render_frame_invalid",
-                f"unexpected RGB frame dtype/shape: {frame.dtype} {frame.shape}",
+    vendor = info.get("vendor")
+    renderer_name = info.get("renderer")
+    lowered = f"{vendor or ''} {renderer_name or ''}".lower()
+    software = any(token in lowered for token in ("llvmpipe", "softpipe", "swrast"))
+    if software or "nvidia" not in (vendor or "").lower():
+        return ProbeFailure(
+            "opengl_not_nvidia",
+            f"OpenGL is not the local NVIDIA driver: vendor={vendor!r}, "
+            f"renderer={renderer_name!r}",
+            details={"render": info},
+        )
+    background = frame[:8, :8].reshape(-1, 3).astype(np.int16).mean(axis=0)
+    distance = np.linalg.norm(frame.astype(np.int16) - background, axis=2)
+    foreground = float((distance > 30.0).mean())
+    unique = int(len(np.unique(frame.reshape(-1, 3), axis=0)))
+    deviation = float(frame.std())
+    info.update(
+        {
+            "dtype": str(frame.dtype),
+            "shape": list(frame.shape),
+            "mean": [round(float(value), 4) for value in frame.mean(axis=(0, 1))],
+            "std": round(deviation, 4),
+            "unique_colors": unique,
+            "foreground_fraction": round(foreground, 6),
+            "pixel_sha256": hashlib.sha256(frame.tobytes()).hexdigest(),
+        }
+    )
+    if deviation < 1.0 or unique < 32 or foreground < 0.02:
+        return ProbeFailure(
+            "render_not_visible",
+            "rendered frame is uniform or contains no visible model",
+            details={"render": info},
+        )
+    return None
+
+
+def _save_preview(run_dir: Path, frame, info) -> None:
+    from PIL import Image
+
+    artifacts = run_dir / "artifacts"
+    artifacts.mkdir(exist_ok=False)
+    png_path = artifacts / "panda_preview.png"
+    Image.fromarray(frame, mode="RGB").save(png_path, format="PNG")
+    body = png_path.read_bytes()
+    info.update(
+        {
+            "artifact": png_path.relative_to(run_dir).as_posix(),
+            "png_sha256": hashlib.sha256(body).hexdigest(),
+            "png_bytes": len(body),
+        }
+    )
+
+
+def _close_renderer(renderer, failure, info):
+    if renderer is None:
+        return failure
+    try:
+        renderer.close()
+    except Exception as error:
+        close_error = f"{type(error).__name__}: {error}"
+        info["close_error"] = close_error
+        if failure is None:
+            return ProbeFailure(
+                "renderer_close_failed",
+                f"renderer close failed: {close_error}",
                 details={"render": info},
             )
-        else:
-            lowered = f"{vendor or ''} {renderer_name or ''}".lower()
-            software = any(token in lowered for token in ("llvmpipe", "softpipe", "swrast"))
-            if software or "nvidia" not in (vendor or "").lower():
-                failure = ProbeFailure(
-                    "opengl_not_nvidia",
-                    f"OpenGL is not the local NVIDIA driver: vendor={vendor!r}, "
-                    f"renderer={renderer_name!r}",
-                    details={"render": info},
-                )
-            else:
-                background = frame[:8, :8].reshape(-1, 3).astype(np.int16).mean(axis=0)
-                distance = np.linalg.norm(frame.astype(np.int16) - background, axis=2)
-                foreground = float((distance > 30.0).mean())
-                unique = int(len(np.unique(frame.reshape(-1, 3), axis=0)))
-                deviation = float(frame.std())
-                info.update(
-                    {
-                        "dtype": str(frame.dtype),
-                        "shape": list(frame.shape),
-                        "mean": [round(float(value), 4) for value in frame.mean(axis=(0, 1))],
-                        "std": round(deviation, 4),
-                        "unique_colors": unique,
-                        "foreground_fraction": round(foreground, 6),
-                        "pixel_sha256": hashlib.sha256(frame.tobytes()).hexdigest(),
-                    }
-                )
-                if deviation < 1.0 or unique < 32 or foreground < 0.02:
-                    failure = ProbeFailure(
-                        "render_not_visible",
-                        "rendered frame is uniform or contains no visible model",
-                        details={"render": info},
-                    )
-                else:
-                    artifacts = run_dir / "artifacts"
-                    artifacts.mkdir(exist_ok=False)
-                    png_path = artifacts / "panda_preview.png"
-                    Image.fromarray(frame, mode="RGB").save(png_path, format="PNG")
-                    body = png_path.read_bytes()
-                    info.update(
-                        {
-                            "artifact": png_path.relative_to(run_dir).as_posix(),
-                            "png_sha256": hashlib.sha256(body).hexdigest(),
-                            "png_bytes": len(body),
-                        }
-                    )
+        failure.details.setdefault("render", info)["close_error"] = close_error
+    return failure
+
+
+def _render_preview(run_dir: Path) -> dict[str, object]:
+    info: dict[str, object] = {}
+    renderer = None
+    failure: ProbeFailure | None = None
+    try:
+        model, data, camera, info = _prepare_render()
+        renderer, frame = _capture_render(model, data, camera, info)
+        failure = _validate_frame(frame, info)
+        if failure is None:
+            _save_preview(run_dir, frame, info)
     except ProbeFailure as error:
         failure = error
     except Exception as error:
@@ -411,20 +449,7 @@ def _render_preview(run_dir: Path) -> dict[str, object]:
             details={"render": info},
         )
     finally:
-        if renderer is not None:
-            try:
-                renderer.close()
-            except Exception as error:
-                close_error = f"{type(error).__name__}: {error}"
-                info["close_error"] = close_error
-                if failure is None:
-                    failure = ProbeFailure(
-                        "renderer_close_failed",
-                        f"renderer close failed: {close_error}",
-                        details={"render": info},
-                    )
-                else:
-                    failure.details.setdefault("render", info)["close_error"] = close_error
+        failure = _close_renderer(renderer, failure, info)
     if failure is not None:
         failure.details.setdefault("render", info)
         raise failure
@@ -464,14 +489,8 @@ def _write_json_atomic(path: Path, document: object) -> None:
         raise
 
 
-def run(arguments: ProbeArguments) -> int:
-    run_dir = arguments.report_root / arguments.run_id
-    if os.path.lexists(run_dir):
-        raise ProbeUsageError(f"report run directory already exists: {run_dir}")
-    arguments.report_root.mkdir(parents=True, exist_ok=True)
-    run_dir.mkdir(exist_ok=False)
-    started = time.monotonic()
-    report: dict[str, object] = {
+def _report_template(arguments: ProbeArguments) -> dict[str, object]:
+    return {
         "schema_version": REPORT_SCHEMA_VERSION,
         "run_id": arguments.run_id,
         "component": COMPONENT,
@@ -501,124 +520,127 @@ def run(arguments: ProbeArguments) -> int:
         "logs_closed": False,
         "error": None,
     }
-    state = ProbeState(report=report)
-    try:
-        from robot_run_logging import EventLogger, LogSettings
 
-        instance_id = str(uuid.uuid4())
-        logger = EventLogger(
-            run_dir / "logs" / COMPONENT / instance_id,
-            run_id=arguments.run_id,
-            component=COMPONENT,
-            instance_id=instance_id,
-            settings=LogSettings(
-                queue_capacity=256,
-                max_event_bytes=32768,
-                max_file_bytes=8 * 1024 * 1024,
-                max_total_bytes=32 * 1024 * 1024,
-                close_timeout_s=5.0,
-                flush_interval_s=0.2,
-                console=False,
-            ),
-        )
-        state.logger = logger
-        report["instance_id"] = logger.instance_id
-        report["log_directory"] = Path(logger.directory).relative_to(run_dir).as_posix()
-        _emit(logger, "probe_start", "environment probe started", {"run_id": arguments.run_id})
-        dependencies = check_dependencies()
-        report["python"] = dependencies["python"]
-        report["packages"] = dependencies["packages"]
-        report["imports"] = dependencies["imports"]
-        _verify_mounted_source(dependencies)
-        _emit(
-            logger,
-            "dependencies_checked",
-            "installed Python packages and import sources inspected",
-            {
-                "python": str(dependencies["python"]["version"]),
-                "count": len(dependencies["packages"]),
-            },
-        )
-        model_info = _check_model()
-        report["model"] = model_info
-        report["assets"] = {"model_directory": str(assets.MODEL_DIR)}
-        stats = model_info["stats"]
-        _emit(
-            logger,
-            "model_checked",
-            "upstream Panda scene loaded from its keyframe and stepped",
-            {
-                "nq": int(stats["nq"]),
-                "nv": int(stats["nv"]),
-                "nu": int(stats["nu"]),
-                "steps": MODEL_STEPS,
-            },
-        )
-        qp_info = _check_qp()
-        report["qp"] = qp_info
-        _emit(
-            logger,
-            "qp_checked",
-            "known positive-definite QP solved with DAQP",
-            {"solver": "daqp", "max_abs_error": float(qp_info["max_abs_error"])},
-        )
-        render_info = _render_preview(run_dir)
-        report["render"] = render_info
-        report["artifact"] = str(render_info["artifact"])
-        _emit(
-            logger,
-            "render_checked",
-            "EGL preview rendered with the local NVIDIA driver",
-            {
-                "width": PREVIEW_WIDTH,
-                "height": PREVIEW_HEIGHT,
-                "vendor": str(render_info["vendor"]),
-                "renderer": str(render_info["renderer"]),
-                "unique_colors": int(render_info["unique_colors"]),
-            },
-        )
+
+def _open_probe_logger(arguments: ProbeArguments, run_dir: Path):
+    from robot_run_logging import EventLogger, LogSettings
+
+    instance_id = str(uuid.uuid4())
+    return EventLogger(
+        run_dir / "logs" / COMPONENT / instance_id,
+        run_id=arguments.run_id,
+        component=COMPONENT,
+        instance_id=instance_id,
+        settings=LogSettings(
+            queue_capacity=256,
+            max_event_bytes=32768,
+            max_file_bytes=8 * 1024 * 1024,
+            max_total_bytes=32 * 1024 * 1024,
+            close_timeout_s=5.0,
+            flush_interval_s=0.2,
+            console=False,
+        ),
+    )
+
+
+def _run_probe_checks(arguments, run_dir: Path, report: dict, logger) -> None:
+    _emit(logger, "probe_start", "environment probe started", {"run_id": arguments.run_id})
+    dependencies = check_dependencies()
+    report["python"] = dependencies["python"]
+    report["packages"] = dependencies["packages"]
+    report["imports"] = dependencies["imports"]
+    _verify_mounted_source(dependencies)
+    _emit(
+        logger,
+        "dependencies_checked",
+        "installed Python packages and import sources inspected",
+        {
+            "python": str(dependencies["python"]["version"]),
+            "count": len(dependencies["packages"]),
+        },
+    )
+    model_info = _check_model()
+    report["model"] = model_info
+    report["assets"] = {"model_directory": str(assets.MODEL_DIR)}
+    stats = model_info["stats"]
+    _emit(
+        logger,
+        "model_checked",
+        "upstream Panda scene loaded from its keyframe and stepped",
+        {
+            "nq": int(stats["nq"]),
+            "nv": int(stats["nv"]),
+            "nu": int(stats["nu"]),
+            "steps": MODEL_STEPS,
+        },
+    )
+    qp_info = _check_qp()
+    report["qp"] = qp_info
+    _emit(
+        logger,
+        "qp_checked",
+        "known positive-definite QP solved with DAQP",
+        {"solver": "daqp", "max_abs_error": float(qp_info["max_abs_error"])},
+    )
+    render_info = _render_preview(run_dir)
+    report["render"] = render_info
+    report["artifact"] = str(render_info["artifact"])
+    _emit(
+        logger,
+        "render_checked",
+        "EGL preview rendered with the local NVIDIA driver",
+        {
+            "width": PREVIEW_WIDTH,
+            "height": PREVIEW_HEIGHT,
+            "vendor": str(render_info["vendor"]),
+            "renderer": str(render_info["renderer"]),
+            "unique_colors": int(render_info["unique_colors"]),
+        },
+    )
+    try:
+        logger.check_health()
+    except Exception as error:
+        raise ProbeFailure(
+            "event_log_failed",
+            f"logger health check: {type(error).__name__}: {error}",
+        ) from error
+    _emit(logger, "probe_complete", "environment probe checks completed")
+
+
+def _merge_failure_details(error: ProbeFailure, report: dict) -> None:
+    if isinstance(error.details.get("render"), dict):
+        report["render"] = error.details["render"]
+    if isinstance(error.details.get("packages"), dict) and report.get("packages") is None:
+        report["packages"] = error.details["packages"]
+    if isinstance(error.details.get("dependencies"), dict):
+        dependencies = error.details["dependencies"]
+        report["python"] = dependencies.get("python")
+        report["packages"] = dependencies.get("packages")
+        report["imports"] = dependencies.get("imports")
+
+
+def _close_probe_logger(state: ProbeState) -> None:
+    logger = state.logger
+    if logger is None:
+        return
+    if state.failure is not None:
         try:
-            logger.check_health()
-        except Exception as error:
-            raise ProbeFailure(
-                "event_log_failed",
-                f"logger health check: {type(error).__name__}: {error}",
-            ) from error
-        _emit(logger, "probe_complete", "environment probe checks completed")
-    except ProbeFailure as error:
-        state.failure = error
-        if isinstance(error.details.get("render"), dict):
-            report["render"] = error.details["render"]
-        if isinstance(error.details.get("packages"), dict) and report.get("packages") is None:
-            report["packages"] = error.details["packages"]
-        if isinstance(error.details.get("dependencies"), dict):
-            dependencies = error.details["dependencies"]
-            report["python"] = dependencies.get("python")
-            report["packages"] = dependencies.get("packages")
-            report["imports"] = dependencies.get("imports")
-    except BaseException as error:
-        state.failure = ProbeFailure(
-            "unexpected_error",
-            f"{type(error).__name__}: {error}",
-        )
-    finally:
-        logger = state.logger
-        if logger is not None:
-            if state.failure is not None:
-                try:
-                    logger.emit(
-                        "probe_failed",
-                        message="environment probe failed",
-                        reason=state.failure.reason,
-                        fields={"reason": state.failure.reason},
-                        critical=True,
-                    )
-                except Exception:
-                    pass
-            try:
-                logger.close()
-            except Exception as error:
-                state.log_close_error = f"{type(error).__name__}: {error}"
+            logger.emit(
+                "probe_failed",
+                message="environment probe failed",
+                reason=state.failure.reason,
+                fields={"reason": state.failure.reason},
+                critical=True,
+            )
+        except Exception:
+            pass
+    try:
+        logger.close()
+    except Exception as error:
+        state.log_close_error = f"{type(error).__name__}: {error}"
+
+
+def _finalize_report(state: ProbeState, report: dict, run_dir: Path, started: float) -> int:
     if state.log_close_error is not None and state.failure is None:
         state.failure = ProbeFailure(
             "logger_close_failed",
@@ -647,6 +669,34 @@ def run(arguments: ProbeArguments) -> int:
         return 1
     print(f"report: {report_path}")
     return int(report["exit_code"])
+
+
+def run(arguments: ProbeArguments) -> int:
+    run_dir = arguments.report_root / arguments.run_id
+    if os.path.lexists(run_dir):
+        raise ProbeUsageError(f"report run directory already exists: {run_dir}")
+    arguments.report_root.mkdir(parents=True, exist_ok=True)
+    run_dir.mkdir(exist_ok=False)
+    started = time.monotonic()
+    report = _report_template(arguments)
+    state = ProbeState(report=report)
+    try:
+        logger = _open_probe_logger(arguments, run_dir)
+        state.logger = logger
+        report["instance_id"] = logger.instance_id
+        report["log_directory"] = Path(logger.directory).relative_to(run_dir).as_posix()
+        _run_probe_checks(arguments, run_dir, report, logger)
+    except ProbeFailure as error:
+        state.failure = error
+        _merge_failure_details(error, report)
+    except BaseException as error:
+        state.failure = ProbeFailure(
+            "unexpected_error",
+            f"{type(error).__name__}: {error}",
+        )
+    finally:
+        _close_probe_logger(state)
+    return _finalize_report(state, report, run_dir, started)
 
 
 def main(argv: list[str] | None = None) -> int:

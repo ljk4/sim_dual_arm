@@ -125,13 +125,22 @@ class _Planner:
                     self._busy_since_ns = None
                     self._active_future = None
 
-    def _compile_and_admit(self, request: StreamRequest) -> SubmitOutcome:
-        if self._follower_config is None:
-            raise ContractError(
-                "FOLLOWER_DISABLED",
-                "follower protocol is not enabled by this backend configuration",
+    @staticmethod
+    def _reference(request, packet, status, chunk):
+        if packet.request is None:
+            return None
+        if isinstance(chunk, ChunkStatus):
+            return follower_reference_from_chunk_status(
+                packet.request,
+                packet,
+                chunk,
+                motion_seq=status.motion_seq or 0,
             )
-        context = request.command.context
+        return follower_reference_from_status(packet.request, packet, status)
+
+    def _lookup_outcome(
+        self, request: StreamRequest, context: object
+    ) -> SubmitOutcome | None:
         lookup = self._owner.submit(
             "lookup",
             (
@@ -141,54 +150,49 @@ class _Planner:
             ),
             self._config.request_timeout_s,
         )
-        if lookup is not None:
-            packet, status = lookup  # type: ignore[misc]
-            if not isinstance(packet, PreparedControlCommand):
-                raise ContractError("RESULT_EXPIRED", "stored packet is not immutable")
-            if packet.request is not None:
-                if packet.request != request:
-                    raise ContractError(
-                        "COMMAND_ID_CONFLICT",
-                        "same command_id has a different complete request",
-                    )
-            elif packet.command != request.command:
-                raise ContractError(
-                    "COMMAND_ID_CONFLICT", "same command_id has a different identity"
-                )
-            if packet.kind != "FOLLOWER":
+        if lookup is None:
+            return None
+        packet, _status = lookup  # type: ignore[misc]
+        if not isinstance(packet, PreparedControlCommand):
+            raise ContractError("RESULT_EXPIRED", "stored packet is not immutable")
+        if packet.request is not None:
+            if packet.request != request:
                 raise ContractError(
                     "COMMAND_ID_CONFLICT",
-                    "same command_id was not accepted through the follower entry",
+                    "same command_id has a different complete request",
                 )
-            # Idempotent replies still pass through the authoritative lease
-            # and generation checks; a history lookup is not control authority.
-            reply = self._owner.submit("admit", (request, packet), self._config.request_timeout_s)
-            status = reply.status
-            if status is None or status.snapshot is None:
-                raise ContractError("RESULT_EXPIRED", "stored command has no immutable snapshot")
-            chunk = self._owner.submit(
-                "query_chunk",
-                (context, request.command.command_id, packet.prepared.seq),
-                self._config.request_timeout_s,
+        elif packet.command != request.command:
+            raise ContractError(
+                "COMMAND_ID_CONFLICT", "same command_id has a different identity"
             )
-            reference = None
-            if packet.request is not None:
-                if isinstance(chunk, ChunkStatus):
-                    reference = follower_reference_from_chunk_status(
-                        packet.request,
-                        packet,
-                        chunk,
-                        motion_seq=status.motion_seq or 0,
-                    )
-                else:
-                    reference = follower_reference_from_status(packet.request, packet, status)
-            return SubmitOutcome(
-                reply=reply,
-                execution=status,
-                chunk=chunk if isinstance(chunk, ChunkStatus) else None,
-                reference=reference,
-                idempotent=True,
+        if packet.kind != "FOLLOWER":
+            raise ContractError(
+                "COMMAND_ID_CONFLICT",
+                "same command_id was not accepted through the follower entry",
             )
+        # Idempotent replies still pass through the authoritative lease
+        # and generation checks; a history lookup is not control authority.
+        reply = self._owner.submit(
+            "admit", (request, packet), self._config.request_timeout_s
+        )
+        status = reply.status
+        if status is None or status.snapshot is None:
+            raise ContractError("RESULT_EXPIRED", "stored command has no immutable snapshot")
+        chunk = self._owner.submit(
+            "query_chunk",
+            (context, request.command.command_id, packet.prepared.seq),
+            self._config.request_timeout_s,
+        )
+        return SubmitOutcome(
+            reply=reply,
+            execution=status,
+            chunk=chunk if isinstance(chunk, ChunkStatus) else None,
+            reference=self._reference(request, packet, status, chunk),
+            idempotent=True,
+        )
+
+    def _fresh_outcome(self, request: StreamRequest, context: object) -> SubmitOutcome:
+        assert self._follower_config is not None
         packet = prepare_follower_request(
             request,
             self._profile,
@@ -196,28 +200,22 @@ class _Planner:
             self._follower_config,
             duration_grid_ns=self._duration_grid_ns,
         )
-        reply = self._owner.submit("admit", (request, packet), self._config.request_timeout_s)
+        reply = self._owner.submit(
+            "admit", (request, packet), self._config.request_timeout_s
+        )
         if not isinstance(reply, ControlReply):
             raise ContractError("INVALID_ADMISSION", "owner returned an invalid reply")
         status = reply.status
         chunk = None
-        reference = None
         if status is not None and reply.accepted:
             chunk = self._owner.submit(
                 "query_chunk",
                 (context, request.command.command_id, packet.prepared.seq),
                 self._config.request_timeout_s,
             )
+        reference = None
         if reply.accepted and status is not None and packet.request is not None:
-            if isinstance(chunk, ChunkStatus):
-                reference = follower_reference_from_chunk_status(
-                    packet.request,
-                    packet,
-                    chunk,
-                    motion_seq=status.motion_seq or 0,
-                )
-            else:
-                reference = follower_reference_from_status(packet.request, packet, status)
+            reference = self._reference(request, packet, status, chunk)
         return SubmitOutcome(
             reply=reply,
             execution=status,
@@ -225,6 +223,18 @@ class _Planner:
             reference=reference,
             idempotent=False,
         )
+
+    def _compile_and_admit(self, request: StreamRequest) -> SubmitOutcome:
+        if self._follower_config is None:
+            raise ContractError(
+                "FOLLOWER_DISABLED",
+                "follower protocol is not enabled by this backend configuration",
+            )
+        context = request.command.context
+        existing = self._lookup_outcome(request, context)
+        if existing is not None:
+            return existing
+        return self._fresh_outcome(request, context)
 
 
 def _failed_future(error: BaseException) -> Future:

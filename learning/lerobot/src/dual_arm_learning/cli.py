@@ -117,6 +117,168 @@ def _training_config(args: argparse.Namespace) -> object:
     return config
 
 
+def _resolve(path: Path, root: Path) -> Path:
+    return path if path.is_absolute() else root / path
+
+
+def _command_convert(args: argparse.Namespace, root: Path) -> int:
+    config_path = _resolve(args.config, root)
+    config = load_dataset_config(config_path, root)
+    changes: dict[str, object] = {}
+    if args.select is not None:
+        changes["select_path"] = _resolve(args.select, root)
+    if args.output_root is not None:
+        changes["output_root"] = _resolve(args.output_root, root)
+    if changes:
+        config = dataclasses.replace(config, **changes)  # type: ignore[arg-type]
+    manifest = convert(
+        select_path=config.select_path,
+        config=config,
+        config_path=config_path,
+        replace=args.replace,
+        synthetic=args.synthetic,
+    )
+    _print(
+        {
+            "status": manifest["status"],
+            "synthetic": manifest["synthetic"],
+            "output_root": str(config.output_root),
+            "training_episodes": manifest["splits"]["training"]["episode_count"],
+            "validation_episodes": manifest["splits"]["validation"]["episode_count"],
+            "training_frames": manifest["splits"]["training"]["frame_count"],
+            "validation_frames": manifest["splits"]["validation"]["frame_count"],
+            "manifest": str(config.output_root / "manifest.json"),
+        }
+    )
+    return 0
+
+
+def _command_train(args: argparse.Namespace, root: Path) -> int:
+    del root
+    config = _training_config(args)
+    report = train(
+        config,
+        allow_synthetic=args.allow_synthetic,
+        resume_run=args.resume_run,
+        max_steps=args.max_steps,
+    )
+    _print(
+        {
+            "status": report["reason"],
+            "run_id": report["run_id"],
+            "mode": report["mode"],
+            "steps": report["steps"],
+            "device": report["device"],
+            "best_val_l1": report["best_val_l1"],
+            "duration_seconds": report["duration_seconds"],
+            "run_dir": str(config.checkpoint.root / report["run_id"]),
+        }
+    )
+    return 0
+
+
+def _command_filter(args: argparse.Namespace, root: Path) -> int:
+    document = build_filter_manifest(
+        rule_path=_resolve(args.config, root),
+        dataset_root=_resolve(args.dataset_root, root),
+        select_path=_resolve(args.select, root),
+    )
+    target = write_filter_manifest(document, _resolve(args.output, root))
+    mask = load_filter_mask(target)
+    training = document["training"]
+    _print(
+        {
+            "status": "complete",
+            "output": str(target),
+            "filter_digest": mask.digest,
+            "mask_sha256": mask.file_sha256,
+            "training_source_frames": mask.source_frames,
+            "training_eligible_frames": len(mask.eligible_indices),
+            "training_excluded_frames": mask.excluded_frames,
+            "training_reduction_ratio": training["reduction_ratio"],
+            "validation_filtered": document["validation"]["filtered"],
+            "validation_frames": document["validation"]["kept_frames"],
+        }
+    )
+    return 0
+
+
+def _command_verify_data(args: argparse.Namespace, root: Path) -> int:
+    del root
+    config = _training_config(args)
+    audit = verify_dataset_manifest(
+        config,
+        allow_synthetic=args.allow_synthetic,
+        require_full=config.mode == "full",
+    )
+    _print(dataclasses.asdict(audit))
+    return 0
+
+
+def _command_budget(args: argparse.Namespace, root: Path) -> int:
+    del root
+    config = _training_config(args)
+    ledger = BudgetLedger(
+        config.budget.ledger, config.budget.lock, config.budget.limit_seconds
+    )
+    _print(ledger.status())
+    return 0
+
+
+def _command_bundle(args: argparse.Namespace, root: Path) -> int:
+    config = load_training_config(_resolve(args.config, root), root)
+    if args.data_root is not None:
+        config = dataclasses.replace(config, data_root=_resolve(args.data_root, root))
+    run = _resolve(args.run, root)
+    output = _resolve(args.output, root)
+    manifest = export_bundle(
+        config=config,
+        run_dir=run,
+        output_dir=output,
+        checkpoint_name=args.checkpoint,
+        allow_synthetic=args.allow_synthetic,
+    )
+    _print(
+        {
+            "status": "complete",
+            "bundle": str(output),
+            "bundle_digest": manifest["bundle_digest"],
+            "files": len(manifest["files"]),
+            "checkpoint_step": manifest["checkpoint"]["step"],
+            "synthetic": manifest["synthetic"],
+        }
+    )
+    return 0
+
+
+def _command_verify_bundle(args: argparse.Namespace, root: Path) -> int:
+    del root
+    handle = load_bundle(args.bundle, device=args.device)
+    _print(
+        {
+            "status": "verified",
+            "bundle": str(handle.root),
+            "bundle_digest": handle.manifest.get("bundle_digest"),
+            "chunk_size": handle.manifest["chunk_size"],
+            "state_dim": handle.manifest["state_dim"],
+            "checkpoint_step": handle.manifest.get("checkpoint", {}).get("step"),
+            "deployment": handle.manifest.get("deployment"),
+        }
+    )
+    return 0
+
+
+_COMMANDS = {
+    "convert": _command_convert,
+    "train": _command_train,
+    "filter-anchors": _command_filter,
+    "verify-data": _command_verify_data,
+    "budget-status": _command_budget,
+    "bundle": _command_bundle,
+    "verify-bundle": _command_verify_bundle,
+}
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     try:
@@ -125,148 +287,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return int(error.code or 0)
     root = args.project_root.resolve()
     try:
-        if args.command == "convert":
-            config_path = args.config if args.config.is_absolute() else root / args.config
-            config = load_dataset_config(config_path, root)
-            changes: dict[str, object] = {}
-            if args.select is not None:
-                changes["select_path"] = (
-                    args.select if args.select.is_absolute() else root / args.select
-                )
-            if args.output_root is not None:
-                changes["output_root"] = (
-                    args.output_root if args.output_root.is_absolute() else root / args.output_root
-                )
-            if changes:
-                config = dataclasses.replace(config, **changes)  # type: ignore[arg-type]
-            manifest = convert(
-                select_path=config.select_path,
-                config=config,
-                config_path=config_path,
-                replace=args.replace,
-                synthetic=args.synthetic,
-            )
-            _print(
-                {
-                    "status": manifest["status"],
-                    "synthetic": manifest["synthetic"],
-                    "output_root": str(config.output_root),
-                    "training_episodes": manifest["splits"]["training"]["episode_count"],
-                    "validation_episodes": manifest["splits"]["validation"]["episode_count"],
-                    "training_frames": manifest["splits"]["training"]["frame_count"],
-                    "validation_frames": manifest["splits"]["validation"]["frame_count"],
-                    "manifest": str(config.output_root / "manifest.json"),
-                }
-            )
-            return 0
-        if args.command == "train":
-            config = _training_config(args)
-            report = train(
-                config,
-                allow_synthetic=args.allow_synthetic,
-                resume_run=args.resume_run,
-                max_steps=args.max_steps,
-            )
-            _print(
-                {
-                    "status": report["reason"],
-                    "run_id": report["run_id"],
-                    "mode": report["mode"],
-                    "steps": report["steps"],
-                    "device": report["device"],
-                    "best_val_l1": report["best_val_l1"],
-                    "duration_seconds": report["duration_seconds"],
-                    "run_dir": str(config.checkpoint.root / report["run_id"]),
-                }
-            )
-            return 0
-        if args.command == "filter-anchors":
-            rule = args.config if args.config.is_absolute() else root / args.config
-            dataset_root = (
-                args.dataset_root if args.dataset_root.is_absolute() else root / args.dataset_root
-            )
-            select = args.select if args.select.is_absolute() else root / args.select
-            output = args.output if args.output.is_absolute() else root / args.output
-            document = build_filter_manifest(
-                rule_path=rule, dataset_root=dataset_root, select_path=select
-            )
-            target = write_filter_manifest(document, output)
-            mask = load_filter_mask(target)
-            training = document["training"]
-            _print(
-                {
-                    "status": "complete",
-                    "output": str(target),
-                    "filter_digest": mask.digest,
-                    "mask_sha256": mask.file_sha256,
-                    "training_source_frames": mask.source_frames,
-                    "training_eligible_frames": len(mask.eligible_indices),
-                    "training_excluded_frames": mask.excluded_frames,
-                    "training_reduction_ratio": training["reduction_ratio"],
-                    "validation_filtered": document["validation"]["filtered"],
-                    "validation_frames": document["validation"]["kept_frames"],
-                }
-            )
-            return 0
-        if args.command == "verify-data":
-            config = _training_config(args)
-            audit = verify_dataset_manifest(
-                config,
-                allow_synthetic=args.allow_synthetic,
-                require_full=config.mode == "full",
-            )
-            _print(dataclasses.asdict(audit))
-            return 0
-        if args.command == "budget-status":
-            config = _training_config(args)
-            ledger = BudgetLedger(
-                config.budget.ledger, config.budget.lock, config.budget.limit_seconds
-            )
-            _print(ledger.status())
-            return 0
-        if args.command == "bundle":
-            config_path = args.config if args.config.is_absolute() else root / args.config
-            config = load_training_config(config_path, root)
-            if args.data_root is not None:
-                data_root = (
-                    args.data_root if args.data_root.is_absolute() else root / args.data_root
-                )
-                config = dataclasses.replace(config, data_root=data_root)
-            run = args.run if args.run.is_absolute() else root / args.run
-            output = args.output if args.output.is_absolute() else root / args.output
-            manifest = export_bundle(
-                config=config,
-                run_dir=run,
-                output_dir=output,
-                checkpoint_name=args.checkpoint,
-                allow_synthetic=args.allow_synthetic,
-            )
-            _print(
-                {
-                    "status": "complete",
-                    "bundle": str(output),
-                    "bundle_digest": manifest["bundle_digest"],
-                    "files": len(manifest["files"]),
-                    "checkpoint_step": manifest["checkpoint"]["step"],
-                    "synthetic": manifest["synthetic"],
-                }
-            )
-            return 0
-        if args.command == "verify-bundle":
-            handle = load_bundle(args.bundle, device=args.device)
-            _print(
-                {
-                    "status": "verified",
-                    "bundle": str(handle.root),
-                    "bundle_digest": handle.manifest.get("bundle_digest"),
-                    "chunk_size": handle.manifest["chunk_size"],
-                    "state_dim": handle.manifest["state_dim"],
-                    "checkpoint_step": handle.manifest.get("checkpoint", {}).get("step"),
-                    "deployment": handle.manifest.get("deployment"),
-                }
-            )
-            return 0
-        parser.error(f"unknown command {args.command!r}")
+        command = _COMMANDS.get(args.command)
+        if command is None:
+            parser.error(f"unknown command {args.command!r}")
+        return command(args, root)
     except (
         ConfigError,
         ExportError,

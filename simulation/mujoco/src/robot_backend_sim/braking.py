@@ -204,20 +204,12 @@ def _ceiling_ns(seconds: float, location: str) -> int:
     return value
 
 
-def plan_braking(
+def _braking_inputs(
     initial_positions: Sequence[float],
     initial_velocities: Sequence[float],
     joints: Sequence[JointSpec],
     max_accelerations: Sequence[float],
-) -> BrakingPlan:
-    """Build one explicit merged braking plan from the last applied reference.
-
-    Stop time for each moving axis is ``ceil(abs(v) / max_acceleration * 1e9)``
-    nanoseconds, so the actual constant deceleration never exceeds the limit.
-    Axes already at exactly zero velocity use the hold path.  Invalid input,
-    limit overshoot or non-finite arithmetic raises a stable ``ContractError``;
-    callers latch ``STOP_PLAN_REJECTED`` rather than claiming a bounded stop.
-    """
+):
     joint_items = _check_joint_metadata(joints)
     count = len(joint_items)
     positions = _vector(initial_positions, "initial_positions", count)
@@ -229,7 +221,10 @@ def plan_braking(
     if tuple(joint.name for joint in joint_items) == ():
         raise _invalid("joints: must not be empty")
     _check_initial_limits(positions, velocities, joint_items, accelerations)
+    return joint_items, count, positions, velocities, accelerations
 
+
+def _stop_plan(positions, velocities, accelerations) -> tuple[list[int], list[float]]:
     stop_times: list[int] = []
     stop_positions: list[float] = []
     for index, (position, velocity, acceleration) in enumerate(
@@ -251,15 +246,31 @@ def plan_braking(
             )
         stop_times.append(duration_ns)
         stop_positions.append(position + velocity * duration_s / 2.0)
+    return stop_times, stop_positions
 
-    boundaries = sorted({value for value in stop_times if value > 0})
-    names = tuple(joint.name for joint in joint_items)
-    if not boundaries:
-        hold = tuple(stop_positions)
-        plan = BrakingPlan(names, (), hold, tuple(stop_times))
-        _validate_hold_plan(plan, joint_items, accelerations)
-        return plan
 
+def _segment_coefficients(
+    position: float, velocity: float, start_ns: int, stop_time: int
+) -> tuple[float, float, float]:
+    if velocity == 0.0 or start_ns >= stop_time:
+        return position, 0.0, 0.0
+    # Reconstruct velocity from the integer remaining time. Using
+    # an accumulated residual over a final 1 ns interval amplifies
+    # cancellation into an apparent acceleration-limit violation.
+    remaining_ns = stop_time - start_ns
+    c0 = position
+    c1 = velocity * (remaining_ns / stop_time)
+    signed_acceleration = -velocity / (stop_time / 1_000_000_000)
+    return c0, c1, 0.5 * signed_acceleration
+
+
+def _build_segments(
+    count: int,
+    positions,
+    velocities,
+    stop_times,
+    boundaries,
+) -> tuple[list[CubicSegment], list[float], list[float]]:
     segments: list[CubicSegment] = []
     current_positions = list(positions)
     current_velocities = list(velocities)
@@ -273,27 +284,16 @@ def plan_braking(
         c0_values: list[float] = []
         c1_values: list[float] = []
         c2_values: list[float] = []
-        c3_values: list[float] = []
         for index in range(count):
-            position = current_positions[index]
-            if velocities[index] == 0.0 or start_ns >= stop_times[index]:
-                c0, c1, c2 = position, 0.0, 0.0
-            else:
-                # Reconstruct velocity from the integer remaining time. Using
-                # an accumulated residual over a final 1 ns interval amplifies
-                # cancellation into an apparent acceleration-limit violation.
-                remaining_ns = stop_times[index] - start_ns
-                c0 = position
-                c1 = velocities[index] * (remaining_ns / stop_times[index])
-                signed_acceleration = -velocities[index] / (stop_times[index] / 1_000_000_000)
-                c2 = 0.5 * signed_acceleration
+            c0, c1, c2 = _segment_coefficients(
+                current_positions[index], velocities[index], start_ns, stop_times[index]
+            )
             end_position, end_velocity = _quadratic_end(c0, c1, c2, duration_s)
             if not (math.isfinite(end_position) and math.isfinite(end_velocity)):
                 raise _invalid("braking segment endpoint is not finite")
             c0_values.append(c0)
             c1_values.append(c1)
             c2_values.append(c2)
-            c3_values.append(0.0)
             current_positions[index] = end_position
             current_velocities[index] = end_velocity
         start_state = (tuple(c0_values), tuple(c1_values))
@@ -306,16 +306,44 @@ def plan_braking(
                 c0=tuple(c0_values),
                 c1=tuple(c1_values),
                 c2=tuple(c2_values),
-                c3=tuple(c3_values),
+                c3=(0.0,) * count,
             )
         )
         start_ns = end_ns
+    return segments, current_positions, current_velocities
 
+
+def plan_braking(
+    initial_positions: Sequence[float],
+    initial_velocities: Sequence[float],
+    joints: Sequence[JointSpec],
+    max_accelerations: Sequence[float],
+) -> BrakingPlan:
+    """Build one explicit merged braking plan from the last applied reference.
+
+    Stop time for each moving axis is ``ceil(abs(v) / max_acceleration * 1e9)``
+    nanoseconds, so the actual constant deceleration never exceeds the limit.
+    Axes already at exactly zero velocity use the hold path.  Invalid input,
+    limit overshoot or non-finite arithmetic raises a stable ``ContractError``;
+    callers latch ``STOP_PLAN_REJECTED`` rather than claiming a bounded stop.
+    """
+    joint_items, count, positions, velocities, accelerations = _braking_inputs(
+        initial_positions, initial_velocities, joints, max_accelerations
+    )
+    stop_times, stop_positions = _stop_plan(positions, velocities, accelerations)
+    boundaries = sorted({value for value in stop_times if value > 0})
+    names = tuple(joint.name for joint in joint_items)
+    if not boundaries:
+        plan = BrakingPlan(names, (), tuple(stop_positions), tuple(stop_times))
+        _validate_hold_plan(plan, joint_items, accelerations)
+        return plan
+    segments, current_positions, current_velocities = _build_segments(
+        count, positions, velocities, stop_times, boundaries
+    )
     for index, velocity in enumerate(current_velocities):
         if abs(velocity) > _CONTINUITY_ATOL:
             raise _invalid(f"joints[{index}]: braking endpoint velocity is not zero")
-    hold = tuple(current_positions)
-    plan = BrakingPlan(names, tuple(segments), hold, tuple(stop_times))
+    plan = BrakingPlan(names, tuple(segments), tuple(current_positions), tuple(stop_times))
     _validate_merged_plan(plan, joint_items, accelerations)
     return plan
 

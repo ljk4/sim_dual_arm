@@ -210,6 +210,138 @@ class _PreparedEvent:
     event_limit: int
     console_enabled: bool
 
+    def _caps(self) -> tuple[int, int, int]:
+        message_cap = min(len(self.message), _MAX_MESSAGE_CHARS)
+        if self.exception is None:
+            return message_cap, 0, 0
+        return (
+            message_cap,
+            min(len(self.exception.message), _MAX_EXCEPTION_MESSAGE_CHARS),
+            min(len(self.exception.stacktrace), _MAX_STACK_CHARS),
+        )
+
+    def _build(
+        self,
+        event_seq: int,
+        wall_time_utc: str,
+        elapsed_ns: int,
+        message_cap: int,
+        exception_message_cap: int,
+        stacktrace_cap: int,
+    ) -> dict[str, object]:
+        message, _, _ = _clip(self.message, message_cap, "message")
+        exception: dict[str, object] | None = None
+        if self.exception is not None:
+            exc_message, exc_truncated, exc_original = _clip(
+                self.exception.message, exception_message_cap, "exception message"
+            )
+            stack, stack_truncated, stack_original = _clip(
+                self.exception.stacktrace, stacktrace_cap, "exception stack"
+            )
+            exception = {
+                "type": self.exception.type_name,
+                "message": exc_message,
+                "stacktrace": stack,
+                "truncated": exc_truncated or stack_truncated,
+                "message_original_chars": exc_original,
+                "stacktrace_original_chars": stack_original,
+            }
+        episode_id, request_id, command_id, clock_epoch, sim_time_ns = self.context
+        return {
+            "schema_version": 1,
+            "run_id": self.run_id,
+            "component": self.component,
+            "instance_id": self.instance_id,
+            "event_seq": event_seq,
+            "wall_time_utc": wall_time_utc,
+            "elapsed_ns": elapsed_ns,
+            "level": self.level,
+            "event": self.event,
+            "reason": self.reason,
+            "message": message,
+            "episode_id": episode_id,
+            "request_id": request_id,
+            "command_id": command_id,
+            "clock_epoch": clock_epoch,
+            "sim_time_ns": sim_time_ns,
+            "critical": self.critical,
+            "fields": dict(self.fields),
+            "exception": exception,
+        }
+
+    @staticmethod
+    def _dump(record: dict[str, object]) -> bytes:
+        return json.dumps(
+            record,
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+
+    def _largest_fitting(
+        self,
+        high: int,
+        make: Callable[[int], dict[str, object]],
+    ) -> int:
+        low = 0
+        while low < high:
+            middle = (low + high + 1) // 2
+            if len(self._dump(make(middle))) + 1 <= self.event_limit:
+                low = middle
+            else:
+                high = middle - 1
+        return low
+
+    def _fit(
+        self,
+        event_seq: int,
+        wall_time_utc: str,
+        elapsed_ns: int,
+        caps: tuple[int, int, int],
+    ) -> bytes:
+        message_cap, exception_message_cap, stacktrace_cap = caps
+
+        def build(msg_cap: int, exc_cap: int, stack_cap: int) -> dict[str, object]:
+            return self._build(
+                event_seq, wall_time_utc, elapsed_ns, msg_cap, exc_cap, stack_cap
+            )
+
+        body = self._dump(build(message_cap, exception_message_cap, stacktrace_cap))
+        if len(body) + 1 <= self.event_limit:
+            return body
+        minimum = self._dump(build(0, 0, 0))
+        if len(minimum) + 1 > self.event_limit:
+            raise ValueError(
+                f"event {self.event!r} cannot fit in max_event_bytes={self.event_limit}"
+            )
+        stacktrace_cap = self._largest_fitting(
+            stacktrace_cap, lambda cap: build(message_cap, exception_message_cap, cap)
+        )
+        exception_message_cap = self._largest_fitting(
+            exception_message_cap, lambda cap: build(message_cap, cap, stacktrace_cap)
+        )
+        message_cap = self._largest_fitting(
+            message_cap, lambda cap: build(cap, exception_message_cap, stacktrace_cap)
+        )
+        body = self._dump(build(message_cap, exception_message_cap, stacktrace_cap))
+        if len(body) + 1 > self.event_limit:
+            raise ValueError(
+                f"event {self.event!r} cannot fit in max_event_bytes={self.event_limit}"
+            )
+        return body
+
+    def _console(self, wall_time_utc: str, event_seq: int) -> str | None:
+        if not self.console_enabled:
+            return None
+        detail = " ".join(self.message.splitlines())
+        if len(detail) > _MAX_CONSOLE_CHARS:
+            detail = detail[: _MAX_CONSOLE_CHARS - 3] + "..."
+        suffix = f" {detail}" if detail else ""
+        console = f"{wall_time_utc} {self.level} {self.event} seq={event_seq}{suffix}"
+        if len(console) > _MAX_CONSOLE_CHARS:
+            console = console[: _MAX_CONSOLE_CHARS - 3] + "..."
+        return console
+
     def render(
         self,
         *,
@@ -217,109 +349,17 @@ class _PreparedEvent:
         wall_time_utc: str,
         elapsed_ns: int,
     ) -> EncodedEvent:
-        message_cap = min(len(self.message), _MAX_MESSAGE_CHARS)
-        if self.exception is None:
-            exception_message_cap = 0
-            stacktrace_cap = 0
-        else:
-            exception_message_cap = min(len(self.exception.message), _MAX_EXCEPTION_MESSAGE_CHARS)
-            stacktrace_cap = min(len(self.exception.stacktrace), _MAX_STACK_CHARS)
-
-        def build(msg_cap: int, exc_cap: int, stack_cap: int) -> dict[str, object]:
-            message, _, _ = _clip(self.message, msg_cap, "message")
-            exception: dict[str, object] | None = None
-            if self.exception is not None:
-                exc_message, exc_message_truncated, exc_message_original = _clip(
-                    self.exception.message, exc_cap, "exception message"
-                )
-                stack, stack_truncated, stack_original = _clip(
-                    self.exception.stacktrace, stack_cap, "exception stack"
-                )
-                exception = {
-                    "type": self.exception.type_name,
-                    "message": exc_message,
-                    "stacktrace": stack,
-                    "truncated": exc_message_truncated or stack_truncated,
-                    "message_original_chars": exc_message_original,
-                    "stacktrace_original_chars": stack_original,
-                }
-            episode_id, request_id, command_id, clock_epoch, sim_time_ns = self.context
-            return {
-                "schema_version": 1,
-                "run_id": self.run_id,
-                "component": self.component,
-                "instance_id": self.instance_id,
-                "event_seq": event_seq,
-                "wall_time_utc": wall_time_utc,
-                "elapsed_ns": elapsed_ns,
-                "level": self.level,
-                "event": self.event,
-                "reason": self.reason,
-                "message": message,
-                "episode_id": episode_id,
-                "request_id": request_id,
-                "command_id": command_id,
-                "clock_epoch": clock_epoch,
-                "sim_time_ns": sim_time_ns,
-                "critical": self.critical,
-                "fields": dict(self.fields),
-                "exception": exception,
-            }
-
-        def dump(record: dict[str, object]) -> bytes:
-            return json.dumps(
-                record,
-                ensure_ascii=False,
-                allow_nan=False,
-                separators=(",", ":"),
-            ).encode("utf-8")
-
-        body = dump(build(message_cap, exception_message_cap, stacktrace_cap))
-        if len(body) + 1 > self.event_limit:
-            minimum = dump(build(0, 0, 0))
-            if len(minimum) + 1 > self.event_limit:
-                raise ValueError(
-                    f"event {self.event!r} cannot fit in max_event_bytes={self.event_limit}"
-                )
-
-            def largest_fitting(high: int, make: Callable[[int], dict[str, object]]) -> int:
-                low = 0
-                while low < high:
-                    middle = (low + high + 1) // 2
-                    if len(dump(make(middle))) + 1 <= self.event_limit:
-                        low = middle
-                    else:
-                        high = middle - 1
-                return low
-
-            stacktrace_cap = largest_fitting(
-                stacktrace_cap,
-                lambda cap: build(message_cap, exception_message_cap, cap),
-            )
-            exception_message_cap = largest_fitting(
-                exception_message_cap,
-                lambda cap: build(message_cap, cap, stacktrace_cap),
-            )
-            message_cap = largest_fitting(
-                message_cap,
-                lambda cap: build(cap, exception_message_cap, stacktrace_cap),
-            )
-            body = dump(build(message_cap, exception_message_cap, stacktrace_cap))
-            if len(body) + 1 > self.event_limit:
-                raise ValueError(
-                    f"event {self.event!r} cannot fit in max_event_bytes={self.event_limit}"
-                )
-
-        console = None
-        if self.console_enabled:
-            detail = " ".join(self.message.splitlines())
-            if len(detail) > _MAX_CONSOLE_CHARS:
-                detail = detail[: _MAX_CONSOLE_CHARS - 3] + "..."
-            suffix = f" {detail}" if detail else ""
-            console = f"{wall_time_utc} {self.level} {self.event} seq={event_seq}{suffix}"
-            if len(console) > _MAX_CONSOLE_CHARS:
-                console = console[: _MAX_CONSOLE_CHARS - 3] + "..."
-        return EncodedEvent(body=body, critical=self.critical, console=console)
+        body = self._fit(
+            event_seq,
+            wall_time_utc,
+            elapsed_ns,
+            self._caps(),
+        )
+        return EncodedEvent(
+            body=body,
+            critical=self.critical,
+            console=self._console(wall_time_utc, event_seq),
+        )
 
 
 def prepare_event(

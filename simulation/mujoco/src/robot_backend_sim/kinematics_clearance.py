@@ -83,26 +83,93 @@ def _robot_body(name: str) -> bool:
     return name.startswith("left_") or name.startswith("right_")
 
 
+def _geometry_state(model: object):
+    body_names, geom_names = _geometry_names(model)
+    return {
+        "body_names": body_names,
+        "geom_names": geom_names,
+        "geom_body": [int(value) for value in model.geom_bodyid],
+        "contype": [int(value) for value in model.geom_contype],
+        "conaffinity": [int(value) for value in model.geom_conaffinity],
+        "welded": [int(value) for value in model.body_weldid],
+        "parent": [int(value) for value in model.body_parentid],
+        "movable": [_body_movable(model, body) for body in range(model.nbody)],
+        "exclude_signatures": {int(value) for value in model.exclude_signature},
+    }
+
+
+def _explicit_pairs(model: object) -> set[tuple[int, int]]:
+    explicit: set[tuple[int, int]] = set()
+    for index in range(model.npair):
+        first = int(model.pair_geom1[index])
+        second = int(model.pair_geom2[index])
+        explicit.add((min(first, second), max(first, second)))
+    return explicit
+
+
+def _pair_exclusion(
+    first: int,
+    second: int,
+    state: dict,
+    explicit: set[tuple[int, int]],
+) -> tuple[str | None, bool]:
+    geom_body = state["geom_body"]
+    first_body = geom_body[first]
+    second_body = geom_body[second]
+    if first_body == second_body:
+        return "same_body", False
+    welded = state["welded"]
+    if welded[first_body] == welded[second_body]:
+        return "welded_body", False
+    key = (first, second)
+    is_explicit = key in explicit
+    contype = state["contype"]
+    conaffinity = state["conaffinity"]
+    if not is_explicit and not (
+        contype[first] & conaffinity[second] or contype[second] & conaffinity[first]
+    ):
+        return "visual_or_no_affinity", False
+    if not is_explicit:
+        # Match mink/MuJoCo's welded-body parent-child rule rather than
+        # only the direct body parent link.
+        parent = state["parent"]
+        first_weld = welded[first_body]
+        second_weld = welded[second_body]
+        first_parent_weld = welded[parent[first_weld]]
+        second_parent_weld = welded[parent[second_weld]]
+        if first_weld == second_parent_weld or second_weld == first_parent_weld:
+            return "parent_child", False
+    if not is_explicit:
+        signature = (min(first_body, second_body) << 16) | max(first_body, second_body)
+        if signature in state["exclude_signatures"]:
+            return "explicit_exclude", False
+    return None, is_explicit
+
+
+def _pair_category(first_name: str, second_name: str) -> str | None:
+    if _robot_body(first_name) and _robot_body(second_name):
+        return (
+            "robot_self"
+            if first_name.split("_", 1)[0] == second_name.split("_", 1)[0]
+            else "robot_cross"
+        )
+    if _robot_body(first_name) or _robot_body(second_name):
+        other = second_name if _robot_body(first_name) else first_name
+        return "robot_object" if other in {"source", "target"} else "robot_scene"
+    return None
+
+
 def build_collision_pairs(model: object) -> CollisionPairSet:
     """Enumerate effective robot-involving physical geom pairs natively.
 
     All native default exclusions are accounted for explicitly; no global
     "robot collision off" switch is used and no model margin is modified.
     """
-    body_names, geom_names = _geometry_names(model)
-    geom_body = [int(value) for value in model.geom_bodyid]
-    contype = [int(value) for value in model.geom_contype]
-    conaffinity = [int(value) for value in model.geom_conaffinity]
-    welded = [int(value) for value in model.body_weldid]
-    parent = [int(value) for value in model.body_parentid]
-    movable = [_body_movable(model, body) for body in range(model.nbody)]
-    exclude_signatures = {int(value) for value in model.exclude_signature}
-    explicit: set[tuple[int, int]] = set()
-    for index in range(model.npair):
-        first = int(model.pair_geom1[index])
-        second = int(model.pair_geom2[index])
-        explicit.add((min(first, second), max(first, second)))
-
+    state = _geometry_state(model)
+    body_names = state["body_names"]
+    geom_names = state["geom_names"]
+    movable = state["movable"]
+    explicit = _explicit_pairs(model)
     categories: dict[str, int] = {}
     exclusions: dict[str, int] = {}
     pairs: list[CollisionPair] = []
@@ -110,55 +177,25 @@ def build_collision_pairs(model: object) -> CollisionPairSet:
     explicit_count = 0
     for first in range(model.ngeom):
         for second in range(first + 1, model.ngeom):
-            first_body = geom_body[first]
-            second_body = geom_body[second]
-            first_name = body_names[first_body]
-            second_name = body_names[second_body]
-            if first_body == second_body:
-                exclusions["same_body"] = exclusions.get("same_body", 0) + 1
+            excluded, is_explicit = _pair_exclusion(first, second, state, explicit)
+            if excluded is not None:
+                exclusions[excluded] = exclusions.get(excluded, 0) + 1
                 continue
-            if welded[first_body] == welded[second_body]:
-                exclusions["welded_body"] = exclusions.get("welded_body", 0) + 1
-                continue
-            key = (first, second)
-            is_explicit = key in explicit
             if is_explicit:
                 explicit_count += 1
-            elif not (contype[first] & conaffinity[second] or contype[second] & conaffinity[first]):
-                exclusions["visual_or_no_affinity"] = exclusions.get("visual_or_no_affinity", 0) + 1
-                continue
-            if not is_explicit:
-                # Match mink/MuJoCo's welded-body parent-child rule rather than
-                # only the direct body parent link.
-                first_weld = welded[first_body]
-                second_weld = welded[second_body]
-                first_parent_weld = welded[parent[first_weld]]
-                second_parent_weld = welded[parent[second_weld]]
-                if first_weld == second_parent_weld or second_weld == first_parent_weld:
-                    exclusions["parent_child"] = exclusions.get("parent_child", 0) + 1
-                    continue
-            if not is_explicit:
-                signature = (min(first_body, second_body) << 16) | max(first_body, second_body)
-                if signature in exclude_signatures:
-                    exclusions["explicit_exclude"] = exclusions.get("explicit_exclude", 0) + 1
-                    continue
             physical += 1
+            first_body = state["geom_body"][first]
+            second_body = state["geom_body"][second]
+            first_name = body_names[first_body]
+            second_name = body_names[second_body]
             if not _robot_body(first_name) and not _robot_body(second_name):
                 exclusions["non_robot_pair"] = exclusions.get("non_robot_pair", 0) + 1
                 continue
             if not movable[first_body] and not movable[second_body]:
                 exclusions["fixed_connection"] = exclusions.get("fixed_connection", 0) + 1
                 continue
-            if _robot_body(first_name) and _robot_body(second_name):
-                category = (
-                    "robot_self"
-                    if first_name.split("_", 1)[0] == second_name.split("_", 1)[0]
-                    else "robot_cross"
-                )
-            elif _robot_body(first_name) or _robot_body(second_name):
-                other = second_name if _robot_body(first_name) else first_name
-                category = "robot_object" if other in {"source", "target"} else "robot_scene"
-            else:  # pragma: no cover - guarded above
+            category = _pair_category(first_name, second_name)
+            if category is None:  # pragma: no cover - guarded above
                 continue
             pairs.append(
                 CollisionPair(

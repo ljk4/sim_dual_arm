@@ -9,6 +9,7 @@ import signal
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import rclpy
 from rclpy.executors import SingleThreadedExecutor
@@ -66,7 +67,7 @@ def _destroy_ros_resources(
         rclpy.shutdown()
 
 
-def main() -> None:
+def _parse_arguments() -> tuple[argparse.Namespace, list[str]]:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project-root", type=Path, default=Path("/workspace"))
     parser.add_argument(
@@ -101,72 +102,92 @@ def main() -> None:
         parser.error("--hold-after-episode requires --once")
     if args.reset_seed is not None and not 0 <= args.reset_seed <= 2**63 - 1:
         parser.error("--reset-seed must be within [0, 2^63-1]")
-    try:
-        run_id = new_run_id() if args.run_id is None else validate_run_id(args.run_id)
-        if args.episode_id:
-            validate_run_id(args.episode_id)
-    except ValueError as error:
-        parser.error(str(error))
-    runs_output = args.runs_output if args.runs_output is not None else args.output.parent / "runs"
+    return args, ros_args
+
+
+def _initialization_error(error: BaseException) -> None:
+    print(
+        json.dumps({"runtime_initialization_error": f"{type(error).__name__}: {error}"}),
+        file=sys.stderr,
+        flush=True,
+    )
+    raise SystemExit(EXIT_RUNTIME_FAILURE) from error
+
+
+def _load_configuration(args: argparse.Namespace, run_id: str):
     try:
         configuration = load_runtime_configuration(args.config, args.project_root)
         if args.reset_seed is not None:
-            recipe = configuration.recipe.model_copy(update={
-                "reset": configuration.recipe.reset.model_copy(
-                    update={"seed": args.reset_seed})})
+            recipe = configuration.recipe.model_copy(
+                update={
+                    "reset": configuration.recipe.reset.model_copy(
+                        update={"seed": args.reset_seed}
+                    )
+                }
+            )
             snapshot = configuration.snapshot
             snapshot["recipe"]["reset"]["seed"] = args.reset_seed
-            configuration = configuration.model_copy(update={
-                "recipe": recipe,
-                "snapshot_json": json.dumps(snapshot, sort_keys=True, allow_nan=False),
-            })
+            configuration = configuration.model_copy(
+                update={
+                    "recipe": recipe,
+                    "snapshot_json": json.dumps(
+                        snapshot, sort_keys=True, allow_nan=False
+                    ),
+                }
+            )
+        return configuration
     except Exception as error:
-        print(
-            json.dumps({"runtime_initialization_error": f"{type(error).__name__}: {error}"}),
-            file=sys.stderr,
-            flush=True,
-        )
-        raise SystemExit(EXIT_RUNTIME_FAILURE) from error
-    try:
-        session = initialize_run(
-            configuration, run_id=run_id, runs_output=runs_output, output=args.output
-        )
-    except Exception as error:
-        print(
-            json.dumps({"runtime_initialization_error": f"{type(error).__name__}: {error}"}),
-            file=sys.stderr,
-            flush=True,
-        )
-        raise SystemExit(EXIT_RUNTIME_FAILURE) from error
-    logger = session.logger
-    signal_state = ShutdownSignal()
-    previous_handlers = install_signal_handlers(signal_state)
-    rclpy_initialized = False
-    node: RuntimeNode | None = None
-    executor: SingleThreadedExecutor | None = None
-    exit_code = 0
-    fatal_error = False
-    fatal_exception: BaseException | None = None
-    executor_usable = True
-    startup_announced = False
-    stopping_logged = False
-    health_failure_seen = False
-    hold_announced = False
-    shutdown_deadline: float | None = None
-    record_directory = ""
-    episode_id = ""
+        _initialization_error(error)
 
-    def set_fatal(error: BaseException) -> None:
-        nonlocal fatal_error, fatal_exception
-        fatal_error = True
-        if fatal_exception is None:
-            fatal_exception = error
 
-    def emit_stopping(code: str, detail: str = "") -> None:
-        nonlocal stopping_logged
-        if stopping_logged:
+class _RuntimeProcess:
+    """Mutable process state for one runtime launch and its bounded shutdown."""
+
+    def __init__(
+        self,
+        args: argparse.Namespace,
+        configuration: Any,
+        run_id: str,
+        runs_output: Path,
+        session: Any,
+        signal_state: ShutdownSignal,
+        previous_handlers: Any,
+        ros_args: list[str],
+    ) -> None:
+        self.args = args
+        self.configuration = configuration
+        self.run_id = run_id
+        self.runs_output = runs_output
+        self.session = session
+        self.signal_state = signal_state
+        self.previous_handlers = previous_handlers
+        self.ros_args = ros_args
+        self.logger = session.logger
+        self.node: RuntimeNode | None = None
+        self.executor: SingleThreadedExecutor | None = None
+        self.rclpy_initialized = False
+        self.exit_code = 0
+        self.fatal_error = False
+        self.fatal_exception: BaseException | None = None
+        self.executor_usable = True
+        self.startup_announced = False
+        self.stopping_logged = False
+        self.health_failure_seen = False
+        self.hold_announced = False
+        self.shutdown_deadline: float | None = None
+        self.record_directory = ""
+        self.episode_id = ""
+
+    def set_fatal(self, error: BaseException) -> None:
+        self.fatal_error = True
+        if self.fatal_exception is None:
+            self.fatal_exception = error
+
+    def emit_stopping(self, code: str, detail: str = "") -> None:
+        if self.stopping_logged:
             return
-        stopping_logged = True
+        self.stopping_logged = True
+        node = self.node
         current_episode = ""
         if node is not None:
             try:
@@ -175,289 +196,394 @@ def main() -> None:
                 current_episode = ""
         if code == "COMPLETE":
             level = "INFO"
-        elif code == signal_state.reason and signal_state.requested:
+        elif code == self.signal_state.reason and self.signal_state.requested:
             level = "WARNING"
         else:
             level = "ERROR"
         error_text = emit_best_effort(
-            logger,
+            self.logger,
             "run.stopping",
             level=level,
             reason=code,
             message=detail,
             context=EventContext(episode_id=current_episode or None),
-            fields={"signal": signal_state.reason or None, "episode_id": current_episode or None},
+            fields={
+                "signal": self.signal_state.reason or None,
+                "episode_id": current_episode or None,
+            },
             critical=True,
         )
         if error_text is not None:
-            set_fatal(RuntimeError(error_text))
+            self.set_fatal(RuntimeError(error_text))
             if node is not None:
                 node.append_failure(f"LOGGING_ERROR: {error_text}")
 
-    def current_failure_code() -> str:
-        if signal_state.requested:
-            return signal_state.reason
-        if fatal_error or (node is not None and node.failure_reason):
+    def current_failure_code(self) -> str:
+        if self.signal_state.requested:
+            return self.signal_state.reason
+        if self.fatal_error or (self.node is not None and self.node.failure_reason):
             return "RUNTIME_FAILURE"
         return "COMPLETE"
 
-    def request_stop(reason: str, code: str, detail: str = "") -> None:
-        nonlocal shutdown_deadline
-        if node is not None:
-            node.request_shutdown(reason)
-        if shutdown_deadline is None:
-            shutdown_deadline = time.monotonic() + args.shutdown_timeout
-        emit_stopping(code, detail)
+    def request_stop(self, reason: str, code: str, detail: str = "") -> None:
+        if self.node is not None:
+            self.node.request_shutdown(reason)
+        if self.shutdown_deadline is None:
+            self.shutdown_deadline = time.monotonic() + self.args.shutdown_timeout
+        self.emit_stopping(code, detail)
 
-    try:
+    def start_ros(self) -> bool:
         try:
-            rclpy.init(args=ros_args, signal_handler_options=SignalHandlerOptions.NO)
-            rclpy_initialized = True
-            node = RuntimeNode(
-                configuration,
-                args.output,
-                auto_start=args.once,
-                log=logger,
-                run_id=run_id,
-                initial_episode_id=args.episode_id or None,
+            rclpy.init(args=self.ros_args, signal_handler_options=SignalHandlerOptions.NO)
+            self.rclpy_initialized = True
+            self.node = RuntimeNode(
+                self.configuration,
+                self.args.output,
+                auto_start=self.args.once,
+                log=self.logger,
+                run_id=self.run_id,
+                initial_episode_id=self.args.episode_id or None,
             )
-            executor = SingleThreadedExecutor()
-            executor.add_node(node)
+            self.executor = SingleThreadedExecutor()
+            self.executor.add_node(self.node)
         except BaseException as error:
-            set_fatal(error)
+            self.set_fatal(error)
             print(
-                json.dumps({"runtime_error": f"INITIALIZATION: {type(error).__name__}: {error}"}),
+                json.dumps(
+                    {"runtime_error": f"INITIALIZATION: {type(error).__name__}: {error}"}
+                ),
                 flush=True,
             )
-        else:
-            try:
-                emit_event(
-                    logger,
-                    "run.started",
-                    level="INFO",
-                    reason="STARTUP",
-                    message="runtime process starting",
-                    fields={
-                        "config_path": str(args.config),
-                        "output_path": str(args.output),
-                        "runs_output": str(runs_output),
-                        "run_directory": str(session.run_directory),
-                        "shutdown_timeout_s": args.shutdown_timeout,
-                    },
-                    critical=True,
-                )
-                startup_announced = True
-            except Exception as error:
-                set_fatal(error)
-                request_stop(f"LOGGING_ERROR: {error}", "LOGGING_ERROR", detail=str(error))
-            while True:
-                if not health_failure_seen:
-                    try:
-                        check_health(logger)
-                    except Exception as error:
-                        health_failure_seen = True
-                        set_fatal(error)
-                        request_stop(f"LOGGING_ERROR: {error}", "LOGGING_ERROR", detail=str(error))
-                if node.logging_failed and not node.shutdown_requested:
-                    set_fatal(RuntimeError(node.logging_failure))
-                    request_stop(
-                        f"LOGGING_ERROR: {node.logging_failure}",
-                        "LOGGING_ERROR",
-                        detail=node.logging_failure,
-                    )
-                if signal_state.requested and not node.shutdown_requested:
-                    request_stop(
-                        signal_state.reason, signal_state.reason, detail="termination signal"
-                    )
-                if (
-                    args.once
-                    and node.done.is_set()
-                    and not node.shutdown_requested
-                    and not signal_state.requested
-                ):
-                    if not args.hold_after_episode:
-                        break
-                    if not hold_announced:
-                        details = node.shutdown_details()
-                        print(
-                            json.dumps(
-                                {
-                                    "episode_finished": True,
-                                    "episode_id": details.get("episode_id", ""),
-                                    "record_directory": details.get("directory", ""),
-                                    "hint": "Ctrl-C to exit",
-                                }
-                            ),
-                            flush=True,
-                        )
-                        hold_announced = True
-                    try:
-                        executor.spin_once(timeout_sec=0.1)
-                    except KeyboardInterrupt:
-                        signal_state(signal.SIGINT, None)
-                    continue
-                if node.shutdown_requested:
-                    if not node.worker_alive():
-                        break
-                    if shutdown_deadline is None:
-                        shutdown_deadline = time.monotonic() + args.shutdown_timeout
-                    remaining = shutdown_deadline - time.monotonic()
-                    if remaining <= 0:
-                        _forced_shutdown_timeout(node, args.shutdown_timeout)
-                    if executor_usable:
-                        try:
-                            executor.spin_once(timeout_sec=min(0.05, remaining))
-                        except KeyboardInterrupt:
-                            signal_state(signal.SIGINT, None)
-                        except Exception as error:
-                            set_fatal(error)
-                            executor_usable = False
-                            reason = f"RUNTIME_ERROR: {type(error).__name__}: {error}"
-                            request_stop(reason, "RUNTIME_ERROR", detail=reason)
-                            print(json.dumps({"runtime_error": reason}), flush=True)
-                    elif not node.join_worker(min(0.05, remaining)):
-                        time.sleep(0.01)
-                    continue
-                try:
-                    executor.spin_once(timeout_sec=0.1)
-                except KeyboardInterrupt:
-                    signal_state(signal.SIGINT, None)
-                except Exception as error:
-                    set_fatal(error)
-                    executor_usable = False
-                    reason = f"RUNTIME_ERROR: {type(error).__name__}: {error}"
-                    request_stop(reason, "RUNTIME_ERROR", detail=reason)
-                    print(json.dumps({"runtime_error": reason}), flush=True)
-                    shutdown_deadline = time.monotonic() + args.shutdown_timeout
-            if node.worker_alive():
-                if shutdown_deadline is None:
-                    shutdown_deadline = time.monotonic() + args.shutdown_timeout
-                remaining = shutdown_deadline - time.monotonic()
-                if remaining <= 0 or not node.join_worker(remaining):
-                    _forced_shutdown_timeout(node, args.shutdown_timeout)
-            if signal_state.requested:
-                exit_code = signal_state.exit_code
-            elif fatal_error or node.failure_reason:
-                exit_code = EXIT_RUNTIME_FAILURE
-            if not stopping_logged:
-                emit_stopping(current_failure_code(), "process leaving main")
-    except BaseException as error:
-        set_fatal(error)
-        print(json.dumps({"runtime_error": f"{type(error).__name__}: {error}"}), flush=True)
-        if node is not None:
-            request_stop(
-                f"RUNTIME_ERROR: {type(error).__name__}: {error}",
-                "RUNTIME_ERROR",
-                detail=str(error),
+            return False
+        return True
+
+    def announce_start(self) -> None:
+        try:
+            emit_event(
+                self.logger,
+                "run.started",
+                level="INFO",
+                reason="STARTUP",
+                message="runtime process starting",
+                fields={
+                    "config_path": str(self.args.config),
+                    "output_path": str(self.args.output),
+                    "runs_output": str(self.runs_output),
+                    "run_directory": str(self.session.run_directory),
+                    "shutdown_timeout_s": self.args.shutdown_timeout,
+                },
+                critical=True,
             )
-    finally:
+            self.startup_announced = True
+        except Exception as error:
+            self.set_fatal(error)
+            self.request_stop(f"LOGGING_ERROR: {error}", "LOGGING_ERROR", detail=str(error))
+
+    def _health_tick(self) -> None:
+        if self.health_failure_seen:
+            return
+        try:
+            check_health(self.logger)
+        except Exception as error:
+            self.health_failure_seen = True
+            self.set_fatal(error)
+            self.request_stop(f"LOGGING_ERROR: {error}", "LOGGING_ERROR", detail=str(error))
+
+    def _episode_done(self) -> bool:
+        node = self.node
+        assert node is not None
+        if not self.args.hold_after_episode:
+            return True
+        if not self.hold_announced:
+            details = node.shutdown_details()
+            print(
+                json.dumps(
+                    {
+                        "episode_finished": True,
+                        "episode_id": details.get("episode_id", ""),
+                        "record_directory": details.get("directory", ""),
+                        "hint": "Ctrl-C to exit",
+                    }
+                ),
+                flush=True,
+            )
+            self.hold_announced = True
+        self._spin_once(0.1)
+        return False
+
+    def _spin_once(self, timeout: float) -> None:
+        assert self.executor is not None
+        try:
+            self.executor.spin_once(timeout_sec=timeout)
+        except KeyboardInterrupt:
+            self.signal_state(signal.SIGINT, None)
+
+    def _runtime_error(self, error: BaseException) -> None:
+        self.set_fatal(error)
+        self.executor_usable = False
+        reason = f"RUNTIME_ERROR: {type(error).__name__}: {error}"
+        self.request_stop(reason, "RUNTIME_ERROR", detail=reason)
+        print(json.dumps({"runtime_error": reason}), flush=True)
+
+    def _shutdown_step(self) -> bool:
+        node = self.node
+        assert node is not None
+        if not node.worker_alive():
+            return True
+        if self.shutdown_deadline is None:
+            self.shutdown_deadline = time.monotonic() + self.args.shutdown_timeout
+        remaining = self.shutdown_deadline - time.monotonic()
+        if remaining <= 0:
+            _forced_shutdown_timeout(node, self.args.shutdown_timeout)
+        if self.executor_usable:
+            assert self.executor is not None
+            try:
+                self.executor.spin_once(timeout_sec=min(0.05, remaining))
+            except KeyboardInterrupt:
+                self.signal_state(signal.SIGINT, None)
+            except Exception as error:
+                self._runtime_error(error)
+        elif not node.join_worker(min(0.05, remaining)):
+            time.sleep(0.01)
+        return False
+
+    def run_loop(self) -> None:
+        node = self.node
+        assert node is not None
+        while True:
+            self._health_tick()
+            if node.logging_failed and not node.shutdown_requested:
+                self.set_fatal(RuntimeError(node.logging_failure))
+                self.request_stop(
+                    f"LOGGING_ERROR: {node.logging_failure}",
+                    "LOGGING_ERROR",
+                    detail=node.logging_failure,
+                )
+            if self.signal_state.requested and not node.shutdown_requested:
+                self.request_stop(
+                    self.signal_state.reason, self.signal_state.reason, detail="termination signal"
+                )
+            if (
+                self.args.once
+                and node.done.is_set()
+                and not node.shutdown_requested
+                and not self.signal_state.requested
+            ):
+                if self._episode_done():
+                    break
+                continue
+            if node.shutdown_requested:
+                if self._shutdown_step():
+                    break
+                continue
+            try:
+                assert self.executor is not None
+                self.executor.spin_once(timeout_sec=0.1)
+            except KeyboardInterrupt:
+                self.signal_state(signal.SIGINT, None)
+            except Exception as error:
+                self._runtime_error(error)
+                self.shutdown_deadline = time.monotonic() + self.args.shutdown_timeout
+
+    def _await_worker(self) -> None:
+        node = self.node
+        assert node is not None
+        if not node.worker_alive():
+            return
+        if self.shutdown_deadline is None:
+            self.shutdown_deadline = time.monotonic() + self.args.shutdown_timeout
+        remaining = self.shutdown_deadline - time.monotonic()
+        if remaining <= 0 or not node.join_worker(remaining):
+            _forced_shutdown_timeout(node, self.args.shutdown_timeout)
+
+    def _set_exit_code(self) -> None:
+        node = self.node
+        if self.signal_state.requested:
+            self.exit_code = self.signal_state.exit_code
+        elif self.fatal_error or (node is not None and node.failure_reason):
+            self.exit_code = EXIT_RUNTIME_FAILURE
+
+    def execute(self) -> None:
+        try:
+            if not self.start_ros():
+                return
+            self.announce_start()
+            self.run_loop()
+            self._await_worker()
+            self._set_exit_code()
+            if not self.stopping_logged:
+                self.emit_stopping(self.current_failure_code(), "process leaving main")
+        except BaseException as error:
+            self.set_fatal(error)
+            print(
+                json.dumps({"runtime_error": f"{type(error).__name__}: {error}"}), flush=True
+            )
+            if self.node is not None:
+                self.request_stop(
+                    f"RUNTIME_ERROR: {type(error).__name__}: {error}",
+                    "RUNTIME_ERROR",
+                    detail=str(error),
+                )
+
+    def _teardown(self) -> tuple[BaseException | None, bool]:
         teardown_error: BaseException | None = None
+        node = self.node
         try:
             if node is not None:
                 try:
                     details = node.shutdown_details()
-                    episode_id = details.get("episode_id", "")
-                    record_directory = details.get("directory", "")
+                    self.episode_id = details.get("episode_id", "")
+                    self.record_directory = details.get("directory", "")
                 except Exception:
                     pass
                 if node.worker_alive():
                     node.request_shutdown("UNEXPECTED_MAIN_EXIT")
-                    if not node.join_worker(args.shutdown_timeout):
-                        _forced_shutdown_timeout(node, args.shutdown_timeout)
+                    if not node.join_worker(self.args.shutdown_timeout):
+                        _forced_shutdown_timeout(node, self.args.shutdown_timeout)
             try:
-                if rclpy_initialized:
-                    _destroy_ros_resources(node, executor)
+                if self.rclpy_initialized:
+                    _destroy_ros_resources(node, self.executor)
             except BaseException as error:
                 teardown_error = error
-                set_fatal(error)
-                print(
-                    json.dumps({"runtime_error": f"TEARDOWN: {type(error).__name__}: {error}"}),
-                    flush=True,
-                )
-            if not stopping_logged:
-                emit_stopping(current_failure_code(), "process leaving main")
-            if signal_state.requested:
-                exit_code = signal_state.exit_code
-            elif fatal_error or (node is not None and node.failure_reason):
-                exit_code = EXIT_RUNTIME_FAILURE
-            elif not startup_announced:
-                exit_code = EXIT_RUNTIME_FAILURE
-            finalizing_code = current_failure_code()
-            if finalizing_code == "COMPLETE":
-                finalizing_reason, finalizing_level = "CLOSE_PENDING", "INFO"
-            elif signal_state.requested:
-                finalizing_reason, finalizing_level = finalizing_code, "WARNING"
-            else:
-                finalizing_reason, finalizing_level = finalizing_code, "ERROR"
-            failure_detail = node.failure_reason if node is not None else ""
-            if teardown_error is not None:
-                failure_detail = (
-                    f"{failure_detail}; TEARDOWN: {type(teardown_error).__name__}: {teardown_error}"
-                )
-            try:
-                emit_event(
-                    logger,
-                    "run.finalizing",
-                    level=finalizing_level,
-                    reason=finalizing_reason,
-                    message=failure_detail,
-                    context=EventContext(episode_id=episode_id or None),
-                    fields={
-                        "exit_code_before_log_close": exit_code,
-                        "log_close_pending": True,
-                        "episode_id": episode_id or None,
-                        "record_directory": record_directory or None,
-                        "started": startup_announced,
-                        "signal": signal_state.reason or None,
-                    },
-                    exception=fatal_exception or teardown_error,
-                    critical=True,
-                )
-            except Exception as error:
-                if exit_code == 0:
-                    exit_code = EXIT_RUNTIME_FAILURE
+                self.set_fatal(error)
                 print(
                     json.dumps(
-                        {"logging_error": f"run.finalizing: {type(error).__name__}: {error}"}
+                        {"runtime_error": f"TEARDOWN: {type(error).__name__}: {error}"}
                     ),
-                    file=sys.stderr,
                     flush=True,
                 )
-            logging_closed = False
-            try:
-                logger.close()
-            except Exception as error:
-                if exit_code == 0:
-                    exit_code = EXIT_RUNTIME_FAILURE
-                print(
-                    json.dumps({"logging_error": f"close: {type(error).__name__}: {error}"}),
-                    file=sys.stderr,
-                    flush=True,
-                )
-            else:
-                logging_closed = True
-            if signal_state.requested:
-                process_outcome = "interrupted"
-            elif exit_code == 0:
-                process_outcome = "succeeded"
-            else:
-                process_outcome = "failed"
         finally:
-            restore_signal_handlers(previous_handlers)
+            restore_signal_handlers(self.previous_handlers)
+        return teardown_error, self.stopping_logged
+
+    def _finalize_logging(self, teardown_error: BaseException | None) -> bool:
+        if not self.stopping_logged:
+            self.emit_stopping(self.current_failure_code(), "process leaving main")
+        self._set_exit_code()
+        node = self.node
+        if (
+            not self.startup_announced
+            and not self.signal_state.requested
+            and not self.fatal_error
+            and not (node is not None and node.failure_reason)
+        ):
+            self.exit_code = EXIT_RUNTIME_FAILURE
+        finalizing_code = self.current_failure_code()
+        if finalizing_code == "COMPLETE":
+            finalizing_reason, finalizing_level = "CLOSE_PENDING", "INFO"
+        elif self.signal_state.requested:
+            finalizing_reason, finalizing_level = finalizing_code, "WARNING"
+        else:
+            finalizing_reason, finalizing_level = finalizing_code, "ERROR"
+        node = self.node
+        failure_detail = node.failure_reason if node is not None else ""
+        if teardown_error is not None:
+            failure_detail = (
+                f"{failure_detail}; TEARDOWN: {type(teardown_error).__name__}: {teardown_error}"
+            )
+        try:
+            emit_event(
+                self.logger,
+                "run.finalizing",
+                level=finalizing_level,
+                reason=finalizing_reason,
+                message=failure_detail,
+                context=EventContext(episode_id=self.episode_id or None),
+                fields={
+                    "exit_code_before_log_close": self.exit_code,
+                    "log_close_pending": True,
+                    "episode_id": self.episode_id or None,
+                    "record_directory": self.record_directory or None,
+                    "started": self.startup_announced,
+                    "signal": self.signal_state.reason or None,
+                },
+                exception=self.fatal_exception or teardown_error,
+                critical=True,
+            )
+        except Exception as error:
+            if self.exit_code == 0:
+                self.exit_code = EXIT_RUNTIME_FAILURE
+            print(
+                json.dumps(
+                    {"logging_error": f"run.finalizing: {type(error).__name__}: {error}"}
+                ),
+                file=sys.stderr,
+                flush=True,
+            )
+        logging_closed = False
+        try:
+            self.logger.close()
+        except Exception as error:
+            if self.exit_code == 0:
+                self.exit_code = EXIT_RUNTIME_FAILURE
+            print(
+                json.dumps({"logging_error": f"close: {type(error).__name__}: {error}"}),
+                file=sys.stderr,
+                flush=True,
+            )
+        else:
+            logging_closed = True
+        return logging_closed
+
+    def finalize(self) -> tuple[bool, str]:
+        teardown_error, _stopping = self._teardown()
+        logging_closed = self._finalize_logging(teardown_error)
+        if self.signal_state.requested:
+            process_outcome = "interrupted"
+        elif self.exit_code == 0:
+            process_outcome = "succeeded"
+        else:
+            process_outcome = "failed"
+        return logging_closed, process_outcome
+
+
+def main() -> None:
+    args, ros_args = _parse_arguments()
+    try:
+        run_id = new_run_id() if args.run_id is None else validate_run_id(args.run_id)
+        if args.episode_id:
+            validate_run_id(args.episode_id)
+    except ValueError as error:
+        raise SystemExit(f"invalid run/episode id: {error}") from error
+    runs_output = (
+        args.runs_output if args.runs_output is not None else args.output.parent / "runs"
+    )
+    configuration = _load_configuration(args, run_id)
+    try:
+        session = initialize_run(
+            configuration, run_id=run_id, runs_output=runs_output, output=args.output
+        )
+    except Exception as error:
+        _initialization_error(error)
+    signal_state = ShutdownSignal()
+    process = _RuntimeProcess(
+        args,
+        configuration,
+        run_id,
+        runs_output,
+        session,
+        signal_state,
+        install_signal_handlers(signal_state),
+        ros_args,
+    )
+    try:
+        process.execute()
+    finally:
+        logging_closed, process_outcome = process.finalize()
     print(
         json.dumps(
             runtime_summary(
                 session,
-                record_directory=record_directory,
-                exit_code=exit_code,
+                record_directory=process.record_directory,
+                exit_code=process.exit_code,
                 process_outcome=process_outcome,
                 logging_closed=logging_closed,
             )
         ),
         flush=True,
     )
-    if exit_code:
-        raise SystemExit(exit_code)
+    if process.exit_code:
+        raise SystemExit(process.exit_code)
 
 
 if __name__ == "__main__":

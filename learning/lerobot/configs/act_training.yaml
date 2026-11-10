@@ -8,7 +8,7 @@
 # data.root/manifest/train_dir/validation_dir：数据集根、清单和训练/验证子目录。
 # data.verify_hashes：是否启动前校验数据集文件哈希。
 # model.*：视觉骨干、Transformer 维度/层数、VAE、dropout、KL 权重和预训练权重；权重哈希由运行时计算。
-# training.*：batch、worker、学习率、权重衰减、梯度裁剪、日志/验证/保存间隔、验证 batch、精度和确定性。
+# training.*：batch、worker、锁页内存、预取、混合精度、学习率、权重衰减、梯度裁剪、日志/验证/保存间隔、验证 batch 和确定性。
 # modes.*：smoke/overfit/full 的步数、数据划分、episode 范围、是否验证及预算预留时间。
 # budget.*：总训练预算、追加式台账、锁文件、停止余量和最小磁盘空间。
 # checkpoint.*：检查点根目录、保留策略和最小磁盘空间。
@@ -46,8 +46,12 @@ model:
   weights:
     path: .build/cache/torch/hub/checkpoints/resnet18-f37072fd.pth
 training:
-  batch_size: 8
-  num_workers: 0
+  batch_size: 32
+  num_workers: 4
+  pin_memory: true
+  prefetch_factor: 2
+  use_amp: true
+  amp_dtype: bfloat16
   lr: 0.00001
   weight_decay: 0.0001
   grad_clip_norm: 10.0
@@ -56,8 +60,6 @@ training:
   save_every_steps: 1000
   # Covers all five full validation episodes (not only episode 0).
   val_batches: 512
-  dtype: float32
-  amp: false
   deterministic: true
 modes:
   smoke:
