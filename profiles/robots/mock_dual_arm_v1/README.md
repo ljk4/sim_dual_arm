@@ -1,6 +1,5 @@
 # mock_dual_arm_v1
 
-历史 schema v1 单相机 CPU mock profile，`test_only=true`。仅用于软件链路回归，
-不代表真实 Panda 语义；新任务不要以它为基线。
+仅用于契约与 Schema 单元测试的最小单相机 Profile（`schema_version=1`，`test_only=true`）。不代表真实双 Panda 物理语义，禁止用于正式仿真、数据采集或模型训练。
 
-目录导航：[上级目录](../README.md)。
+目录导航：[上级目录](../README.md)

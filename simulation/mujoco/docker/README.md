@@ -1,118 +1,96 @@
-# MuJoCo Docker 构建及运行维护
+# MuJoCo 容器构建与运行指南
 
-本目录的 Compose 只管理 `simulation` 空闲容器。进入后手动运行
-`/app/scripts/run.sh`；构建和启动不会自动加载场景或开始数采。
+本目录的 `docker-compose.yml` 管理独立的 `simulation` 容器（默认镜像 `sim-dual-arm/simulation:current`）。容器启动后保持 `sleep infinity` 空闲状态，所有仿真与检查命令均在进入容器后通过 `/app/scripts/run.sh` 手动执行。
 
-## 路径与磁盘
+---
 
-Panda 模型位于 `../assets/franka_emika_panda/`，随仿真项目只读挂到
-`/app/assets/franka_emika_panda/`。仓库的 `var/` 挂到 `/data`，
-`.build/ros-dev/` 只读挂到 `/opt/ros-dev`。首次使用先核对实际磁盘：
+## 1. 挂载边界与磁盘准备
 
-```bash
-cd /path/to/sim_dual_arm
-mkdir -p var .build
-findmnt -T var
-df -hT var
-findmnt -T .build
-df -hT .build
-```
+`simulation` 容器实行最小化权限挂载：
 
-如需数据盘，修改本目录 `docker-compose.yml` 中 `/data` 对应的宿主来源，
-并确保它指向预期磁盘。仓库位置不会改变 Docker 镜像存储。
-Compose 中 `../` 指本端 `simulation/mujoco`，`../../../` 指仓库根；不需要
-`PROJECT_ROOT`、`DATA_ROOT` 等宿主环境变量。当前 `user: "1000:1000"` 对应本机用户，
-换机器时先核对 `id -u` 和 `id -g`。
+- 本端目录 `simulation/mujoco/` 只读挂载至 `/app:ro`（含 `/app/assets/franka_emika_panda/` 模型资产）。
+- `contracts/`、`profiles/`、`libraries/` 与公共配置文件分别只读挂载至 `/contracts:ro`、`/profiles:ro`、`/deps/*:ro` 与 `/config/*:ro`。
+- ROS 2 SDK 只读挂载至 `/opt/ros-dev:ro`（宿主机 `.build/ros-dev/`）。
+- 运行产物目录可写挂载至 `/data`（宿主机 `var/`）。
 
-## 构建、进入和检查
+首次运行前，请在仓库根目录创建 `.build` 与 `var` 目录，并确认宿主机用户 UID/GID 与 Compose 中的 `user: "1000:1000"` 一致。
 
-需要 Docker Compose、NVIDIA 驱动和 NVIDIA Container Toolkit。镜像基于
-`ros:jazzy-ros-base-noble`，安装固定的 [Ruckig wheel](wheels/README.md) 和
-`requirements.lock`。容器内路径及 ROS/EGL 设置在 `../configs/container.env`。
+---
+
+## 2. 构建与离线检查
+
+前置条件：已安装 Docker Compose、NVIDIA 显卡驱动与 NVIDIA Container Toolkit。镜像基于 `ros:jazzy-ros-base-noble`，通过单次 `pip install --require-hashes -r /opt/dependencies/requirements.lock` 安装固定版本的 MuJoCo 及随仓提供的 [Ruckig wheel](wheels/README.md)。
 
 ```bash
-cd /path/to/sim_dual_arm/simulation/mujoco/docker
-docker compose config --quiet
+cd simulation/mujoco/docker
 docker compose build
 docker compose up -d
 docker compose exec simulation bash
 ```
 
-进入容器后：
+在容器内运行环境、三相机视野与运动学净空检查（无需预先构建 ROS SDK，检查报告写入 `/data/reports/sim-check/<run-id>/`）：
 
 ```bash
 scripts/run.sh --help
 scripts/run.sh environment --run-id env-001
 scripts/run.sh scene --run-id scene-001
 scripts/run.sh kinematics --run-id kin-001
+scripts/run.sh test -q /workspace_or_mounted_tests  # 如需运行单测
 ```
 
-单次命令也可在宿主本目录运行
-`docker compose exec simulation scripts/run.sh scene --run-id scene-002`。
-检查报告写入 `/data/reports/sim-check/<run-id>/`；使用新的 run-id，不覆盖旧报告。
+---
 
-## 与 runtime 连接
+## 3. 启动 ROS 2 仿真后端
 
-只有 `backend` 需要 ROS SDK。先在宿主构建并启动 runtime 容器：
+启动 `backend` 前，须先在 `runtime` 容器中执行 `runtime/ros2/scripts/run.sh build-ros-sdk` 生成 `/opt/ros-dev`。
 
-```bash
-cd /path/to/sim_dual_arm/runtime/ros2/docker
-docker compose build
-docker compose up -d
-docker compose exec runtime bash
-# runtime 容器内：
-runtime/ros2/scripts/run.sh build-ros-sdk
-```
-
-仿真与运行端使用同一 Docker 项目名和 `ros` 网络；两端的 `ROS_DOMAIN_ID=42`
-写在各自 `configs/container.env`。回到 simulation 容器后准备配置并启动：
+在 `simulation` 容器内准备后端配置并前台启动服务：
 
 ```bash
 scripts/run.sh prepare \
-  --template /app/configs/backend/backend_stack_inference.yaml \
-  --seed 42 --run-id prep-001 --output /data/prepared/prep-001
+  --template /app/configs/backend/backend_stack_act_chunked.yaml \
+  --seed 20001 \
+  --run-id sim-001 \
+  --output /data/prepared/sim-001
+
 scripts/run.sh backend \
-  --config /data/prepared/prep-001/backend.yaml --run-id backend-001
+  --config /data/prepared/sim-001/backend.yaml \
+  --run-id sim-001
 ```
 
-`backend` 前台运行，用 Ctrl+C 正常停止。采集、控制和 Policy 调用见
-[项目使用指南](../../../README.md#运行端)。
+按 `Ctrl-C` 可安全停止后端并完成日志落盘。
 
-## 实时 MuJoCo 可视化
+---
 
-backend 保持无窗口 EGL 渲染；需要实时窗口时，用宿主机 X11 显式运行一次性
-viewer 容器（默认 Compose 不注入宿主变量或 X11 挂载）：
+## 4. 实时 MuJoCo 可视化（Viewer）
+
+`backend` 进程始终采用无窗口 NVIDIA EGL 离屏渲染。如需在图形桌面查看实时物理状态，可在宿主机通过 `docker compose run` 临时注入 X11 显示套接字启动只读 `viewer`（若遇权限错误，先在宿主机执行 `xhost +SI:localuser:$(id -un)`）：
 
 ```bash
-cd /path/to/sim_dual_arm/simulation/mujoco/docker
-echo "DISPLAY=$DISPLAY"
-echo "XAUTHORITY=$XAUTHORITY"
-# 如果 XAUTHORITY 未设置，按实际桌面会话设置，例如：
-# export XAUTHORITY=/run/user/$(id -u)/gdm/Xauthority
+cd simulation/mujoco/docker
 docker compose run --rm \
   -e DISPLAY="$DISPLAY" \
   -e XAUTHORITY=/tmp/.Xauthority \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   -v "${XAUTHORITY:-/dev/null}:/tmp/.Xauthority:ro" \
   simulation scripts/run.sh viewer \
-  --config /data/prepared/prep-001/backend.yaml
+  --config /data/prepared/sim-001/backend.yaml
 ```
 
-viewer 是独立进程，订阅后端发布的只读完整物理快照并显示，不参与物理步进。
-它只对当前仿真端有效，不进入 runtime 或 learning 容器。
+`viewer` 仅订阅后端的完整物理状态快照进行渲染，不推进物理步，也不介入控制回路。
 
-## 停止与排查
+---
 
-在本目录仅停止并移除仿真容器，bind 数据保留：
+## 5. 容器停止与清理
+
+仅停止并移除 `simulation` 容器（保留共享网络与 `/data` 产物）：
 
 ```bash
+cd simulation/mujoco/docker
 docker compose stop simulation
 docker compose rm -f simulation
 ```
 
-不要对单端使用 `down --remove-orphans`，以免影响同项目名的其他服务。
-GPU/EGL 失败先检查宿主 `nvidia-smi` 与 `docker compose config` 中的 GPU 请求；
-SDK 失败先在 runtime 重新构建 SDK。空闲容器日志只反映 `sleep`，业务错误查看
-该命令的终端输出及 `/data` 下对应 run 报告。
+> 切勿对单端执行 `docker compose down --remove-orphans`，以免误停共享同一项目名 `sim-dual-arm` 的 `runtime` 或 `learning` 容器。
 
-目录导航：[上级目录](../README.md)。
+目录导航：[上级目录](../README.md)

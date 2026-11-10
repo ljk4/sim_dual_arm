@@ -1,25 +1,20 @@
-# 运行入口
+# Runtime 容器命令入口（Scripts）
 
-容器内功能脚本是 `run.sh`，进入空闲容器后手动执行。
-它按 case 分发到已有 CLI，并透传参数：
+`run.sh` 是 `runtime` 容器内的唯一命令分发脚本，在容器内手动调用并将参数透传至底层工具：
 
-- `build-ros-sdk` / `build-policy-sdk`：调用真实 SDK 生成脚本。
-- `prepare`：把通用 Policy binding、runtime 模板、seed/run-id 生成为
-  `runtime.yaml` + `run_manifest.json`。
-- `collect` / `policy`：运行 ROS 采集或 Policy 执行；必须显式给
-  `--output /data/raw/<run-id>`，不共享同一输出目录。
-- `interactive`：交互式运行一局 Policy。`y` 后通过 episode start 复原环境并开始；
-  `--run-id` 默认按时间自动生成，`--seed` 可覆盖本次 reset seed。任务结束后
-  进程保持 IDLE，按 `Ctrl-C` 完成有界退出。仿真/策略服务可在此之前长期运行。
-- `test`：固定 `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` 的 pytest 入口。
-- `export`、`campaign`、`evaluate`：导出标签/RGB/质量、预算台账与评估报告。
-- `campaign.py`、`export_episode.py`、`evaluate.py`、
-  `collect_artifacts.py` 是上述命令复用的业务实现。
-- `prepare_run.py` 是纯配置准备，不导入 learning 或 MuJoCo。
+| 子命令 | 功能说明 |
+| --- | --- |
+| `build-ros-sdk` | 编译 `contracts/ros/robot_api_msgs` 及共享包至 `/build/ros-dev` |
+| `build-policy-sdk` | 从 `policy.proto` 生成 Python Protobuf/gRPC SDK 至 `/build/generated/policy-sdk` |
+| `prepare` | 将 `policy_binding.json`、运行端模板与 `seed`/`run-id` 合成为 `runtime.yaml` 与 `run_manifest.json`（`prepare_run.py`） |
+| `collect` | 执行单局 ROS 示教数据采集（须显式指定全新 `--output /data/raw/<run-id>`） |
+| `policy` | 执行单局非交互式 Policy 推理闭环（须显式指定全新 `--output /data/raw/<run-id>`） |
+| `interactive` | 交互式执行单局 Policy 推理：自动生成唯一 `run-id`，输入 `y` 复位环境并开始，结束后保持 IDLE 直至按 `Ctrl-C` 退出 |
+| `export` | 从录制目录导出逐帧 RGB、动作参考标签与图像质量报告（`export_episode.py`、`export_media.py`、`export_quality.py`） |
+| `campaign` | 管理采集预算台账、执行带预算的单次尝试（`collect_attempt.py`）并筛选训练/验证集（`campaign.py`、`campaign_ledger.py`、`campaign_execution.py`） |
+| `evaluate` | 生成只读评估指标与可视化对比报告（`evaluate.py`、`evaluation_metrics.py`、`evaluation_media.py`） |
+| `test` | 运行固定禁用自动插件收集的 `pytest` 测试套件 |
 
-`run.sh` 在宿主执行会明确失败；先在 `runtime/ros2/docker` 运行
-`docker compose exec runtime bash`，再执行 `runtime/ros2/scripts/run.sh <功能> ...`。
-一次性命令可用 `docker compose exec runtime runtime/ros2/scripts/run.sh <功能> ...`。
-入口不内嵌控制、训练或模型算法。
+> `run.sh` 在宿主机直接运行会报错退出（返回码 2）；请先通过 `docker compose -f runtime/ros2/docker/docker-compose.yml exec runtime bash` 进入容器。
 
-目录导航：[上级目录](../README.md)。
+目录导航：[上级目录](../README.md)

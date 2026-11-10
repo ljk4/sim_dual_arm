@@ -1,28 +1,29 @@
-# 测试
+# 测试套件（Tests）
 
-- `unit/`：纯 Python 单元测试和共享夹具，默认不依赖 ROS/GPU。
-- `integration/`：ROS 服务、物理执行、记录、任务和运行入口的集成检查。
-- `doubles/`：test-only fake Policy 与 mock ROS backend，不冒充正式数据。
+本目录包含全仓单元测试、集成测试、测试替身（Fakes）与配置夹具（Fixtures）：
 
-测试按 `pyproject.toml` 运行纯 Python 部分；进入已有运行或学习容器后执行该端
-`run.sh test ...`。仿真端不维护单独测试工具清单，常规环境、场景与运动学验收使用
-已有 `environment`、`scene`、`kinematics` 命令；官方 ROS 镜像自带的工具可以直接
-使用，缺少的项目测试依赖再按实际需要增加。容器业务入口在宿主执行会明确拒绝。
+- **[`unit/`](unit/README.md)**：纯 Python 单元测试与合成数据夹具，覆盖契约模型、轨迹数学、状态机、配置校验与学习流水线。
+- **[`integration/`](integration/README.md)**：涉及 ROS 2 通信、MuJoCo 物理执行、Ruckig 跟随与 LeRobot CPU 生命周期的集成测试。
+- **[`fakes/`](fakes/README.md)**：仅供测试使用的确定性 Fake Policy Provider（`fakes/policy/`），标记 `test_only=true`，严禁混入正式评估。
+- **[`fixtures/`](fixtures/simulation/README.md)**：仿真与策略回归对照专用的历史配置夹具（`fixtures/simulation/`）。
 
-内核/ROS 回归使用固定插件环境，禁止把 skip 当通过：
+## 执行方式
+
+所有测试通过各端容器内的 `scripts/run.sh test`（底层调用 [`infrastructure/scripts/test.sh`](../infrastructure/scripts/test.sh)，固定设置 `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`）执行：
 
 ```bash
-# 进入对应容器后：
+# 在 runtime 容器内运行单元测试与 ROS 集成测试：
 runtime/ros2/scripts/run.sh test -q tests/unit
+
+# 在 learning 容器内运行学习端单元测试：
 learning/lerobot/scripts/run.sh test -q tests/unit
+
+# 在 simulation 容器内运行仿真端测试或环境/场景/运动学检查：
+scripts/run.sh environment --run-id env-001
+scripts/run.sh scene --run-id scene-001
+scripts/run.sh kinematics --run-id kin-001
 ```
 
-运行和学习入口的 `test` 调用公共 `infrastructure/scripts/test.sh`，由各自环境
-提供依赖。仿真入口不提供 `test` 或 SDK 构建命令；ROS SDK 在运行容器生成后
-只读挂载到仿真容器。不要修改训练依赖，也不要在宿主启动训练环境。
+测试产生的临时文件与缓存输出至 `.build/` 或 `var/`，不写入源码目录。
 
-`run.sh test` 与公共 `test.sh` 固定 `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`，避免 ROS `launch_testing`
-自动插件提前导入未选择的 Torch 测试。
-测试产物和缓存写到 `.build/`/`var/`，不提交。
-
-目录导航：[上级目录](../README.md)。
+目录导航：[上级目录](../README.md)

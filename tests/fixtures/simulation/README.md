@@ -1,7 +1,11 @@
-# 仿真历史配方测试夹具
+# 仿真配置测试夹具（Simulation Fixtures）
 
-`backend_follower.yaml` 验证基础后端的跟随接口；`backend_stack_act.yaml`
-保存早期 ACT 时序配方，用于与当前分块配方进行回归对照。两份文件的参数未改，
-仅从日常仿真配置移到测试专用位置。其引用的场景、控制和 profile 仍来自当前源码。
+存放专供单元测试与历史回归对照使用的配置文件：
 
-目录导航：[上级目录](../../README.md)。
+- **`backend_follower.yaml`**：验证基础仿真后端受限跟随接口的最小配置。
+- **`backend_stack_act.yaml`**：保存早期 ACT 时序参数，用于与当前分块配方（`backend_stack_act_chunked.yaml`）进行回归对照测试。
+- **`policy_unit.yaml`**：Policy 服务配置解析单元测试夹具。
+
+这些夹具引用的场景、控制限值与 Robot Profile 均指向仓库当前有效源码。
+
+目录导航：[上级目录](../../README.md)

@@ -1,45 +1,18 @@
-# 仿真脚本
+# 仿真端命令入口（Scripts）
 
-`run.sh` 是进入 simulation 容器后手动执行的功能脚本。
-它复用公共 `infrastructure/docker/setup.sh` 加载 ROS 与源码路径，然后调用真实
-Python CLI，参数原样传递。
+`run.sh` 是 `simulation` 容器内的唯一命令分发脚本，自动加载 `/config/setup.sh` 并调用对应的 Python 模块：
 
-| 命令 | 功能 | 主要输出 |
+| 子命令 | 功能说明 | 默认输出路径 |
 | --- | --- | --- |
-| `environment` | 依赖、单 Panda 物理、DAQP 与 NVIDIA EGL 检查 | `/data/reports/sim-check/<run-id>/` |
-| `scene` | 双 Panda 场景三相机可见性检查 | 同上 |
-| `kinematics` | 关键位姿与运动学净空检查 | 同上 |
-| `prepare` | 从模板、seed、run-id 生成 backend 配置 | 显式 `--output` 下的 `backend.yaml` 和 `run_manifest.json` |
-| `backend` | 运行 MuJoCo ROS 后端，启动前检查 ROS SDK | `/data/runs/backend/<run-id>/` |
-| `viewer` | 连接正在运行的后端，打开实时 MuJoCo GUI；只读快照，不步进物理 | 当前终端窗口 |
+| `environment` | 检查 MuJoCo 依赖、单 Panda 物理步进、DAQP 与 NVIDIA EGL 离屏渲染 | `/data/reports/sim-check/<run-id>/` |
+| `scene` | 检查双 Panda 场景在 67 个布局下的三路相机静态可见性 | `/data/reports/sim-check/<run-id>/` |
+| `kinematics` | 检查堆叠任务关键位姿 IK 可达性与路径碰撞净空 | `/data/reports/sim-check/<run-id>/` |
+| `prepare` | 从后端模板、随机种子与 `run-id` 生成 `backend.yaml` 与 `run_manifest.json`（`prepare_backend.py`） | `--output` 指定的全新目录 |
+| `backend` | 校验 `/opt/ros-dev` SDK 后启动 MuJoCo ROS 2 物理仿真后端 | `/data/runs/backend/<run-id>/` |
+| `viewer` | 订阅 `/robot/visualization/mujoco_state` 快照，通过宿主机 X11 打开只读实时 GUI | 实时窗口显示 |
+| `test` | 运行固定禁用自动插件收集的 `pytest` 测试套件 | 终端输出 |
 
-在宿主进入 `simulation/mujoco/docker` 并运行 `docker compose exec simulation bash`，再执行：
+- 所有报告目录与 `prepare` 输出目录均禁止覆盖已存在路径。
+- 在宿主机直接运行 `run.sh` 会报错退出（返回码 2），请先进入 `simulation` 容器执行。
 
-```bash
-scripts/run.sh --help
-scripts/run.sh scene --help
-```
-
-`prepare_backend.py` 负责配置准备；Panda 模型直接位于 `../assets/franka_emika_panda/`。
-
-实时可视化示例：
-
-```bash
-scripts/run.sh viewer \
-  --config /data/prepared/<run>/simulation/backend.yaml
-```
-
-viewer 是独立进程，通过 `/robot/visualization/mujoco_state` 订阅完整物理快照；
-后端仍使用 EGL 无窗口渲染，viewer 自行使用宿主机 X11 窗口。不要在 viewer
-进程里修改控制或任务状态。
-场景、控制与物理参数由 `configs/` 提供。backend 必须显式指定 `--config` 和
-`--run-id`；scene/kinematics 的默认 YAML 在 `run.sh` 中选择，可用 CLI 参数覆盖。
-
-模型通过仿真项目的 `/app:ro` 挂载进入容器。报告和准备输出使用独立目录，
-已存在即拒绝覆盖。
-ROS SDK 由 runtime 构建并挂到 `/opt/ros-dev`，仅 backend 启动时检查；
-仿真构建、检查与容器空闲启动不要求预先生成 SDK。
-
-构建、挂载和完整启动顺序见 [Docker 说明](../docker/README.md)。
-
-目录导航：[上级目录](../README.md)。
+目录导航：[上级目录](../README.md)

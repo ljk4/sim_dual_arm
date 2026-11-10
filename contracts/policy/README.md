@@ -1,9 +1,10 @@
-# Policy 协议
+# Policy 协议定义
 
-`v1/policy.proto` 是唯一 Policy 协议源码。生成的 Python Protobuf/gRPC SDK 由
-`infrastructure/scripts/generate_policy_sdk.py` 输出到构建目录。ROS 接口另由
-`contracts/ros/robot_api_msgs/` 构建；两者不能混称为同一 SDK。
-不手工修改生成文件。
-字段语义和兼容规则见 [v1 说明](v1/README.md)。
+[`v1/policy.proto`](v1/policy.proto) 是 gRPC Policy 推理服务的唯一协议源码。
 
-目录导航：[上级目录](../README.md)。
+- **SDK 生成**：由 `runtime` 容器内的 `runtime/ros2/scripts/run.sh build-policy-sdk`（调用 [`infrastructure/scripts/generate_policy_sdk.py`](../../infrastructure/scripts/generate_policy_sdk.py)）生成 Python Protobuf/gRPC 代码至 `.build/generated/policy-sdk/`。
+- **使用边界**：严禁手动修改生成的 SDK 文件；ROS 2 机器人接口位于 [`contracts/ros/robot_api_msgs/`](../ros/robot_api_msgs/README.md)，与 Policy SDK 相互独立。
+
+详细字段语义见 [v1 说明](v1/README.md)。
+
+目录导航：[上级目录](../README.md)

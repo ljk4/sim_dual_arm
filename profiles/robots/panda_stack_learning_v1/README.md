@@ -1,12 +1,8 @@
 # panda_stack_learning_v1
 
-学习任务相机标定变体。关节顺序、单位、硬限位和其他相机继承 `panda_stack_v1`；
-右腕 FOV 为 68°，声明在 `right_wrist_calibration.json`，摘要由
-`camera_declared_description`/`semantic_hash` 生成。
+双 Panda 堆叠学习任务专用的机器人 Profile 变体：
 
-对应场景 `simulation/mujoco/configs/scene/panda_stack_learning.yaml` 只改右腕视场，机械几何和
-物理与 `panda_stack.yaml` 一致。相机变化会改变 profile digest；旧数据保留其
-manifest 内 profile 快照，禁止混用；关节或其他相机变动需同步两个 profile 并通过
-变体一致性测试。
+- **继承与差异**：16 维关节顺序、物理单位、位置/速度硬限位以及 `global` / `left_wrist` 相机参数与 [`panda_stack_v1`](../panda_stack_v1/README.md) 完全一致；仅将 `right_wrist` 相机的垂直视场角（FOV）扩大为 **68°**（标定详情记录于 `right_wrist_calibration.json`）。
+- **场景绑定**：对应仿真场景配置文件为 [`simulation/mujoco/configs/scene/panda_stack_learning.yaml`](../../../simulation/mujoco/configs/scene/panda_stack_learning.yaml)。修改关节或公共相机参数时须同步更新两个 Profile 并通过变体一致性单元测试（[`test_learning_camera_variant.py`](../../../tests/unit/test_learning_camera_variant.py)）。
 
-目录导航：[上级目录](../README.md)。
+目录导航：[上级目录](../README.md)

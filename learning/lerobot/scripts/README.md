@@ -1,14 +1,12 @@
-# Learning 容器入口
+# Learning 容器命令入口（Scripts）
 
-`run.sh` 是进入空闲容器后手动执行的功能脚本；按 case 分发到真实
-CLI，支持 `--help` 与参数透传：`prepare-policy`、`convert`、
-`validate`、`filter`、`train`、`bundle`、`verify-bundle`、`budget`、`policy`、`cli`、
-`test`。默认使用 `configs/act_dataset.container.yaml` /
-`act_training.container.yaml` 的 `/data` 路径；用户传入的 `--config` 仍可覆盖。
+`run.sh` 是 `learning` 容器内的唯一命令分发脚本，提供以下子命令：
 
-`prepare_policy.py` 只做 bundle 校验与配置生成，不加载 Torch 模型；所有学习命令
-统一经过 `run.sh`。脚本在宿主执行会明确失败；先在 `learning/lerobot/docker` 运行
-`docker compose exec learning bash`，再执行 `learning/lerobot/scripts/run.sh <功能> ...`。
-一次性命令可用 `docker compose exec learning learning/lerobot/scripts/run.sh <功能> ...`。
+- **`prepare-policy`**：调用 `prepare_policy.py` 校验 ACT 模型包（不加载 GPU 模型权重），动态计算模型、Processor、Profile 与 Schema 摘要，输出 `policy.yaml`、`policy_binding.json`、`act_contract.json` 与 `run_manifest.json`。
+- **`convert` / `validate` / `filter` / `train` / `bundle` / `verify-bundle` / `budget` / `cli`**：调用 `dual_arm_learning.cli`，默认加载 `configs/act_dataset.container.yaml` 与 `configs/act_training.container.yaml`（可通过 `--config` 覆盖）。
+- **`policy`**：校验 `/opt/policy-sdk` 后启动 `dual_arm_learning.policy_service_cli` gRPC 推理服务。
+- **`test`**：调用 `infrastructure/scripts/test.sh` 执行单元测试。
 
-目录导航：[上级目录](../README.md)。
+在宿主机直接执行 `run.sh` 或 `prepare_policy.py` 会报错退出（返回码 2），请先进入 `learning` 容器运行。
+
+目录导航：[上级目录](../README.md)

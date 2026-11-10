@@ -1,12 +1,7 @@
-# Schema
+# JSON Schema 契约
 
-`v1/` is the single current schema directory; unknown versions are rejected.
+[`v1/`](v1/README.md) 是当前唯一维护的 JSON Schema 目录，未声明的字段或未知的 Schema 版本在校验时一律拒绝。
 
-- `v1/`：当前机器人 profile、观测、动作、配置、运行日志和 episode manifest。
-- `v1/robot_profile_v2.schema.json`：仍在使用中的 schema_version=2 机器人 profile
-  格式；profile 文档版本与 episode manifest 版本彼此独立。
+- Schema 仅定义文档结构与基础类型约束；关节顺序、相机命名、物理单位与跨字段语义由 [`profiles/`](../../profiles/README.md) 与 [`robot_contracts`](../python/src/robot_contracts/README.md) 联合校验。
 
-schema 只描述结构；关节/相机顺序和单位由 `profiles/` 与
-`robot_contracts` 校验。
-
-目录导航：[上级目录](../README.md)。
+目录导航：[上级目录](../README.md)

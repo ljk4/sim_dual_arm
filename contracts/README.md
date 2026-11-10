@@ -1,13 +1,14 @@
-# 公共契约
+# 公共契约（Contracts）
 
-协议、ROS IDL、schema 和轻量 Python 类型的唯一维护位置。
+本目录是跨端协议、ROS 2 IDL、JSON Schema 与轻量 Python 契约模型的唯一数据源（SSOT）。
 
-- `policy/v1/policy.proto`：Policy RPC 与动作块语义。
-- `ros/robot_api_msgs/`：ROS 2 action/msg/srv 包。
-- `schemas/v1`～`v4`：profile、观测、动作、配置和 episode manifest。
-- `python/src/robot_contracts/`：无 ROS/ML 依赖的类型、校验和语义哈希。
+## 目录结构
 
-生成 SDK/ROS 文件写到 `.build/`，不在组件里复制；规则见
-[项目规范](../docs/standards.md)。
+- **[`policy/v1/policy.proto`](policy/v1/README.md)**：gRPC Policy 推理服务与动作块（Action Chunk）协议定义。
+- **[`ros/robot_api_msgs/`](ros/robot_api_msgs/README.md)**：ROS 2 消息（`msg/`）与服务（`srv/`）接口包。
+- **[`schemas/v1/`](schemas/v1/README.md)**：机器人 Profile、观测、动作、运行配置、日志事件与 Episode Manifest 的 JSON Schema 定义。
+- **[`python/src/robot_contracts/`](python/src/robot_contracts/README.md)**：无 ROS/MuJoCo/PyTorch 依赖的 Pydantic v2 契约模型、语义哈希与轨迹数学库（`trajectory/`）。
 
-目录导航：[上级目录](../README.md)。
+生成的 SDK 与构建产物输出至 `.build/`，不在各运行端复制接口源码。详细约定见[项目规范](../docs/standards.md)。
+
+目录导航：[上级目录](../README.md)

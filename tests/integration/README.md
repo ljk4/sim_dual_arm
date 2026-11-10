@@ -1,10 +1,11 @@
-# 集成测试
+# 集成测试（Integration Tests）
 
-覆盖 ROS 服务/action、运动与连续块、受限跟随、MCAP 审计、运行时收尾、任务、
-学习和 ACK 唤醒。`probe_backend.py`、`runtime_cli_harness.py` 等是测试辅助入口，
-不是生产启动器。
+覆盖跨模块与运行环境的端到端行为验证：
 
-需要 ROS、MuJoCo、GPU 或 Docker 的用例由对应镜像/监督者执行；纯 Python 环境会
-跳过或明确失败，不把未执行当通过。
+- **MuJoCo 物理与场景**：`test_sim_scene.py`、`test_panda_io.py`、`test_scene_visibility.py`、`test_scene_kinematics.py`。
+- **受限跟随与 ROS 2 协议**：`test_follower_execution.py`、`test_follower_protocol_ros.py`、`test_backend_ros.py`。
+- **学习端 CPU 生命周期**：`test_learning_cpu_lifecycle.py`。
 
-目录导航：[上级目录](../README.md)。
+集成测试须在提供对应依赖（ROS 2、MuJoCo/EGL 或 PyTorch/LeRobot）的容器环境中执行。
+
+目录导航：[上级目录](../README.md)

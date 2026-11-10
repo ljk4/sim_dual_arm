@@ -1,33 +1,30 @@
-# MuJoCo 仿真后端
+# MuJoCo 物理仿真后端
 
-实现双 Panda 物理步进、三相机渲染、受限动作执行、实测反馈与程序示教，通过
-ROS 2 Robot API 与运行端通信。
+实现双 Panda 机械臂物理步进、三路无窗口 EGL 相机渲染、Ruckig 有界跟随动作执行、实测反馈发布与程序示教（Teacher），通过 ROS 2 Robot API 与运行端通信。
 
-| 目录 | 内容 |
+## 目录结构
+
+| 目录 | 职责内容 |
 | --- | --- |
-| `src/robot_backend_sim/` | 物理、控制、渲染与 ROS 后端实现 |
-| `assets/franka_emika_panda/` | 随项目挂载的 Panda 模型与网格 |
-| `configs/` | 场景、控制、任务与检查配置 |
-| `docker/` | 依赖镜像、安装锁、固定 wheel 与 simulation 服务 |
-| `scripts/` | 容器内 `run.sh` 与 backend 配置准备 |
+| [`src/robot_backend_sim/`](src/robot_backend_sim/README.md) | 物理引擎封装、运动控制、渲染线程、任务插件与 ROS 2 节点实现 |
+| [`assets/franka_emika_panda/`](assets/README.md) | 随仓只读挂载的 Menagerie Franka Emika Panda 模型与网格资产 |
+| [`configs/`](configs/README.md) | 后端启动配方（`backend/`）、场景与任务定义（`scene/`）、检查门限（`checks/`）与 `container.env` |
+| [`docker/`](docker/README.md) | 仿真容器 `Dockerfile`、`docker-compose.yml`、`requirements.lock` 与固定 Ruckig wheel |
+| [`scripts/`](scripts/README.md) | 容器内统一命令入口 `run.sh` 与后端配置生成脚本 `prepare_backend.py` |
 
-首次使用从 [Docker 构建与运行说明](docker/README.md) 开始：
+## 快速启动
 
 ```bash
-# 宿主：
+# 宿主机：构建并进入容器
 cd simulation/mujoco/docker
 docker compose build
 docker compose up -d
 docker compose exec simulation bash
-# simulation 容器内：
+
+# 容器内：执行环境与渲染检查
 scripts/run.sh environment --run-id env-001
 ```
 
-`run.sh` 提供 `environment`、`scene`、`kinematics`、`prepare`、`backend`、
-`viewer`。其中 `viewer` 使用宿主机 X11 打开实时 MuJoCo 窗口，后端本身仍保持
-无窗口 EGL 渲染。
-backend 需要 runtime 生成的 ROS SDK；仿真检查可以独立运行。
-模型随本目录挂到 `/app/assets/`，报告与运行数据写到 `/data`；
-完整采集与任务记录由运行端负责。命令参数见[脚本说明](scripts/README.md)。
+详细构建、挂载与运行说明见 [`docker/README.md`](docker/README.md) 与 [`scripts/README.md`](scripts/README.md)。
 
-目录导航：[上级目录](../README.md)。
+目录导航：[上级目录](../README.md)

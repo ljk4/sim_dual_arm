@@ -1,7 +1,5 @@
-# ROS 包根
+# ROS 2 运行包目录
 
-ROS 2 工作空间的源码根，目前只有 `dual_arm_runtime` 一个运行包。构建、生成契约和
-安装由 `infrastructure/scripts/` 与 `runtime/ros2/docker/Dockerfile` 负责；生成文件
-写到 `.build/`，不回到源码树。包说明见 [dual_arm_runtime](dual_arm_runtime/README.md)。
+本目录为 `runtime` 侧 ROS 2 包的源码根，包含 [`dual_arm_runtime`](dual_arm_runtime/README.md)。构建与产物输出均位于 `.build/`，不污染源码树。
 
-目录导航：[上级目录](../README.md)。
+目录导航：[上级目录](../README.md)

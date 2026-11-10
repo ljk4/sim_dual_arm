@@ -1,19 +1,12 @@
-# 构建工具
+# 构建、SDK 与边界检查脚本
 
-- `test.sh`：运行/学习端共用的容器内 pytest 入口，固定关闭自动插件收集，保留真实退出码。
-- `build_ros_sdk.sh`：容器内用 `dev_workspace.py`/colcon 生成 ROS SDK 到
-  `/build/ros-dev`（宿主 `.build/ros-dev`），由 runtime `run.sh build-ros-sdk` 调用。
-- `build_policy_sdk.sh`：容器内用 `policy_sdk.py` 生成 Policy SDK 到
-  `/build/generated/policy-sdk`，由 runtime `run.sh build-policy-sdk` 调用。
-- `dev_workspace.py`：生成/校验 ROS 契约工作空间，检查 host home 不被重置。
-- `policy_sdk.py`：生成/校验挂载 SDK，拒绝无归属输出、过期摘要和镜像模块回退。
-- `ros_workspace.py`：colcon 的 Python 入口。
-- `generate_policy_sdk.py`：从 `contracts/policy/v1/policy.proto` 生成 Protobuf/gRPC SDK。
-- `check_dockerfiles.py`：检查每端唯一 Dockerfile/Compose/run.sh、无旧入口包装，
-  拒绝业务 COPY、内嵌程序、非 idle Compose，并保留 GPU/网络/SDK 边界检查。
+本目录提供容器内 SDK 构建、测试执行与容器配置合规检查工具：
 
-SDK 与工作空间构建输出写到 `.build/`，镜像写入 Docker 存储，不修改源码树。宿主
-在各端 `docker/` 目录用 `docker compose build/up -d/exec` 管理容器，进入后显式运行
-各端 `run.sh`；不在宿主 venv 中运行项目 Python，也不自动生成 SDK。
+- **`build_ros_sdk.sh` / `dev_workspace.py` / `ros_workspace.py`**：在 `runtime` 容器内使用 `colcon` 编译 `contracts/ros/robot_api_msgs` 及共享包至 `/build/ros-dev`（宿主机 `.build/ros-dev`），并生成源码 SHA-256 摘要供 `runtime` 与 `simulation` 启动前校验。
+- **`build_policy_sdk.sh` / `policy_sdk.py` / `generate_policy_sdk.py`**：从 `contracts/policy/v1/policy.proto` 生成 Python Protobuf/gRPC SDK 至 `/build/generated/policy-sdk`，并校验模块归属、文件完整性与 `.proto` 摘要，防止回退到过期的安装模块。
+- **`test.sh`**：三端共用的容器内 `pytest` 入口，固定设置 `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`，防止 ROS `launch_testing` 插件提前导入无关测试模块。
+- **`check_dockerfiles.py`**：静态检查三端 `Dockerfile`、`docker-compose.yml` 与 `scripts/run.sh` 是否满足单入口、空闲启动、无业务源码 `COPY`、无内嵌脚本及网络/GPU/SDK 挂载隔离规范。
 
-目录导航：[上级目录](../README.md)。
+所有构建产物均输出至 `.build/`，不污染源码树。
+
+目录导航：[上级目录](../README.md)

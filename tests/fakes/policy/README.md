@@ -1,6 +1,8 @@
-# fake Policy
+# Fake Policy Provider
 
-`fake_provider.py` 实现确定性 Policy provider，`run_fake.py` 是独立进程入口；
-用于协议、服务和评估语义测试。输出不是训练模型，不能计作 ACT 执行证据。
+- **`fake_provider.py`**：实现确定性的 Policy Provider（声明 `test_only=true`），用于协议连通性、会话生命周期与流式动作块测试。
+- **`run_fake.py`**：独立进程启动入口。
 
-目录导航：[上级目录](../README.md)。
+Fake Policy 输出非真实神经网络预测，严禁作为 ACT 策略评估证据。
+
+目录导航：[上级目录](../README.md)

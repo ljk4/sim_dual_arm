@@ -1,9 +1,9 @@
-# 机器人实例
+# 机器人实例档案（Robots）
 
-- `mock_dual_arm_v1/`：历史 CPU mock 单相机 profile。
-- `panda_stack_v1/`：双 Panda 三相机基线 profile。
-- `panda_stack_learning_v1/`：学习任务相机标定变体。
+- **[`panda_stack_v1/`](panda_stack_v1/README.md)**：双 Panda 16 自由度 + 三路 320×240 相机基线 Profile。
+- **[`panda_stack_learning_v1/`](panda_stack_learning_v1/README.md)**：堆叠学习任务相机标定变体（右腕 FOV 68°）。
+- **[`mock_dual_arm_v1/`](mock_dual_arm_v1/README.md)**：仅用于契约与配置单元测试的最小单相机 Profile（`test_only=true`）。
 
-每个目录的 `profile.json` 是语义快照；不要放机器路径、账号或部署地址。
+每个子目录下的 `profile.json` 为纯语义配置快照，不包含任何机器路径、网络地址或账号信息。
 
-目录导航：[上级目录](../README.md)。
+目录导航：[上级目录](../README.md)

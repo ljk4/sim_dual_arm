@@ -1,23 +1,17 @@
 # dual_arm_learning
 
-ACT 推理、训练和数据处理包：
+无 ROS 依赖（ROS-free）的 ACT 数据集转换、训练与策略推理服务包：
 
-- `adapters/lerobot_act.py`、`pipeline.py`、`policy_service_cli.py`、`policy_config.py`、
-  `chunk_admission.py`、`temporal_ensemble.py`：纯模型适配器、分块推理流水线、gRPC
-  服务入口、单层配置/契约、夹爪准入，以及按绝对仿真时间对齐的有界预测融合。
-- `policy_server.py`、`policy_service.py`、`policy_types.py`、`policy_config.py`：
-  Policy 服务装配、配置与公共类型。
-- `dataset.py`、`dataset_common.py`、`dataset_export.py`、`dataset_manifest.py`：
-  数据转换入口、共享哈希/路径原语、单 episode 导出校验，以及 LeRobot 分片写入与
-  manifest 组装。
-- `sample_filter.py`、`sample_filter_rules.py`、`sample_filter_mask.py`：训练起点
-  筛选、Pydantic 规则校验和 mask 读取/摘要校验。
-- `training.py`、`training_manifest.py`、`training_engine.py`、`training_support.py`：
-  数据准入、budget 训练上下文与 AMP 步进循环，以及模型/DataLoader/验证/报告支持。
-- `checkpoints.py`、`bundle.py`、`budget.py`：检查点、模型包和预算台账。
-- `cli.py`、`config.py`：命令行入口与配置解析（训练默认 PyAV、批处理 collate、
-  多 worker、`pin_memory` 和 CUDA AMP）。
+- **策略推理流水线与 gRPC 服务**：
+  - `adapters/base.py`、`adapters/lerobot_act.py`：策略适配器协议与 LeRobot ACT 纯模型推理封装。
+  - `pipeline.py`、`chunk_admission.py`、`temporal_ensemble.py`：分块推理流水线（`ChunkedPolicyPipeline`）、夹爪开度准入修正与按绝对仿真时刻对齐的历史预测指数加权融合。
+  - `policy_config.py`、`policy_types.py`、`policy_service.py`、`policy_server.py`、`policy_service_cli.py`：单层 Pydantic 服务配置与契约模型、会话管理、gRPC 服务端及命令行入口。
+- **数据集构建与起点筛选**：
+  - `dataset.py`、`dataset_common.py`、`dataset_export.py`、`dataset_manifest.py`：数据转换主入口、共享哈希/路径原语、单局导出校验、LeRobot 分片写入与 Manifest 组装。
+  - `sample_filter.py`、`sample_filter_rules.py`、`sample_filter_mask.py`：训练起点静止冗余筛选、Pydantic 规则校验与采样掩码摘要验证。
+- **模型训练、检查点与发布包**：
+  - `training.py`、`training_manifest.py`、`training_engine.py`、`training_support.py`：训练准入校验、预算上下文、CUDA AMP 混合精度训练循环、PyAV 视频解码、张量批处理 DataLoader 与验证评估。
+  - `checkpoints.py`、`bundle.py`、`budget.py`：检查点保存/恢复、safetensors 模型包导出与追加式训练预算台账。
+- **CLI 与通用配置**：`cli.py`、`config.py`、`config_yaml.py`。
 
-训练不得下载 backbone 或依赖网络；模型、数据和缓存路径由配置和只读挂载决定。
-
-目录导航：[上级目录](../README.md)。
+目录导航：[上级目录](../README.md)

@@ -1,9 +1,11 @@
 # Schema v1
 
-包括 `robot_profile`、`observation`、`action`、`runtime_config`、`run_event`、
-`run_status` 和 `episode_manifest`。`robot_profile` 同时提供历史单相机
-`schema_version=1` 与当前具名相机 `schema_version=2` 两种严格格式
-（`robot_profile_v2.schema.json`）。版本按具体类型分别演进；旧记录仍按原字段
-严格读取。
+包含以下严格 JSON Schema 定义：
 
-目录导航：[上级目录](../README.md)。
+- **机器人与数据语义**：`robot_profile.schema.json`（单相机 v1 格式）、`robot_profile_v2.schema.json`（当前具名多相机 `schema_version=2` 格式）、`observation.schema.json`、`action.schema.json`。
+- **运行配置与产物**：`runtime_config.schema.json`、`episode_manifest.schema.json`（`schema_version=1`）。
+- **结构化日志**：`run_event.schema.json`、`run_status.schema.json`。
+
+各文档类型的 `schema_version` 独立演进，均开启 `additionalProperties: false` 严格校验。
+
+目录导航：[上级目录](../README.md)

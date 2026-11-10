@@ -1,21 +1,22 @@
-# 学习与策略服务
+# LeRobot ACT 学习与策略服务
 
-ROS-free 的 ACT 策略服务、协议适配、bundle/checkpoint 校验、数据转换和训练工具。
-`src/dual_arm_learning/` 是唯一包，公共 CLI 为 `cli.py`，策略服务为
-`policy_service_cli.py`。容器内唯一入口为 `learning/lerobot/scripts/run.sh`：
+提供无 ROS 依赖（ROS-free）的 LeRobot 数据集转换、起点筛选、ACT 混合精度训练、模型包（Bundle）导出与 gRPC Policy 推理服务。
 
-- `prepare-policy`：验证真实 ACT bundle，生成通用 `policy_binding.json` 和可执行
-  `policy.yaml`；模型/processor/profile/schema 摘要均由 bundle 与 shipped 文件计算。
-- `convert`、`validate`、`filter`、`train`、`bundle`、`verify-bundle`、`budget`：
-  复用原 `dual_arm_learning.cli` 的转换、数据校验、筛选、训练预算、模型包能力。
-  训练默认使用 PyAV 视频解码、默认张量批处理 collate、`num_workers`/`pin_memory`
-  多进程预取和 CUDA `torch.amp` 混合精度；这些参数都在 `act_training*.yaml` 中显式配置。
-- `policy`：启动 ROS-free Policy 服务；runtime 默认绑定 `learning:50051`，binding 可配置一致端口的 host:port。
-- `test`：固定关闭自动插件收集的 pytest 入口。
+## 目录结构
 
-配置在 `configs/`，镜像/Compose 在 `docker/`；数据、模型和缓存属于运行产物，
-不提交。学习环境不挂 ROS，也不导入 runtime。当前阶段见
-[项目状态](../../docs/project-status.md)，实现历史见
-[DSH-035](../../docs/history/README.md#dsh-035)、[DSH-036](../../docs/history/README.md#dsh-036)。
+- **[`src/dual_arm_learning/`](src/dual_arm_learning/README.md)**：`dual_arm_learning` 核心 Python 包。
+- **[`configs/`](configs/README.md)**：容器环境配置（`container.env`）、数据集转换（`act_dataset*.yaml`）、训练超参（`act_training*.yaml`）、起点筛选（`act_sample_filter.yaml`）与 Policy 服务模板（`policy_temporal.yaml`）。
+- **[`docker/`](docker/README.md)**：学习端 `Dockerfile`、`docker-compose.yml` 与固定源码来源声明（`learning-source.json`）。
+- **[`scripts/`](scripts/README.md)**：容器内统一入口 `run.sh` 与策略配置生成脚本 `prepare_policy.py`。
 
-目录导航：[上级目录](../README.md)。
+## 核心子命令
+
+在 `learning` 容器内通过 `learning/lerobot/scripts/run.sh <command>` 调用：
+
+- **`prepare-policy`**：校验 ACT 模型包并生成 `policy_binding.json`、`policy.yaml`、`act_contract.json` 与 `run_manifest.json`。
+- **`convert` / `validate` / `filter`**：将合格 Episode 转换为 45/5 LeRobot 数据集、校验数据完整性、生成静止冗余起点筛选掩码。
+- **`train` / `bundle` / `verify-bundle` / `budget`**：执行 ACT 训练（默认启用 PyAV、批张量直出、`num_workers`/`pin_memory` 与 CUDA AMP）、导出并校验 safetensors 模型包、查询训练预算台账。
+- **`policy`**：启动 gRPC Policy 推理服务（默认监听 `50051` 端口）。
+- **`test`**：运行固定禁用自动插件收集的 `pytest` 测试套件。
+
+目录导航：[上级目录](../README.md)

@@ -1,10 +1,5 @@
-# 仿真端
+# 仿真端（Simulation）
 
-按仿真器划分的机器人实现。当前只有 MuJoCo；Gazebo、Isaac Sim 等后续在此层级
-并列新增实际实现。
+本目录按物理仿真引擎组织机器人后端实现。当前唯一实现为 MuJoCo（[`mujoco/`](mujoco/README.md)），负责双 Panda 动力学步进、三路 EGL 相机渲染、Ruckig 有界跟随规划、接触判定与程序示教。
 
-- `mujoco/`：MuJoCo 双 Panda 物理后端、场景/控制配置、依赖镜像和资产脚本。
-
-入口与历史材料见 [mujoco/README.md](mujoco/README.md)。
-
-目录导航：[上级目录](../README.md)。
+目录导航：[上级目录](../README.md)

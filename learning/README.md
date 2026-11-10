@@ -1,10 +1,5 @@
-# 学习端
+# 学习与策略服务端（Learning）
 
-按学习框架划分的数据、训练和推理实现。当前为 LeRobot ACT；其他框架后续在此层级
-并列新增实际实现，不预建空目录。
+本目录按机器学习框架组织数据集构建、模型训练与策略推理服务实现。当前唯一实现为基于 LeRobot 的 ACT（Action Chunking with Transformers）框架（[`lerobot/`](lerobot/README.md)），全程保持 ROS-free。
 
-- `lerobot/`：数据转换、训练、模型包和 ROS-free Policy 服务。
-
-入口与历史材料见 [lerobot/README.md](lerobot/README.md)。
-
-目录导航：[上级目录](../README.md)。
+目录导航：[上级目录](../README.md)

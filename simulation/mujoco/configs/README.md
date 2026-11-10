@@ -1,16 +1,13 @@
-# MuJoCo 配置
+# MuJoCo 配置说明
 
-| 目录 | 用途 |
+| 目录/文件 | 用途说明 |
 | --- | --- |
-| [backend/](backend/README.md) | 后端启动配方，选择场景、控制、profile 与任务 |
-| [scene/](scene/README.md) | 物理场景、学习相机变体与堆叠任务 |
-| [checks/](checks/README.md) | 场景可见性与关键位姿检查门限 |
-| `container.env` | simulation 容器的运行路径及 ROS/EGL 环境设置 |
+| [`backend/`](backend/README.md) | 后端启动配方模板（组合场景、控制参数、Profile 与任务插件） |
+| [`scene/`](scene/README.md) | 双 Panda 物理场景几何、学习相机视场变体与堆叠任务阈值 |
+| [`checks/`](checks/README.md) | 三相机静态可见性门限与关键位姿运动学净空检查参数 |
+| `container.env` | `simulation` 容器内运行路径、ROS 2 域 ID 与 NVIDIA EGL 环境变量 |
 
-控制、跟随和流式执行参数已收敛到跨端共享的
-[profiles/control/](../../../profiles/control/README.md)。`container.env` 由 Compose 的 `env_file` 加载；宿主 bind 来源由本端
-`docker/docker-compose.yml` 指定。修改场景/动作语义时同步校验对应 profile。
-当前运行配方与参数保留；两份仅供历史对照的后端配置已移至
-[测试夹具](../../../tests/fixtures/simulation/README.md)，不进入日常配置目录。
+- 跨端共享的控制限值、受限跟随与流式超时配置集中维护在 [`profiles/control/`](../../../profiles/control/README.md)。
+- 历史回归对照专用的后端配置夹具存放于 [`tests/fixtures/simulation/`](../../../tests/fixtures/simulation/README.md)。
 
-目录导航：[上级目录](../README.md)。
+目录导航：[上级目录](../README.md)

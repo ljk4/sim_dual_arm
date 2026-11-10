@@ -1,19 +1,20 @@
-# Runtime 镜像与组合
+# Runtime 容器构建与编排
 
-- `Dockerfile`：唯一运行依赖镜像，直接基于 `ros:jazzy-ros-base-noble`，包含
-  colcon、MCAP、jsonschema 和本目录 `requirements-dev.txt`；Fast DDS 配置从公共
-  文件只读挂载，不 COPY 业务或 `run.sh`。仅保留依赖 `PATH` 环境变量；
-  `ENTRYPOINT` 清空，`CMD` 为 `sleep infinity`。
-- `docker-compose.yml`：单个空闲 `runtime` 服务，build 本目录 Dockerfile，镜像默认
-  `sim-dual-arm/runtime:current`；加入共享 ROS 网络与 learning 网络。
-- `../configs/container.env`：容器内源码、ROS 与路径设置。
-- `../scripts/run.sh`：进入容器后手动执行的功能脚本，提供
-  `build-ros-sdk`、`build-policy-sdk`、`prepare`、`collect`、`policy`、`control`、
-  `audit`、`export`、`campaign`、`evaluate`、`test`。
+- **`Dockerfile`**：基于 `ros:jazzy-ros-base-noble` 构建运行端环境，安装 `colcon`、MCAP、Pydantic、JSON Schema 及 `requirements-dev.txt` 中的依赖。不 `COPY` 业务源码或启动脚本，清空 `ENTRYPOINT` 并以 `CMD ["sleep", "infinity"]` 空闲启动。
+- **`docker-compose.yml`**：定义 `runtime` 服务（默认镜像 `sim-dual-arm/runtime:current`），加载 `../configs/container.env`，同时接入 `ros` 与 `learning` 网络（无需 GPU）。
 
-源码、配置、SDK、数据与模型通过只读/可写挂载提供。在本目录执行
-`docker compose build`、`docker compose up -d`、`docker compose exec runtime bash`。
-ROS/Policy SDK 由容器内 `run.sh build-*-sdk` 调用
-`infrastructure/scripts/build_*_sdk.sh` 生成。
+## 常用操作
 
-目录导航：[上级目录](../README.md)。
+```bash
+cd runtime/ros2/docker
+docker compose build
+docker compose up -d
+docker compose exec runtime bash
+
+# 在容器内构建 SDK 或运行测试：
+runtime/ros2/scripts/run.sh build-ros-sdk
+runtime/ros2/scripts/run.sh build-policy-sdk
+runtime/ros2/scripts/run.sh test -q tests/unit
+```
+
+目录导航：[上级目录](../README.md)
