@@ -1,9 +1,4 @@
-"""Bounded Policy RPC service over one typed provider boundary.
-
-The service owns wire identity, session/request idempotence, observation and
-prediction schema checks, deadlines and bounded caches.  It has no Torch, ROS,
-MuJoCo or runtime import; a fake or ACT provider is injected from outside.
-"""
+"""Bounded Policy RPC service over one typed provider/adapter boundary."""
 
 from __future__ import annotations
 
@@ -14,11 +9,15 @@ import threading
 import time
 import uuid
 from collections import OrderedDict
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any
 
 from google.protobuf.message import Message
+from robot_contracts.models import ContractError, RobotProfile
 
+from .adapters.base import PolicyModelAdapter
+from .pipeline import ChunkedPolicyPipeline, PipelineResult, PredictionBudget
 from .policy_config import PolicyServiceConfig
 from .policy_types import (
     PolicyError,
@@ -29,6 +28,7 @@ from .policy_types import (
     ProviderJointSample,
     ProviderObservation,
     ProviderPrediction,
+    ProviderTarget,
 )
 
 
@@ -36,12 +36,9 @@ def _bad(reason: str, detail: str = "") -> PolicyError:
     return PolicyError(reason, detail)
 
 
-def _canonical_bytes(value: dict[str, Any]) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
-
-
 def semantic_hash(value: dict[str, Any]) -> str:
-    return hashlib.sha256(_canonical_bytes(value)).hexdigest()
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return hashlib.sha256(payload.encode()).hexdigest()
 
 
 def _payload_digest(message: Message) -> str:
@@ -77,10 +74,6 @@ def _context_value(message: object) -> ProviderContext:
     return context
 
 
-def _same_context(left: ProviderContext, right: ProviderContext) -> bool:
-    return left == right
-
-
 @dataclass(slots=True)
 class _Session:
     session_id: str
@@ -90,20 +83,38 @@ class _Session:
     lock: threading.Lock = field(default_factory=threading.Lock)
     request_cache: OrderedDict[str, tuple[str, object]] = field(default_factory=OrderedDict)
     reset_cache: OrderedDict[str, tuple[str, object]] = field(default_factory=OrderedDict)
-    observation_digests: dict[int, str] = field(default_factory=dict)
-    max_observation_id: int = 0
+    pipeline: ChunkedPolicyPipeline | None = None
+    last_observation_id: int = 0
+    predictions: int = 0
 
 
 class PolicyService:
     """The actual service layer, independent of the gRPC server object."""
 
-    def __init__(self, config: PolicyServiceConfig, provider: PolicyProvider) -> None:
+    def __init__(
+        self,
+        config: PolicyServiceConfig,
+        provider: PolicyProvider | PolicyModelAdapter,
+        *,
+        prediction_directory: Path | None = None,
+        prediction_max_bytes: int = 268435456,
+    ) -> None:
         if not isinstance(config, PolicyServiceConfig):
             raise _bad("SCHEMA_MISMATCH", "config must be PolicyServiceConfig")
         self.config = config
-        self.provider = provider
+        self.adapter: PolicyModelAdapter | None = (
+            provider if hasattr(provider, "predict_raw_chunk") else None  # type: ignore[assignment]
+        )
+        self.provider: PolicyProvider | None = (
+            None if self.adapter is not None else provider  # type: ignore[assignment]
+        )
+        self.prediction_directory = prediction_directory
+        self.prediction_max_bytes = prediction_max_bytes
+        self._budget = PredictionBudget()
         try:
-            info = provider.info()
+            info = provider.info() if self.provider is not None else ProviderInfo.from_config(
+                config
+            )
         except PolicyError:
             raise
         except Exception as error:  # noqa: BLE001 - provider failure is explicit
@@ -113,32 +124,19 @@ class PolicyService:
         self._open_cache: OrderedDict[str, tuple[str, str]] = OrderedDict()
         self._lock = threading.Lock()
 
-    # ------------------------------------------------------------------ info
     def _validate_info(self, info: ProviderInfo) -> ProviderInfo:
-        cfg = self.config
         if not isinstance(info, ProviderInfo):
             raise _bad("PROVIDER_MISMATCH", "provider.info must return ProviderInfo")
-        expected = (
-            ("protocol_major", cfg.protocol_major),
-            ("model_bundle_digest", cfg.model_bundle_digest),
-            ("processor_digest", cfg.processor_digest),
-            ("observation_schema_hash", cfg.observation_schema_hash),
-            ("action_schema_hash", cfg.action_schema_hash),
-            ("robot_profile_hash", cfg.robot_profile_hash),
-            ("state_joint_names", cfg.joint_names),
-            ("action_joint_names", cfg.action_joint_names),
-            ("required_camera_names", cfg.camera_names),
-            ("action_period_ns", cfg.action_period_ns),
-            ("stateful", cfg.stateful),
-            ("command_space", cfg.command_space),
-            ("chunk_size", cfg.chunk_size),
-            ("test_only", cfg.test_only),
-        )
-        for name, value in expected:
-            if getattr(info, name) != value:
+        expected = ProviderInfo.from_config(self.config)
+        for name in info.__dataclass_fields__:
+            if getattr(info, name) != getattr(expected, name):
                 raise _bad("PROVIDER_MISMATCH", f"provider {name} differs from config")
-        if info.ready is not True:
-            raise _bad("NOT_READY", "provider is not ready")
+        if self.adapter is not None and (
+            self.adapter.policy_family != "act"
+            or self.adapter.chunk_size != self.config.chunk_size
+            or self.adapter.action_dim != len(self.config.action_joint_names)
+        ):
+            raise _bad("PROVIDER_MISMATCH", "adapter family/dimensions differ from config")
         return info
 
     def info_reply(self, requested_model_digest: str = "") -> object:
@@ -149,26 +147,13 @@ class PolicyService:
     def _policy_info_message(self) -> object:
         from dual_arm_policy.v1 import policy_pb2
 
-        info = self.info
-        return policy_pb2.PolicyInfo(
-            protocol_major=info.protocol_major,
-            model_bundle_digest=info.model_bundle_digest,
-            processor_digest=info.processor_digest,
-            observation_schema_hash=info.observation_schema_hash,
-            action_schema_hash=info.action_schema_hash,
-            robot_profile_hash=info.robot_profile_hash,
-            state_joint_names=list(info.state_joint_names),
-            action_joint_names=list(info.action_joint_names),
-            required_camera_names=list(info.required_camera_names),
-            action_period_ns=info.action_period_ns,
-            stateful=info.stateful,
-            ready=info.ready,
-            command_space=info.command_space,
-            chunk_size=info.chunk_size,
-            test_only=info.test_only,
-        )
+        fields = {
+            name: getattr(self.info, name) for name in self.info.__dataclass_fields__
+        }
+        for name in ("state_joint_names", "action_joint_names", "required_camera_names"):
+            fields[name] = list(fields[name])
+        return policy_pb2.PolicyInfo(**fields)
 
-    # ------------------------------------------------------------------ open
     def open_session(self, request: object, deadline_ns: int | None = None) -> object:
         del deadline_ns
         open_request_id = str(request.open_request_id)  # type: ignore[attr-defined]
@@ -194,10 +179,7 @@ class PolicyService:
             if cached is not None:
                 previous_digest, session_id = cached
                 if previous_digest != digest:
-                    raise _bad(
-                        "REQUEST_ID_CONFLICT",
-                        "open_request_id was already used with different content",
-                    )
+                    raise _bad("REQUEST_ID_CONFLICT", "open_request_id conflicts with content")
                 session = self._sessions.get(session_id)
                 if session is None:
                     raise _bad("UNKNOWN_SESSION", "cached open session no longer exists")
@@ -207,20 +189,30 @@ class PolicyService:
             if len(self._open_cache) >= self.config.max_open_requests:
                 raise _bad("RESOURCE_EXHAUSTED", "open request cache is full")
             session_id = f"policy-{uuid.uuid4()}"
-            try:
-                self.provider.open(
-                    session_id,
-                    context,
-                    open_request_id,
-                    bytes(request.robot_profile_json),  # type: ignore[attr-defined]
-                    bytes(request.observation_schema_json),  # type: ignore[attr-defined]
-                    bytes(request.action_schema_json),  # type: ignore[attr-defined]
+            if self.provider is not None:
+                try:
+                    self.provider.open(
+                        session_id,
+                        context,
+                        open_request_id,
+                        bytes(request.robot_profile_json),  # type: ignore[attr-defined]
+                        bytes(request.observation_schema_json),  # type: ignore[attr-defined]
+                        bytes(request.action_schema_json),  # type: ignore[attr-defined]
+                    )
+                except PolicyError:
+                    raise
+                except Exception as error:  # noqa: BLE001
+                    raise _bad("PROVIDER_ERROR", f"provider open failed: {error}") from error
+            pipeline = None
+            if self.adapter is not None:
+                pipeline = ChunkedPolicyPipeline(
+                    self.adapter,
+                    self.config,
+                    prediction_directory=self.prediction_directory,
+                    prediction_max_bytes=self.prediction_max_bytes,
+                    budget=self._budget,
                 )
-            except PolicyError:
-                raise
-            except Exception as error:  # noqa: BLE001
-                raise _bad("PROVIDER_ERROR", f"provider open failed: {error}") from error
-            session = _Session(session_id, context, digest, calibrations)
+            session = _Session(session_id, context, digest, calibrations, pipeline=pipeline)
             self._sessions[session_id] = session
             self._open_cache[open_request_id] = (digest, session_id)
             return self._open_reply(session)
@@ -238,19 +230,12 @@ class PolicyService:
     def _context_message(context: ProviderContext) -> object:
         from dual_arm_policy.v1 import policy_pb2
 
-        return policy_pb2.RunContext(
-            robot_id=context.robot_id,
-            robot_profile_hash=context.robot_profile_hash,
-            backend_instance_id=context.backend_instance_id,
-            time_domain_id=context.time_domain_id,
-            clock_epoch=context.clock_epoch,
-            episode_id=context.episode_id,
-            control_epoch=context.control_epoch,
-        )
+        return policy_pb2.RunContext(**asdict(context))
 
     def _validate_documents(
         self, profile_json: bytes, observation_json: bytes, action_json: bytes
     ) -> dict[str, str]:
+        cfg = self.config
         try:
             profile = json.loads(profile_json)
             observation = json.loads(observation_json)
@@ -260,9 +245,9 @@ class PolicyService:
         if not all(isinstance(item, dict) for item in (profile, observation, action)):
             raise _bad("SCHEMA_MISMATCH", "session documents must be JSON objects")
         try:
-            profile_hash = semantic_hash(profile)  # type: ignore[arg-type]
-            observation_hash = semantic_hash(observation)  # type: ignore[arg-type]
-            action_hash = semantic_hash(action)  # type: ignore[arg-type]
+            profile_hash = semantic_hash(profile)
+            observation_hash = semantic_hash(observation)
+            action_hash = semantic_hash(action)
         except (TypeError, ValueError) as error:
             raise _bad("SCHEMA_MISMATCH", f"session JSON is not canonical: {error}") from error
         if profile_hash != self.info.robot_profile_hash:
@@ -271,47 +256,29 @@ class PolicyService:
             raise _bad("SCHEMA_MISMATCH", "observation_schema_json digest differs")
         if action_hash != self.info.action_schema_hash:
             raise _bad("SCHEMA_MISMATCH", "action_schema_json digest differs")
-        joints = profile.get("joints")
-        if (
-            not isinstance(joints, list)
-            or tuple(item.get("name") for item in joints if isinstance(item, dict))
-            != self.config.joint_names
-        ):
+        try:
+            robot = RobotProfile.validate_dict(profile)
+        except ContractError as error:
+            raise _bad("SCHEMA_MISMATCH", f"robot profile is invalid: {error}") from error
+        if robot.joint_names != cfg.joint_names:
             raise _bad("SCHEMA_MISMATCH", "robot profile joint order differs")
-        cameras = profile.get("cameras")
-        if not isinstance(cameras, list):
-            raise _bad("SCHEMA_MISMATCH", "robot profile has no cameras")
-        calibrations: dict[str, str] = {}
-        camera_names: list[str] = []
-        for item in cameras:
-            if not isinstance(item, dict):
-                raise _bad("SCHEMA_MISMATCH", "profile camera entry must be an object")
-            name = item.get("name")
-            if not isinstance(name, str):
-                raise _bad("SCHEMA_MISMATCH", "profile camera name must be a string")
-            if (item.get("width"), item.get("height")) != (
-                self.config.camera_width,
-                self.config.camera_height,
-            ):
-                raise _bad("SCHEMA_MISMATCH", f"profile camera {name} dimensions differ")
-            digest = item.get("calibration_digest")
-            if not isinstance(digest, str) or not digest:
-                raise _bad("SCHEMA_MISMATCH", f"profile camera {name} lacks a calibration digest")
-            camera_names.append(name)
-            calibrations[name] = digest
-        if tuple(camera_names) != self.config.camera_names:
+        if robot.camera_names != cfg.camera_names:
             raise _bad("SCHEMA_MISMATCH", "robot profile camera order differs")
-        if tuple(observation.get("joint_names", ())) != self.config.joint_names:
+        for camera in robot.cameras:
+            if (camera.width, camera.height) != (cfg.camera_width, cfg.camera_height):
+                raise _bad("SCHEMA_MISMATCH", f"profile camera {camera.name} dimensions differ")
+            if not camera.calibration_digest:
+                raise _bad("SCHEMA_MISMATCH", f"profile camera {camera.name} lacks a digest")
+        if tuple(observation.get("joint_names", ())) != cfg.joint_names:
             raise _bad("SCHEMA_MISMATCH", "observation schema joint order differs")
-        if tuple(observation.get("camera_names", ())) != self.config.camera_names:
+        if tuple(observation.get("camera_names", ())) != cfg.camera_names:
             raise _bad("SCHEMA_MISMATCH", "observation schema camera order differs")
-        if tuple(action.get("joint_names", ())) != self.config.action_joint_names:
+        if tuple(action.get("joint_names", ())) != cfg.action_joint_names:
             raise _bad("SCHEMA_MISMATCH", "action schema joint order differs")
-        if action.get("command_space") != self.config.command_space:
+        if action.get("command_space") != cfg.command_space:
             raise _bad("SCHEMA_MISMATCH", "action schema command space differs")
-        return calibrations
+        return {camera.name: camera.calibration_digest for camera in robot.cameras}
 
-    # ------------------------------------------------------------- predict
     def predict(self, request: object, deadline_ns: int | None = None) -> object:
         from dual_arm_policy.v1 import policy_pb2
 
@@ -322,7 +289,7 @@ class PolicyService:
         context = _context_value(request.context)  # type: ignore[attr-defined]
         with session.lock:
             # Old-context responses are never reused or executed after reset.
-            if not _same_context(context, session.context):
+            if context != session.context:
                 raise _bad("STALE_CONTEXT", "predict context differs from the open session")
             observation = self._validate_observation(session, request.observation)  # type: ignore[attr-defined]
             digest = _payload_digest(request)  # type: ignore[arg-type]
@@ -330,28 +297,53 @@ class PolicyService:
             if cached is not None:
                 previous_digest, reply = cached
                 if previous_digest != digest:
-                    raise _bad(
-                        "REQUEST_ID_CONFLICT",
-                        "request_id was already used with different content",
-                    )
+                    raise _bad("REQUEST_ID_CONFLICT", "request_id conflicts with content")
                 return reply
             if len(session.request_cache) >= self.config.max_request_cache:
                 session.request_cache.popitem(last=False)
             started = time.monotonic_ns()
-            try:
-                prediction = self.provider.predict(
-                    session.session_id, request_id, context, observation
+            pipeline_result: PipelineResult | None = None
+            if self.adapter is not None:
+                if observation.observation_id <= session.last_observation_id:
+                    raise _bad("INVALID_OBSERVATION", "observations must advance monotonically")
+                try:
+                    pipeline_result = session.pipeline.predict(  # type: ignore[union-attr]
+                        identity=session.session_id + ":" + request_id,
+                        observation_id=observation.observation_id,
+                        observation_time_ns=observation.reference_robot_time_ns,
+                        cameras=observation.cameras,
+                        joint_positions=observation.joints.positions,
+                    )
+                except PolicyError:
+                    raise
+                except Exception as error:  # noqa: BLE001
+                    raise _bad("PROVIDER_ERROR", f"pipeline predict failed: {error}") from error
+                limit_ns = int(self.config.predict_deadline_s * 1_000_000_000)
+                limit_ns = limit_ns if deadline_ns is None else min(limit_ns, deadline_ns)
+                if time.monotonic_ns() - started > limit_ns:
+                    raise _bad("DEADLINE_EXCEEDED", "prediction exceeded its deadline")
+                prediction = self._adapter_prediction(
+                    pipeline_result, session.session_id, request_id, context, observation
                 )
-            except PolicyError:
-                raise
-            except Exception as error:  # noqa: BLE001
-                raise _bad("PROVIDER_ERROR", f"provider predict failed: {error}") from error
-            elapsed = time.monotonic_ns() - started
-            if deadline_ns is not None and elapsed > deadline_ns:
-                raise _bad("DEADLINE_EXCEEDED", "provider prediction exceeded its deadline")
+            else:
+                try:
+                    prediction = self.provider.predict(  # type: ignore[union-attr]
+                        session.session_id, request_id, context, observation
+                    )
+                except PolicyError:
+                    raise
+                except Exception as error:  # noqa: BLE001
+                    raise _bad("PROVIDER_ERROR", f"provider predict failed: {error}") from error
+                elapsed = time.monotonic_ns() - started
+                if deadline_ns is not None and elapsed > deadline_ns:
+                    raise _bad("DEADLINE_EXCEEDED", "provider prediction exceeded its deadline")
             target_count, inference_duration = self._validate_prediction(
                 prediction, observation, context, session.session_id, request_id
             )
+            if pipeline_result is not None:
+                session.pipeline.commit(pipeline_result)  # type: ignore[union-attr]
+                session.last_observation_id = observation.observation_id
+                session.predictions += 1
             reply = policy_pb2.PredictReply(
                 session_id=session.session_id,
                 request_id=request_id,
@@ -374,6 +366,30 @@ class PolicyService:
             session.request_cache[request_id] = (digest, reply)
             return reply
 
+    def _adapter_prediction(
+        self,
+        result: PipelineResult,
+        session_id: str,
+        request_id: str,
+        context: ProviderContext,
+        observation: ProviderObservation,
+    ) -> ProviderPrediction:
+        period = self.config.action_period_ns
+        targets = tuple(
+            ProviderTarget((index + 1) * period, tuple(map(float, result.targets[index])))
+            for index in range(self.config.chunk_size)
+        )
+        return ProviderPrediction(
+            self.config.action_joint_names,
+            targets,
+            self.config.model_bundle_digest,
+            result.inference_duration_ns,
+            context,
+            session_id,
+            request_id,
+            observation.observation_id,
+        )
+
     def _session(self, session_id: str) -> _Session:
         if not session_id:
             raise _bad("INVALID_REQUEST", "session_id must not be empty")
@@ -389,7 +405,7 @@ class PolicyService:
             raise _bad("INVALID_OBSERVATION", "observation_id must be positive")
         reference = int(observation.reference_robot_time_ns)  # type: ignore[attr-defined]
         if reference < 0:
-            raise _bad("INVALID_OBSERVATION", "reference robot time must be non-negative")
+            raise _bad("INVALID_OBSERVATION", "reference time must be non-negative")
         if observation.task_id != cfg.task_id or observation.task_text != cfg.task_text:  # type: ignore[attr-defined]
             raise _bad("INVALID_OBSERVATION", "task identity/text differs from the fixed task")
         joints = observation.joints  # type: ignore[attr-defined]
@@ -405,13 +421,13 @@ class PolicyService:
         if names != cfg.joint_names:
             raise _bad("INVALID_OBSERVATION", "joint names/order differ")
         if len(positions) != len(cfg.joint_names):
-            raise _bad("INVALID_OBSERVATION", "joint positions do not cover all 16 joints")
+            raise _bad("INVALID_OBSERVATION", "positions do not cover 16 joints")
         if velocities and len(velocities) != len(cfg.joint_names):
-            raise _bad("INVALID_OBSERVATION", "joint velocities are not 16-wide")
+            raise _bad("INVALID_OBSERVATION", "velocities are not 16-wide")
         if int(joints.state_seq) < 1:  # type: ignore[attr-defined]
             raise _bad("INVALID_OBSERVATION", "state_seq must be positive")
         if int(joints.captured_at_robot_time_ns) != reference:  # type: ignore[attr-defined]
-            raise _bad("INVALID_OBSERVATION", "joint capture time differs from the reference")
+            raise _bad("INVALID_OBSERVATION", "joint capture time differs")
         cameras = tuple(observation.cameras)  # type: ignore[attr-defined]
         if tuple(camera.camera_name for camera in cameras) != cfg.camera_names:
             raise _bad("INVALID_OBSERVATION", "camera names/order differ")
@@ -436,28 +452,20 @@ class PolicyService:
             total_payload += len(payload)
             typed.append(
                 ProviderCameraSample(
-                    str(camera.camera_name),
-                    int(camera.frame_seq),
-                    int(camera.captured_at_robot_time_ns),
-                    str(camera.frame_id),
-                    str(camera.calibration_digest),
-                    int(camera.width),
-                    int(camera.height),
-                    int(camera.encoding),
-                    payload,
+                    str(camera.camera_name), int(camera.frame_seq),
+                    int(camera.captured_at_robot_time_ns), str(camera.frame_id),
+                    str(camera.calibration_digest), int(camera.width), int(camera.height),
+                    int(camera.encoding), payload,
                 )
             )
         if total_payload > cfg.max_message_bytes:
-            raise _bad("RESOURCE_EXHAUSTED", "observation payload exceeds the configured bound")
+            raise _bad("RESOURCE_EXHAUSTED", "payload exceeds the configured bound")
         return ProviderObservation(
             int(observation.observation_id),
             reference,
             ProviderJointSample(
-                int(joints.state_seq),
-                int(joints.captured_at_robot_time_ns),
-                names,
-                positions,
-                velocities,
+                int(joints.state_seq), int(joints.captured_at_robot_time_ns),
+                names, positions, velocities,
             ),
             tuple(typed),
             str(observation.task_id),
@@ -475,7 +483,6 @@ class PolicyService:
         cfg = self.config
         if not isinstance(prediction, ProviderPrediction):
             raise _bad("INVALID_PREDICTION", "provider did not return ProviderPrediction")
-        # A provider cannot smuggle an old/wrong context into a canonical reply.
         if prediction.context is not None and prediction.context != observation_context:
             raise _bad("STALE_CONTEXT", "provider prediction context differs")
         if prediction.observation_id and prediction.observation_id != observation.observation_id:
@@ -490,33 +497,17 @@ class PolicyService:
             raise _bad("INVALID_PREDICTION", "prediction model digest differs")
         targets = tuple(prediction.targets)
         if len(targets) != cfg.chunk_size:
-            raise _bad(
-                "INVALID_PREDICTION",
-                f"prediction has {len(targets)} targets, expected {cfg.chunk_size}",
-            )
-        previous = 0
+            raise _bad("INVALID_PREDICTION", f"prediction has {len(targets)} targets, expected 60")
         for index, target in enumerate(targets):
-            expected = (index + 1) * cfg.action_period_ns
-            if target.time_from_observation_ns != expected:
-                raise _bad(
-                    "INVALID_PREDICTION",
-                    f"target[{index}] time is not the uniform {cfg.action_period_ns}ns grid",
-                )
-            if target.time_from_observation_ns <= previous:
-                raise _bad("INVALID_PREDICTION", "target times are not increasing")
-            previous = target.time_from_observation_ns
+            if target.time_from_observation_ns != (index + 1) * cfg.action_period_ns:
+                raise _bad("INVALID_PREDICTION", f"target[{index}] is off the 50 ms grid")
             positions = tuple(target.positions)
             if len(positions) != len(cfg.action_joint_names):
                 raise _bad("INVALID_PREDICTION", f"target[{index}] is not 16-wide")
             for axis, value in enumerate(positions):
                 number = _finite(value, f"target[{index}].positions[{axis}]")
-                low = cfg.joint_lower_bounds[axis]
-                high = cfg.joint_upper_bounds[axis]
-                if not low <= number <= high:
-                    raise _bad(
-                        "INVALID_PREDICTION",
-                        f"target[{index}].positions[{axis}] outside the robot joint range",
-                    )
+                if not cfg.joint_lower_bounds[axis] <= number <= cfg.joint_upper_bounds[axis]:
+                    raise _bad("INVALID_PREDICTION", f"target[{index}] axis {axis} out of range")
             if observation.reference_robot_time_ns + target.time_from_observation_ns > 2**63 - 1:
                 raise _bad("INVALID_PREDICTION", "target absolute time exceeds int64")
         duration = prediction.inference_duration_ns
@@ -524,7 +515,6 @@ class PolicyService:
             raise _bad("INVALID_PREDICTION", "inference_duration_ns must be non-negative")
         return len(targets), duration
 
-    # --------------------------------------------------------------- reset
     def reset_session(self, request: object) -> object:
         from dual_arm_policy.v1 import policy_pb2
 
@@ -546,16 +536,19 @@ class PolicyService:
                 raise _bad("STALE_CONTEXT", "reset robot profile differs")
             if context.clock_epoch < session.context.clock_epoch:
                 raise _bad("STALE_CONTEXT", "reset clock_epoch moved backwards")
-            try:
-                self.provider.reset(session.session_id, reset_id, context)
-            except PolicyError:
-                raise
-            except Exception as error:  # noqa: BLE001
-                raise _bad("PROVIDER_ERROR", f"provider reset failed: {error}") from error
+            if self.provider is not None:
+                try:
+                    self.provider.reset(session.session_id, reset_id, context)
+                except PolicyError:
+                    raise
+                except Exception as error:  # noqa: BLE001
+                    raise _bad("PROVIDER_ERROR", f"provider reset failed: {error}") from error
+            if session.pipeline is not None:
+                session.pipeline.reset()
             session.context = context
+            session.last_observation_id = 0
+            session.predictions = 0
             session.request_cache.clear()
-            session.observation_digests.clear()
-            session.max_observation_id = 0
             reply = policy_pb2.ResetSessionReply(
                 session_id=session.session_id,
                 reset_id=reset_id,
@@ -565,7 +558,6 @@ class PolicyService:
             session.reset_cache[reset_id] = (_payload_digest(request), reply)  # type: ignore[arg-type]
             return reply
 
-    # --------------------------------------------------------------- close
     def close_session(self, request: object) -> object:
         from dual_arm_policy.v1 import policy_pb2
 
@@ -574,7 +566,7 @@ class PolicyService:
             raise _bad("INVALID_REQUEST", "session_id must not be empty")
         with self._lock:
             session = self._sessions.pop(session_id, None)
-        if session is not None:
+        if session is not None and self.provider is not None:
             with session.lock:
                 try:
                     self.provider.close(session.session_id)

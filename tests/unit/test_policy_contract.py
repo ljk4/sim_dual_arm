@@ -2,27 +2,35 @@ import json
 from pathlib import Path
 
 import pytest
+
+pytest.importorskip("torch")
+pytest.importorskip("lerobot")
 import yaml
-from act_fixtures import (
+from act_fixtures import (  # noqa: E402
     ACTION,
     OBSERVATION,
     PROFILE,
     make_act_bundle,
     reseal_bundle,
 )
-from dual_arm_learning.act_contract import (
-    ActContractError,
-    load_act_settings,
-    resolve_act_contract,
+from dual_arm_learning.bundle import deployment_summary
+from dual_arm_learning.policy_config import (
+    PolicyConfigError,
+    load_policy_config,
+    parse_policy_config,
 )
+from fake_provider import load_fake_config
 
 ROOT = Path(__file__).resolve().parents[2]
+CONFIG = ROOT / "learning/lerobot/configs/policy_temporal.yaml"
+FAKE = ROOT / "learning/lerobot/configs/fake_policy.yaml"
 
 
 def resolve(bundle: Path, *, require_formal: bool = False):
-    return resolve_act_contract(
-        bundle=bundle,
-        profile_path=PROFILE,
+    return load_policy_config(
+        CONFIG,
+        bundle_dir=bundle,
+        robot_profile_path=PROFILE,
         observation_schema_path=OBSERVATION,
         action_schema_path=ACTION,
         require_formal=require_formal,
@@ -33,13 +41,14 @@ def test_contract_verifies_stats_and_rejects_tampered_synthetic(tmp_path):
     bundle = tmp_path / "bundle"
     make_act_bundle(bundle)
     contract = resolve(bundle)
-    assert contract.train_episodes == 45
-    assert contract.validation_episodes == 5
-    assert contract.checkpoint_mode == "full"
-    assert contract.synthetic is True
+    summary = deployment_summary(contract)
+    assert summary["train_episodes"] == 45
+    assert summary["validation_episodes"] == 5
+    assert summary["checkpoint_mode"] == "full"
+    assert summary["synthetic"] is True
 
     def mutate_stats(root: Path) -> None:
-        summary = {
+        stats = {
             "source": "validation_split",
             "features": {
                 "observation.state": {
@@ -57,14 +66,14 @@ def test_contract_verifies_stats_and_rejects_tampered_synthetic(tmp_path):
             },
         }
         (root / "processors/train_stats_summary.json").write_text(
-            json.dumps(summary) + "\n", encoding="utf-8"
+            json.dumps(stats) + "\n", encoding="utf-8"
         )
         (root / "metadata/train_stats_summary.json").write_text(
-            json.dumps(summary) + "\n", encoding="utf-8"
+            json.dumps(stats) + "\n", encoding="utf-8"
         )
 
     reseal_bundle(bundle, mutate_stats)
-    with pytest.raises(ActContractError, match="training-split-only"):
+    with pytest.raises(PolicyConfigError, match="training-split-only"):
         resolve(bundle)
 
 
@@ -83,12 +92,10 @@ def test_contract_rejects_tampered_dataset_split_and_temporal_ensemble(tmp_path)
         )
 
     reseal_bundle(bundle, mutate_dataset)
-    with pytest.raises(ActContractError, match="45/5"):
+    with pytest.raises(PolicyConfigError, match="45/5"):
         resolve(bundle)
 
-
-def test_contract_rejects_temporal_ensemble_and_wrong_schema(tmp_path):
-    bundle = tmp_path / "bundle"
+    bundle = tmp_path / "bundle-temporal"
     make_act_bundle(bundle)
 
     def mutate_config(root: Path) -> None:
@@ -97,17 +104,20 @@ def test_contract_rejects_temporal_ensemble_and_wrong_schema(tmp_path):
         (root / "config.json").write_text(json.dumps(document) + "\n", encoding="utf-8")
 
     reseal_bundle(bundle, mutate_config)
-    with pytest.raises(ActContractError, match="temporal"):
+    with pytest.raises(PolicyConfigError, match="temporal"):
         resolve(bundle)
 
+    schema_bundle = tmp_path / "bundle-schema"
+    make_act_bundle(schema_bundle)
     wrong = tmp_path / "observation.json"
     document = json.loads(OBSERVATION.read_text())
     document["joint_names"] = list(reversed(document["joint_names"]))
     wrong.write_text(json.dumps(document) + "\n", encoding="utf-8")
-    with pytest.raises(ActContractError, match="joint_names"):
-        resolve_act_contract(
-            bundle=bundle,
-            profile_path=PROFILE,
+    with pytest.raises(PolicyConfigError, match="joint order"):
+        load_policy_config(
+            CONFIG,
+            bundle_dir=schema_bundle,
+            robot_profile_path=PROFILE,
             observation_schema_path=wrong,
             action_schema_path=ACTION,
             require_formal=False,
@@ -115,15 +125,21 @@ def test_contract_rejects_temporal_ensemble_and_wrong_schema(tmp_path):
 
 
 def test_temporal_ensemble_setting_is_optional_and_strictly_bounded(tmp_path):
-    temporal = load_act_settings(ROOT / "learning/lerobot/configs/act_policy_temporal.yaml")
-    assert temporal.temporal_ensemble_coeff == pytest.approx(0.01)
+    template = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
+    assert template["model"]["temporal_ensemble_coeff"] == pytest.approx(0.01)
 
-    document = yaml.safe_load(
-        (ROOT / "learning/lerobot/configs/act_policy_temporal.yaml").read_text(encoding="utf-8")
-    )
-    for index, value in enumerate((True, float("nan"), float("inf"), -0.01, 1.01, "0.1")):
-        document["model"]["temporal_ensemble_coeff"] = value
-        path = tmp_path / f"temporal-{index}.yaml"
-        path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
-        with pytest.raises(ActContractError, match="temporal_ensemble_coeff"):
-            load_act_settings(path)
+    from dual_arm_learning.policy_config import PolicyServiceConfig
+
+    assert PolicyServiceConfig.model_fields["temporal_ensemble_coeff"].default is None
+    service = yaml.safe_load(FAKE.read_text(encoding="utf-8"))["service"]
+    for value in (True, float("nan"), float("inf"), -0.01, 1.01, "0.1"):
+        document = dict(service)
+        document["temporal_ensemble_coeff"] = value
+        with pytest.raises(PolicyConfigError, match="temporal_ensemble_coeff"):
+            parse_policy_config(document)
+
+
+def test_fake_service_config_is_unchanged_by_bundle_derivation():
+    config, settings = load_fake_config(FAKE)
+    assert config.chunk_size == 60
+    assert settings.fault == "none"

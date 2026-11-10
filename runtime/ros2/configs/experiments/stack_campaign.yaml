@@ -77,7 +77,7 @@ paths:
   required_paths:
     - runtime/ros2/configs/teacher_collect.yaml
     - runtime/ros2/configs/policy_rollout.yaml
-    - learning/lerobot/configs/act_policy_temporal.yaml
+    - learning/lerobot/configs/policy_temporal.yaml
     - learning/lerobot/docker/docker-compose.yml
     - runtime/ros2/docker/docker-compose.yml
     - simulation/mujoco/configs/backend/backend_stack_teacher.yaml

@@ -5,6 +5,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+pytest.importorskip("mujoco")
 from model_helpers import replace
 from robot_contracts.trajectory import ReferenceSample
 

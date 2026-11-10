@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -16,18 +17,17 @@ pb2 = pytest.importorskip("dual_arm_policy.v1.policy_pb2")
 grpc = pytest.importorskip("grpc")
 
 from act_fixtures import ACTION, OBSERVATION, PROFILE, make_act_bundle  # noqa: E402
-from dual_arm_learning.act_contract import (  # noqa: E402
-    ActContractError,
-    load_act_settings,
-    resolve_act_contract,
+from dual_arm_learning.adapters.lerobot_act import (  # noqa: E402
+    BundleActModel,
+    load_act_adapter,
 )
-from dual_arm_learning.act_provider import (  # noqa: E402
-    ActProvider,
-    decode_rgb,
-    load_act_provider,
+from dual_arm_learning.bundle import deployment_summary  # noqa: E402
+from dual_arm_learning.pipeline import ChunkedPolicyPipeline, decode_rgb  # noqa: E402
+from dual_arm_learning.policy_config import (  # noqa: E402
+    PolicyConfigError,
+    PolicyServiceConfig,
+    load_policy_config,
 )
-from dual_arm_learning.act_service import build_policy_config  # noqa: E402
-from dual_arm_learning.act_temporal import PERIOD_NS  # noqa: E402
 from dual_arm_learning.policy_server import PolicyServer  # noqa: E402
 from dual_arm_learning.policy_service import PolicyService  # noqa: E402
 from dual_arm_learning.policy_types import (  # noqa: E402
@@ -37,9 +37,10 @@ from dual_arm_learning.policy_types import (  # noqa: E402
     ProviderJointSample,
     ProviderObservation,
 )
+from dual_arm_learning.temporal_ensemble import PERIOD_NS  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
-CONFIG = ROOT / "learning/lerobot/configs/act_policy_temporal.yaml"
+CONFIG = ROOT / "learning/lerobot/configs/policy_temporal.yaml"
 
 
 @pytest.fixture(scope="module")
@@ -50,80 +51,87 @@ def bundle(tmp_path_factory):
     return path
 
 
-@pytest.fixture(scope="module")
-def contract(bundle):
-    return resolve_act_contract(
-        bundle=bundle,
-        profile_path=PROFILE,
+def settings_for(bundle: Path) -> PolicyServiceConfig:
+    return load_policy_config(
+        CONFIG,
+        bundle_dir=bundle,
+        robot_profile_path=PROFILE,
         observation_schema_path=OBSERVATION,
         action_schema_path=ACTION,
-        require_formal=False,
-    )
-
-
-def settings_for(bundle: Path):
-    settings = load_act_settings(CONFIG)
-    return dataclasses.replace(
-        settings,
-        bundle=bundle,
-        profile=PROFILE,
-        observation_schema=OBSERVATION,
-        action_schema=ACTION,
         device="cpu",
         require_formal=False,
     )
 
 
-class BadWarmModel:
-    device = "cpu"
+def plain(config: PolicyServiceConfig) -> PolicyServiceConfig:
+    return config.model_copy(
+        update={"gripper_max_correction_m": 0.0, "temporal_ensemble_coeff": None}
+    )
 
-    def __init__(self, mode):
-        self.mode = mode
 
-    def predict(self, images, state):
-        del images, state
-        if self.mode == "shape":
-            return np.zeros((1, 1), dtype=np.float32)
-        result = np.zeros((60, 16), dtype=np.float32)
-        result[0, 0] = np.nan
-        return result
+def profile(bundle: Path) -> dict:
+    return json.loads((bundle / "metadata/profile.json").read_text())
+
+
+def initial_positions(bundle: Path) -> np.ndarray:
+    return np.asarray([joint["initial"] for joint in profile(bundle)["joints"]], dtype=np.float64)
+
+
+def cameras(bundle: Path, observation_id=1, reference_ns=1_000_000_000):
+    array = np.zeros((240, 320, 3), dtype=np.uint8)
+    array[:, :, 0] = 255
+    return tuple(
+        ProviderCameraSample(
+            camera["name"],
+            observation_id,
+            reference_ns,
+            camera["frame_id"],
+            camera["calibration_digest"],
+            320,
+            240,
+            1,
+            array.tobytes(),
+        )
+        for camera in profile(bundle)["cameras"]
+    )
 
 
 class RecordingModel:
-    device = "cpu"
+    policy_family = "act"
+    chunk_size = 60
+    action_dim = 16
 
-    def __init__(self, mode="ok"):
+    def __init__(self, bundle: Path, mode="ok"):
+        self.base = initial_positions(bundle).astype(np.float32)
         self.mode = mode
         self.calls = 0
+        self.resets = 0
         self.last_images = None
         self.last_state = None
 
-    def predict(self, images, state):
+    def reset(self):
+        self.resets += 1
+
+    def predict_raw_chunk(self, images, state):
         self.calls += 1
         self.last_images = images
         self.last_state = state
-        if self.calls == 1:
-            return np.zeros((60, 16), dtype=np.float32)
-        if self.mode == "nan":
-            result = np.zeros((60, 16), dtype=np.float32)
-            result[0, 0] = np.nan
-            return result
         if self.mode == "shape":
             return np.zeros((59, 16), dtype=np.float32)
-        return np.full((60, 16), float(self.calls), dtype=np.float32)
+        result = np.tile(self.base, (60, 1)).astype(np.float32)
+        result[:, 0] += 0.001 * self.calls
+        if self.mode == "nan":
+            result[0, 0] = np.nan
+        return result
 
 
-class TemporalChunkModel:
-    """Valid arm blocks with a small per-call offset and an optional bad call."""
-
-    device = "cpu"
-
-    def __init__(self, base, invalid_at=None):
+class TemporalChunkModel(RecordingModel):
+    def __init__(self, bundle: Path, base, invalid_at=None):
+        super().__init__(bundle)
         self.base = np.asarray(base, dtype=np.float64)
-        self.calls = 0
         self.invalid_at = invalid_at
 
-    def predict(self, images, state):
+    def predict_raw_chunk(self, images, state):
         del images, state
         self.calls += 1
         result = np.tile(self.base, (60, 1))
@@ -133,40 +141,32 @@ class TemporalChunkModel:
         return result.astype(np.float32)
 
 
-def temporal_base(contract):
-    result = np.asarray(
-        [joint["initial"] for joint in contract.profile["joints"]], dtype=np.float64
-    )
-    result[7] = result[15] = 0.09
-    return result
+class BadWarmModel(BundleActModel):
+    mode = "shape"
+
+    def __init__(self, mode):
+        super().__init__(
+            None,
+            device="cpu",
+            chunk_size=60,
+            action_dim=16,
+            camera_names=("global", "left_wrist", "right_wrist"),
+            camera_width=320,
+            camera_height=240,
+            initial_positions=(0.0,) * 16,
+        )
+        self.mode = mode
+
+    def predict_raw_chunk(self, images, state):
+        del images, state
+        if self.mode == "shape":
+            return np.zeros((1, 1), dtype=np.float32)
+        result = np.zeros((60, 16), dtype=np.float32)
+        result[0, 0] = np.nan
+        return result
 
 
-def build_temporal_provider(bundle, contract, model, directory, *, coeff=0.01):
-    config = build_policy_config(settings_for(bundle), contract)
-    provider = ActProvider(
-        config,
-        contract,
-        model,
-        gripper_max_correction_m=0.03,
-        temporal_ensemble_coeff=coeff,
-        prediction_directory=directory,
-    )
-    return config, provider
-
-
-def artifact_path(directory, identity):
-    return Path(directory) / (hashlib.sha256(identity.encode()).hexdigest() + ".npz")
-
-
-def profile_documents():
-    return (
-        PROFILE.read_bytes(),
-        OBSERVATION.read_bytes(),
-        ACTION.read_bytes(),
-    )
-
-
-def context(config, **changes):
+def context(config: PolicyServiceConfig, **changes) -> ProviderContext:
     values = {
         "robot_id": "panda_stack",
         "robot_profile_hash": config.robot_profile_hash,
@@ -180,222 +180,26 @@ def context(config, **changes):
     return ProviderContext(**values)
 
 
-def observation(config, contract, observation_id=1, reference_ns=1_000_000_000):
-    profile = json.loads(Path(contract.bundle_root / "metadata/profile.json").read_text())
-    cameras = []
-    for camera in profile["cameras"]:
-        array = np.zeros((240, 320, 3), dtype=np.uint8)
-        array[:, :, 0] = 255
-        array[:, :, 1] = 0
-        array[:, :, 2] = 0
-        cameras.append(
-            ProviderCameraSample(
-                camera["name"],
-                observation_id,
-                reference_ns,
-                camera["frame_id"],
-                camera["calibration_digest"],
-                320,
-                240,
-                1,
-                array.tobytes(),
-            )
-        )
+def typed_observation(config, bundle, observation_id=1, reference_ns=1_000_000_000):
+    profile_document = profile(bundle)
     return ProviderObservation(
-        observation_id=observation_id,
-        reference_robot_time_ns=reference_ns,
-        joints=ProviderJointSample(
+        observation_id,
+        reference_ns,
+        ProviderJointSample(
             observation_id,
             reference_ns,
             config.joint_names,
-            tuple(joint["initial"] for joint in profile["joints"]),
+            tuple(joint["initial"] for joint in profile_document["joints"]),
             (0.0,) * 16,
         ),
-        cameras=tuple(cameras),
-        task_id=config.task_id,
-        task_text=config.task_text,
+        cameras(bundle, observation_id, reference_ns),
+        config.task_id,
+        config.task_text,
     )
 
 
-def build_provider(bundle, contract, model):
-    config = build_policy_config(settings_for(bundle), contract)
-    provider = ActProvider(config, contract, model)
-    return config, provider
-
-
-def test_contract_is_reloaded_identically_and_formal_rejects_synthetic(bundle, contract):
-    again = resolve_act_contract(
-        bundle=bundle,
-        profile_path=PROFILE,
-        observation_schema_path=OBSERVATION,
-        action_schema_path=ACTION,
-        require_formal=False,
-    )
-    assert again.summary() == contract.summary()
-    assert again.bundle_digest == contract.bundle_digest
-    assert again.processor_digest == contract.processor_digest
-    with pytest.raises(ActContractError, match="synthetic"):
-        resolve_act_contract(
-            bundle=bundle,
-            profile_path=PROFILE,
-            observation_schema_path=OBSERVATION,
-            action_schema_path=ACTION,
-            require_formal=True,
-        )
-
-
-def test_contract_rejects_wrong_profile_and_tampered_hash(bundle):
-    with pytest.raises(ActContractError, match="profile"):
-        resolve_act_contract(
-            bundle=bundle,
-            profile_path=ROOT / "profiles/robots/panda_stack_v1/profile.json",
-            observation_schema_path=OBSERVATION,
-            action_schema_path=ACTION,
-            require_formal=False,
-        )
-    model = bundle / "model.safetensors"
-    original = model.read_bytes()
-    try:
-        model.write_bytes(original + b"tamper")
-        with pytest.raises(ActContractError, match="hash mismatch"):
-            resolve_act_contract(
-                bundle=bundle,
-                profile_path=PROFILE,
-                observation_schema_path=OBSERVATION,
-                action_schema_path=ACTION,
-                require_formal=False,
-            )
-    finally:
-        model.write_bytes(original)
-
-
-def test_real_bundle_offline_reload_returns_same_fresh_chunk(bundle, contract):
-    config = build_policy_config(settings_for(bundle), contract)
-    first = load_act_provider(config=config, contract=contract, device="cpu")
-    second = load_act_provider(config=config, contract=contract, device="cpu")
-    try:
-        first.open("s1", context(config), "o1", *profile_documents())
-        second.open("s2", context(config), "o2", *profile_documents())
-        one = first.predict("s1", "p1", context(config), observation(config, contract))
-        two = second.predict("s2", "p2", context(config), observation(config, contract))
-        assert len(one.targets) == len(two.targets) == 60
-        assert one.targets[0].time_from_observation_ns == 50_000_000
-        assert one.targets[-1].time_from_observation_ns == 3_000_000_000
-        assert all(len(target.positions) == 16 for target in one.targets)
-        assert np.allclose(
-            np.asarray([target.positions for target in one.targets]),
-            np.asarray([target.positions for target in two.targets]),
-            atol=1e-6,
-        )
-    finally:
-        first.close("s1")
-        second.close("s2")
-
-
-def test_rgb_decode_is_chw_float_and_image_order(bundle, contract):
-    model = RecordingModel()
-    config, provider = build_provider(bundle, contract, model)
-    provider.open("s1", context(config), "o1", *profile_documents())
-    provider.predict("s1", "p1", context(config), observation(config, contract))
-    images = model.last_images
-    assert tuple(images) == config.camera_names
-    image = images["global"]
-    assert image.shape == (3, 240, 320)
-    assert image.dtype == np.float32
-    assert image[0].min() == 1.0 and image[0].max() == 1.0
-    assert image[1].max() == 0.0 and image[2].max() == 0.0
-    # A direct HWC payload with distinct channels proves order is not swapped.
-    hwc = np.zeros((2, 3, 3), dtype=np.uint8)
-    hwc[0, 0, 0], hwc[0, 1, 1], hwc[0, 2, 2] = 255, 128, 64
-    chw = decode_rgb(hwc.tobytes(), 3, 2)
-    assert chw.shape == (3, 2, 3)
-    assert chw[0, 0, 0] == 1.0
-    assert chw[1, 0, 1] == pytest.approx(128 / 255)
-    assert chw[2, 0, 2] == pytest.approx(64 / 255)
-
-
-def test_each_new_observation_calls_fresh_60_point_chunk_and_reset_clears_state(
-    bundle, contract
-):
-    model = RecordingModel()
-    config, provider = build_provider(bundle, contract, model)
-    expected_initial = np.asarray(
-        [joint["initial"] for joint in contract.profile["joints"]], dtype=np.float32
-    )
-    assert np.allclose(model.last_state, expected_initial)
-    provider.open("s1", context(config), "o1", *profile_documents())
-    first = provider.predict("s1", "p1", context(config), observation(config, contract, 1))
-    second = provider.predict("s1", "p2", context(config), observation(config, contract, 2))
-    assert model.calls == 3  # warm-up + two observations
-    assert first.targets[0].positions != second.targets[0].positions
-    with pytest.raises(PolicyError, match="advance monotonically"):
-        provider.predict("s1", "p3", context(config), observation(config, contract, 2))
-    provider.reset("s1", "r1", context(config, clock_epoch=2, control_epoch=2))
-    third = provider.predict(
-        "s1",
-        "p4",
-        context(config, clock_epoch=2, control_epoch=2),
-        observation(config, contract, 1),
-    )
-    assert third.targets[0].positions != first.targets[0].positions
-    assert model.calls == 4
-
-
-@pytest.mark.parametrize("mode", ["nan", "shape"])
-def test_bad_model_output_shape_or_nonfinite_is_rejected(bundle, contract, mode):
-    model = RecordingModel(mode=mode)
-    config, provider = build_provider(bundle, contract, model)
-    provider.open("s1", context(config), "o1", *profile_documents())
-    with pytest.raises(PolicyError, match="INVALID_PREDICTION"):
-        provider.predict("s1", "p1", context(config), observation(config, contract))
-
-
-def test_wrong_context_and_profile_are_rejected(bundle, contract):
-    model = RecordingModel()
-    config, provider = build_provider(bundle, contract, model)
-    provider.open("s1", context(config), "o1", *profile_documents())
-    with pytest.raises(PolicyError, match="STALE_CONTEXT"):
-        provider.predict(
-            "s1", "p1", context(config, clock_epoch=2), observation(config, contract)
-        )
-    with pytest.raises(PolicyError, match="CONTEXT_MISMATCH"):
-        provider.open(
-            "s2",
-            context(config, robot_profile_hash="0" * 64),
-            "o2",
-            *profile_documents(),
-        )
-    wrong_profile = json.loads(PROFILE.read_text())
-    wrong_profile["profile_id"] = "tampered"
-    with pytest.raises(PolicyError, match="SCHEMA_MISMATCH"):
-        provider.open(
-            "s3",
-            context(config),
-            "o3",
-            json.dumps(wrong_profile).encode(),
-            OBSERVATION.read_bytes(),
-            ACTION.read_bytes(),
-        )
-
-
-def test_policy_service_preserves_act_rejection_reason(bundle, contract):
-    model = RecordingModel(mode="nan")
-    config, provider = build_provider(bundle, contract, model)
-    service = PolicyService(config, provider)
-    ctx = context(config)
-    opened = service.open_session(
-        pb2.OpenSessionRequest(
-            context=pb2.RunContext(**dataclasses.asdict(ctx)),
-            model_bundle_digest=config.model_bundle_digest,
-            observation_schema_hash=config.observation_schema_hash,
-            action_schema_hash=config.action_schema_hash,
-            robot_profile_json=PROFILE.read_bytes(),
-            observation_schema_json=OBSERVATION.read_bytes(),
-            action_schema_json=ACTION.read_bytes(),
-            open_request_id="open-1",
-        )
-    )
-    template = observation(config, contract)
+def pb2_observation(config, bundle, observation_id=1, reference_ns=1_000_000_000):
+    template = typed_observation(config, bundle, observation_id, reference_ns)
     message = pb2.Observation(
         observation_id=template.observation_id,
         reference_robot_time_ns=template.reference_robot_time_ns,
@@ -423,60 +227,292 @@ def test_policy_service_preserves_act_rejection_reason(bundle, contract):
                 payload=camera.payload,
             )
         )
+    return message
+
+
+def open_request(config, ctx, open_id="open-1"):
+    return pb2.OpenSessionRequest(
+        context=pb2.RunContext(**dataclasses.asdict(ctx)),
+        model_bundle_digest=config.model_bundle_digest,
+        observation_schema_hash=config.observation_schema_hash,
+        action_schema_hash=config.action_schema_hash,
+        robot_profile_json=PROFILE.read_bytes(),
+        observation_schema_json=OBSERVATION.read_bytes(),
+        action_schema_json=ACTION.read_bytes(),
+        open_request_id=open_id,
+    )
+
+
+def temporal_base(bundle: Path) -> np.ndarray:
+    result = initial_positions(bundle)
+    result[7] = result[15] = 0.09
+    return result
+
+
+def artifact_path(directory, identity):
+    return Path(directory) / (hashlib.sha256(identity.encode()).hexdigest() + ".npz")
+
+
+def test_contract_is_reloaded_identically_and_formal_rejects_synthetic(bundle):
+    first = settings_for(bundle)
+    again = settings_for(bundle)
+    assert first.to_document() == again.to_document()
+    with pytest.raises(PolicyConfigError, match="synthetic"):
+        load_policy_config(
+            CONFIG,
+            bundle_dir=bundle,
+            robot_profile_path=PROFILE,
+            observation_schema_path=OBSERVATION,
+            action_schema_path=ACTION,
+            require_formal=True,
+        )
+
+
+def test_contract_rejects_wrong_profile_and_tampered_hash(bundle):
+    with pytest.raises(PolicyConfigError, match="profile"):
+        load_policy_config(
+            CONFIG,
+            bundle_dir=bundle,
+            robot_profile_path=ROOT / "profiles/robots/panda_stack_v1/profile.json",
+            observation_schema_path=OBSERVATION,
+            action_schema_path=ACTION,
+            require_formal=False,
+        )
+    model = bundle / "model.safetensors"
+    original = model.read_bytes()
+    try:
+        model.write_bytes(original + b"tamper")
+        with pytest.raises(PolicyConfigError, match="hash mismatch"):
+            settings_for(bundle)
+    finally:
+        model.write_bytes(original)
+
+
+def test_real_bundle_offline_reload_returns_same_fresh_chunk(bundle):
+    config = plain(settings_for(bundle))
+    first_adapter = load_act_adapter(config)
+    second_adapter = load_act_adapter(config)
+    first = ChunkedPolicyPipeline(first_adapter, config)
+    second = ChunkedPolicyPipeline(second_adapter, config)
+    one = first.predict(
+        identity="s1:p1",
+        observation_id=1,
+        observation_time_ns=1_000_000_000,
+        cameras=cameras(bundle),
+        joint_positions=tuple(initial_positions(bundle)),
+    )
+    two = second.predict(
+        identity="s2:p2",
+        observation_id=1,
+        observation_time_ns=1_000_000_000,
+        cameras=cameras(bundle),
+        joint_positions=tuple(initial_positions(bundle)),
+    )
+    assert one.targets.shape == two.targets.shape == (60, 16)
+    assert np.allclose(one.targets, two.targets, atol=1e-6)
+
+
+def test_rgb_decode_is_chw_float_and_image_order(bundle):
+    model = RecordingModel(bundle)
+    pipeline = ChunkedPolicyPipeline(model, plain(settings_for(bundle)))
+    pipeline.predict(
+        identity="s1:p1",
+        observation_id=1,
+        observation_time_ns=1_000_000_000,
+        cameras=cameras(bundle),
+        joint_positions=tuple(initial_positions(bundle)),
+    )
+    images = model.last_images
+    assert tuple(images) == ("global", "left_wrist", "right_wrist")
+    image = images["global"]
+    assert image.shape == (3, 240, 320)
+    assert image.dtype == np.float32
+    assert image[0].min() == 1.0 and image[0].max() == 1.0
+    assert image[1].max() == 0.0 and image[2].max() == 0.0
+    hwc = np.zeros((2, 3, 3), dtype=np.uint8)
+    hwc[0, 0, 0], hwc[0, 1, 1], hwc[0, 2, 2] = 255, 128, 64
+    chw = decode_rgb(hwc.tobytes(), 3, 2)
+    assert chw.shape == (3, 2, 3)
+    assert chw[0, 0, 0] == 1.0
+    assert chw[1, 0, 1] == pytest.approx(128 / 255)
+    assert chw[2, 0, 2] == pytest.approx(64 / 255)
+
+
+def test_each_new_observation_calls_fresh_chunk_and_reset_clears_state(bundle):
+    model = RecordingModel(bundle)
+    config = plain(settings_for(bundle))
+    pipeline = ChunkedPolicyPipeline(model, config)
+    first = pipeline.predict(
+        identity="s1:p1",
+        observation_id=1,
+        observation_time_ns=1_000_000_000,
+        cameras=cameras(bundle, 1),
+        joint_positions=tuple(initial_positions(bundle)),
+    )
+    second = pipeline.predict(
+        identity="s1:p2",
+        observation_id=2,
+        observation_time_ns=1_050_000_000,
+        cameras=cameras(bundle, 2),
+        joint_positions=tuple(initial_positions(bundle)),
+    )
+    assert model.calls == 2
+    assert first.targets[0, 0] != second.targets[0, 0]
+    pipeline.reset()
+    assert model.resets == 1
+
+
+def test_service_requires_monotonic_observations_and_reset_clears_history(bundle):
+    config = plain(settings_for(bundle))
+    model = RecordingModel(bundle)
+    service = PolicyService(config, model)
+    ctx = context(config)
+    opened = service.open_session(open_request(config, ctx))
+    request = pb2.PredictRequest(
+        session_id=opened.session_id,
+        request_id="p1",
+        context=pb2.RunContext(**dataclasses.asdict(ctx)),
+        observation=pb2_observation(config, bundle, 1),
+    )
+    service.predict(request)
+    with pytest.raises(PolicyError, match="advance monotonically"):
+        service.predict(
+            pb2.PredictRequest(
+                session_id=opened.session_id,
+                request_id="p2",
+                context=pb2.RunContext(**dataclasses.asdict(ctx)),
+                observation=pb2_observation(config, bundle, 1),
+            )
+        )
+    service.reset_session(
+        pb2.ResetSessionRequest(
+            session_id=opened.session_id,
+            reset_id="r1",
+            new_context=pb2.RunContext(**dataclasses.asdict(context(config, clock_epoch=2))),
+        )
+    )
+    service.predict(
+        pb2.PredictRequest(
+            session_id=opened.session_id,
+            request_id="p3",
+            context=pb2.RunContext(**dataclasses.asdict(context(config, clock_epoch=2))),
+            observation=pb2_observation(config, bundle, 1),
+        )
+    )
+    assert model.resets == 1
+
+
+@pytest.mark.parametrize("mode", ["nan", "shape"])
+def test_bad_model_output_shape_or_nonfinite_is_rejected(bundle, mode):
+    model = RecordingModel(bundle, mode=mode)
+    pipeline = ChunkedPolicyPipeline(model, plain(settings_for(bundle)))
+    with pytest.raises(PolicyError, match="INVALID_PREDICTION"):
+        pipeline.predict(
+            identity="s1:p1",
+            observation_id=1,
+            observation_time_ns=1_000_000_000,
+            cameras=cameras(bundle),
+            joint_positions=tuple(initial_positions(bundle)),
+        )
+
+
+def test_wrong_context_and_profile_are_rejected(bundle):
+    config = plain(settings_for(bundle))
+    service = PolicyService(config, RecordingModel(bundle))
+    ctx = context(config)
+    opened = service.open_session(open_request(config, ctx))
+    with pytest.raises(PolicyError, match="STALE_CONTEXT"):
+        service.predict(
+            pb2.PredictRequest(
+                session_id=opened.session_id,
+                request_id="p1",
+                context=pb2.RunContext(**dataclasses.asdict(context(config, clock_epoch=2))),
+                observation=pb2_observation(config, bundle),
+            )
+        )
+    with pytest.raises(PolicyError, match="CONTEXT_MISMATCH"):
+        service.open_session(
+            open_request(config, context(config, robot_profile_hash="0" * 64), "open-2")
+        )
+    wrong_profile = json.loads(PROFILE.read_text())
+    wrong_profile["profile_id"] = "tampered"
+    with pytest.raises(PolicyError, match="SCHEMA_MISMATCH"):
+        service.open_session(
+            pb2.OpenSessionRequest(
+                context=pb2.RunContext(**dataclasses.asdict(ctx)),
+                model_bundle_digest=config.model_bundle_digest,
+                observation_schema_hash=config.observation_schema_hash,
+                action_schema_hash=config.action_schema_hash,
+                robot_profile_json=json.dumps(wrong_profile).encode(),
+                observation_schema_json=OBSERVATION.read_bytes(),
+                action_schema_json=ACTION.read_bytes(),
+                open_request_id="open-3",
+            )
+        )
+
+
+def test_policy_service_preserves_act_rejection_reason(bundle):
+    config = plain(settings_for(bundle))
+    service = PolicyService(config, RecordingModel(bundle, mode="nan"))
+    ctx = context(config)
+    opened = service.open_session(open_request(config, ctx))
     with pytest.raises(PolicyError, match="INVALID_PREDICTION"):
         service.predict(
             pb2.PredictRequest(
                 session_id=opened.session_id,
                 request_id="predict-1",
                 context=pb2.RunContext(**dataclasses.asdict(ctx)),
-                observation=message,
+                observation=pb2_observation(config, bundle),
             )
         )
 
 
-def test_grpc_server_shutdown_is_bounded(bundle, contract):
-    model = RecordingModel()
-    config, provider = build_provider(bundle, contract, model)
-    server = PolicyServer(config, provider)
+def test_grpc_server_shutdown_is_bounded(bundle):
+    config = plain(settings_for(bundle))
+    server = PolicyServer(config, RecordingModel(bundle))
     server.start()
     started = time.monotonic()
     server.stop(0.5)
     assert time.monotonic() - started < 3.0
 
 
-def test_act_entry_loads_warms_logs_and_shuts_down_cleanly(bundle, contract, tmp_path):
-    config = yaml.safe_load(CONFIG.read_text())
-    config["model"].update(
+def test_act_entry_loads_warms_logs_and_shuts_down_cleanly(bundle, tmp_path):
+    document = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
+    document["model"].update(
         {
-            "bundle": str(bundle),
-            "profile": str(PROFILE),
-            "observation_schema": str(OBSERVATION),
-            "action_schema": str(ACTION),
+            "bundle_dir": str(bundle),
+            "robot_profile_path": str(PROFILE),
+            "observation_schema_path": str(OBSERVATION),
+            "action_schema_path": str(ACTION),
             "device": "cpu",
             "require_formal": False,
         }
     )
-    config["service"]["port"] = 0
-    config["service"]["bind_address"] = "127.0.0.1"
-    config_path = tmp_path / "act_policy.yaml"
-    config_path.write_text(yaml.safe_dump(config, sort_keys=False))
+    document["service"]["port"] = 0
+    document["service"]["bind_address"] = "127.0.0.1"
+    config_path = tmp_path / "policy.yaml"
+    config_path.write_text(yaml.safe_dump(document, sort_keys=False))
     log_dir = tmp_path / "act-log"
     environment = dict(os.environ)
     import dual_arm_policy
-
-    sdk = str(Path(dual_arm_policy.__file__).parents[1])
     import lerobot
 
+    sdk = str(Path(dual_arm_policy.__file__).parents[1])
     source = os.environ.get(
         "LEARNING_SOURCE", str(Path(lerobot.__file__).resolve().parents[1])
     )
     environment["PROJECT_CONTAINER"] = "1"
+    environment["POLICY_SDK_ROOT"] = str(ROOT / ".build/generated/policy-sdk")
+    environment["PATH"] = str(Path(sys.executable).parent) + ":" + environment["PATH"]
+    inherited = environment.get("PYTHONPATH", "")
     environment["PYTHONPATH"] = ":".join(
         [
             str(ROOT / "learning/lerobot/src"),
             str(ROOT / "libraries/run_logging/src"),
+            str(ROOT / "contracts/python/src"),
             sdk,
             source,
+            *([inherited] if inherited else []),
         ]
     )
     process = subprocess.Popen(
@@ -523,29 +559,29 @@ def test_act_entry_loads_warms_logs_and_shuts_down_cleanly(bundle, contract, tmp
         assert "policy.ready" in events
         assert "policy.closed" in events
         snapshot = json.loads((log_dir / "resolved_contract.json").read_text())
-        assert snapshot["bundle"]["bundle_digest"] == contract.bundle_digest
+        summary = deployment_summary(settings_for(bundle))
+        assert snapshot["bundle"]["bundle_digest"] == summary["bundle_digest"]
     finally:
         if process.poll() is None:
             process.kill()
             process.wait(timeout=5)
 
 
-
 @pytest.mark.parametrize("mode", ["shape", "nan"])
-def test_warmup_rejects_wrong_shape_or_nonfinite_before_ready(bundle, contract, mode):
+def test_warmup_rejects_wrong_shape_or_nonfinite_before_ready(mode):
     with pytest.raises(PolicyError, match="warm-up"):
-        build_provider(bundle, contract, BadWarmModel(mode))
+        BadWarmModel(mode).warm_up()
 
 
 def test_startup_failure_leaves_structured_artifact(tmp_path):
-    from dual_arm_learning.act_service import main as act_main
+    from dual_arm_learning.policy_service_cli import main as service_main
 
     log_dir = tmp_path / "failed-log"
-    code = act_main(
+    code = service_main(
         [
             "--config",
             str(CONFIG),
-            "--bundle",
+            "--bundle-dir",
             str(tmp_path / "missing-bundle"),
             "--log-directory",
             str(log_dir),
@@ -556,39 +592,40 @@ def test_startup_failure_leaves_structured_artifact(tmp_path):
     assert code == 1
     payload = json.loads((log_dir / "startup_failure.json").read_text())
     assert payload["status"] == "failed"
-    assert payload["stage"] == "contract"
-    assert payload["error_type"] == "ActContractError"
+    assert payload["stage"] == "config"
+    assert payload["error_type"] == "PolicyConfigError"
     assert payload["bundle"].endswith("missing-bundle")
 
 
-def test_temporal_ensemble_is_off_by_default(bundle, contract):
-    model = RecordingModel()
-    config, provider = build_provider(bundle, contract, model)
-    summary = provider.summary()
-    assert summary["temporal_ensemble"] is False
-    assert summary["temporal_ensemble_coeff"] is None
-    assert load_act_settings(CONFIG).temporal_ensemble_coeff is None
+def test_temporal_ensemble_is_off_by_default(bundle):
+    assert PolicyServiceConfig.model_fields["temporal_ensemble_coeff"].default is None
+    pipeline = ChunkedPolicyPipeline(RecordingModel(bundle), plain(settings_for(bundle)))
+    assert pipeline._ensemble is None
 
 
-def test_temporal_ensemble_fuses_admitted_history_and_records_npz(
-    bundle, contract, tmp_path
-):
-    model = TemporalChunkModel(temporal_base(contract))
+def test_temporal_ensemble_fuses_admitted_history_and_records_npz(bundle, tmp_path):
+    model = TemporalChunkModel(bundle, temporal_base(bundle))
     directory = tmp_path / "predictions"
-    config, provider = build_temporal_provider(bundle, contract, model, directory)
-    assert provider.summary()["temporal_ensemble"] is True
-    assert provider.summary()["temporal_ensemble_coeff"] == pytest.approx(0.01)
-
-    provider.open("s1", context(config), "o1", *profile_documents())
-    first = provider.predict(
-        "s1", "p1", context(config), observation(config, contract, 1, 1_000_000_000)
+    config = settings_for(bundle)
+    pipeline = ChunkedPolicyPipeline(model, config, prediction_directory=directory)
+    first = pipeline.predict(
+        identity="s1:p1",
+        observation_id=1,
+        observation_time_ns=1_000_000_000,
+        cameras=cameras(bundle, 1),
+        joint_positions=tuple(temporal_base(bundle)),
     )
-    assert len(first.targets) == 60
-    second = provider.predict(
-        "s1", "p2", context(config), observation(config, contract, 2, 1_100_000_000)
+    pipeline.commit(first)
+    second = pipeline.predict(
+        identity="s1:p2",
+        observation_id=2,
+        observation_time_ns=1_100_000_000,
+        cameras=cameras(bundle, 2),
+        joint_positions=tuple(temporal_base(bundle)),
     )
+    pipeline.commit(second)
 
-    executed = np.asarray([target.positions for target in second.targets])
+    executed = second.targets
     with np.load(artifact_path(directory, "s1:p2"), allow_pickle=False) as stored:
         raw = stored["raw_act"]
         admitted = stored["admitted"]
@@ -601,76 +638,95 @@ def test_temporal_ensemble_fuses_admitted_history_and_records_npz(
         np.testing.assert_array_equal(stored["ensemble_counts"][:58], 2)
         np.testing.assert_array_equal(stored["ensemble_counts"][58:], 1)
         np.testing.assert_array_equal(stored["history_observation_ids"], [1])
-        np.testing.assert_array_equal(
-            stored["history_observation_time_ns"], [1_000_000_000]
-        )
+        np.testing.assert_array_equal(stored["history_observation_time_ns"], [1_000_000_000])
 
     weight = np.exp(0.01 * (2 * PERIOD_NS) / PERIOD_NS)
-    base = temporal_base(contract)
-    expected = (weight * (base[0] + 0.02) + (base[0] + 0.03)) / (1.0 + weight)
+    base = temporal_base(bundle)
+    expected = (weight * (base[0] + 0.01) + (base[0] + 0.02)) / (1.0 + weight)
     assert executed[0, 0] == pytest.approx(expected)
-    # Every joint uses the same rule; dimensions without a disagreement stay put.
     assert executed[0, 1] == pytest.approx(base[1], abs=1e-6)
-
     with pytest.raises(PolicyError, match="temporal ensemble"):
-        provider.predict(
-            "s1",
-            "p3",
-            context(config),
-            observation(config, contract, 3, 1_000_000_000),
+        pipeline.predict(
+            identity="s1:p3",
+            observation_id=3,
+            observation_time_ns=1_000_000_000,
+            cameras=cameras(bundle, 3),
+            joint_positions=tuple(temporal_base(bundle)),
         )
 
 
-def test_temporal_history_is_per_session_and_reset_discards_it(bundle, contract, tmp_path):
-    model = TemporalChunkModel(temporal_base(contract))
+def test_temporal_history_is_per_session_and_reset_discards_it(bundle, tmp_path):
+    model = TemporalChunkModel(bundle, temporal_base(bundle))
     directory = tmp_path / "predictions"
-    config, provider = build_temporal_provider(bundle, contract, model, directory)
-    provider.open("s1", context(config), "o1", *profile_documents())
-    provider.open("s2", context(config), "o2", *profile_documents())
-    provider.predict(
-        "s1", "a1", context(config), observation(config, contract, 1, 1_000_000_000)
+    config = settings_for(bundle)
+    first = ChunkedPolicyPipeline(model, config, prediction_directory=directory)
+    second = ChunkedPolicyPipeline(model, config, prediction_directory=directory)
+    one = first.predict(
+        identity="s1:a1",
+        observation_id=1,
+        observation_time_ns=1_000_000_000,
+        cameras=cameras(bundle, 1),
+        joint_positions=tuple(temporal_base(bundle)),
     )
-    provider.predict(
-        "s2", "b1", context(config), observation(config, contract, 1, 1_000_000_000)
+    first.commit(one)
+    other = second.predict(
+        identity="s2:b1",
+        observation_id=1,
+        observation_time_ns=1_000_000_000,
+        cameras=cameras(bundle, 1),
+        joint_positions=tuple(temporal_base(bundle)),
     )
+    second.commit(other)
     with np.load(artifact_path(directory, "s2:b1"), allow_pickle=False) as stored:
         np.testing.assert_array_equal(stored["ensemble_counts"], 1)
-
-    provider.reset("s1", "r1", context(config, clock_epoch=2, control_epoch=2))
-    provider.predict(
-        "s1",
-        "a2",
-        context(config, clock_epoch=2, control_epoch=2),
-        observation(config, contract, 1, 2_000_000_000),
+    first.reset()
+    again = first.predict(
+        identity="s1:a2",
+        observation_id=1,
+        observation_time_ns=2_000_000_000,
+        cameras=cameras(bundle, 1),
+        joint_positions=tuple(temporal_base(bundle)),
     )
+    first.commit(again)
     with np.load(artifact_path(directory, "s1:a2"), allow_pickle=False) as stored:
         np.testing.assert_array_equal(stored["ensemble_counts"], 1)
         assert stored["history_observation_ids"].size == 0
 
 
-def test_rejected_raw_is_not_hidden_or_added_to_temporal_history(bundle, contract, tmp_path):
-    model = TemporalChunkModel(temporal_base(contract), invalid_at=3)
+def test_rejected_raw_is_not_hidden_or_added_to_temporal_history(bundle, tmp_path):
+    model = TemporalChunkModel(bundle, temporal_base(bundle), invalid_at=2)
     directory = tmp_path / "predictions"
-    config, provider = build_temporal_provider(bundle, contract, model, directory)
-    provider.open("s1", context(config), "o1", *profile_documents())
-    provider.predict(
-        "s1", "p1", context(config), observation(config, contract, 1, 1_000_000_000)
+    config = settings_for(bundle)
+    pipeline = ChunkedPolicyPipeline(model, config, prediction_directory=directory)
+    first = pipeline.predict(
+        identity="s1:p1",
+        observation_id=1,
+        observation_time_ns=1_000_000_000,
+        cameras=cameras(bundle, 1),
+        joint_positions=tuple(temporal_base(bundle)),
     )
+    pipeline.commit(first)
     with pytest.raises(PolicyError, match="hard limits"):
-        provider.predict(
-            "s1", "p2", context(config), observation(config, contract, 2, 1_100_000_000)
+        pipeline.predict(
+            identity="s1:p2",
+            observation_id=2,
+            observation_time_ns=1_100_000_000,
+            cameras=cameras(bundle, 2),
+            joint_positions=tuple(temporal_base(bundle)),
         )
     with np.load(artifact_path(directory, "s1:p2"), allow_pickle=False) as stored:
         assert not bool(stored["accepted"])
         assert "execution_targets" not in stored.files
-
-    provider.predict(
-        "s1", "p3", context(config), observation(config, contract, 3, 1_200_000_000)
+    third = pipeline.predict(
+        identity="s1:p3",
+        observation_id=3,
+        observation_time_ns=1_200_000_000,
+        cameras=cameras(bundle, 3),
+        joint_positions=tuple(temporal_base(bundle)),
     )
+    pipeline.commit(third)
     with np.load(artifact_path(directory, "s1:p3"), allow_pickle=False) as stored:
         np.testing.assert_array_equal(stored["ensemble_counts"][:56], 2)
         np.testing.assert_array_equal(stored["ensemble_counts"][56:], 1)
         np.testing.assert_array_equal(stored["history_observation_ids"], [1])
-        np.testing.assert_array_equal(
-            stored["history_observation_time_ns"], [1_000_000_000]
-        )
+        np.testing.assert_array_equal(stored["history_observation_time_ns"], [1_000_000_000])

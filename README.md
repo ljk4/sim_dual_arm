@@ -251,7 +251,7 @@ learning/lerobot/scripts/run.sh bundle --mode full --run "$TRAIN_RUN" --output /
 含义：校验 bundle，并生成 `policy.yaml`、`policy_binding.json` 和 `act_contract.json`。
 
 ```bash
-learning/lerobot/scripts/run.sh prepare-policy --template /workspace/learning/lerobot/configs/act_policy_temporal.yaml --bundle /data/learning/bundles/stack-act --run-id infer-5k-server --output /data/prepared/infer-5k-server/policy
+learning/lerobot/scripts/run.sh prepare-policy --template /workspace/learning/lerobot/configs/policy_temporal.yaml --bundle /data/learning/bundles/stack-act --run-id infer-5k-server --output /data/prepared/infer-5k-server/policy
 ```
 
 该命令每套 bundle 只执行一次。输出目录已存在时不要重复覆盖；需要新配置时使用新的
@@ -366,7 +366,7 @@ runtime/ros2/scripts/run.sh interactive --config /data/prepared/infer-5k-server/
 
 ```text
 learning bundle
-  + learning/lerobot/configs/act_policy_temporal.yaml
+  + learning/lerobot/configs/policy_temporal.yaml
   -> learning prepare-policy
   -> /data/prepared/<run-id>/policy/policy.yaml
   -> /data/prepared/<run-id>/policy/policy_binding.json
@@ -396,7 +396,7 @@ simulation backend 模板
 | follower 窗口和偏差预算 | `profiles/control/panda_follower_v1.yaml` | 同时重新执行 simulation `prepare` 和 runtime `prepare`，重启 backend 与 runtime |
 | runtime 策略模板 | `runtime/ros2/configs/policy_rollout.yaml` | 重新执行 runtime `prepare`，重启 runtime |
 | 数采 runtime 模板 | `runtime/ros2/configs/teacher_collect.yaml` | 下一次 `campaign run` 会重新生成该 attempt 的 runtime 配置，无需手工 prepare |
-| Policy 服务模板 | `learning/lerobot/configs/act_policy_temporal.yaml` | 重新执行 learning `prepare-policy`，再用新 binding 重新执行 runtime `prepare`，重启 Policy 服务和 runtime |
+| Policy 服务模板 | `learning/lerobot/configs/policy_temporal.yaml` | 重新执行 learning `prepare-policy`，再用新 binding 重新执行 runtime `prepare`，重启 Policy 服务和 runtime |
 | 训练参数 | `learning/lerobot/configs/act_training.container.yaml` | 下一次 `train` 使用新参数；训练后重新 bundle、prepare-policy、runtime prepare |
 | 数据转换、划分、质量规则 | `learning/lerobot/configs/act_dataset.container.yaml` | 重新执行 `convert`；已有数据集目录不会覆盖，需使用新的输出目录或 run-id |
 | 模型 bundle | `/data/learning/bundles/<bundle>` | 重新执行 learning `prepare-policy`，再重新执行 runtime `prepare`，重启 Policy 服务和 runtime |
@@ -448,7 +448,7 @@ runtime/ros2/scripts/run.sh interactive --config /data/prepared/infer-5k-server/
 说明缺少 `prepare-policy` 产物。重新执行：
 
 ```bash
-learning/lerobot/scripts/run.sh prepare-policy --template /workspace/learning/lerobot/configs/act_policy_temporal.yaml --bundle /data/learning/bundles/stack-act --run-id infer-5k-server --output /data/prepared/infer-5k-server/policy
+learning/lerobot/scripts/run.sh prepare-policy --template /workspace/learning/lerobot/configs/policy_temporal.yaml --bundle /data/learning/bundles/stack-act --run-id infer-5k-server --output /data/prepared/infer-5k-server/policy
 ```
 
 如果输出目录已经存在，先检查其中的 `policy.yaml` 和 `policy_binding.json`，不要覆盖。
@@ -472,7 +472,7 @@ learning/lerobot/scripts/run.sh policy --config /data/prepared/infer-5k-server/p
 含义：查找残留服务进程。
 
 ```bash
-ps -eo pid,cmd | grep '[d]ual_arm_learning.act_service'
+ps -eo pid,cmd | grep '[d]ual_arm_learning.policy_service_cli'
 ```
 
 含义：停止查到的旧进程，把 `<PID>` 替换成实际进程号。

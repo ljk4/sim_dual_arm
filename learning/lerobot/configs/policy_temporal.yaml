@@ -1,6 +1,6 @@
 # 中文参数说明（维护时优先阅读本段）
-# model.bundle：ACT bundle 根目录。
-# model.profile/observation_schema/action_schema：机器人、观测和动作契约文件。
+# model.bundle_dir：ACT bundle 根目录。
+# model.robot_profile_path/observation_schema_path/action_schema_path：机器人、观测和动作契约文件。
 # model.device：推理设备，cuda 或 cpu。
 # model.require_formal：是否拒绝 synthetic/teacher/test 等非正式数据来源。
 # model.gripper_max_correction_m：夹爪原始动作允许的最大修正量，单位 m。
@@ -19,17 +19,17 @@
 # Named, ROS-free ACT Policy service.
 #
 # This file intentionally contains no model/processor/profile/schema digests:
-# the entry derives every identity from the 035 bundle and the shipped profile
-# documents at startup, verifies all file hashes, then snapshots the resolved
-# contract next to the service log.  `bundle` may be outside the repository and
-# is prepared inside the learning environment and mounted read-only by the runtime.
+# the loader derives every identity from the bundle and the shipped profile
+# documents at startup, verifies their consistency and snapshots the resolved
+# contract next to the service log.  `bundle_dir` may be outside the
+# repository and is mounted read-only by the runtime.
 schema_version: 1
 
 model:
-  bundle: /opt/act-bundle
-  profile: ../../../profiles/robots/panda_stack_learning_v1/profile.json
-  observation_schema: ../../../profiles/observations/panda_rgb_joint_v1.json
-  action_schema: ../../../profiles/actions/panda_joint_position_v1.json
+  bundle_dir: /opt/act-bundle
+  robot_profile_path: ../../../profiles/robots/panda_stack_learning_v1/profile.json
+  observation_schema_path: ../../../profiles/observations/panda_rgb_joint_v1.json
+  action_schema_path: ../../../profiles/actions/panda_joint_position_v1.json
   device: cuda
   # Formal evaluation must reject synthetic/teacher/test evidence.
   require_formal: true

@@ -6,8 +6,6 @@ import json
 from pathlib import Path
 
 import numpy as np
-import pyarrow as pa
-import pyarrow.parquet as pq
 import pytest
 import yaml
 from dual_arm_learning.checkpoints import (
@@ -27,6 +25,8 @@ from dual_arm_learning.sample_filter import (
 from dual_arm_learning.training import TrainingError, _sample_filter
 from model_helpers import replace
 
+pa = pytest.importorskip("pyarrow")
+pq = pytest.importorskip("pyarrow.parquet")
 ROOT = Path(__file__).resolve().parents[2]
 RULE = ROOT / "learning/lerobot/configs/act_sample_filter.yaml"
 PROFILE = "a" * 64

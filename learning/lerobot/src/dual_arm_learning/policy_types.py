@@ -48,6 +48,27 @@ class ProviderInfo:
     chunk_size: int
     test_only: bool
 
+    @classmethod
+    def from_config(cls, config: object) -> ProviderInfo:
+        """Project one PolicyServiceConfig onto the wire identity."""
+        return cls(
+            protocol_major=config.protocol_major,  # type: ignore[attr-defined]
+            model_bundle_digest=config.model_bundle_digest,  # type: ignore[attr-defined]
+            processor_digest=config.processor_digest,  # type: ignore[attr-defined]
+            observation_schema_hash=config.observation_schema_hash,  # type: ignore[attr-defined]
+            action_schema_hash=config.action_schema_hash,  # type: ignore[attr-defined]
+            robot_profile_hash=config.robot_profile_hash,  # type: ignore[attr-defined]
+            state_joint_names=config.joint_names,  # type: ignore[attr-defined]
+            action_joint_names=config.action_joint_names,  # type: ignore[attr-defined]
+            required_camera_names=config.camera_names,  # type: ignore[attr-defined]
+            action_period_ns=config.action_period_ns,  # type: ignore[attr-defined]
+            stateful=config.stateful,  # type: ignore[attr-defined]
+            ready=True,
+            command_space=config.command_space,  # type: ignore[attr-defined]
+            chunk_size=config.chunk_size,  # type: ignore[attr-defined]
+            test_only=config.test_only,  # type: ignore[attr-defined]
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class ProviderJointSample:

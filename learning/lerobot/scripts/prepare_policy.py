@@ -10,7 +10,6 @@ overwritten.  The runtime side consumes only the generic JSON.
 from __future__ import annotations
 
 import argparse
-import dataclasses
 import hashlib
 import json
 import os
@@ -25,15 +24,16 @@ ROOT = Path(__file__).resolve().parents[3]
 for _path in (
     ROOT / "learning/lerobot/src",
     ROOT / "libraries/run_logging/src",
+    ROOT / "contracts/python/src",
 ):
     if str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
 
-from dual_arm_learning.act_contract import (  # noqa: E402
-    ActContractError,
-    ActSettings,
-    load_act_settings,
-    resolve_act_contract,
+from dual_arm_learning.bundle import deployment_summary  # noqa: E402
+from dual_arm_learning.policy_config import (  # noqa: E402
+    PolicyConfigError,
+    PolicyServiceConfig,
+    load_policy_config,
 )
 
 RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -84,7 +84,7 @@ def _container_path(path: Path, project_root: Path) -> str:
     return f"/workspace/{relative.as_posix()}"
 
 
-def _settings(
+def _load(
     template: Path,
     *,
     bundle: Path,
@@ -93,20 +93,18 @@ def _settings(
     action_schema: Path | None,
     device: str | None,
     require_formal: bool | None,
-) -> tuple[ActSettings, Path]:
-    loaded = load_act_settings(template)
-    changes: dict[str, Any] = {"bundle": Path(bundle).resolve()}
-    if profile is not None:
-        changes["profile"] = Path(profile).resolve()
-    if observation_schema is not None:
-        changes["observation_schema"] = Path(observation_schema).resolve()
-    if action_schema is not None:
-        changes["action_schema"] = Path(action_schema).resolve()
-    if device is not None:
-        changes["device"] = device
-    if require_formal is not None:
-        changes["require_formal"] = require_formal
-    return dataclasses.replace(loaded, **changes), template
+) -> PolicyServiceConfig:
+    return load_policy_config(
+        template,
+        bundle_dir=Path(bundle).resolve(),
+        robot_profile_path=None if profile is None else Path(profile).resolve(),
+        observation_schema_path=(
+            None if observation_schema is None else Path(observation_schema).resolve()
+        ),
+        action_schema_path=None if action_schema is None else Path(action_schema).resolve(),
+        device=device,
+        require_formal=require_formal,
+    )
 
 
 def prepare_policy(
@@ -127,7 +125,7 @@ def prepare_policy(
     if RUN_ID.fullmatch(run_id) is None or ".." in run_id:
         raise PrepareError("run_id must be a safe 1..128 character path segment")
     template_path = Path(template).resolve()
-    settings, _ = _settings(
+    config = _load(
         template_path,
         bundle=bundle,
         profile=profile,
@@ -137,31 +135,25 @@ def prepare_policy(
         require_formal=require_formal,
     )
     endpoint_port = _endpoint_port(endpoint)
-    if settings.port != endpoint_port:
+    if config.port != endpoint_port:
         raise PrepareError(
-            f"ACT template service.port {settings.port} must match endpoint port {endpoint_port}"
+            f"ACT template service.port {config.port} must match endpoint port {endpoint_port}"
         )
-    contract = resolve_act_contract(
-        bundle=settings.bundle,
-        profile_path=settings.profile,
-        observation_schema_path=settings.observation_schema,
-        action_schema_path=settings.action_schema,
-        require_formal=settings.require_formal,
-    )
     source = yaml.safe_load(template_path.read_text(encoding="utf-8"))
     if not isinstance(source, dict) or not isinstance(source.get("model"), dict):
         raise PrepareError("ACT policy template has no model object")
     model = source["model"]
-    model["bundle"] = _container_path(settings.bundle, project_root)
-    model["profile"] = _container_path(settings.profile, project_root)
-    model["observation_schema"] = _container_path(settings.observation_schema, project_root)
-    model["action_schema"] = _container_path(settings.action_schema, project_root)
-    model["device"] = settings.device
-    model["require_formal"] = settings.require_formal
+    model["bundle_dir"] = _container_path(config.bundle_dir, project_root)
+    model["robot_profile_path"] = _container_path(config.robot_profile_path, project_root)
+    model["observation_schema_path"] = _container_path(
+        config.observation_schema_path, project_root
+    )
+    model["action_schema_path"] = _container_path(config.action_schema_path, project_root)
+    model["device"] = config.device
+    model["require_formal"] = config.require_formal
     if "service" not in source or not isinstance(source["service"], dict):
         raise PrepareError("ACT policy template has no service object")
-    service = source["service"]
-    service["port"] = settings.port
+    source["service"]["port"] = config.port
     if "FROM_VERIFIED" in yaml.safe_dump(source):
         raise PrepareError("ACT service template still contains an unverified placeholder")
 
@@ -171,6 +163,7 @@ def prepare_policy(
     destination.mkdir(parents=True)
     policy_path = destination / "policy.yaml"
     policy_path.write_text(yaml.safe_dump(source, sort_keys=False), encoding="utf-8")
+    summary = deployment_summary(config)
     binding = {
         "schema_version": 1,
         "kind": "policy-binding",
@@ -178,55 +171,54 @@ def prepare_policy(
         "endpoint": endpoint,
         "policy_api": "grpc",
         "model": {
-            "bundle": _container_path(settings.bundle, project_root),
-            "bundle_digest": contract.bundle_digest,
-            "model_sha256": contract.model_sha256,
-            "state_dict_sha256": contract.state_dict_sha256,
-            "config_sha256": contract.config_sha256,
-            "processor_digest": contract.processor_digest,
-            "stats_sha256": contract.stats_sha256,
-            "checkpoint_step": contract.checkpoint_step,
-            "checkpoint_mode": contract.checkpoint_mode,
-            "dataset_seed": contract.dataset_seed,
-            "train_episodes": contract.train_episodes,
-            "validation_episodes": contract.validation_episodes,
-            "synthetic": contract.synthetic,
-            "lerobot_revision": contract.lerobot_revision,
-            "lerobot_archive_sha256": contract.lerobot_archive_sha256,
-            "training_config_sha256": contract.training_config_sha256,
+            "bundle": _container_path(config.bundle_dir, project_root),
+            "bundle_digest": config.model_bundle_digest,
+            "model_sha256": summary.get("model_sha256", ""),
+            "state_dict_sha256": summary.get("state_dict_sha256", ""),
+            "config_sha256": summary.get("config_sha256", ""),
+            "processor_digest": config.processor_digest,
+            "checkpoint_step": summary.get("checkpoint_step", 0),
+            "checkpoint_mode": summary.get("checkpoint_mode", ""),
+            "dataset_seed": summary.get("dataset_seed", 0),
+            "train_episodes": summary.get("train_episodes", 0),
+            "validation_episodes": summary.get("validation_episodes", 0),
+            "synthetic": summary.get("synthetic", False),
+            "lerobot_revision": summary.get("lerobot_revision", ""),
+            "lerobot_archive_sha256": summary.get("lerobot_archive_sha256", ""),
+            "training_config_sha256": summary.get("training_config_sha256", ""),
         },
         "profile": {
-            "path": _container_path(settings.profile, project_root),
-            "sha256": _sha256(settings.profile),
-            "semantic_sha256": contract.profile_semantic_sha256,
+            "path": _container_path(config.robot_profile_path, project_root),
+            "sha256": _sha256(config.robot_profile_path),
+            "semantic_sha256": config.robot_profile_hash,
         },
         "observation_schema": {
-            "path": _container_path(settings.observation_schema, project_root),
-            "sha256": _sha256(settings.observation_schema),
-            "semantic_sha256": contract.observation_schema_hash,
+            "path": _container_path(config.observation_schema_path, project_root),
+            "sha256": _sha256(config.observation_schema_path),
+            "semantic_sha256": config.observation_schema_hash,
         },
         "action_schema": {
-            "path": _container_path(settings.action_schema, project_root),
-            "sha256": _sha256(settings.action_schema),
-            "semantic_sha256": contract.action_schema_hash,
+            "path": _container_path(config.action_schema_path, project_root),
+            "sha256": _sha256(config.action_schema_path),
+            "semantic_sha256": config.action_schema_hash,
         },
         "service": {
-            "port": settings.port,
-            "task_id": settings.task_id,
-            "task_text": settings.task_text,
-            "predict_deadline_s": settings.predict_deadline_s,
-            "open_deadline_s": settings.open_deadline_s,
-            "close_deadline_s": settings.close_deadline_s,
-            "max_message_bytes": settings.max_message_bytes,
-            "chunk_size": contract.chunk_size,
-            "state_dim": contract.state_dim,
-            "action_period_ns": contract.action_period_ns,
-            "action_lead_ns": contract.action_lead_ns,
-            "cameras": list(contract.camera_names),
-            "camera_width": contract.camera_width,
-            "camera_height": contract.camera_height,
+            "port": config.port,
+            "task_id": config.task_id,
+            "task_text": config.task_text,
+            "predict_deadline_s": config.predict_deadline_s,
+            "open_deadline_s": config.open_deadline_s,
+            "close_deadline_s": config.close_deadline_s,
+            "max_message_bytes": config.max_message_bytes,
+            "chunk_size": config.chunk_size,
+            "state_dim": len(config.joint_names),
+            "action_period_ns": config.action_period_ns,
+            "action_lead_ns": summary.get("action_lead_ns", 50_000_000),
+            "cameras": list(config.camera_names),
+            "camera_width": config.camera_width,
+            "camera_height": config.camera_height,
         },
-        "contract": contract.summary(),
+        "contract": summary,
     }
     binding_path = destination / "policy_binding.json"
     binding_path.write_text(
@@ -238,15 +230,9 @@ def prepare_policy(
         json.dumps(
             {
                 "schema_version": 1,
-                "contract": contract.summary(),
-                "template": {
-                    "path": str(template_path),
-                    "sha256": _sha256(template_path),
-                },
-                "generated": {
-                    "path": str(policy_path),
-                    "sha256": _sha256(policy_path),
-                },
+                "contract": summary,
+                "template": {"path": str(template_path), "sha256": _sha256(template_path)},
+                "generated": {"path": str(policy_path), "sha256": _sha256(policy_path)},
             },
             indent=2,
             sort_keys=True,
@@ -264,8 +250,8 @@ def prepare_policy(
         "inputs": {
             "template": str(template_path),
             "template_sha256": _sha256(template_path),
-            "bundle": str(settings.bundle),
-            "bundle_digest": contract.bundle_digest,
+            "bundle": str(config.bundle_dir),
+            "bundle_digest": config.model_bundle_digest,
         },
         "outputs": {
             "policy": str(policy_path),
@@ -289,7 +275,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--template",
         type=Path,
-        default=ROOT / "learning/lerobot/configs/act_policy_temporal.yaml",
+        default=ROOT / "learning/lerobot/configs/policy_temporal.yaml",
     )
     parser.add_argument("--bundle", type=Path, required=True)
     parser.add_argument("--profile", type=Path)
@@ -316,7 +302,7 @@ def main(argv: list[str] | None = None) -> int:
             require_formal=arguments.require_formal,
             project_root=arguments.project_root,
         )
-    except (PrepareError, ActContractError, OSError, ValueError) as error:
+    except (PrepareError, PolicyConfigError, OSError, ValueError) as error:
         print(f"prepare_policy: {error}", file=sys.stderr)
         return 1
     print(json.dumps(manifest, sort_keys=True))

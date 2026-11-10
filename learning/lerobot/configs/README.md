@@ -7,7 +7,7 @@
 - `act_training*.yaml`：ACT 训练配方，`.container.yaml` 使用 `/data` 共享产物
   与 `/opt/learning-cache` 只读权重。
 - `act_sample_filter.yaml`：训练起点静止冗余筛选。
-- `act_policy_temporal.yaml`：真实 ACT Policy 服务模板；`prepare-policy` 读取它并
+- `policy_temporal.yaml`：真实 ACT Policy 服务模板；`prepare-policy` 读取它并
   写出带真实 bundle 路径/摘要的服务配置。它打开按绝对仿真时间对齐的预测融合
   （`model.temporal_ensemble_coeff: 0.01`）。
 - `fake_policy.yaml`：仅测试使用的 fake provider 模板，不能冒充正式 ACT。

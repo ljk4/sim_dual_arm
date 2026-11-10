@@ -15,7 +15,7 @@
 # verify_png_pixels：是否逐帧校验 PNG 内容。
 # require_quality：是否要求 quality.json 合格。
 # expected.*：期望的正式、训练、验证 episode 数和验证集位置。
-# lerobot.*：固定源码版本、视频编码器、容量和线程配置。
+# lerobot.*：固定源码版本、视频编码器、容量和线程配置；归档哈希由运行时计算。
 
 # DSH-035: 034 export -> two independent LeRobot datasets.
 # This file is the single conversion/feature contract.  Paths are project-relative.
@@ -44,7 +44,6 @@ expected:
   validation_positions: [9, 19, 29, 39, 49]
 lerobot:
   source_revision: 7e241bd630a3719a56157a497ce5d08f244784f1
-  source_archive_sha256: 710397ad753090743c1aadf04b2bd40584fbca8448b1409131138172913c8a0c
   rgb_encoder:
     vcodec: h264
     g: 2

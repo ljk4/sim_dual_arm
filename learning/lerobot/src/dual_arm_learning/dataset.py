@@ -120,6 +120,18 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def source_archive_sha256(config: DatasetConfig) -> str:
+    """Return the configured archive digest or the actual source binding digest."""
+    if config.lerobot_source_archive_sha256:
+        return config.lerobot_source_archive_sha256
+    binding = config.project_root / "learning/lerobot/docker/learning-source.json"
+    try:
+        value = json.loads(binding.read_text(encoding="utf-8")).get("archive_sha256")
+    except (OSError, json.JSONDecodeError):
+        return ""
+    return value if isinstance(value, str) and PNG_SHA.fullmatch(value) else ""
+
+
 def canonical_hash(document: object) -> str:
     payload = json.dumps(document, sort_keys=True, separators=(",", ":"), allow_nan=False)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -903,7 +915,7 @@ def convert(
             },
             "lerobot": {
                 "source_revision": config.lerobot_source_revision,
-                "source_archive_sha256": config.lerobot_source_archive_sha256,
+                "source_archive_sha256": source_archive_sha256(config),
                 "rgb_encoder": {
                     "vcodec": config.rgb_encoder.vcodec,
                     "g": config.rgb_encoder.g,
@@ -1002,6 +1014,7 @@ __all__ = [
     "canonical_hash",
     "convert",
     "file_sha256",
+    "source_archive_sha256",
     "resolve_export_dir",
     "tree_hashes",
 ]

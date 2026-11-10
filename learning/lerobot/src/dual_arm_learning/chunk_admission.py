@@ -18,7 +18,7 @@ class Admission:
     reason: str
 
 
-def admit_grippers(raw, names, lower, upper, max_correction_m: float) -> Admission:
+def admit_action_chunk(raw, names, lower, upper, max_correction_m: float) -> Admission:
     """Keep arm targets strict; clip only named total gripper apertures."""
     original = np.asarray(raw, dtype=np.float64)
     admitted = original.copy()

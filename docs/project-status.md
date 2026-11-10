@@ -84,7 +84,7 @@ ACT预测、53块执行；无真值/teacher/回放补救。模型仍为原batch1
 
 用户批准的实验参考偏差预算为关节0.30rad/夹爪0.04m；硬限位、速度/加速度、实测
 跟踪、接触条件、卸载2s和成功判定保持原值。通过的源配方为runtime/backend的
-`*_act_chunked.yaml`与Policy的`act_policy_temporal.yaml`，已与成功输入做语义一致性核对。
+`*_act_chunked.yaml`与Policy的`policy_temporal.yaml`，已与成功输入做语义一致性核对。
 
 录制、MCAP审计、数组/文件哈希与资源收尾通过；**图像质量门禁未全过**：右腕底块
 曾遮挡1.85s。因此保留task_success=true、quality_qualified=false、run_success=false。

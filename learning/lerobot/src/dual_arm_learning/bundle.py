@@ -355,6 +355,10 @@ def export_bundle(
         },
     )
     files = tree_hashes(output_dir)
+    dataset_document = _json(metadata / "dataset_manifest.json")
+    archive_sha256 = config.dataset.lerobot_source_archive_sha256 or str(
+        dataset_document.get("lerobot", {}).get("source_archive_sha256", "")
+    )
     model_sha = files["model.safetensors"]["sha256"]
     processor_digest = _processor_digest(output_dir / "processors")
     dataset_record: dict[str, Any] = {
@@ -407,7 +411,7 @@ def export_bundle(
         },
         "source": {
             "lerobot_revision": config.dataset.lerobot_source_revision,
-            "lerobot_archive_sha256": config.dataset.lerobot_source_archive_sha256,
+            "lerobot_archive_sha256": archive_sha256,
             "training_config_sha256": files["metadata/training_config.yaml"]["sha256"],
         },
         "model": {"path": "model.safetensors", "sha256": model_sha},
@@ -470,12 +474,8 @@ def _load_bundle_unverified(root: Path, *, manifest_placeholder: bool = False) -
     )
 
 
-def load_bundle(root: str | Path, *, device: str = "cpu") -> BundleHandle:
-    """Verify every bundle file, then strictly load the trained ACT policy."""
-    from lerobot.policies.act.configuration_act import ACTConfig
-    from lerobot.policies.act.modeling_act import ACTPolicy
-    from safetensors.torch import load_file
-
+def verify_bundle(root: str | Path) -> dict[str, Any]:
+    """Verify one bundle's manifest digest, inventory, symlinks and artefact types."""
     bundle = Path(root)
     manifest = _json(bundle / "manifest.json")
     if manifest.get("format") != BUNDLE_FORMAT:
@@ -511,6 +511,56 @@ def load_bundle(root: str | Path, *, device: str = "cpu") -> BundleHandle:
         raise BundleError("bundle contains a pickle-based model artefact")
     if manifest.get("model", {}).get("sha256") != manifest.get("state_dict_sha256"):
         raise BundleError("bundle model hash is inconsistent")
+    return manifest
+
+
+def deployment_summary(config: Any) -> dict[str, Any]:
+    """Return JSON-safe deployment provenance from an already verified config."""
+    summary: dict[str, Any] = {
+        "format": BUNDLE_FORMAT,
+        "bundle_digest": config.model_bundle_digest,
+        "processor_digest": config.processor_digest,
+        "observation_schema_hash": config.observation_schema_hash,
+        "action_schema_hash": config.action_schema_hash,
+        "profile_semantic_sha256": config.robot_profile_hash,
+        "chunk_size": config.chunk_size,
+        "state_dim": len(config.joint_names),
+        "action_period_ns": config.action_period_ns,
+        "action_lead_ns": 50_000_000,
+        "fps": 20,
+        "cameras": list(config.camera_names),
+        "camera_width": config.camera_width,
+        "camera_height": config.camera_height,
+    }
+    if config.bundle_dir is None:
+        return summary
+    manifest = _json(Path(config.bundle_dir) / "manifest.json")
+    dataset, source = manifest.get("dataset", {}), manifest.get("source", {})
+    summary.update(
+        model_sha256=manifest.get("model", {}).get("sha256", ""),
+        state_dict_sha256=manifest.get("state_dict_sha256", ""),
+        config_sha256=manifest.get("config", {}).get("sha256", ""),
+        checkpoint_step=manifest.get("checkpoint", {}).get("step", 0),
+        checkpoint_mode=manifest.get("checkpoint", {}).get("mode", ""),
+        dataset_seed=dataset.get("seed", 0),
+        train_episodes=dataset.get("train_episodes", 0),
+        validation_episodes=dataset.get("validation_episodes", 0),
+        synthetic=bool(manifest.get("synthetic") or dataset.get("synthetic")),
+        lerobot_revision=source.get("lerobot_revision", ""),
+        lerobot_archive_sha256=source.get("lerobot_archive_sha256", ""),
+        training_config_sha256=source.get("training_config_sha256", ""),
+    )
+    return summary
+
+
+def load_bundle(root: str | Path, *, device: str = "cpu") -> BundleHandle:
+    """Verify every bundle file, then strictly load the trained ACT policy."""
+    from lerobot.policies.act.configuration_act import ACTConfig
+    from lerobot.policies.act.modeling_act import ACTPolicy
+    from safetensors.torch import load_file
+
+    bundle = Path(root)
+    manifest = verify_bundle(bundle)
     config = ACTConfig.from_pretrained(bundle, local_files_only=True)
     config.device = device
     policy = ACTPolicy(config)
@@ -544,8 +594,10 @@ def tree_files_no_manifest(root: Path) -> list[Path]:
 __all__ = [
     "BundleError",
     "BundleHandle",
+    "deployment_summary",
     "export_bundle",
     "load_bundle",
     "predict_action_chunk",
     "tree_files_no_manifest",
+    "verify_bundle",
 ]

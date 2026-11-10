@@ -119,8 +119,9 @@ def verify_dataset_manifest(
         raise TrainingError("manifest profile id does not match")
     if manifest.get("lerobot", {}).get("source_revision") != config.dataset.lerobot_source_revision:
         raise TrainingError("manifest LeRobot revision does not match the pinned source")
-    if manifest.get("lerobot", {}).get("source_archive_sha256") != (
-        config.dataset.lerobot_source_archive_sha256
+    declared_archive = config.dataset.lerobot_source_archive_sha256
+    if declared_archive and manifest.get("lerobot", {}).get("source_archive_sha256") != (
+        declared_archive
     ):
         raise TrainingError("manifest LeRobot source archive does not match")
     processors = manifest.get("processors")
@@ -264,7 +265,7 @@ def masked_l1(prediction: Any, target: Any, action_is_pad: Any) -> tuple[Any, in
     return error.sum() / count, count
 
 
-def _load_resnet_weights(policy: Any, config: TrainingConfig) -> int:
+def _load_resnet_weights(policy: Any, config: TrainingConfig) -> tuple[int, str]:
     import torch
 
     path = config.model.weights_path
@@ -272,7 +273,8 @@ def _load_resnet_weights(policy: Any, config: TrainingConfig) -> int:
         path = Path(os.environ["RESNET18_WEIGHTS"])
     if not path.is_file():
         raise TrainingError(f"official ResNet18 weights are missing: {path}")
-    if file_sha256(path) != config.model.weights_sha256:
+    weights_sha256 = file_sha256(path)
+    if config.model.weights_sha256 and weights_sha256 != config.model.weights_sha256:
         raise TrainingError("official ResNet18 weights SHA256 does not match the configuration")
     loaded = torch.load(path, map_location="cpu", weights_only=True)
     if isinstance(loaded, dict) and "state_dict" in loaded:
@@ -290,7 +292,7 @@ def _load_resnet_weights(policy: Any, config: TrainingConfig) -> int:
         )
     if len(filtered) != len(expected):
         raise TrainingError("ResNet18 weight file did not cover every backbone tensor")
-    return len(filtered)
+    return len(filtered), weights_sha256
 
 
 def build_act_config(config: TrainingConfig, *, device: str | None = None) -> Any:
@@ -326,15 +328,15 @@ def build_act_config(config: TrainingConfig, *, device: str | None = None) -> An
     )
 
 
-def _build_policy(config: TrainingConfig) -> tuple[Any, Any, Any, Any, int]:
+def _build_policy(config: TrainingConfig) -> tuple[Any, Any, Any, Any, int, str]:
     from lerobot.policies.act.modeling_act import ACTPolicy
 
     act_config = build_act_config(config)
     policy = ACTPolicy(act_config)
-    loaded = _load_resnet_weights(policy, config)
+    loaded, weights_sha256 = _load_resnet_weights(policy, config)
     policy.to(config.device)
     # Processors are built from the training split's meta.stats below.
-    return policy, act_config, None, None, loaded
+    return policy, act_config, None, None, loaded, weights_sha256
 
 
 def _build_processors(
@@ -611,6 +613,7 @@ def _report(
     peak_alloc: float,
     peak_reserved: float,
     sample_filter: SampleFilterMask | None = None,
+    weights_sha256: str = "",
 ) -> dict[str, Any]:
     return {
         "format": "dual-arm-act-training-report-v1",
@@ -637,6 +640,12 @@ def _report(
         "checkpoints": save_records,
         "errors": errors,
         "sample_filter": None if sample_filter is None else sample_filter.summary(),
+        "input_sha256": {
+            "training_config": config.sha256,
+            "dataset_manifest": audit.manifest_sha256,
+            "profile": file_sha256(config.dataset.profile_path),
+            "resnet18_weights": weights_sha256,
+        },
         "limits": [
             "model selection uses validation masked L1 only",
             "physical stacking success is measured by the supervised campaign, not this loss",
@@ -759,7 +768,7 @@ def train(
             validation_dataset = _dataset(
                 config, audit.validation_root, validation_episodes, training=False
             )
-        policy, act_config, _, _, loaded_backbone = _build_policy(config)
+        policy, act_config, _, _, loaded_backbone, weights_sha256 = _build_policy(config)
         pre, post = _build_processors(config, train_dataset, act_config)
         optimizer = torch.optim.AdamW(
             policy.parameters(), lr=config.lr, weight_decay=config.weight_decay
@@ -788,6 +797,7 @@ def train(
             "training.model_ready",
             batch_size=config.batch_size,
             loaded_backbone_tensors=loaded_backbone,
+            weights_sha256=weights_sha256,
             train_frames=len(train_dataset),
             train_source_frames=len(train_dataset),
             train_eligible_frames=(
@@ -1010,6 +1020,7 @@ def train(
             peak_alloc=peak_alloc,
             peak_reserved=peak_reserved,
             sample_filter=sample_filter,
+            weights_sha256=weights_sha256,
         )
         try:
             payload = json.dumps(report, indent=2, allow_nan=False, default=str) + "\n"

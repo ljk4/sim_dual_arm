@@ -29,11 +29,11 @@ def test_fake_service_config_is_complete_and_ros_free():
 def test_unknown_and_unsafe_fields_are_rejected():
     value = service_document()
     value["unknown"] = 1
-    with pytest.raises(PolicyConfigError, match="unknown field"):
+    with pytest.raises(PolicyConfigError, match="unknown"):
         parse_policy_config(value)
     value = service_document()
     value["test_only"] = "false"
-    with pytest.raises(PolicyConfigError, match="must be a boolean"):
+    with pytest.raises(PolicyConfigError, match="test_only"):
         parse_policy_config(value)
     value = service_document()
     value["chunk_size"] = 59

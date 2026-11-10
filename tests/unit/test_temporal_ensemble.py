@@ -4,7 +4,7 @@ import math
 
 import numpy as np
 import pytest
-from dual_arm_learning.act_temporal import (
+from dual_arm_learning.temporal_ensemble import (
     CHUNK_SIZE,
     MAX_HISTORY,
     PERIOD_NS,

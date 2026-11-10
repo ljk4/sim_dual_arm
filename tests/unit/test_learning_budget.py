@@ -158,6 +158,15 @@ time.sleep(20)
 """
     env = dict(os.environ)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    root = Path(__file__).resolve().parents[2]
+    env["PYTHONPATH"] = os.pathsep.join(
+        [
+            str(root / "learning/lerobot/src"),
+            str(root / "contracts/python/src"),
+            str(root / "libraries/run_logging/src"),
+            env.get("PYTHONPATH", ""),
+        ]
+    )
     child = subprocess.Popen([sys.executable, "-c", script], env=env)
     try:
         deadline = time.monotonic() + 10

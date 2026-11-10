@@ -2,7 +2,7 @@
 
 ROS-free 的 ACT 策略服务、协议适配、bundle/checkpoint 校验、数据转换和训练工具。
 `src/dual_arm_learning/` 是唯一包，公共 CLI 为 `cli.py`，策略服务为
-`act_service.py`。容器内唯一入口为 `learning/lerobot/scripts/run.sh`：
+`policy_service_cli.py`。容器内唯一入口为 `learning/lerobot/scripts/run.sh`：
 
 - `prepare-policy`：验证真实 ACT bundle，生成通用 `policy_binding.json` 和可执行
   `policy.yaml`；模型/processor/profile/schema 摘要均由 bundle 与 shipped 文件计算。

@@ -1,4 +1,3 @@
-import dataclasses
 import json
 from pathlib import Path
 
@@ -84,7 +83,7 @@ def observation(config, reference_ns=1_000_000_000):
 
 def build(fault=None, settings=None):
     config, configured = load_fake_config(CONFIG)
-    config = dataclasses.replace(config, port=0)
+    config = config.model_copy(update={"port": 0})
     provider = FakeProvider(config, settings or configured, fault=fault)
     return config, provider, PolicyService(config, provider)
 

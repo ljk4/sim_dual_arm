@@ -16,6 +16,7 @@ from typing import Any
 import grpc
 from robot_run_logging import EventContext, EventLogger, LogFailure
 
+from .adapters.base import PolicyModelAdapter
 from .policy_config import PolicyServiceConfig
 from .policy_service import PolicyService
 from .policy_types import PolicyError, PolicyProvider
@@ -174,13 +175,21 @@ class PolicyServer:
     def __init__(
         self,
         config: PolicyServiceConfig,
-        provider: PolicyProvider,
+        provider: PolicyProvider | PolicyModelAdapter,
         log: EventLogger | None = None,
+        *,
+        prediction_directory: Path | None = None,
+        prediction_max_bytes: int = 268435456,
     ) -> None:
         from dual_arm_policy.v1 import policy_pb2_grpc
 
         self.config = config
-        self.service = PolicyService(config, provider)
+        self.service = PolicyService(
+            config,
+            provider,
+            prediction_directory=prediction_directory,
+            prediction_max_bytes=prediction_max_bytes,
+        )
         self.log = log
         self.servicer = PolicyServicer(self.service, config, log)
         self._server = grpc.server(
@@ -220,10 +229,12 @@ class PolicyServer:
 
 def serve_forever(
     config: PolicyServiceConfig,
-    provider: PolicyProvider,
+    provider: PolicyProvider | PolicyModelAdapter,
     stop: threading.Event | None = None,
     *,
     log_directory: Path = Path("var/logs/policy"),
+    prediction_directory: Path | None = None,
+    prediction_max_bytes: int = 268435456,
     run_id: str | None = None,
     startup_fields: dict[str, Any] | None = None,
     snapshot: dict[str, Any] | None = None,
@@ -247,7 +258,13 @@ def serve_forever(
         attach = getattr(provider, "attach_logger", None)
         if callable(attach):
             attach(log)
-        server = PolicyServer(config, provider, log)
+        server = PolicyServer(
+            config,
+            provider,
+            log,
+            prediction_directory=prediction_directory,
+            prediction_max_bytes=prediction_max_bytes,
+        )
         port = server.start()
         log.emit(
             "policy.started",
@@ -261,12 +278,12 @@ def serve_forever(
             critical=True,
         )
         log.emit("policy.ready", fields={"port": port, "ready": True, **fields}, critical=True)
-        print(f"policy service listening on {config.bind_address}:{port}", flush=True)
 
         def request_stop(_signum: int, _frame: object) -> None:
             stopping.set()
 
         previous = {s: signal.signal(s, request_stop) for s in (signal.SIGINT, signal.SIGTERM)}
+        print(f"policy service listening on {config.bind_address}:{port}", flush=True)
         server.wait(stopping)
     except Exception as error:
         code = 1

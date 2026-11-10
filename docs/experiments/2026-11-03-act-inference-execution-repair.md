@@ -22,7 +22,7 @@
 | 模型时间语义 | 每点 50 ms；完整预测 60 点，即 3 秒 |
 | 数据 | 原 50 条合格 episode，45/5 划分；此次修复没有改数据或归一化统计 |
 | 最终执行配方 | 10 点／0.5 秒窗口、绝对仿真时间融合、系数 0.01、任务前稳定等待 2 秒 |
-| 最终配方入口 | [runtime](../../runtime/ros2/configs/policy_rollout.yaml)、[backend](../../simulation/mujoco/configs/backend/backend_stack_act_chunked.yaml)、[follower](../../profiles/control/panda_follower_v1.yaml)、[policy](../../learning/lerobot/configs/act_policy_temporal.yaml) |
+| 最终配方入口 | [runtime](../../runtime/ros2/configs/policy_rollout.yaml)、[backend](../../simulation/mujoco/configs/backend/backend_stack_act_chunked.yaml)、[follower](../../profiles/control/panda_follower_v1.yaml)、[policy](../../learning/lerobot/configs/policy_temporal.yaml) |
 
 模型包：`var/learning/experiments/act-static-b16-20k-20261103/bundle-best-20k`。
 其 digest 为 `c1ed8e8f0e3123f17fc1cba72aeec7c624b9a12d5a3f2c825c1f8300bcc278e6`。
@@ -67,7 +67,7 @@ weight = exp(coeff * (t - s) / P)
 
 **可复用经验：**异步查询的间隔可能超过一个动作周期，融合须按绝对执行时刻对齐，不能直接平均同一数组下标。保留历史观测身份和融合贡献数，防止平滑后无法解释动作来源。
 
-详见 [DSH-047](../history/README.md#dsh-047)、[融合实现](../../learning/lerobot/src/dual_arm_learning/act_temporal.py) 和 [同一失败请求的融合对照](../../.build/reports/dsh-045/ensemble-probe-30401.json)。该离线通过不单独证明物理成功。
+详见 [DSH-047](../history/README.md#dsh-047)、[融合实现](../../learning/lerobot/src/dual_arm_learning/temporal_ensemble.py) 和 [同一失败请求的融合对照](../../.build/reports/dsh-045/ensemble-probe-30401.json)。该离线通过不单独证明物理成功。
 
 ### 3.3 reset 完成不等于任务可准备，也不等于适合立即推理
 
@@ -94,7 +94,7 @@ weight = exp(coeff * (t - s) / P)
 
 修复将每个时刻、每个轴的融合结果约束在**实际参与融合值的最小值与最大值之间**，恢复加权平均应有的凸组合范围；增加常量边界的长序列回归测试。没有放宽机器人限位，也没有新增机械臂目标投影。
 
-**可复用经验：**输入校验通过不代表计算结果自动保留输入的不变量。浮点修正应有数学依据和明确范围，不应靠通用裁剪掩盖非法输入。实现与验收见 [DSH-047](../history/README.md#dsh-047) 和 [融合测试](../../tests/unit/test_act_temporal.py)。
+**可复用经验：**输入校验通过不代表计算结果自动保留输入的不变量。浮点修正应有数学依据和明确范围，不应靠通用裁剪掩盖非法输入。实现与验收见 [DSH-047](../history/README.md#dsh-047) 和 [融合测试](../../tests/unit/test_temporal_ensemble.py)。
 
 ### 3.6 Ruckig 的极小制动前缀被导出器当成真实额外制动
 
