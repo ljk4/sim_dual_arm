@@ -1,0 +1,17 @@
+# Bounded, read-only task preparation.  It never executes a task action.
+robot_api_msgs/RunContext context
+string episode_id
+string request_id
+string lease_id
+uint64 seed
+# Empty selects the backend's configured task plugin.
+string task_type
+---
+bool success
+string reason
+uint64 task_epoch
+string task_type
+string task_config_digest
+string plan_digest
+# Canonical JSON object with task-specific preparation metrics.
+string metrics_json

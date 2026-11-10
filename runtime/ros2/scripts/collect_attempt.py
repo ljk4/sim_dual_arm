@@ -22,11 +22,11 @@ REFERENCES = (
 
 
 def main() -> int:
-    attempt = Path(os.environ["STACK_ATTEMPT_DIR"]).resolve()
-    seed = int(os.environ["STACK_SEED"])
-    run_id = os.environ["STACK_RUN_ID"]
-    episode_id = os.environ["STACK_EPISODE_ID"]
-    template = (ROOT / os.environ["STACK_RUNTIME_CONFIG"]).resolve()
+    attempt = Path(os.environ["CAMPAIGN_ATTEMPT_DIR"]).resolve()
+    seed = int(os.environ["CAMPAIGN_SEED"])
+    run_id = os.environ["CAMPAIGN_RUN_ID"]
+    episode_id = os.environ["CAMPAIGN_EPISODE_ID"]
+    template = (ROOT / os.environ["CAMPAIGN_RUNTIME_CONFIG"]).resolve()
     backend_log = Path("/data/runs/backend/teacher-backend/log")
     if not backend_log.is_dir():
         raise FileNotFoundError(f"teacher backend log is missing: {backend_log}")

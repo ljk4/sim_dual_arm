@@ -6,8 +6,8 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "runtime/ros2/scripts"))
-import stack_campaign  # noqa: E402
-import stack_evaluate  # noqa: E402
+import campaign  # noqa: E402
+import evaluate  # noqa: E402
 
 
 def _write(path: Path, value: object) -> None:
@@ -15,7 +15,7 @@ def _write(path: Path, value: object) -> None:
     path.write_text(json.dumps(value) + "\n", encoding="utf-8")
 
 
-def campaign(tmp_path: Path) -> tuple[Path, Path]:
+def campaign_config(tmp_path: Path) -> tuple[Path, Path]:
     root = tmp_path / "project"
     config = {
         "schema_version": 1,
@@ -203,9 +203,9 @@ def make_attempt(root: Path) -> Path:
 
 
 def test_evaluation_allocation_shares_the_fixed_test_seed_pool(tmp_path):
-    root, config_path = campaign(tmp_path)
-    config = stack_campaign._load(config_path)
-    first, _ = stack_campaign._allocate(
+    root, config_path = campaign_config(tmp_path)
+    config = campaign._load(config_path)
+    first, _ = campaign._allocate(
         config, [], "evaluation", "rollout", "act", None, root / "var/attempts"
     )
     assert first == 20000
@@ -216,18 +216,18 @@ def test_evaluation_allocation_shares_the_fixed_test_seed_pool(tmp_path):
         "seed": 20000,
         "attempt_dir": str(root / "var/attempts/evaluation-20000-run"),
     }
-    next_eval, _ = stack_campaign._allocate(
+    next_eval, _ = campaign._allocate(
         config, [record], "evaluation", "rollout", "act", None, root / "var/attempts"
     )
     assert next_eval == 20001
-    next_test, _ = stack_campaign._allocate(
+    next_test, _ = campaign._allocate(
         config, [record], "test", "rollout", "act", None, root / "var/attempts"
     )
     assert next_test == 20001
 
 
 def test_evaluation_report_counts_missing_seeds_and_actual_metrics(tmp_path):
-    root, config_path = campaign(tmp_path)
+    root, config_path = campaign_config(tmp_path)
     attempt = make_attempt(root)
     ledger = root / "var/attempts.jsonl"
     _write(
@@ -259,7 +259,7 @@ def test_evaluation_report_counts_missing_seeds_and_actual_metrics(tmp_path):
             )
             + "\n"
         )
-    document = stack_evaluate.build_report(
+    document = evaluate.build_report(
         project_root=root,
         config_path=config_path,
         purposes=("evaluation",),
@@ -291,7 +291,7 @@ def test_evaluation_report_counts_missing_seeds_and_actual_metrics(tmp_path):
 
 
 def _report(root: Path, config_path: Path, name: str) -> dict:
-    return stack_evaluate.build_report(
+    return evaluate.build_report(
         project_root=root,
         config_path=config_path,
         purposes=("evaluation",),
@@ -334,7 +334,7 @@ def _reserve(root: Path, attempt: Path) -> None:
 
 
 def test_fake_policy_labels_without_act_evidence_never_count(tmp_path):
-    root, config_path = campaign(tmp_path)
+    root, config_path = campaign_config(tmp_path)
     attempt = make_attempt(root)
     launch = json.loads((attempt / "launch_result.json").read_text())
     launch.pop("act", None)
@@ -357,7 +357,7 @@ def test_fake_policy_labels_without_act_evidence_never_count(tmp_path):
 
 
 def test_quality_failure_is_separate_from_physical_task_success(tmp_path):
-    root, config_path = campaign(tmp_path)
+    root, config_path = campaign_config(tmp_path)
     attempt = make_attempt(root)
     (attempt / "quality.json").write_text(
         json.dumps({"qualified": False, "failure_reasons": ["visibility"]}) + "\n",
@@ -376,7 +376,7 @@ def test_quality_failure_is_separate_from_physical_task_success(tmp_path):
 
 
 def test_outcome_string_without_physical_task_facts_is_not_success(tmp_path):
-    root, config_path = campaign(tmp_path)
+    root, config_path = campaign_config(tmp_path)
     attempt = make_attempt(root)
     (attempt / "task_result.json").write_text(
         json.dumps({"result": {"outcome": "succeeded", "reason": "TASK_SUCCEEDED"}}) + "\n",
@@ -394,7 +394,7 @@ def test_outcome_string_without_physical_task_facts_is_not_success(tmp_path):
 
 
 def test_time_resolution_separates_started_and_20hz_exported_label(tmp_path):
-    root, config_path = campaign(tmp_path)
+    root, config_path = campaign_config(tmp_path)
     attempt = make_attempt(root)
     export = Path(json.loads((attempt / "launch_result.json").read_text())["export_directory"])
     (export / "raw_predictions.json").unlink()
@@ -411,10 +411,10 @@ def test_time_resolution_separates_started_and_20hz_exported_label(tmp_path):
 
 
 def test_replay_record_with_act_like_files_is_never_act_execution(tmp_path):
-    root, config_path = campaign(tmp_path)
+    root, config_path = campaign_config(tmp_path)
     attempt = make_attempt(root)
-    config = stack_campaign._load(config_path)
-    row = stack_evaluate._metric_for_seed(
+    config = campaign._load(config_path)
+    row = evaluate._metric_for_seed(
         root,
         config,
         20000,
@@ -434,7 +434,7 @@ def test_replay_record_with_act_like_files_is_never_act_execution(tmp_path):
 
 
 def test_later_control_failure_does_not_erase_real_act_execution(tmp_path):
-    root, config_path = campaign(tmp_path)
+    root, config_path = campaign_config(tmp_path)
     attempt = make_attempt(root)
     path = attempt / "launch_result.json"
     launch = json.loads(path.read_text())
@@ -478,7 +478,7 @@ def _make_control_failure(attempt: Path) -> None:
 
 
 def test_backend_rejection_detail_is_machine_readable_and_preferred(tmp_path):
-    root, config_path = campaign(tmp_path)
+    root, config_path = campaign_config(tmp_path)
     attempt = make_attempt(root)
     _make_control_failure(attempt)
     _write_backend_events(
@@ -538,7 +538,7 @@ def test_backend_rejection_detail_is_machine_readable_and_preferred(tmp_path):
 
 
 def test_missing_or_corrupt_backend_log_keeps_report_semantics(tmp_path):
-    root, config_path = campaign(tmp_path)
+    root, config_path = campaign_config(tmp_path)
     attempt = make_attempt(root)
     _make_control_failure(attempt)
     _reserve(root, attempt)
@@ -563,7 +563,7 @@ def test_missing_or_corrupt_backend_log_keeps_report_semantics(tmp_path):
 
 
 def test_runtime_timing_failure_is_not_hidden_by_launcher_exit(tmp_path):
-    root, config_path = campaign(tmp_path)
+    root, config_path = campaign_config(tmp_path)
     attempt = make_attempt(root)
     _make_control_failure(attempt)
     manifest = json.loads((attempt / "manifest.json").read_text())
@@ -580,7 +580,7 @@ def test_runtime_timing_failure_is_not_hidden_by_launcher_exit(tmp_path):
 
 
 def test_recorded_task_failure_is_complete_evidence(tmp_path):
-    root, config_path = campaign(tmp_path)
+    root, config_path = campaign_config(tmp_path)
     attempt = make_attempt(root)
     _make_control_failure(attempt)
     _reserve(root, attempt)

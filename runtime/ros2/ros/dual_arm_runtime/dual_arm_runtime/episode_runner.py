@@ -174,7 +174,7 @@ class EpisodeIO(Protocol):
 
     def record_task_state(self, fact: object) -> None: ...
 
-    def stack_task_client(self) -> object: ...
+    def task_client(self) -> object: ...
 
     def record_execution(self, execution: ExecutionFeedback) -> None: ...
 
@@ -645,7 +645,7 @@ class EpisodeRunner:
                 raise ContractError("SCHEMA_MISMATCH", "control max_accelerations are absent")
             monitor = None
             if policy.termination_mode == "task":
-                monitor = self._io.stack_task_client()
+                monitor = self._io.task_client()
                 if monitor is None:
                     raise ContractError(
                         "TASK_MONITOR_MISSING", "task-terminated policy has no task client"
@@ -702,7 +702,7 @@ class EpisodeRunner:
         teacher = self._configuration.recipe.teacher
         if teacher is None:
             raise ContractError("TEACHER_CONFIGURATION", "teacher settings are absent")
-        client = self._io.stack_task_client()
+        client = self._io.task_client()
         if client is None:
             raise ContractError("TEACHER_DISABLED", "runtime has no stack-task client")
         raw_limits = self._configuration.control_document.get("max_accelerations")
@@ -763,7 +763,7 @@ class EpisodeRunner:
             except Exception as error:  # noqa: BLE001 - terminal truth is mandatory
                 self._managed_runtime = None
                 raise ContractError("TERMINAL_WAIT_FAILED", str(error)) from error
-        client = self._io.stack_task_client()
+        client = self._io.task_client()
         if client is not None:
             try:
                 frozen = client.state(context, 0)  # type: ignore[attr-defined]
@@ -773,7 +773,7 @@ class EpisodeRunner:
             if frozen is not None:
                 fact = frozen
                 self._io.record_task_state(fact)
-        frozen_state = str(getattr(fact, "state", ""))
+        frozen_state = str(getattr(fact, "phase", ""))
         if frozen_state == "SUCCEEDED":
             runtime_reason = "TASK_SUCCEEDED"
             self._managed_runtime = RuntimeResult(RuntimeOutcome.STOPPED, runtime_reason)
@@ -791,8 +791,10 @@ class EpisodeRunner:
             fields={
                 "task_outcome": self._task_result.outcome.value,
                 "task_reason": self._task_result.reason,
-                "task_state": None if fact is None else str(getattr(fact, "state", "")),
-                "task_state_reason": None if fact is None else str(getattr(fact, "reason", "")),
+                "task_state": None if fact is None else str(getattr(fact, "phase", "")),
+                "task_state_reason": (
+                    None if fact is None else str(getattr(fact, "failure_reason", ""))
+                ),
                 "task_epoch": None if fact is None else int(getattr(fact, "task_epoch", 0)),
                 "budget_ns": budget_ns,
                 "command_id": runner.command_id,  # type: ignore[attr-defined]
@@ -817,7 +819,7 @@ class EpisodeRunner:
             required.append("bounded_target_follower_v1")
         stream = recipe.policy if recipe.action_source == "policy" else recipe.teacher
         if stream is not None and stream.termination_mode == "task":
-            required.extend(("stack_task", "stack_task_state"))
+            required.extend(("task_plugin", "task_state"))
         if recipe.action_source == "teacher":
             required.append("teacher_chunk")
         missing = [capability for capability in required if capability not in info.capabilities]
@@ -1028,7 +1030,7 @@ class EpisodeRunner:
         if self._task_result.outcome is not TaskOutcome.NOT_EVALUATED:
             return
         context = self.context
-        client = self._io.stack_task_client()
+        client = self._io.task_client()
         if context is None or client is None:
             return
         try:

@@ -64,9 +64,9 @@ commands:
   collect         run one ROS teacher collection (requires --output)
   policy          run one policy execution (requires --output)
   interactive     prompt, reset via episode start, run one policy episode, hold until Ctrl-C
-  export          export one episode to labels/RGB/quality (stack_export.py)
-  campaign        reserve and run one budgeted campaign attempt (stack_campaign.py)
-  evaluate        build a read-only evaluation report (stack_evaluate.py)
+  export          export one episode to labels/RGB/quality (export_episode.py)
+  campaign        reserve and run one budgeted campaign attempt (campaign.py)
+  evaluate        build a read-only evaluation report (evaluate.py)
   test            run pytest with plugin autoload disabled
 
 Examples:
@@ -220,16 +220,16 @@ case "$command" in
     ;;
   export)
     check_ros_sdk
-    exec python3 "$ROOT/runtime/ros2/scripts/stack_export.py" "$@"
+    exec python3 "$ROOT/runtime/ros2/scripts/export_episode.py" "$@"
     ;;
   campaign)
     check_ros_sdk
-    exec python3 "$ROOT/runtime/ros2/scripts/stack_campaign.py" \
+    exec python3 "$ROOT/runtime/ros2/scripts/campaign.py" \
       --project-root "$ROOT" "$@"
     ;;
   evaluate)
     check_ros_sdk
-    exec python3 "$ROOT/runtime/ros2/scripts/stack_evaluate.py" \
+    exec python3 "$ROOT/runtime/ros2/scripts/evaluate.py" \
       --project-root "$ROOT" "$@"
     ;;
   test)

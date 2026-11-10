@@ -6,7 +6,7 @@
 - `recording.py`、`recording_queue.py`、`run_logging.py`：MCAP 写入/队列和结构化事件。
 - `policy_client.py`、`policy_audit_rules.py`、`chunk_stream.py`、
   `episode_audit.py`：Policy RPC、连续跟随流和录制审计。
-- `stack_task_client.py`、`task_result.py`、`target_source.py`、`teacher_source.py`、
+- `task_client.py`、`task_result.py`、`target_source.py`、`teacher_source.py`、
   `label_export.py`：任务状态、结果 sidecar、目标源和标签导出。
 - `runtime_errors.py`：稳定的运行时错误分类。
 

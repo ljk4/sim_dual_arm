@@ -21,8 +21,8 @@ from robot_backend_sim.kinematics_config import load_kinematics_config  # noqa: 
 from robot_backend_sim.motion_config import load_control_config  # noqa: E402
 from robot_backend_sim.scene import build_scene  # noqa: E402
 from robot_backend_sim.scene_config import load_scene_config  # noqa: E402
-from robot_backend_sim.task_config import load_task_config  # noqa: E402
-from robot_backend_sim.teacher import (  # noqa: E402
+from robot_backend_sim.tasks.stack.config import load_task_config  # noqa: E402
+from robot_backend_sim.tasks.stack.teacher import (  # noqa: E402
     TeacherError,
     TeacherFeedback,
     TeacherProgress,

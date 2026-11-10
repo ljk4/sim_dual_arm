@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import math
 import threading
-import time
 from concurrent.futures import Future
 from dataclasses import replace
 from typing import Any
@@ -26,35 +25,29 @@ from robot_api_msgs.msg import (
     FollowerReference,
     RobotState,
 )
-from robot_api_msgs.msg import (
-    StackTaskState as StackTaskStateMessage,
-)
+from robot_api_msgs.msg import TaskState as TaskStateMessage
 from robot_api_msgs.srv import (
     AcquireControl,
-    GetStackTaskState,
     GetStreamAnchor,
+    GetTaskState,
     GetTeacherChunk,
-    PrepareStackTask,
+    PrepareTask,
     QueryStreamCommand,
     ReleaseControl,
     RenewControl,
     ResetSimulation,
-    StartStackTask,
+    StartTask,
     Stop,
     SubmitFollower,
 )
 from robot_contracts.execution_feedback import ExecutionFeedback as ExecutionFeedbackRecord
 from robot_contracts.models import CameraSpec, ContractError, RunContext
-from robot_contracts.trajectory import FollowerReference as FollowerReferenceRecord
-from robot_ros_support.conversions import context_from_message, context_message, stamp, time_ns
+from robot_ros_support.conversions import context_message, stamp
 from robot_ros_support.follower_conversions import follower_reference_message
 from robot_ros_support.qos import EVENT_QOS, INFO_QOS, RELIABLE_SENSOR_QOS, SENSOR_QOS
 from robot_ros_support.stream_conversions import (
-    anchor_message,
     control_event_message,
     execution_feedback_message,
-    stream_chunk_status_message,
-    stream_command_from_message,
 )
 from robot_run_logging import EventContext, EventLogger, LogFailure
 from sensor_msgs.msg import CameraInfo, Image, JointState
@@ -62,13 +55,13 @@ from std_msgs.msg import Float64MultiArray, Header
 
 from .backend_config import BackendConfig
 from .control_state import ControlStatus
-from .protocol import chunk_feedback, control_event, execution_feedback
+from .node_services import ServiceAdapter
+from .protocol import control_event, execution_feedback
 from .render_worker import RenderedCapture, RendererFactory
 from .ros_bridge import RosFutureBridge
 from .scene_config import SceneConfig
-from .stack_ros import fill_teacher_chunk_response, stack_state_message
-from .stack_task import StackPrepareResult, StackTaskState
-from .worker import BackendClosed, SubmitOutcome, Worker, WorkerSummary
+from .tasks.ros_conv import task_state_message
+from .worker import BackendClosed, Worker, WorkerSummary
 
 __all__ = ["BackendNode", "main"]
 
@@ -82,7 +75,7 @@ _CAPABILITIES = (
     "control_events",
     "follower_reference",
 )
-_STACK_CAPABILITIES = ("stack_task", "stack_task_state")
+_TASK_CAPABILITIES = ("task_plugin", "task_state")
 _TEACHER_CAPABILITY = "teacher_chunk"
 _FOLLOWER_CAPABILITY = "bounded_target_follower_v1"
 _EXIT_OK = 0
@@ -166,26 +159,27 @@ class BackendNode(Node):
         self._follower_pub = self.create_publisher(
             FollowerReference, f"{self._root}/follower_references", EVENT_QOS
         )
-        self._stack_state_pub = self.create_publisher(
-            StackTaskStateMessage, f"{self._root}/stack_task_state", EVENT_QOS
+        self._task_state_pub = self.create_publisher(
+            TaskStateMessage, f"{self._root}/task_state", EVENT_QOS
         )
-        self._last_stack_state_seq = 0
-        self._last_stack_state_name = ""
+        self._last_task_state_seq = 0
+        self._last_task_state_phase = ""
         self._quality_lost_since_ns: dict[tuple[str, str], int] = {}
         self._quality_max_blackout_ns: dict[tuple[str, str], int] = {}
+        self._service_adapter = ServiceAdapter(self, self._worker, self.config)
         for service_type, name, callback in (
-            (AcquireControl, "acquire_control", self._acquire),
-            (RenewControl, "renew_control", self._renew),
-            (ReleaseControl, "release_control", self._release),
-            (Stop, "stop", self._stop),
-            (SubmitFollower, "submit_follower", self._submit_follower),
-            (GetStreamAnchor, "get_stream_anchor", self._get_anchor),
-            (QueryStreamCommand, "query_stream_command", self._query_command),
-            (ResetSimulation, "reset_simulation", self._reset),
-            (PrepareStackTask, "prepare_stack_task", self._prepare_stack_task),
-            (StartStackTask, "start_stack_task", self._start_stack_task),
-            (GetTeacherChunk, "get_teacher_chunk", self._get_teacher_chunk),
-            (GetStackTaskState, "get_stack_task_state", self._get_stack_task_state),
+            (AcquireControl, "acquire_control", self._service_adapter.acquire),
+            (RenewControl, "renew_control", self._service_adapter.renew),
+            (ReleaseControl, "release_control", self._service_adapter.release),
+            (Stop, "stop", self._service_adapter.stop),
+            (SubmitFollower, "submit_follower", self._service_adapter.submit_follower),
+            (GetStreamAnchor, "get_stream_anchor", self._service_adapter.get_anchor),
+            (QueryStreamCommand, "query_stream_command", self._service_adapter.query_command),
+            (ResetSimulation, "reset_simulation", self._service_adapter.reset),
+            (PrepareTask, "prepare_task", self._service_adapter.prepare_task),
+            (StartTask, "start_task", self._service_adapter.start_task),
+            (GetTeacherChunk, "get_task_chunk", self._service_adapter.get_task_chunk),
+            (GetTaskState, "get_task_state", self._service_adapter.get_task_state),
         ):
             self.create_service(
                 service_type,
@@ -295,7 +289,7 @@ class BackendNode(Node):
         else:
             capabilities.append(_FOLLOWER_CAPABILITY)
         if self._worker.task_enabled:
-            capabilities.extend(_STACK_CAPABILITIES)
+            capabilities.extend(_TASK_CAPABILITIES)
         if self._worker.teacher_enabled:
             capabilities.append(_TEACHER_CAPABILITY)
         return tuple(capabilities)
@@ -320,7 +314,7 @@ class BackendNode(Node):
             self._publish_visual_state(capture)
         for rendered in self._worker.rendered():
             self._publish_frames(rendered)
-        self._publish_stack_state()
+        self._publish_task_state()
         self._publish_control_pending()
 
     def _publish_control_pending(self) -> None:
@@ -396,36 +390,35 @@ class BackendNode(Node):
                 message=f"{type(error).__name__}: {error}",
             )
 
-    def _publish_stack_state(self) -> None:
-        state = self._worker.stack_state
-        if state is None or state.context is None or state.state_seq == self._last_stack_state_seq:
+    def _publish_task_state(self) -> None:
+        state = self._worker.task_state
+        if state is None or state.context is None or state.state_seq == self._last_task_state_seq:
             return
-        self._last_stack_state_seq = state.state_seq
-        if state.state != self._last_stack_state_name:
-            self._last_stack_state_name = state.state
+        self._last_task_state_seq = state.state_seq
+        if state.phase != self._last_task_state_phase:
+            self._last_task_state_phase = state.phase
             self._emit(
-                "backend.stack.state",
-                message=state.state,
-                reason=state.reason.partition(":")[0] or None,
+                "backend.task.state",
+                message=state.phase,
+                reason=state.failure_reason.partition(":")[0] or None,
                 context=EventContext(
-                    episode_id=state.context.episode_id if state.context else None,
-                    clock_epoch=state.context.clock_epoch if state.context else 0,
-                    sim_time_ns=state.sample_sim_time_ns,
+                    episode_id=state.context.episode_id,
+                    clock_epoch=state.context.clock_epoch,
+                    sim_time_ns=state.sample_time_ns,
                 ),
                 fields={
+                    "task_type": state.task_type,
                     "task_epoch": state.task_epoch,
-                    "task_reason": state.reason,
-                    "conditions_passed": state.conditions_passed,
-                    "stable_elapsed_s": state.stable_elapsed_s,
-                    "task_start_sim_time_ns": state.task_start_sim_time_ns,
-                    "completed_sim_time_ns": state.completed_sim_time_ns,
+                    "succeeded": state.succeeded,
+                    "terminal": state.terminal,
+                    "task_reason": state.failure_reason,
                 },
             )
         try:
-            self._stack_state_pub.publish(stack_state_message(state))
+            self._task_state_pub.publish(task_state_message(state))
         except Exception as error:  # noqa: BLE001 - task truth must not vanish silently
             self._worker.latch_fault(
-                "STACK_STATE_PUBLISH_FAILED", f"{type(error).__name__}: {error}"
+                "TASK_STATE_PUBLISH_FAILED", f"{type(error).__name__}: {error}"
             )
 
     def _publish_frames(self, rendered: RenderedCapture) -> None:
@@ -609,408 +602,6 @@ class BackendNode(Node):
                 message=type(error).__name__,
                 exception=error,
             )
-        return response
-
-    # --------------------------------------------------------------- services
-    async def _acquire(self, request: object, response: object) -> object:
-        try:
-            context = context_from_message(request.context)  # type: ignore[attr-defined]
-            response.lease_id = await self._await(  # type: ignore[attr-defined]
-                self._worker.acquire(
-                    context,
-                    request.owner_id,  # type: ignore[attr-defined]
-                    time_ns(request.duration),  # type: ignore[attr-defined]
-                )
-            )
-            response.success = True  # type: ignore[attr-defined]
-            response.reason = ""  # type: ignore[attr-defined]
-            self._publish_info()
-        except BaseException as error:  # noqa: BLE001 - service boundary
-            return self._failure_response(response, error)
-        return response
-
-    async def _renew(self, request: object, response: object) -> object:
-        try:
-            await self._await(
-                self._worker.renew(
-                    context_from_message(request.context),  # type: ignore[attr-defined]
-                    request.lease_id,  # type: ignore[attr-defined]
-                    time_ns(request.duration),  # type: ignore[attr-defined]
-                )
-            )
-            response.success = True  # type: ignore[attr-defined]
-            response.reason = ""  # type: ignore[attr-defined]
-        except BaseException as error:  # noqa: BLE001
-            return self._failure_response(response, error)
-        return response
-
-    async def _release(self, request: object, response: object) -> object:
-        try:
-            await self._await(
-                self._worker.release(
-                    context_from_message(request.context),  # type: ignore[attr-defined]
-                    request.lease_id,  # type: ignore[attr-defined]
-                )
-            )
-            response.success = True  # type: ignore[attr-defined]
-            response.reason = ""  # type: ignore[attr-defined]
-        except BaseException as error:  # noqa: BLE001
-            return self._failure_response(response, error)
-        return response
-
-    async def _stop(self, request: object, response: object) -> object:
-        try:
-            await self._await(
-                self._worker.stop(
-                    context_from_message(request.context),  # type: ignore[attr-defined]
-                    request.lease_id,  # type: ignore[attr-defined]
-                    request.reason,  # type: ignore[attr-defined]
-                )
-            )
-            response.success = True  # type: ignore[attr-defined]
-            response.reason = ""  # type: ignore[attr-defined]
-        except BaseException as error:  # noqa: BLE001
-            return self._failure_response(response, error)
-        return response
-
-    async def _submit_follower(self, request: object, response: object) -> object:
-        try:
-            record = stream_command_from_message(request.request)  # type: ignore[attr-defined]
-            if record.kind not in (2, 3):
-                raise ContractError(
-                    "INVALID_FOLLOWER_REQUEST",
-                    "SubmitFollower accepts only STREAM_FIRST or STREAM_NEXT",
-                )
-            outcome = await self._await(self._worker.submit_follower(record), submit=True)
-        except TimeoutError as error:
-            response.accepted = False  # type: ignore[attr-defined]
-            response.reason = str(error)  # type: ignore[attr-defined]
-            response.has_execution = False  # type: ignore[attr-defined]
-            response.has_chunk = False  # type: ignore[attr-defined]
-            response.has_reference = False  # type: ignore[attr-defined]
-            return response
-        except BaseException as error:  # noqa: BLE001 - SubmitFollower has no success field
-            if isinstance(error, ContractError):
-                reason = error.reason
-                self._emit(
-                    "backend.submit_follower.rejected",
-                    level="WARNING",
-                    reason=reason,
-                    message=str(error),
-                )
-            elif isinstance(error, BackendClosed):
-                reason = "BACKEND_CLOSED"
-            else:
-                reason = "INTERNAL_ERROR"
-                self._emit(
-                    "backend.submit_follower.error",
-                    level="ERROR",
-                    reason="INTERNAL_ERROR",
-                    message=type(error).__name__,
-                    exception=error,
-                )
-            response.accepted = False  # type: ignore[attr-defined]
-            response.reason = reason  # type: ignore[attr-defined]
-            response.has_execution = False  # type: ignore[attr-defined]
-            response.has_chunk = False  # type: ignore[attr-defined]
-            response.has_reference = False  # type: ignore[attr-defined]
-            return response
-        assert isinstance(outcome, SubmitOutcome)
-        if outcome.reference is not None and not isinstance(
-            outcome.reference, FollowerReferenceRecord
-        ):
-            response.accepted = False  # type: ignore[attr-defined]
-            response.reason = "STREAM_MODE_MISMATCH"  # type: ignore[attr-defined]
-            response.has_execution = False  # type: ignore[attr-defined]
-            response.has_chunk = False  # type: ignore[attr-defined]
-            response.has_reference = False  # type: ignore[attr-defined]
-            return response
-        response.accepted = bool(outcome.reply.accepted)  # type: ignore[attr-defined]
-        response.reason = outcome.reply.reason  # type: ignore[attr-defined]
-        response.has_execution = outcome.execution is not None  # type: ignore[attr-defined]
-        if outcome.execution is not None and outcome.execution.snapshot is not None:
-            response.execution = execution_feedback_message(  # type: ignore[attr-defined]
-                execution_feedback(outcome.execution)
-            )
-        response.has_chunk = outcome.chunk is not None  # type: ignore[attr-defined]
-        if outcome.chunk is not None:
-            response.chunk = stream_chunk_status_message(  # type: ignore[attr-defined]
-                chunk_feedback(outcome.chunk)
-            )
-        response.has_reference = outcome.reference is not None  # type: ignore[attr-defined]
-        if outcome.reference is not None:
-            response.reference = follower_reference_message(  # type: ignore[attr-defined]
-                outcome.reference
-            )
-        self._emit(
-            "backend.submit_follower",
-            message="accepted" if response.accepted else "rejected",
-            reason=response.reason or None,
-            context=EventContext(
-                episode_id=record.trajectory.context.episode_id or None,
-                command_id=record.trajectory.command_id,
-                clock_epoch=record.trajectory.context.clock_epoch,
-            ),
-            fields={
-                "command_id": record.trajectory.command_id,
-                "kind": record.mode,
-                "mode": "FOLLOWER",
-                "idempotent": outcome.idempotent,
-                "has_reference": response.has_reference,
-            },
-        )
-        return response
-
-    async def _get_anchor(self, request: object, response: object) -> object:
-        try:
-            anchor = await self._await(
-                self._worker.get_anchor(
-                    context_from_message(request.context),  # type: ignore[attr-defined]
-                    request.lease_id,  # type: ignore[attr-defined]
-                    int(request.start_sim_time_ns) if request.has_start else None,  # type: ignore[attr-defined]
-                )
-            )
-            response.anchor = anchor_message(anchor)  # type: ignore[attr-defined]
-            response.success = True  # type: ignore[attr-defined]
-            response.reason = ""  # type: ignore[attr-defined]
-        except BaseException as error:  # noqa: BLE001
-            return self._failure_response(response, error)
-        return response
-
-    async def _query_command(self, request: object, response: object) -> object:
-        try:
-            status = await self._await(
-                self._worker.query_command(
-                    context_from_message(request.context),  # type: ignore[attr-defined]
-                    request.command_id,  # type: ignore[attr-defined]
-                )
-            )
-            if not isinstance(status, ControlStatus) or status.snapshot is None:
-                raise ContractError("RESULT_EXPIRED", "command has no frozen status")
-            response.execution = execution_feedback_message(  # type: ignore[attr-defined]
-                execution_feedback(status)
-            )
-            response.success = True  # type: ignore[attr-defined]
-            response.reason = ""  # type: ignore[attr-defined]
-        except BaseException as error:  # noqa: BLE001
-            return self._failure_response(response, error)
-        return response
-
-    async def _reset(self, request: object, response: object) -> object:
-        try:
-            new_context = await self._await(
-                self._worker.reset(
-                    context_from_message(request.context),  # type: ignore[attr-defined]
-                    request.lease_id,  # type: ignore[attr-defined]
-                    int(request.seed),  # type: ignore[attr-defined]
-                )
-            )
-            self._worker.clear_task_cache()
-            self._last_stack_state_seq = 0
-            self._last_stack_state_name = ""
-            response.new_context = context_message(new_context)  # type: ignore[attr-defined]
-            response.success = True  # type: ignore[attr-defined]
-            response.reason = ""  # type: ignore[attr-defined]
-            self._emit(
-                "backend.reset",
-                message="episode reset",
-                context=EventContext(clock_epoch=new_context.clock_epoch),
-                fields={
-                    "seed": int(request.seed),  # type: ignore[attr-defined]
-                    "episode_id": new_context.episode_id,
-                },
-            )
-            self._publish_info()
-        except BaseException as error:  # noqa: BLE001
-            return self._failure_response(response, error)
-        return response
-
-    # ----------------------------------------------------------- stack task
-    async def _prepare_stack_task(self, request: object, response: object) -> object:
-        started = time.monotonic()
-        try:
-            context = context_from_message(request.context)  # type: ignore[attr-defined]
-            result = await self._await(
-                self._worker.prepare_stack_task(
-                    context,
-                    request.episode_id,  # type: ignore[attr-defined]
-                    request.request_id,  # type: ignore[attr-defined]
-                    request.lease_id,  # type: ignore[attr-defined]
-                    int(request.seed),  # type: ignore[attr-defined]
-                )
-            )
-        except BaseException as error:  # noqa: BLE001 - service boundary
-            self._emit(
-                "backend.stack.prepare_failed",
-                level="WARNING",
-                reason=error.reason if isinstance(error, ContractError) else "INTERNAL_ERROR",
-                message=type(error).__name__,
-            )
-            return self._failure_response(response, error)
-        if not isinstance(result, StackPrepareResult):
-            return self._failure_response(
-                response,
-                ContractError("INVALID_TASK_PREPARE", "worker result is not a prepare fact"),
-            )
-        response.success = True  # type: ignore[attr-defined]
-        response.reason = ""  # type: ignore[attr-defined]
-        response.task_epoch = result.task_epoch  # type: ignore[attr-defined]
-        response.task_config_digest = result.config_digest  # type: ignore[attr-defined]
-        response.plan_digest = result.plan_digest  # type: ignore[attr-defined]
-        response.key_pose_count = result.key_pose_count  # type: ignore[attr-defined]
-        response.collision_segment_count = result.collision_segment_count  # type: ignore[attr-defined]
-        response.ik_max_position_error_m = result.ik_max_position_error_m  # type: ignore[attr-defined]
-        response.ik_max_orientation_error_rad = (  # type: ignore[attr-defined]
-            result.ik_max_orientation_error_rad
-        )
-        response.planned_duration_s = result.planned_duration_s  # type: ignore[attr-defined]
-        response.prepare_kind = result.prepare_kind  # type: ignore[attr-defined]
-        self._emit(
-            "backend.stack.prepare",
-            message="prepared",
-            context=EventContext(
-                episode_id=request.episode_id,  # type: ignore[attr-defined]
-                clock_epoch=context.clock_epoch,
-            ),
-            fields={
-                "task_epoch": result.task_epoch,
-                "plan_digest": result.plan_digest,
-                "task_config_digest": result.config_digest,
-                "key_pose_count": result.key_pose_count,
-                "collision_segment_count": result.collision_segment_count,
-                "planned_duration_s": result.planned_duration_s,
-                "ik_max_position_error_m": result.ik_max_position_error_m,
-                "ik_max_orientation_error_rad": result.ik_max_orientation_error_rad,
-                "prepare_kind": result.prepare_kind,
-                "elapsed_s": time.monotonic() - started,
-                "idempotent": result.idempotent,
-            },
-        )
-        return response
-
-    async def _start_stack_task(self, request: object, response: object) -> object:
-        try:
-            context = context_from_message(request.context)  # type: ignore[attr-defined]
-            result = await self._await(
-                self._worker.start_stack_task(
-                    context,
-                    request.episode_id,  # type: ignore[attr-defined]
-                    request.request_id,  # type: ignore[attr-defined]
-                    request.lease_id,  # type: ignore[attr-defined]
-                    int(request.task_epoch),  # type: ignore[attr-defined]
-                    request.plan_digest,  # type: ignore[attr-defined]
-                )
-            )
-        except BaseException as error:  # noqa: BLE001
-            return self._failure_response(response, error)
-        if not isinstance(result, tuple) or len(result) != 2:
-            return self._failure_response(
-                response, ContractError("INVALID_TASK_START", "worker result is not a start fact")
-            )
-        state, idempotent = result
-        if not isinstance(state, StackTaskState):
-            return self._failure_response(
-                response, ContractError("INVALID_TASK_START", "start fact has no state")
-            )
-        response.success = True  # type: ignore[attr-defined]
-        response.reason = ""  # type: ignore[attr-defined]
-        response.task_epoch = state.task_epoch  # type: ignore[attr-defined]
-        response.plan_digest = state.plan_digest  # type: ignore[attr-defined]
-        response.start_time = stamp(state.task_start_sim_time_ns)  # type: ignore[attr-defined]
-        response.state = stack_state_message(state)  # type: ignore[attr-defined]
-        self._emit(
-            "backend.stack.start",
-            message="idempotent" if idempotent else "started",
-            context=EventContext(
-                episode_id=state.context.episode_id if state.context else None,
-                clock_epoch=state.context.clock_epoch if state.context else 0,
-                sim_time_ns=state.task_start_sim_time_ns,
-            ),
-            fields={
-                "task_epoch": state.task_epoch,
-                "plan_digest": state.plan_digest,
-                "idempotent": idempotent,
-            },
-        )
-        return response
-
-    async def _get_teacher_chunk(self, request: object, response: object) -> object:
-        started = time.monotonic()
-        try:
-            context = context_from_message(request.context)  # type: ignore[attr-defined]
-            chunk = await self._await(
-                self._worker.get_teacher_chunk(
-                    context,
-                    request.episode_id,  # type: ignore[attr-defined]
-                    int(request.task_epoch),  # type: ignore[attr-defined]
-                    request.request_id,  # type: ignore[attr-defined]
-                    int(request.capture_seq),  # type: ignore[attr-defined]
-                    time_ns(request.observation_time),  # type: ignore[attr-defined]
-                )
-            )
-        except BaseException as error:  # noqa: BLE001
-            self._emit(
-                "backend.stack.teacher_chunk_failed",
-                level="WARNING",
-                reason=error.reason if isinstance(error, ContractError) else "INTERNAL_ERROR",
-                message=type(error).__name__,
-            )
-            return self._failure_response(response, error)
-        from .teacher import TeacherChunk
-
-        if not isinstance(chunk, TeacherChunk):
-            return self._failure_response(
-                response, ContractError("INVALID_TEACHER_CHUNK", "worker returned no chunk")
-            )
-        response.success = True  # type: ignore[attr-defined]
-        response.reason = ""  # type: ignore[attr-defined]
-        fill_teacher_chunk_response(response, chunk)
-        self._emit(
-            "backend.stack.teacher_chunk",
-            message=chunk.phase,
-            context=EventContext(
-                episode_id=chunk.request_id,
-                sim_time_ns=chunk.observation_time_ns,
-            ),
-            fields={
-                "task_epoch": chunk.task_epoch,
-                "capture_seq": chunk.capture_seq,
-                "chunk_digest": chunk.chunk_digest,
-                "phase": chunk.phase,
-                "ik_max_position_error_m": chunk.ik_max_position_error_m,
-                "ik_max_orientation_error_rad": chunk.ik_max_orientation_error_rad,
-                "gate_state": chunk.gate_state,
-                "gate_failure": chunk.gate_failure,
-                "phase_start_sim_time_ns": chunk.phase_start_sim_time_ns,
-                "phase_wait_s": chunk.phase_wait_s,
-                "elapsed_s": time.monotonic() - started,
-            },
-        )
-        return response
-
-    async def _get_stack_task_state(self, request: object, response: object) -> object:
-        try:
-            context = context_from_message(request.context)  # type: ignore[attr-defined]
-            state = await self._await(
-                self._worker.get_stack_task_state(
-                    context,
-                    int(request.task_epoch),  # type: ignore[attr-defined]
-                )
-            )
-        except BaseException as error:  # noqa: BLE001
-            return self._failure_response(response, error)
-        if not isinstance(state, StackTaskState):
-            return self._failure_response(
-                response, ContractError("INVALID_TASK_STATE", "worker returned no task state")
-            )
-        if state.context is None:
-            return self._failure_response(
-                response,
-                ContractError("TASK_NOT_PREPARED", "no stack task exists for this episode"),
-            )
-        response.success = True  # type: ignore[attr-defined]
-        response.reason = ""  # type: ignore[attr-defined]
-        response.state = stack_state_message(state)  # type: ignore[attr-defined]
         return response
 
 

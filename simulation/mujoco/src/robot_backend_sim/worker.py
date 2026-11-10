@@ -7,34 +7,21 @@ ROS node uses.  Every caller receives an explicit ``Future``.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import queue
 import threading
 import time
 from concurrent.futures import Future
 
-from robot_contracts.models import ContractError, RobotProfile, RunContext
+from robot_contracts.models import ContractError, RunContext
 from robot_contracts.profiles import load_profile
 from robot_contracts.stream_request import StreamRequest
 from robot_contracts.trajectory import FollowerReference
 
 from .backend_config import BackendConfig
-from .control_state import (
-    ChunkStatus,
-    ControlEvent,
-    ControlReply,
-    ControlStatus,
-    PreparedControlCommand,
-)
-from .follower_config import PandaFollowerConfig, load_follower_config
-from .follower_protocol import (
-    follower_reference_from_chunk_status,
-    follower_reference_from_status,
-    prepare_follower_request,
-)
-from .kinematics_config import KinematicsCheckConfig, load_kinematics_config
-from .motion_config import PandaControlConfig, load_control_config
+from .control_state import ControlEvent, ControlStatus
+from .follower_config import load_follower_config
+from .motion_config import load_control_config
+from .planner import _failed_future, _Planner, _request_digest, _TaskPlanner
 from .render_worker import (
     Capture,
     RenderCloseSummary,
@@ -43,16 +30,8 @@ from .render_worker import (
     RendererThread,
 )
 from .scene_config import load_scene_config
-from .stack_task import (
-    EvaluationOnlyPlan,
-    StackChunkView,
-    StackPrepareResult,
-    StackPrepareSnapshot,
-    StackTaskState,
-)
 from .stream_config import load_stream_config
-from .task_config import StackTaskConfig, load_task_config, validate_scene_geometry
-from .teacher import TeacherChunk, TeacherSnapshot, build_teacher_plan, sample_teacher_chunk
+from .tasks import SimTaskPlugin, create_task_plugin
 from .worker_owner import (
     BackendClosed,
     SubmitOutcome,
@@ -69,524 +48,6 @@ __all__ = [
     "WorkerFault",
     "WorkerSummary",
 ]
-
-
-class _Planner:
-    """One planner thread; at most one compile is in flight and queued work is bounded."""
-
-    def __init__(
-        self,
-        owner: _Owner,
-        config: BackendConfig,
-        profile: RobotProfile,
-        control_config: PandaControlConfig,
-        log: _LoggerSink | None,
-        follower_config: PandaFollowerConfig | None = None,
-        duration_grid_ns: int | None = 2_000_000,
-    ) -> None:
-        self._owner = owner
-        self._config = config
-        self._profile = profile
-        self._control_config = control_config
-        self._log = log
-        self._follower_config: PandaFollowerConfig | None = follower_config
-        self._duration_grid_ns = duration_grid_ns
-        self._queue: queue.Queue[tuple[StreamRequest, Future]] = queue.Queue(
-            maxsize=config.planner_queue_capacity
-        )
-        self._lock = threading.Lock()
-        self._busy_since_ns: int | None = None
-        self._active_future: Future | None = None
-        self._closing = threading.Event()
-        self._thread = threading.Thread(target=self._run, name="backend-planner", daemon=True)
-
-    def start(self) -> None:
-        self._thread.start()
-
-    @property
-    def busy_since_ns(self) -> int | None:
-        with self._lock:
-            return self._busy_since_ns
-
-    def submit(self, request: StreamRequest, future: Future) -> None:
-        if self._closing.is_set():
-            future.set_exception(BackendClosed("planner is closing"))
-            return
-        try:
-            self._queue.put_nowait((request, future))
-        except queue.Full as error:
-            future.set_exception(
-                ContractError("BACKEND_BUSY", "planner queue is full; retry after querying")
-            )
-            raise error
-
-    def close(self, timeout_s: float) -> bool:
-        self._closing.set()
-        if self._thread.ident is not None:
-            self._thread.join(timeout=max(0.0, timeout_s))
-        with self._lock:
-            active = self._active_future
-        # Resolve the in-flight future even if a planner call cannot be
-        # interrupted; the caller must never wait on a planner that outlives the
-        # close budget.
-        if active is not None and not active.done():
-            active.set_exception(BackendClosed("planner close budget expired"))
-        while True:
-            try:
-                _request, future = self._queue.get_nowait()
-            except queue.Empty:
-                break
-            if not future.done():
-                future.set_exception(BackendClosed("planner closed"))
-        return not self._thread.is_alive()
-
-    def _run(self) -> None:
-        while not self._closing.is_set():
-            try:
-                request, future = self._queue.get(timeout=0.05)
-            except queue.Empty:
-                continue
-            if not future.set_running_or_notify_cancel():
-                continue
-            with self._lock:
-                self._busy_since_ns = time.monotonic_ns()
-                self._active_future = future
-            try:
-                result = self._compile_and_admit(request)
-                if not future.done():
-                    future.set_result(result)
-            except BaseException as error:  # noqa: BLE001 - caller owns the outcome
-                if not future.done():
-                    future.set_exception(error)
-            finally:
-                with self._lock:
-                    self._busy_since_ns = None
-                    self._active_future = None
-
-    def _compile_and_admit(self, request: StreamRequest) -> SubmitOutcome:
-        if self._follower_config is None:
-            raise ContractError(
-                "FOLLOWER_DISABLED",
-                "follower protocol is not enabled by this backend configuration",
-            )
-        context = request.command.context
-        lookup = self._owner.submit(
-            "lookup",
-            (
-                context,
-                request.command.command_id,
-                None if request.anchor is None else request.anchor.predecessor_seq + 1,
-            ),
-            self._config.request_timeout_s,
-        )
-        if lookup is not None:
-            packet, status = lookup  # type: ignore[misc]
-            if not isinstance(packet, PreparedControlCommand):
-                raise ContractError("RESULT_EXPIRED", "stored packet is not immutable")
-            if packet.request is not None:
-                if packet.request != request:
-                    raise ContractError(
-                        "COMMAND_ID_CONFLICT",
-                        "same command_id has a different complete request",
-                    )
-            elif packet.command != request.command:
-                raise ContractError(
-                    "COMMAND_ID_CONFLICT", "same command_id has a different identity"
-                )
-            if packet.kind != "FOLLOWER":
-                raise ContractError(
-                    "COMMAND_ID_CONFLICT",
-                    "same command_id was not accepted through the follower entry",
-                )
-            # Idempotent replies still pass through the authoritative lease
-            # and generation checks; a history lookup is not control authority.
-            reply = self._owner.submit("admit", (request, packet), self._config.request_timeout_s)
-            status = reply.status
-            if status is None or status.snapshot is None:
-                raise ContractError("RESULT_EXPIRED", "stored command has no immutable snapshot")
-            chunk = self._owner.submit(
-                "query_chunk",
-                (context, request.command.command_id, packet.prepared.seq),
-                self._config.request_timeout_s,
-            )
-            reference = None
-            if packet.request is not None:
-                if isinstance(chunk, ChunkStatus):
-                    reference = follower_reference_from_chunk_status(
-                        packet.request,
-                        packet,
-                        chunk,
-                        motion_seq=status.motion_seq or 0,
-                    )
-                else:
-                    reference = follower_reference_from_status(packet.request, packet, status)
-            return SubmitOutcome(
-                reply=reply,
-                execution=status,
-                chunk=chunk if isinstance(chunk, ChunkStatus) else None,
-                reference=reference,
-                idempotent=True,
-            )
-        packet = prepare_follower_request(
-            request,
-            self._profile,
-            self._control_config,
-            self._follower_config,
-            duration_grid_ns=self._duration_grid_ns,
-        )
-        reply = self._owner.submit("admit", (request, packet), self._config.request_timeout_s)
-        if not isinstance(reply, ControlReply):
-            raise ContractError("INVALID_ADMISSION", "owner returned an invalid reply")
-        status = reply.status
-        chunk = None
-        reference = None
-        if status is not None and reply.accepted:
-            chunk = self._owner.submit(
-                "query_chunk",
-                (context, request.command.command_id, packet.prepared.seq),
-                self._config.request_timeout_s,
-            )
-        if reply.accepted and status is not None and packet.request is not None:
-            if isinstance(chunk, ChunkStatus):
-                reference = follower_reference_from_chunk_status(
-                    packet.request,
-                    packet,
-                    chunk,
-                    motion_seq=status.motion_seq or 0,
-                )
-            else:
-                reference = follower_reference_from_status(packet.request, packet, status)
-        return SubmitOutcome(
-            reply=reply,
-            execution=status,
-            chunk=chunk if isinstance(chunk, ChunkStatus) else None,
-            reference=reference,
-            idempotent=False,
-        )
-
-
-def _failed_future(error: BaseException) -> Future:
-    future: Future = Future()
-    future.set_exception(error)
-    return future
-
-
-def _request_digest(payload: dict[str, object]) -> str:
-    text = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
-    return hashlib.sha256(text.encode()).hexdigest()
-
-
-class _TaskPlanner:
-    """One bounded prepare/teacher thread, separate from live physics.
-
-    It owns no MjData.  Prepare first copies an immutable snapshot on the owner
-    thread, then runs mink IK against the read-only model on this thread.  The
-    owner commits only the finished immutable plan.
-    """
-
-    def __init__(
-        self,
-        owner: _Owner,
-        config: BackendConfig,
-        task_config: StackTaskConfig,
-        profile: RobotProfile,
-        control_config: PandaControlConfig,
-        kinematics_config: KinematicsCheckConfig | None,
-    ) -> None:
-        self._owner = owner
-        self._config = config
-        self._task_config = task_config
-        self._profile = profile
-        self._control_config = control_config
-        self._kinematics_config = kinematics_config
-        self._queue: queue.Queue[tuple[str, dict[str, object], Future]] = queue.Queue(
-            maxsize=max(2, config.planner_queue_capacity)
-        )
-        self._lock = threading.Lock()
-        self._busy_since_ns: int | None = None
-        self._active_future: Future | None = None
-        self._closing = threading.Event()
-        self._chunk_cache: dict[str, tuple[str, TeacherChunk]] = {}
-        self._thread = threading.Thread(target=self._run, name="stack-task-planner", daemon=True)
-
-    def start(self) -> None:
-        self._thread.start()
-
-    @property
-    def busy_since_ns(self) -> int | None:
-        with self._lock:
-            return self._busy_since_ns
-
-    def submit(self, kind: str, payload: dict[str, object], future: Future) -> None:
-        if kind not in ("prepare", "chunk"):
-            future.set_exception(ContractError("INVALID_TASK_OPERATION", kind))
-            return
-        if self._closing.is_set():
-            future.set_exception(BackendClosed("task planner is closing"))
-            return
-        try:
-            self._queue.put_nowait((kind, payload, future))
-        except queue.Full:
-            future.set_exception(
-                ContractError("TASK_BUSY", "stack-task planner queue is full; retry")
-            )
-
-    def clear_cache(self) -> None:
-        with self._lock:
-            self._chunk_cache.clear()
-
-    def close(self, timeout_s: float) -> bool:
-        self._closing.set()
-        if self._thread.ident is not None:
-            self._thread.join(timeout=max(0.0, timeout_s))
-        with self._lock:
-            active = self._active_future
-        if active is not None and not active.done():
-            active.set_exception(BackendClosed("task planner close budget expired"))
-        while True:
-            try:
-                _kind, _payload, future = self._queue.get_nowait()
-            except queue.Empty:
-                break
-            if not future.done():
-                future.set_exception(BackendClosed("task planner closed"))
-        return not self._thread.is_alive()
-
-    def _run(self) -> None:
-        while not self._closing.is_set():
-            try:
-                kind, payload, future = self._queue.get(timeout=0.05)
-            except queue.Empty:
-                continue
-            if not future.set_running_or_notify_cancel():
-                continue
-            with self._lock:
-                self._busy_since_ns = time.monotonic_ns()
-                self._active_future = future
-            try:
-                result = self._prepare(payload) if kind == "prepare" else self._chunk(payload)
-                if not future.done():
-                    future.set_result(result)
-            except BaseException as error:  # noqa: BLE001 - caller owns the outcome
-                if not future.done():
-                    future.set_exception(error)
-            finally:
-                with self._lock:
-                    self._busy_since_ns = None
-                    self._active_future = None
-
-    def _prepare(self, payload: dict[str, object]) -> StackPrepareResult:
-        context = payload["context"]
-        episode_id = payload["episode_id"]
-        request_id = payload["request_id"]
-        lease_id = payload["lease_id"]
-        seed = payload["seed"]
-        assert isinstance(context, RunContext)
-        assert isinstance(episode_id, str)
-        assert isinstance(request_id, str)
-        assert isinstance(lease_id, str)
-        assert isinstance(seed, int)
-        content_digest = _request_digest(
-            {
-                "kind": "prepare",
-                "context": context.__dict__,
-                "episode_id": episode_id,
-                "lease_id": lease_id,
-                "seed": seed,
-                "task_config_digest": self._task_config.config_digest,
-            }
-        )
-        result = self._owner.submit(
-            "stack_snapshot",
-            (context, lease_id, request_id, content_digest, episode_id, seed),
-            self._config.request_timeout_s,
-        )
-        if isinstance(result, StackPrepareResult):
-            return result
-        if not isinstance(result, StackPrepareSnapshot):
-            raise ContractError("INVALID_TASK_SNAPSHOT", "owner returned no task snapshot")
-        model = self._owner.model
-        binding = self._owner.stack_task.binding
-        teacher_enabled = (
-            self._task_config.teacher.enabled
-            and self._config.task_mode == "teacher"
-            and self._kinematics_config is not None
-        )
-        if not teacher_enabled:
-            plan = EvaluationOnlyPlan(
-                plan_digest=_request_digest(
-                    {
-                        "kind": "evaluation_only",
-                        "task_config_digest": self._task_config.config_digest,
-                        "context": result.context.__dict__,
-                        "task_epoch": result.task_epoch,
-                        "source": result.source.center,
-                        "target": result.target.center,
-                    }
-                ),
-                duration_ns=round(self._task_config.success.max_task_sim_duration_s * 1e9),
-            )
-            binding = self._owner.stack_task.binding
-            committed = self._owner.submit(
-                "stack_commit",
-                (
-                    result.context,
-                    lease_id,
-                    request_id,
-                    content_digest,
-                    plan,
-                    plan.plan_digest,
-                    plan.duration_ns,
-                    "evaluation_only",
-                    result.task_epoch,
-                    result.controller_command_id,
-                    tuple(
-                        result.qpos[binding.source_qpos_address : binding.source_qpos_address + 7]
-                    ),
-                    tuple(
-                        result.qpos[binding.target_qpos_address : binding.target_qpos_address + 7]
-                    ),
-                ),
-                self._config.request_timeout_s,
-            )
-            if not isinstance(committed, StackPrepareResult):
-                raise ContractError("INVALID_TASK_COMMIT", "owner returned no prepare result")
-            self.clear_cache()
-            return committed
-        if model is None or self._kinematics_config is None:
-            raise ContractError("INVALID_TASK_SNAPSHOT", "scene model is unavailable")
-        snapshot = TeacherSnapshot(
-            context=result.context,
-            task_epoch=result.task_epoch,
-            sim_time_ns=result.sim_time_ns,
-            qpos=result.qpos,
-            source=result.source,
-            target=result.target,
-            source_half_extents_m=self._task_config.source_half_extents_m,
-            target_half_extents_m=self._task_config.target_half_extents_m,
-            left_positions=result.left_positions,
-            right_positions=result.right_positions,
-            left_gripper_opening_m=result.left_gripper_opening_m,
-            right_gripper_opening_m=result.right_gripper_opening_m,
-            table_top_z_m=result.table_top_z_m,
-        )
-        plan = build_teacher_plan(
-            model,
-            snapshot,
-            self._profile,
-            self._control_config,
-            self._kinematics_config,
-            self._task_config,
-            deadline=time.monotonic() + self._task_config.teacher.plan_wall_timeout_s,
-        )
-        committed = self._owner.submit(
-            "stack_commit",
-            (
-                result.context,
-                lease_id,
-                request_id,
-                content_digest,
-                plan,
-                plan.plan_digest,
-                plan.duration_ns,
-                "teacher",
-                result.task_epoch,
-                result.controller_command_id,
-                tuple(result.qpos[binding.source_qpos_address : binding.source_qpos_address + 7]),
-                tuple(result.qpos[binding.target_qpos_address : binding.target_qpos_address + 7]),
-            ),
-            self._config.request_timeout_s,
-        )
-        if not isinstance(committed, StackPrepareResult):
-            raise ContractError("INVALID_TASK_COMMIT", "owner returned no prepare result")
-        self.clear_cache()
-        return committed
-
-    def _chunk(self, payload: dict[str, object]) -> TeacherChunk:
-        context = payload["context"]
-        episode_id = payload["episode_id"]
-        task_epoch = payload["task_epoch"]
-        request_id = payload["request_id"]
-        capture_seq = payload["capture_seq"]
-        observation_time_ns = payload["observation_time_ns"]
-        assert isinstance(context, RunContext)
-        assert isinstance(episode_id, str)
-        assert isinstance(task_epoch, int)
-        assert isinstance(request_id, str)
-        assert isinstance(capture_seq, int)
-        assert isinstance(observation_time_ns, int)
-        cached = self._chunk_cache.get(request_id)
-        if cached is not None:
-            chunk = cached[1]
-            if (
-                chunk.task_epoch == task_epoch
-                and chunk.capture_seq == capture_seq
-                and chunk.observation_time_ns == observation_time_ns
-            ):
-                content_digest = _request_digest(
-                    {
-                        "kind": "chunk",
-                        "context": context.__dict__,
-                        "episode_id": episode_id,
-                        "task_epoch": task_epoch,
-                        "request_id": request_id,
-                        "capture_seq": capture_seq,
-                        "observation_time_ns": observation_time_ns,
-                        "plan_digest": chunk.plan_digest,
-                    }
-                )
-                if content_digest != cached[0]:
-                    raise ContractError(
-                        "REQUEST_ID_CONFLICT",
-                        "same teacher request_id has different content",
-                    )
-                return chunk
-        view = self._owner.submit(
-            "stack_chunk_view",
-            (context, task_epoch, capture_seq, observation_time_ns),
-            self._config.request_timeout_s,
-        )
-        if not isinstance(view, StackChunkView):
-            raise ContractError("INVALID_TASK_CHUNK", "owner returned no chunk view")
-        content_digest = _request_digest(
-            {
-                "kind": "chunk",
-                "context": context.__dict__,
-                "episode_id": episode_id,
-                "task_epoch": task_epoch,
-                "request_id": request_id,
-                "capture_seq": capture_seq,
-                "observation_time_ns": observation_time_ns,
-                "plan_digest": view.plan.plan_digest,
-            }
-        )
-        if cached is not None:
-            if cached[0] != content_digest:
-                raise ContractError(
-                    "REQUEST_ID_CONFLICT",
-                    "same teacher request_id has different content",
-                )
-            return cached[1]
-        if len(self._chunk_cache) >= self._task_config.teacher.chunk_cache_entries:
-            raise ContractError(
-                "TEACHER_CACHE_FULL",
-                "teacher idempotency cache is full; refusing to drop an audited chunk",
-            )
-        chunk = sample_teacher_chunk(
-            view.plan,
-            gate=view.progress,
-            feedback=view.feedback,
-            request_id=request_id,
-            task_epoch=view.task_epoch,
-            capture_seq=capture_seq,
-            observation_time_ns=observation_time_ns,
-            chunk_size=self._task_config.teacher.chunk_size,
-            period_ns=self._task_config.teacher.action_period_ns,
-            profile=self._profile,
-            control_config=self._control_config,
-        )
-        self._chunk_cache[request_id] = (content_digest, chunk)
-        return chunk
 
 
 class Worker:
@@ -612,22 +73,24 @@ class Worker:
         follower_config = (
             None if config.follower_path is None else load_follower_config(config.follower_path)
         )
-        task_config = None if config.task_path is None else load_task_config(config.task_path)
-        if task_config is not None:
-            validate_scene_geometry(task_config, scene_config)
-        kinematics_config = None
-        if task_config is not None and task_config.teacher.enabled:
-            kinematics_config = load_kinematics_config(
-                task_config.teacher.kinematics_config_path, scene_config
+        task_plugin = (
+            None if config.task_path is None
+            else create_task_plugin(
+                config.task_type, task_path=config.task_path,
+                task_mode=config.task_mode, scene_config=scene_config,
             )
-        if task_config is not None:
-            self._check_task_capacity(config, task_config)
+        )
+        kinematics_config = (
+            None if task_plugin is None else task_plugin.load_kinematics(scene_config)
+        )
+        if task_plugin is not None:
+            self._check_task_capacity(config, task_plugin)
         duration_grid_ns = round(scene_config.physics.timestep * 1_000_000_000)
         self.profile = profile
         self.scene_config = scene_config
         self.follower_config = follower_config
-        self.task_config = task_config
-        self.task_kinematics_config = kinematics_config
+        self.task_plugin = task_plugin
+        self.task_kinematics = kinematics_config
         self.follower_duration_grid_ns = duration_grid_ns
         self._owner = _Owner(
             config,
@@ -635,7 +98,8 @@ class Worker:
             profile,
             control_config,
             stream_config,
-            task_config,
+            task_plugin,
+            kinematics_config,
             log,
         )
         self._planner = _Planner(
@@ -649,38 +113,26 @@ class Worker:
         )
         self._task_planner: _TaskPlanner | None = (
             None
-            if task_config is None
-            else _TaskPlanner(
-                self._owner,
-                config,
-                task_config,
-                profile,
-                control_config,
-                kinematics_config,
-            )
+            if task_plugin is None
+            else _TaskPlanner(self._owner, config, task_plugin, profile, control_config)
         )
         self._renderer: RendererThread | None = None
         self._summary: WorkerSummary | None = None
         self._started = False
 
     @staticmethod
-    def _check_task_capacity(config: BackendConfig, task_config: StackTaskConfig) -> None:
-        capacity = task_config.capacity
-        checks = (
-            ("backend chunk history", config.chunk_history_capacity, capacity.max_episode_chunks),
-            ("command history", config.command_history_capacity, capacity.max_episode_chunks),
-            ("event queue", config.event_queue_capacity, capacity.expected_events),
-            (
-                "accepted reference queue",
-                config.accepted_reference_queue_capacity,
-                capacity.expected_references,
-            ),
-        )
-        for name, configured, required in checks:
-            if configured < required:
+    def _check_task_capacity(config: BackendConfig, plugin: SimTaskPlugin) -> None:
+        configured = {
+            "chunk_history": config.chunk_history_capacity,
+            "command_history": config.command_history_capacity,
+            "event_queue": config.event_queue_capacity,
+            "accepted_reference_queue": config.accepted_reference_queue_capacity,
+        }
+        for name, required in plugin.capacity_requirements().items():
+            if configured[name] < required:
                 raise ContractError(
                     "CAPACITY_MISMATCH",
-                    f"{name} {configured} is below task capacity {required}",
+                    f"{name} {configured[name]} is below task capacity {required}",
                 )
 
     # ------------------------------------------------------------- lifecycle
@@ -695,16 +147,12 @@ class Worker:
             self._owner.close("START_FAILED", self.config.shutdown_timeout_s)
             raise
         segmentation_geoms = None
-        if self.task_config is not None and self.config.render_quality_enabled:
+        if self.task_plugin is not None and self.config.render_quality_enabled:
             import mujoco
 
             geom_type = int(mujoco.mjtObj.mjOBJ_GEOM)
             segmentation_geoms = {}
-            for name, geom_name in (
-                ("source", f"{self.task_config.source_object}_geom"),
-                ("target", f"{self.task_config.target_object}_geom"),
-                ("table", "table_top"),
-            ):
+            for name, geom_name in self.task_plugin.segmentation_geoms(scene.model).items():
                 geom_id = int(
                     mujoco.mj_name2id(scene.model, mujoco.mjtObj.mjOBJ_GEOM, geom_name)
                 )
@@ -768,7 +216,7 @@ class Worker:
     @property
     def current_context(self) -> RunContext | None:
         """Latest immutable identity, readable without touching live MjData."""
-        return self._owner.context()
+        return self._owner.context
 
     # -------------------------------------------------------------- requests
     def request(self, name: str, payload: tuple[object, ...] = ()) -> Future:
@@ -835,16 +283,21 @@ class Worker:
             return future
         return self._submit(request)
 
-    def prepare_stack_task(
+    def prepare_task(
         self,
         context: RunContext,
         episode_id: str,
         request_id: str,
         lease_id: str,
         seed: int,
+        task_type: str = "",
     ) -> Future:
-        if self._task_planner is None:
-            return _failed_future(ContractError("TASK_DISABLED", "stack task is not configured"))
+        if self._task_planner is None or self.task_plugin is None:
+            return _failed_future(ContractError("TASK_DISABLED", "no task plugin is configured"))
+        if task_type and task_type != self.task_plugin.task_type:
+            return _failed_future(
+                ContractError("TASK_TYPE_MISMATCH", f"task type {task_type!r} is not configured")
+            )
         if self._closed:
             return _failed_future(BackendClosed("backend is closing"))
         future: Future = Future()
@@ -861,7 +314,7 @@ class Worker:
         )
         return future
 
-    def start_stack_task(
+    def start_task(
         self,
         context: RunContext,
         episode_id: str,
@@ -870,8 +323,8 @@ class Worker:
         task_epoch: int,
         plan_digest: str,
     ) -> Future:
-        if self._task_planner is None or self.task_config is None:
-            return _failed_future(ContractError("TASK_DISABLED", "stack task is not configured"))
+        if self._task_planner is None:
+            return _failed_future(ContractError("TASK_DISABLED", "no task plugin is configured"))
         content_digest = _request_digest(
             {
                 "kind": "start",
@@ -884,7 +337,7 @@ class Worker:
             }
         )
         return self.request(
-            "stack_start",
+            "task_start",
             (
                 context,
                 lease_id,
@@ -896,7 +349,7 @@ class Worker:
             ),
         )
 
-    def get_teacher_chunk(
+    def get_task_chunk(
         self,
         context: RunContext,
         episode_id: str,
@@ -905,9 +358,9 @@ class Worker:
         capture_seq: int,
         observation_time_ns: int,
     ) -> Future:
-        if self._task_planner is None or self.task_config is None:
-            return _failed_future(ContractError("TASK_DISABLED", "stack task is not configured"))
-        if not self.task_config.teacher.enabled or self.config.task_mode != "teacher":
+        if self._task_planner is None:
+            return _failed_future(ContractError("TASK_DISABLED", "no task plugin is configured"))
+        if not self.teacher_enabled:
             return _failed_future(
                 ContractError("TEACHER_DISABLED", "teacher capability is disabled")
             )
@@ -926,27 +379,27 @@ class Worker:
         )
         return future
 
-    def get_stack_task_state(self, context: RunContext, task_epoch: int) -> Future:
-        if self.task_config is None:
-            return _failed_future(ContractError("TASK_DISABLED", "stack task is not configured"))
-        return self.request("stack_state", (context, task_epoch))
+    def get_task_state(self, context: RunContext, task_epoch: int) -> Future:
+        if self.task_plugin is None:
+            return _failed_future(ContractError("TASK_DISABLED", "no task plugin is configured"))
+        return self.request("task_state", (context, task_epoch))
 
     @property
-    def stack_state(self) -> StackTaskState | None:
-        runtime = self._owner.stack_task
-        return None if runtime is None else runtime.state
+    def task_state(self):
+        return None if self.task_plugin is None else self.task_plugin.state
 
     @property
     def teacher_enabled(self) -> bool:
-        return (
-            self.task_config is not None
-            and self.task_config.teacher.enabled
-            and self.config.task_mode == "teacher"
-        )
+        return self.task_plugin is not None and self.task_plugin.teacher_enabled
 
     @property
     def task_enabled(self) -> bool:
-        return self.task_config is not None
+        return self.task_plugin is not None
+
+    def fill_task_chunk_response(self, response: object, chunk: object) -> object:
+        if self.task_plugin is None:
+            raise ContractError("TASK_DISABLED", "no task plugin is configured")
+        return self.task_plugin.fill_chunk_response(response, chunk)  # type: ignore[arg-type]
 
     def clear_task_cache(self) -> None:
         if self._task_planner is not None:
@@ -1073,7 +526,7 @@ class Worker:
             if self._task_planner is None
             else self._task_planner.close(max(0.0, (deadline_ns - time.monotonic_ns()) / 1e9))
         )
-        context = self._owner.context()
+        context = self._owner.context
         fault = self.fault
         summary = WorkerSummary(
             closed=(

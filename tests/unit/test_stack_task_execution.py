@@ -16,13 +16,13 @@ pytest.importorskip("mujoco")
 import mujoco  # noqa: E402
 from robot_backend_sim.scene import build_scene  # noqa: E402
 from robot_backend_sim.scene_config import load_scene_config  # noqa: E402
-from robot_backend_sim.stack_task import (  # noqa: E402
+from robot_backend_sim.tasks.stack.config import load_task_config  # noqa: E402
+from robot_backend_sim.tasks.stack.evaluator import (  # noqa: E402
     StackTaskRuntime,
     capture_task_observation,
     evaluate_task,
     make_task_binding,
 )
-from robot_backend_sim.task_config import load_task_config  # noqa: E402
 from robot_contracts.models import RunContext  # noqa: E402
 
 
@@ -102,13 +102,16 @@ def test_static_physical_fixture_passes_and_latches_at_two_seconds(scene_fixture
         wall_ns=0,
     )
     state = runtime.tick(observation, 10)
-    assert state.state == "RUNNING"
+    assert state.phase == "RUNNING"
     for _ in range(1200):
         mujoco.mj_step(scene.model, scene.data)
         mujoco.mj_forward(scene.model, scene.data)
         state = runtime.tick(capture_task_observation(scene, binding, task_config), 10)
-        if state.state == "SUCCEEDED":
+        if state.phase == "SUCCEEDED":
             break
-    assert state.state == "SUCCEEDED"
-    assert state.reason == "SUCCESS"
-    assert state.completed_sim_time_ns - state.task_start_sim_time_ns >= 2_000_000_000
+    assert state.phase == "SUCCEEDED"
+    assert state.metric("reason") == "SUCCESS"
+    assert (
+        state.metric("completed_sim_time_ns") - state.metric("task_start_sim_time_ns")
+        >= 2_000_000_000
+    )

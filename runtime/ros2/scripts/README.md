@@ -13,7 +13,7 @@
   进程保持 IDLE，按 `Ctrl-C` 完成有界退出。仿真/策略服务可在此之前长期运行。
 - `test`：固定 `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` 的 pytest 入口。
 - `export`、`campaign`、`evaluate`：导出标签/RGB/质量、预算台账与评估报告。
-- `stack_campaign.py`、`stack_export.py`、`stack_evaluate.py`、
+- `campaign.py`、`export_episode.py`、`evaluate.py`、
   `collect_artifacts.py` 是上述命令复用的业务实现。
 - `prepare_run.py` 是纯配置准备，不导入 learning 或 MuJoCo。
 

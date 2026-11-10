@@ -2,29 +2,112 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
+from typing import Annotated, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from robot_contracts.validation import (
+    NonEmptyStr,
+    NonNegativeInt,
+    PositiveFloat,
+    PositiveInt,
     StrictMappingError,
     StrictMappingModel,
     UniqueKeyError,
+    contract_error,
     read_unique_yaml,
     validate_config_model,
 )
 from robot_run_logging import LogSettings
 
-from .backend_config_sections import (
-    LimitsSection,
-    LoggingSection,
-    QueueSection,
-    RobotSection,
-    RunSection,
-)
-
 __all__ = ["BackendConfig", "BackendConfigError", "load_backend_config"]
 
 BackendConfigError = StrictMappingError
+
+
+_NAMESPACE_SEGMENT = re.compile(r"^[A-Za-z0-9_]+$")
+_INT64_MAX = 2**63 - 1
+_MAX_HISTORY = 4096
+_MAX_QUEUE = 4096
+
+
+class RenderQualitySection(StrictMappingModel):
+    enabled: bool = False
+
+
+class RobotSection(StrictMappingModel):
+    namespace: NonEmptyStr
+    profile: NonEmptyStr
+    schemas: NonEmptyStr
+    scene: NonEmptyStr
+    control: NonEmptyStr
+    stream: NonEmptyStr
+    follower: NonEmptyStr | None = None
+    task: NonEmptyStr | None = None
+    task_type: NonEmptyStr = "stack"
+    task_mode: Literal["teacher", "inference"] | None = None
+    render_quality: RenderQualitySection = RenderQualitySection()
+    velocity_feedforward: bool = False
+    reliable_sensors: bool = False
+
+    @model_validator(mode="after")
+    def _names(self) -> RobotSection:
+        text = self.namespace
+        if len(text) > 128 or not text.startswith("/") or text == "/" or text.endswith("/"):
+            raise contract_error("namespace", "must be an absolute ROS namespace")
+        if any(not _NAMESPACE_SEGMENT.fullmatch(part) for part in text[1:].split("/")):
+            raise contract_error("namespace", "segments must be ASCII letters, digits and '_'")
+        if (self.task is None) != (self.task_mode is None):
+            raise contract_error("task_mode", "must be set together with task")
+        if self.render_quality.enabled and self.task is None:
+            raise contract_error("render_quality.enabled", "requires task")
+        return self
+
+
+class RunSection(StrictMappingModel):
+    seed: Annotated[NonNegativeInt, Field(le=_INT64_MAX)]
+    capture_hz: Annotated[PositiveFloat, Field(gt=1.0, le=200.0)]
+    realtime_speed: Annotated[PositiveFloat, Field(gt=0.1, le=100.0)]
+    max_catchup_steps: Annotated[PositiveInt, Field(le=64)]
+
+
+class QueueSection(StrictMappingModel):
+    owner: Annotated[PositiveInt, Field(le=_MAX_QUEUE)]
+    planner: Annotated[PositiveInt, Field(le=64)]
+    render_snapshots: Annotated[PositiveInt, Field(le=64)]
+    render_outputs: Annotated[PositiveInt, Field(le=64)]
+    captures: Annotated[PositiveInt, Field(le=_MAX_QUEUE)]
+    events: Annotated[PositiveInt, Field(le=_MAX_QUEUE)]
+    feedback: Annotated[PositiveInt, Field(le=_MAX_QUEUE)]
+    accepted_references: Annotated[PositiveInt, Field(le=_MAX_QUEUE)]
+    follower_references: Annotated[PositiveInt, Field(le=_MAX_QUEUE)] | None = None
+
+
+class LimitsSection(StrictMappingModel):
+    planner_health_s: Annotated[PositiveFloat, Field(gt=0.1, le=120.0)]
+    renderer_health_s: Annotated[PositiveFloat, Field(gt=0.1, le=120.0)]
+    request_timeout_s: Annotated[PositiveFloat, Field(gt=0.1, le=120.0)]
+    shutdown_s: Annotated[PositiveFloat, Field(gt=0.1, le=120.0)]
+    command_history: Annotated[PositiveInt, Field(le=_MAX_HISTORY)] = 256
+    chunk_history: Annotated[PositiveInt, Field(le=_MAX_HISTORY)] = 128
+
+
+class LoggingSection(StrictMappingModel):
+    queue_capacity: Annotated[PositiveInt, Field(le=_MAX_QUEUE)]
+    max_event_bytes: Annotated[PositiveInt, Field(ge=1024, le=16 * 1024 * 1024)]
+    max_file_bytes: Annotated[PositiveInt, Field(ge=1024, le=1024 * 1024 * 1024)]
+    max_total_bytes: Annotated[PositiveInt, Field(ge=1024, le=16 * 1024 * 1024 * 1024)]
+    close_timeout_s: Annotated[PositiveFloat, Field(gt=0.05, le=60.0)]
+    flush_interval_s: Annotated[PositiveFloat, Field(gt=0.01, le=10.0)]
+    console: bool
+
+    @model_validator(mode="after")
+    def _ordering(self) -> LoggingSection:
+        if not self.max_event_bytes <= self.max_file_bytes <= self.max_total_bytes:
+            raise contract_error("max_event_bytes",
+                                 "must be <= max_file_bytes <= max_total_bytes")
+        return self
 
 
 class BackendConfig(StrictMappingModel):
@@ -46,6 +129,7 @@ class BackendConfig(StrictMappingModel):
 
     namespace = property(lambda self: self.robot.namespace)
     task_mode = property(lambda self: self.robot.task_mode)
+    task_type = property(lambda self: self.robot.task_type)
     reliable_sensors = property(lambda self: self.robot.reliable_sensors)
     velocity_feedforward = property(lambda self: self.robot.velocity_feedforward)
     render_quality_enabled = property(lambda self: self.robot.render_quality.enabled)

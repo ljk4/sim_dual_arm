@@ -1,11 +1,4 @@
-"""Independent stack-task state, physical evidence and success evaluation.
-
-The evaluator reads an immutable :class:`TaskObservation` captured from the
-single physics-owner thread.  It never steps physics, applies targets, calls
-IK or mutates an object.  Success is a latched, multi-condition fact: a block
-that is merely higher than another block cannot pass, and a one-tick contact
-cannot satisfy the continuous stable window.
-"""
+"""Independent stack-task state, physical evidence and success evaluation."""
 
 from __future__ import annotations
 
@@ -14,106 +7,30 @@ from dataclasses import dataclass
 from typing import Any
 
 from robot_contracts.models import ContractError, RunContext
+from robot_contracts.task_state import TaskState
 
-from .task_config import StackTaskConfig, SuccessThresholds
+from .config import StackTaskConfig, SuccessThresholds
 
-__all__ = [
-    "EvaluationOnlyPlan",
-    "ObjectState",
-    "StackChunkView",
-    "StackPrepareResult",
-    "StackPrepareSnapshot",
-    "StackTaskError",
-    "StackTaskRuntime",
-    "StackTaskState",
-    "TaskBinding",
-    "TaskCondition",
-    "TaskEvaluation",
-    "TaskObservation",
-    "capture_task_observation",
-    "evaluate_task",
-    "make_task_binding",
-]
+__all__ = ["ObjectState", "StackTaskError", "StackTaskRuntime", "TaskBinding",
+           "TaskCondition", "TaskEvaluation", "TaskObservation",
+           "capture_task_observation", "evaluate_task", "make_task_binding"]
 
 _FINGER_BODIES = (
-    "left_left_finger",
-    "left_right_finger",
-    "right_left_finger",
-    "right_right_finger",
+    "left_left_finger", "left_right_finger", "right_left_finger", "right_right_finger",
 )
-_TASK_STATES = ("IDLE", "PREPARED", "RUNNING", "SUCCEEDED", "FAILED")
+_TERMINAL_STATES = ("SUCCEEDED", "FAILED")
 
 
 class StackTaskError(ContractError):
     """A bounded task-interface error using the public ContractError shape."""
 
 
-def _error(reason: str, message: str) -> StackTaskError:
-    return StackTaskError(reason, message)
-
-
-@dataclass(frozen=True, slots=True)
-class EvaluationOnlyPlan:
-    """Explicit evaluation-only preparation fact; no IK or teacher plan exists."""
-
-    plan_digest: str
-    duration_ns: int
-    prepare_kind: str = "evaluation_only"
-    key_poses: tuple[object, ...] = ()
-    ik_results: tuple[object, ...] = ()
-    collision_results: tuple[object, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
-class StackPrepareSnapshot:
-    """Immutable truth copied by the owner before any IK is attempted."""
-
-    context: RunContext
-    task_epoch: int
-    sim_time_ns: int
-    capture_seq: int
-    qpos: tuple[float, ...]
-    source: Any
-    target: Any
-    left_positions: tuple[float, ...]
-    right_positions: tuple[float, ...]
-    left_gripper_opening_m: float
-    right_gripper_opening_m: float
-    table_top_z_m: float
-    seed: int
-    controller_command_id: str = ""
-
-
-@dataclass(frozen=True, slots=True)
-class StackPrepareResult:
-    task_epoch: int
-    config_digest: str
-    plan_digest: str
-    key_pose_count: int
-    collision_segment_count: int
-    ik_max_position_error_m: float
-    ik_max_orientation_error_rad: float
-    planned_duration_s: float
-    idempotent: bool
-    state: StackTaskState
-    prepare_kind: str = "teacher"
-
-
-@dataclass(frozen=True, slots=True)
-class StackChunkView:
-    plan: Any
-    task_epoch: int
-    task_start_sim_time_ns: int
-    current_sim_time_ns: int
-    latest_capture_seq: int
-    state: StackTaskState
-    feedback: Any
-    progress: Any
+_error = StackTaskError
 
 
 @dataclass(frozen=True, slots=True)
 class ObjectState:
-    """One object's world pose/velocity sampled at a single sim time."""
+
 
     center: tuple[float, float, float]
     quaternion_wxyz: tuple[float, float, float, float]
@@ -130,15 +47,14 @@ class ObjectState:
 
     @property
     def tilt_rad(self) -> float:
-        w, x, y, z = self.quaternion_wxyz
-        # World-Z component of the body's local +Z axis for a unit quaternion.
+        _, x, y, _ = self.quaternion_wxyz
         z_world = 1.0 - 2.0 * (x * x + y * y)
         return math.acos(max(-1.0, min(1.0, z_world)))
 
 
 @dataclass(frozen=True, slots=True)
 class TaskObservation:
-    """Complete immutable physical evidence for one evaluation tick."""
+
 
     sim_time_ns: int
     source: ObjectState
@@ -183,7 +99,7 @@ class TaskEvaluation:
 
 @dataclass(frozen=True, slots=True)
 class TaskBinding:
-    """Name-to-index binding resolved once from the compiled scene model."""
+
 
     source_body_id: int
     target_body_id: int
@@ -199,23 +115,11 @@ class TaskBinding:
     table_top_z_m: float
 
 
-def make_task_binding(
-    model: Any,
-    config: StackTaskConfig,
-    *,
-    table_top_z_m: float,
-    task_binding_objects: tuple[str, str] | None = None,
-) -> TaskBinding:
+def make_task_binding(model: Any, config: StackTaskConfig, *, table_top_z_m: float) -> TaskBinding:
     """Resolve fixed object/finger/table/TCP names and validate cube geometry."""
-    source_name, target_name = task_binding_objects or (
-        config.source_object,
-        config.target_object,
-    )
-    if source_name != config.source_object or target_name != config.target_object:
-        raise _error("TASK_CONFIG_MISMATCH", "configured task object names changed")
     try:
-        source_body = int(model.body(source_name).id)
-        target_body = int(model.body(target_name).id)
+        source_body = int(model.body(config.source_object).id)
+        target_body = int(model.body(config.target_object).id)
         table_body = int(model.body("table").id)
     except KeyError as error:
         raise _error("MODEL_MISMATCH", f"task body is missing: {error}") from error
@@ -232,22 +136,17 @@ def make_task_binding(
             raise _error("MODEL_MISMATCH", f"{name!r} must own exactly one free joint")
         return int(model.jnt_qposadr[joint_id]), int(model.jnt_dofadr[joint_id])
 
-    source_qpos, source_dof = free_addresses(source_body, source_name)
-    target_qpos, target_dof = free_addresses(target_body, target_name)
+    source_qpos, source_dof = free_addresses(source_body, config.source_object)
+    target_qpos, target_dof = free_addresses(target_body, config.target_object)
     try:
         tcp_site = int(model.site("right_tcp").id)
     except KeyError as error:
         raise _error("MODEL_MISMATCH", "right_tcp site is missing") from error
     return TaskBinding(
-        source_body_id=source_body,
-        target_body_id=target_body,
-        table_body_id=table_body,
-        finger_body_ids=tuple(finger_ids),
-        source_qpos_address=source_qpos,
-        target_qpos_address=target_qpos,
-        source_dof_address=source_dof,
-        target_dof_address=target_dof,
-        right_tcp_site_id=tcp_site,
+        source_body_id=source_body, target_body_id=target_body, table_body_id=table_body,
+        finger_body_ids=tuple(finger_ids), source_qpos_address=source_qpos,
+        target_qpos_address=target_qpos, source_dof_address=source_dof,
+        target_dof_address=target_dof, right_tcp_site_id=tcp_site,
         source_half_extents_m=config.source_half_extents_m,
         target_half_extents_m=config.target_half_extents_m,
         table_top_z_m=float(table_top_z_m),
@@ -270,35 +169,28 @@ def _object_state(data: Any, qpos_address: int, dof_address: int) -> ObjectState
     )
 
 
-def _vertical_contact_force(
-    model: Any,
-    data: Any,
-    first_body: int,
-    second_body: int,
-    *,
-    minimum_vertical_component: float,
+def _contacts_between(
+    model: Any, data: Any, first: int, second: int, *, vertical_only: float | None
 ) -> tuple[float, int]:
     import mujoco
     import numpy as np
 
-    total = 0.0
-    count = 0
     body_of_geom = [int(value) for value in model.geom_bodyid]
+    total, count = 0.0, 0
     for index in range(int(data.ncon)):
         contact = data.contact[index]
         body1 = body_of_geom[int(contact.geom1)]
         body2 = body_of_geom[int(contact.geom2)]
         if not (
-            (body1 == first_body and body2 == second_body)
-            or (body1 == second_body and body2 == first_body)
+            (body1 == first and body2 == second) or (body1 == second and body2 == first)
         ):
+            continue
+        if vertical_only is not None and abs(float(contact.frame[2])) < vertical_only:
             continue
         force = np.zeros(6, dtype=float)
         mujoco.mj_contactForce(model, data, index, force)
-        vertical = abs(float(contact.frame[2]))
-        if vertical >= minimum_vertical_component:
-            total += abs(float(force[0]))
-            count += 1
+        total += abs(float(force[0]))
+        count += 1
     return total, count
 
 
@@ -308,11 +200,9 @@ def _finger_contacts(
     import mujoco
     import numpy as np
 
-    finger_set = set(finger_ids)
-    object_set = set(object_ids)
-    count = 0
-    total = 0.0
+    finger_set, object_set = set(finger_ids), set(object_ids)
     body_of_geom = [int(value) for value in model.geom_bodyid]
+    count, total = 0, 0.0
     for index in range(int(data.ncon)):
         contact = data.contact[index]
         body1 = body_of_geom[int(contact.geom1)]
@@ -330,17 +220,15 @@ def _finger_contacts(
 def _right_finger_source_evidence(
     scene: Any, data: Any, binding: TaskBinding
 ) -> tuple[int, float, float]:
-    """Return names/forces for both right fingers on the source only."""
+    """Return contacts/min force for both right fingers on the source only."""
     import mujoco
     import numpy as np
 
     model = scene.model
     body_of_geom = [int(value) for value in model.geom_bodyid]
     source = binding.source_body_id
-    # The scene indices do not carry finger ids; resolve the two named bodies.
     right_fingers = {
-        int(model.body("right_left_finger").id),
-        int(model.body("right_right_finger").id),
+        int(model.body("right_left_finger").id), int(model.body("right_right_finger").id)
     }
     per_finger: dict[int, list[float]] = {body: [] for body in right_fingers}
     for index in range(int(data.ncon)):
@@ -359,13 +247,11 @@ def _right_finger_source_evidence(
     contacts = sum(1 for forces in per_finger.values() if forces)
     if contacts == 0:
         return 0, 0.0, 0.0
-    # Match the controller completion rule: sum the contact points on each
-    # named finger, then require both fingers to meet the force threshold.
     min_force = min(sum(forces) for forces in per_finger.values() if forces)
-    speeds = []
-    for index in (1, 2):
-        dof = int(model.joint(f"right_finger_joint{index}").dofadr[0])
-        speeds.append(abs(float(data.qvel[dof])))
+    speeds = [
+        abs(float(data.qvel[int(model.joint(f"right_finger_joint{index}").dofadr[0])]))
+        for index in (1, 2)
+    ]
     return contacts, min_force, max(speeds)
 
 
@@ -373,51 +259,54 @@ def capture_task_observation(
     scene: Any, binding: TaskBinding, config: StackTaskConfig
 ) -> TaskObservation:
     """Copy all task evidence from live ``MjData`` on the owner thread only."""
-    model = scene.model
-    data = scene.data
+    model, data = scene.model, scene.data
     source = _object_state(data, binding.source_qpos_address, binding.source_dof_address)
     target = _object_state(data, binding.target_qpos_address, binding.target_dof_address)
     threshold = config.success.min_vertical_normal_component
-    source_target, _ = _vertical_contact_force(
-        model, data, binding.source_body_id, binding.target_body_id,
-        minimum_vertical_component=threshold,
+    source_target, _ = _contacts_between(
+        model, data, binding.source_body_id, binding.target_body_id, vertical_only=threshold
     )
-    target_table, _ = _vertical_contact_force(
-        model, data, binding.target_body_id, binding.table_body_id,
-        minimum_vertical_component=threshold,
+    target_table, _ = _contacts_between(
+        model, data, binding.target_body_id, binding.table_body_id, vertical_only=threshold
     )
-    source_table, _ = _vertical_contact_force(
-        model, data, binding.source_body_id, binding.table_body_id,
-        minimum_vertical_component=threshold,
+    source_table, _ = _contacts_between(
+        model, data, binding.source_body_id, binding.table_body_id, vertical_only=threshold
     )
-    finger_count, _finger_force = _finger_contacts(
+    finger_count, _ = _finger_contacts(
         model, data, binding.finger_body_ids, (binding.source_body_id, binding.target_body_id)
     )
     right_contacts, right_min_force, right_max_speed = _right_finger_source_evidence(
         scene, data, binding
     )
-    table_top = float(scene.config.table.top_z)
-    finger_addresses = []
-    finger_addresses.extend(scene.indices.finger_joint_qpos["right"])
+    finger_addresses = [
+        *scene.indices.finger_joint_qpos["right"],
+    ]
     opening = float(data.qpos[finger_addresses[0]] + data.qpos[finger_addresses[1]])
     tcp = tuple(float(value) for value in data.site_xpos[binding.right_tcp_site_id])
     distance = math.sqrt(sum((tcp[index] - source.center[index]) ** 2 for index in range(3)))
     return TaskObservation(
-        sim_time_ns=round(float(data.time) * 1_000_000_000),
-        source=source,
-        target=target,
+        sim_time_ns=round(float(data.time) * 1_000_000_000), source=source, target=target,
         source_target_normal_force_n=source_target,
         target_table_normal_force_n=target_table,
-        source_table_normal_force_n=source_table,
-        finger_contact_count=finger_count,
-        right_gripper_opening_m=opening,
-        right_tcp_position=tcp,
-        right_tcp_to_source_m=distance,
-        table_top_z_m=table_top,
+        source_table_normal_force_n=source_table, finger_contact_count=finger_count,
+        right_gripper_opening_m=opening, right_tcp_position=tcp,
+        right_tcp_to_source_m=distance, table_top_z_m=float(scene.config.table.top_z),
         right_finger_source_contacts=right_contacts,
         right_finger_source_min_force_n=right_min_force,
         right_finger_source_max_speed_m_s=right_max_speed,
     )
+
+
+def _pose(state: ObjectState | None) -> dict[str, object] | None:
+    if state is None:
+        return None
+    return {"center": list(state.center), "quaternion_wxyz": list(state.quaternion_wxyz),
+            "linear_velocity": list(state.linear_velocity),
+            "angular_velocity": list(state.angular_velocity)}
+
+
+def _metric(observation: TaskObservation | None, name: str, default: object = 0.0) -> object:
+    return default if observation is None else getattr(observation, name)
 
 
 def _height_error(observation: TaskObservation, binding: TaskBinding) -> float:
@@ -434,7 +323,6 @@ def _support_xy_error(
 ) -> tuple[float, float]:
     target = observation.target
     w, x, y, z = target.quaternion_wxyz
-    # World-from-target rotation; the support frame is the target's local frame.
     rotation = (
         (1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - w * z), 2.0 * (x * z + w * y)),
         (2.0 * (x * y + w * z), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - w * x)),
@@ -442,12 +330,12 @@ def _support_xy_error(
     )
     delta = tuple(observation.source.center[i] - target.center[i] for i in range(3))
     local = tuple(
-        sum(rotation[row][column] * delta[column] for column in range(3))
-        for row in range(3)
+        sum(rotation[row][column] * delta[column] for column in range(3)) for row in range(3)
     )
-    limit_x = binding.target_half_extents_m[0] - margin_m
-    limit_y = binding.target_half_extents_m[1] - margin_m
-    return abs(local[0]) - limit_x, abs(local[1]) - limit_y
+    return (
+        abs(local[0]) - (binding.target_half_extents_m[0] - margin_m),
+        abs(local[1]) - (binding.target_half_extents_m[1] - margin_m),
+    )
 
 
 def evaluate_task(
@@ -459,159 +347,57 @@ def evaluate_task(
     xy_x_error, xy_y_error = _support_xy_error(
         observation, binding, thresholds.support_xy_margin_m
     )
-    source = observation.source
-    target = observation.target
-    conditions = [
-        TaskCondition(
-            "source_on_target_height",
-            abs(height_error) <= thresholds.support_height_tolerance_m,
-            height_error,
-            thresholds.support_height_tolerance_m,
-            "m (source_z - target_top)",
-            "height difference must equal the two half heights",
-        ),
-        TaskCondition(
-            "source_xy_inside_target",
-            xy_x_error <= 0.0 and xy_y_error <= 0.0,
-            max(xy_x_error, xy_y_error),
-            0.0,
-            "m (over edge)",
-            "source centre must stay at least the configured margin inside the target",
-        ),
-        TaskCondition(
-            "source_target_vertical_contact",
-            observation.source_target_normal_force_n >= thresholds.min_support_normal_force_n,
-            observation.source_target_normal_force_n,
-            thresholds.min_support_normal_force_n,
-            "N",
-            "only contact normals with a sufficient world-Z component count as support",
-        ),
-        TaskCondition(
-            "target_on_table",
-            observation.target_table_normal_force_n >= thresholds.min_table_normal_force_n
-            and abs(
-                target.center[2]
-                - observation.table_top_z_m
-                - binding.target_half_extents_m[2]
-            )
-            <= thresholds.support_height_tolerance_m,
-            observation.target_table_normal_force_n,
-            thresholds.min_table_normal_force_n,
-            "N",
-            "target must be supported by the real table contact at the expected height",
-        ),
-        TaskCondition(
-            "source_not_on_table",
-            observation.source_table_normal_force_n < thresholds.min_table_normal_force_n,
-            observation.source_table_normal_force_n,
-            thresholds.min_table_normal_force_n,
-            "N",
-            "source must be lifted off the table, not resting beside the target",
-        ),
-        TaskCondition(
-            "source_tilt",
-            source.tilt_rad <= thresholds.max_tilt_rad,
-            source.tilt_rad,
-            thresholds.max_tilt_rad,
-            "rad",
-            "source must stay upright",
-        ),
-        TaskCondition(
-            "target_tilt",
-            target.tilt_rad <= thresholds.max_tilt_rad,
-            target.tilt_rad,
-            thresholds.max_tilt_rad,
-            "rad",
-            "target must stay upright",
-        ),
-        TaskCondition(
-            "source_linear_speed",
-            source.linear_speed_m_s <= thresholds.max_linear_speed_m_s,
-            source.linear_speed_m_s,
-            thresholds.max_linear_speed_m_s,
-            "m/s",
-            "source must be at rest",
-        ),
-        TaskCondition(
-            "target_linear_speed",
-            target.linear_speed_m_s <= thresholds.max_linear_speed_m_s,
-            target.linear_speed_m_s,
-            thresholds.max_linear_speed_m_s,
-            "m/s",
-            "target must be at rest",
-        ),
-        TaskCondition(
-            "source_angular_speed",
-            source.angular_speed_rad_s <= thresholds.max_angular_speed_rad_s,
-            source.angular_speed_rad_s,
-            thresholds.max_angular_speed_rad_s,
-            "rad/s",
-            "source must not rotate",
-        ),
-        TaskCondition(
-            "target_angular_speed",
-            target.angular_speed_rad_s <= thresholds.max_angular_speed_rad_s,
-            target.angular_speed_rad_s,
-            thresholds.max_angular_speed_rad_s,
-            "rad/s",
-            "target must not rotate",
-        ),
-        TaskCondition(
-            "no_finger_contact",
-            observation.finger_contact_count == 0,
-            float(observation.finger_contact_count),
-            0.0,
-            "contacts",
-            "neither finger may touch or pinch either block",
-        ),
-        TaskCondition(
-            "right_gripper_opening",
-            observation.right_gripper_opening_m >= thresholds.min_gripper_opening_m,
-            observation.right_gripper_opening_m,
-            thresholds.min_gripper_opening_m,
-            "m",
-            "the right gripper must be measurably released",
-        ),
-        TaskCondition(
-            "right_tcp_clearance",
-            observation.right_tcp_to_source_m >= thresholds.min_tcp_clearance_m,
-            observation.right_tcp_to_source_m,
-            thresholds.min_tcp_clearance_m,
-            "m",
-            "the TCP must have retreated from the source centre",
-        ),
-    ]
-    return TaskEvaluation(tuple(conditions))
-
-
-@dataclass(frozen=True, slots=True)
-class StackTaskState:
-    context: RunContext | None
-    state_seq: int
-    sample_sim_time_ns: int
-    task_epoch: int
-    state: str
-    reason: str
-    task_config_digest: str
-    plan_digest: str
-    task_start_sim_time_ns: int
-    first_satisfied_sim_time_ns: int
-    completed_sim_time_ns: int
-    stable_elapsed_s: float
-    source: ObjectState | None
-    target: ObjectState | None
-    source_target_normal_force_n: float
-    target_table_normal_force_n: float
-    source_table_normal_force_n: float
-    finger_contact_count: int
-    right_gripper_opening_m: float
-    right_tcp_distance_m: float
-    conditions_passed: bool
-    conditions: tuple[TaskCondition, ...]
-
-    @property
-    def terminal(self) -> bool:
-        return self.state in ("SUCCEEDED", "FAILED")
+    source, target = observation.source, observation.target
+    specs = (
+        ("source_on_target_height", abs(height_error) <= thresholds.support_height_tolerance_m,
+         height_error, thresholds.support_height_tolerance_m, "m (source_z - target_top)",
+         "height difference must equal the two half heights"),
+        ("source_xy_inside_target", xy_x_error <= 0.0 and xy_y_error <= 0.0,
+         max(xy_x_error, xy_y_error), 0.0, "m (over edge)",
+         "source centre must stay at least the configured margin inside the target"),
+        ("source_target_vertical_contact",
+         observation.source_target_normal_force_n >= thresholds.min_support_normal_force_n,
+         observation.source_target_normal_force_n, thresholds.min_support_normal_force_n, "N",
+         "only contact normals with a sufficient world-Z component count as support"),
+        ("target_on_table",
+         observation.target_table_normal_force_n >= thresholds.min_table_normal_force_n
+         and abs(target.center[2] - observation.table_top_z_m
+                 - binding.target_half_extents_m[2]) <= thresholds.support_height_tolerance_m,
+         observation.target_table_normal_force_n, thresholds.min_table_normal_force_n, "N",
+         "target must be supported by the real table contact at the expected height"),
+        ("source_not_on_table",
+         observation.source_table_normal_force_n < thresholds.min_table_normal_force_n,
+         observation.source_table_normal_force_n, thresholds.min_table_normal_force_n, "N",
+         "source must be lifted off the table, not resting beside the target"),
+        ("source_tilt", source.tilt_rad <= thresholds.max_tilt_rad, source.tilt_rad,
+         thresholds.max_tilt_rad, "rad", "source must stay upright"),
+        ("target_tilt", target.tilt_rad <= thresholds.max_tilt_rad, target.tilt_rad,
+         thresholds.max_tilt_rad, "rad", "target must stay upright"),
+        ("source_linear_speed", source.linear_speed_m_s <= thresholds.max_linear_speed_m_s,
+         source.linear_speed_m_s, thresholds.max_linear_speed_m_s, "m/s",
+         "source must be at rest"),
+        ("target_linear_speed", target.linear_speed_m_s <= thresholds.max_linear_speed_m_s,
+         target.linear_speed_m_s, thresholds.max_linear_speed_m_s, "m/s",
+         "target must be at rest"),
+        ("source_angular_speed", source.angular_speed_rad_s <= thresholds.max_angular_speed_rad_s,
+         source.angular_speed_rad_s, thresholds.max_angular_speed_rad_s, "rad/s",
+         "source must not rotate"),
+        ("target_angular_speed", target.angular_speed_rad_s <= thresholds.max_angular_speed_rad_s,
+         target.angular_speed_rad_s, thresholds.max_angular_speed_rad_s, "rad/s",
+         "target must not rotate"),
+        ("no_finger_contact", observation.finger_contact_count == 0,
+         float(observation.finger_contact_count), 0.0, "contacts",
+         "neither finger may touch or pinch either block"),
+        ("right_gripper_opening",
+         observation.right_gripper_opening_m >= thresholds.min_gripper_opening_m,
+         observation.right_gripper_opening_m, thresholds.min_gripper_opening_m, "m",
+         "the right gripper must be measurably released"),
+        ("right_tcp_clearance",
+         observation.right_tcp_to_source_m >= thresholds.min_tcp_clearance_m,
+         observation.right_tcp_to_source_m, thresholds.min_tcp_clearance_m, "m",
+         "the TCP must have retreated from the source centre"),
+    )
+    return TaskEvaluation(tuple(TaskCondition(*spec) for spec in specs))
 
 
 @dataclass(frozen=True, slots=True)
@@ -619,7 +405,7 @@ class _PrepareFact:
     request_id: str
     content_digest: str
     plan_digest: str
-    state: StackTaskState
+    state: TaskState
     key_pose_count: int = 0
     collision_segment_count: int = 0
     ik_max_position_error_m: float = 0.0
@@ -633,7 +419,7 @@ class _StartFact:
     request_id: str
     content_digest: str
     start_sim_time_ns: int
-    state: StackTaskState
+    state: TaskState
 
 
 @dataclass(frozen=True, slots=True)
@@ -643,40 +429,27 @@ class _PrepareOutcome:
 
 
 class StackTaskRuntime:
-    """One task's explicit prepare/start/tick/reset state machine.
-
-    The runtime is owned by the physics-owner thread.  Prepared/teacher plans
-    are immutable objects handed in by the bounded planning thread; no IK or
-    mink call happens here.  Reset invalidates the plan, stable window, task
-    epoch and every RPC/idempotency record.
-    """
+    """One task's explicit prepare/start/tick/reset state machine."""
 
     def __init__(self, config: StackTaskConfig, binding: TaskBinding) -> None:
         self.config = config
         self.binding = binding
-        self._seq = 0
-        self._task_epoch = 0
-        self._state = "IDLE"
-        self._reason = ""
+        self._seq = self._task_epoch = 0
+        self._state, self._reason = "IDLE", ""
         self._context: RunContext | None = None
         self._plan: object | None = None
-        self._plan_digest = ""
-        self._plan_duration_ns = 0
-        self._start_sim_ns = 0
-        self._start_wall_ns = 0
+        self._plan_digest, self._plan_duration_ns = "", 0
+        self._start_sim_ns = self._start_wall_ns = 0
         self._stable_start_ns: int | None = None
-        self._first_satisfied_ns = 0
-        self._completed_ns = 0
+        self._first_satisfied_ns = self._completed_ns = 0
         self._conditions: tuple[TaskCondition, ...] = ()
-        self._observation: TaskObservation | None = None
-        self._success_observation: TaskObservation | None = None
+        self._observation = self._success_observation = None
         self._success_conditions: tuple[TaskCondition, ...] = ()
         self._prepare_cache: dict[str, _PrepareFact] = {}
         self._start_fact: _StartFact | None = None
         self._lifted = False
-
     @property
-    def state(self) -> StackTaskState:
+    def state(self) -> TaskState:
         return self._snapshot()
 
     @property
@@ -704,7 +477,7 @@ class StackTaskRuntime:
             raise _error("TASK_BUSY", "a stack task is already running")
         if self._state == "PREPARED":
             raise _error("TASK_ALREADY_PREPARED", "reset before preparing a different plan")
-        if self._state in ("SUCCEEDED", "FAILED"):
+        if self._state in _TERMINAL_STATES:
             raise _error("TASK_TERMINAL", "reset the terminal task before preparing again")
         if len(self._prepare_cache) >= self.config.capacity.rpc_cache_entries:
             raise _error("TASK_CACHE_FULL", "prepare idempotency cache is full")
@@ -718,19 +491,10 @@ class StackTaskRuntime:
         return _PrepareOutcome(fact, idempotent=True)
 
     def commit_prepare(
-        self,
-        *,
-        request_id: str,
-        content_digest: str,
-        context: RunContext,
-        plan: object,
-        plan_digest: str,
-        plan_duration_ns: int,
-        key_pose_count: int = 0,
-        collision_segment_count: int = 0,
-        ik_max_position_error_m: float = 0.0,
-        ik_max_orientation_error_rad: float = 0.0,
-        prepare_kind: str = "teacher",
+        self, *, request_id: str, content_digest: str, context: RunContext, plan: object,
+        plan_digest: str, plan_duration_ns: int, key_pose_count: int = 0,
+        collision_segment_count: int = 0, ik_max_position_error_m: float = 0.0,
+        ik_max_orientation_error_rad: float = 0.0, prepare_kind: str = "teacher",
     ) -> _PrepareOutcome:
         existing = self.lookup_prepare(request_id, content_digest)
         if existing is not None:
@@ -742,51 +506,31 @@ class StackTaskRuntime:
             raise _error("INVALID_TASK_PLAN", "plan duration must be positive")
         self._task_epoch += 1
         self._seq += 1
-        self._context = context
-        self._plan = plan
-        self._plan_digest = plan_digest
-        self._plan_duration_ns = plan_duration_ns
-        self._state = "PREPARED"
-        self._reason = ""
-        self._start_sim_ns = 0
-        self._start_wall_ns = 0
+        self._context, self._plan = context, plan
+        self._plan_digest, self._plan_duration_ns = plan_digest, plan_duration_ns
+        self._state, self._reason = "PREPARED", ""
+        self._start_sim_ns = self._start_wall_ns = 0
         self._stable_start_ns = None
-        self._first_satisfied_ns = 0
-        self._completed_ns = 0
+        self._first_satisfied_ns = self._completed_ns = 0
         self._conditions = ()
         self._success_observation = None
         self._success_conditions = ()
         self._lifted = False
         self._start_fact = None
-        state = self._snapshot()
         fact = _PrepareFact(
-            request_id,
-            content_digest,
-            plan_digest,
-            state,
-            key_pose_count,
-            collision_segment_count,
-            ik_max_position_error_m,
-            ik_max_orientation_error_rad,
-            plan_duration_ns / 1e9,
-            prepare_kind,
+            request_id, content_digest, plan_digest, self._snapshot(), key_pose_count,
+            collision_segment_count, ik_max_position_error_m, ik_max_orientation_error_rad,
+            plan_duration_ns / 1e9, prepare_kind,
         )
         self._prepare_cache[request_id] = fact
         return _PrepareOutcome(fact, idempotent=False)
 
     def start(
-        self,
-        *,
-        request_id: str,
-        content_digest: str,
-        context: RunContext,
-        plan_digest: str,
-        task_epoch: int,
-        sim_time_ns: int,
-        wall_ns: int,
-    ) -> tuple[StackTaskState, bool]:
+        self, *, request_id: str, content_digest: str, context: RunContext,
+        plan_digest: str, task_epoch: int, sim_time_ns: int, wall_ns: int,
+    ) -> tuple[TaskState, bool]:
         fact = self._start_fact
-        if fact is not None and self._state in ("RUNNING", "SUCCEEDED", "FAILED"):
+        if fact is not None and self._state in ("RUNNING", *_TERMINAL_STATES):
             if fact.request_id != request_id or fact.content_digest != content_digest:
                 raise _error("START_CONFLICT", "task has already started with a different request")
             return self._snapshot(), True
@@ -799,22 +543,17 @@ class StackTaskRuntime:
         ):
             raise _error("STALE_TASK_CONTEXT", "start does not match the prepared task")
         self._seq += 1
-        self._start_sim_ns = int(sim_time_ns)
-        self._start_wall_ns = int(wall_ns)
+        self._start_sim_ns, self._start_wall_ns = int(sim_time_ns), int(wall_ns)
         self._stable_start_ns = None
-        self._first_satisfied_ns = 0
-        self._completed_ns = 0
+        self._first_satisfied_ns = self._completed_ns = 0
         self._lifted = False
         self._conditions = ()
-        self._state = "RUNNING"
-        self._reason = ""
+        self._state, self._reason = "RUNNING", ""
         state = self._snapshot()
-        self._start_fact = _StartFact(
-            request_id, content_digest, self._start_sim_ns, state
-        )
+        self._start_fact = _StartFact(request_id, content_digest, self._start_sim_ns, state)
         return state, False
 
-    def tick(self, observation: TaskObservation, wall_ns: int) -> StackTaskState:
+    def tick(self, observation: TaskObservation, wall_ns: int) -> TaskState:
         self._seq += 1
         self._observation = observation
         if self._state != "RUNNING":
@@ -825,7 +564,7 @@ class StackTaskRuntime:
         max_sim_ns = round(self.config.success.max_task_sim_duration_s * 1e9)
         max_wall_ns = round(self.config.success.max_task_wall_duration_s * 1e9)
         if elapsed_ns > max_sim_ns:
-            self._fail("TIMEOUT", "task exceeded the configured 30 s simulation budget")
+            self._fail("TIMEOUT", "task exceeded the configured simulation budget")
             return self._snapshot()
         if int(wall_ns) - self._start_wall_ns > max_wall_ns:
             self._fail("WALL_TIMEOUT", "task exceeded the configured wall watchdog")
@@ -848,26 +587,21 @@ class StackTaskRuntime:
                 self._completed_ns = observation.sim_time_ns
                 self._success_observation = observation
                 self._success_conditions = evaluation.conditions
-                self._state = "SUCCEEDED"
-                self._reason = "SUCCESS"
+                self._state, self._reason = "SUCCEEDED", "SUCCESS"
         else:
             self._stable_start_ns = None
             self._first_satisfied_ns = 0
         return self._snapshot()
 
-    def reset(self, reason: str = "RESET") -> StackTaskState:
+    def reset(self, reason: str = "RESET") -> TaskState:
         self._task_epoch += 1
-        self._state = "IDLE"
-        self._reason = reason
+        self._state, self._reason = "IDLE", reason
         self._context = None
         self._plan = None
-        self._plan_digest = ""
-        self._plan_duration_ns = 0
-        self._start_sim_ns = 0
-        self._start_wall_ns = 0
+        self._plan_digest, self._plan_duration_ns = "", 0
+        self._start_sim_ns = self._start_wall_ns = 0
         self._stable_start_ns = None
-        self._first_satisfied_ns = 0
-        self._completed_ns = 0
+        self._first_satisfied_ns = self._completed_ns = 0
         self._conditions = ()
         self._observation = None
         self._success_observation = None
@@ -878,7 +612,7 @@ class StackTaskRuntime:
         self._seq += 1
         return self._snapshot()
 
-    def fail_control(self, reason: str) -> StackTaskState:
+    def fail_control(self, reason: str) -> TaskState:
         if self._state == "SUCCEEDED":
             return self._snapshot()
         if self._state == "RUNNING":
@@ -891,71 +625,56 @@ class StackTaskRuntime:
         self._stable_start_ns = None
 
     def _dropped(self, observation: TaskObservation) -> bool:
-        table_top = observation.table_top_z_m
-        # Falling below the table plane means the block left the support
-        # surface.  A legitimate target rests exactly at top + half height.
-        floor = table_top - 0.02
-        if observation.source.center[2] < floor:
+        floor = observation.table_top_z_m - 0.02
+        if observation.source.center[2] < floor or observation.target.center[2] < floor:
             return True
-        if observation.target.center[2] < floor:
-            return True
-        if self._lifted and (
+        return self._lifted and (
             observation.source_table_normal_force_n
             >= self.config.success.min_table_normal_force_n
-        ):
-            return True
-        # Any block that has fallen off the table is a drop even if it is not
-        # touching the floor plane used by this scene.
-        return False
+        )
 
-    def _snapshot(self) -> StackTaskState:
+    def _snapshot(self) -> TaskState:
         observation = self._observation
         conditions = self._conditions
         if self._state == "SUCCEEDED" and self._success_observation is not None:
             observation = self._success_observation
             conditions = self._success_conditions
         stable_elapsed = 0.0
-        if (
-            self._state == "RUNNING"
-            and self._stable_start_ns is not None
-            and observation is not None
-        ):
-            stable_elapsed = max(
-                0.0, (observation.sim_time_ns - self._stable_start_ns) / 1e9
-            )
+        if self._state == "RUNNING" and self._stable_start_ns is not None and observation:
+            stable_elapsed = max(0.0, (observation.sim_time_ns - self._stable_start_ns) / 1e9)
         elif self._state == "SUCCEEDED":
             stable_elapsed = self.config.success.stable_duration_s
-        return StackTaskState(
-            context=self._context,
-            state_seq=self._seq,
-            sample_sim_time_ns=0 if observation is None else observation.sim_time_ns,
-            task_epoch=self._task_epoch,
-            state=self._state,
-            reason=self._reason,
-            task_config_digest=self.config.config_digest,
-            plan_digest=self._plan_digest,
-            task_start_sim_time_ns=self._start_sim_ns,
-            first_satisfied_sim_time_ns=self._first_satisfied_ns,
-            completed_sim_time_ns=self._completed_ns,
-            stable_elapsed_s=stable_elapsed,
-            source=None if observation is None else observation.source,
-            target=None if observation is None else observation.target,
-            source_target_normal_force_n=(
-                0.0 if observation is None else observation.source_target_normal_force_n
+        bitmask = sum(1 << index for index, item in enumerate(conditions) if item.passed)
+        metrics: dict[str, Any] = {
+            "reason": self._reason,
+            "task_start_sim_time_ns": self._start_sim_ns,
+            "first_satisfied_sim_time_ns": self._first_satisfied_ns,
+            "completed_sim_time_ns": self._completed_ns,
+            "stable_elapsed_s": stable_elapsed,
+            "source": _pose(None if observation is None else observation.source),
+            "target": _pose(None if observation is None else observation.target),
+            "source_target_normal_force_n": _metric(
+                observation, "source_target_normal_force_n"
             ),
-            target_table_normal_force_n=(
-                0.0 if observation is None else observation.target_table_normal_force_n
-            ),
-            source_table_normal_force_n=(
-                0.0 if observation is None else observation.source_table_normal_force_n
-            ),
-            finger_contact_count=0 if observation is None else observation.finger_contact_count,
-            right_gripper_opening_m=(
-                0.0 if observation is None else observation.right_gripper_opening_m
-            ),
-            right_tcp_distance_m=(
-                0.0 if observation is None else observation.right_tcp_to_source_m
-            ),
-            conditions_passed=bool(conditions) and all(c.passed for c in conditions),
-            conditions=conditions,
+            "target_table_normal_force_n": _metric(observation, "target_table_normal_force_n"),
+            "source_table_normal_force_n": _metric(observation, "source_table_normal_force_n"),
+            "finger_contact_count": _metric(observation, "finger_contact_count", 0),
+            "right_gripper_opening_m": _metric(observation, "right_gripper_opening_m"),
+            "right_tcp_distance_m": _metric(observation, "right_tcp_to_source_m"),
+            "conditions_passed": bool(conditions) and all(c.passed for c in conditions),
+            "conditions_bitmask": bitmask,
+            "conditions": [
+                {"name": item.name, "passed": item.passed, "actual": item.actual,
+                 "threshold": item.threshold, "unit": item.unit, "detail": item.detail}
+                for item in conditions
+            ],
+        }
+        return TaskState(
+            context=self._context, state_seq=self._seq,
+            sample_time_ns=0 if observation is None else observation.sim_time_ns,
+            task_epoch=self._task_epoch, task_type="stack", phase=self._state,
+            succeeded=self._state == "SUCCEEDED", terminal=self._state in _TERMINAL_STATES,
+            failure_reason=self._reason if self._state == "FAILED" else "",
+            plan_digest=self._plan_digest, task_config_digest=self.config.config_digest,
+            metrics=metrics,
         )

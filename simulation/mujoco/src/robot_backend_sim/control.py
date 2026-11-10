@@ -28,10 +28,10 @@ from robot_contracts.control import (
 from robot_contracts.models import ContractError, RunContext
 from robot_contracts.trajectory import PreparedFollowerPlan
 
+from .control_events import CommandJournal
 from .control_state import (
     COMMAND_ACTIVE_PHASES,
     MAX_DEFERRED_EVENTS,
-    MAX_EVENT_SEQUENCE,
     ChunkHistory,
     ChunkRecord,
     ChunkStatus,
@@ -46,12 +46,8 @@ from .control_state import (
     _status_from_chunk,
     _status_from_record,
 )
-from .motion import (
-    MotionController,
-    MotionSnapshot,
-    Phase,
-)
 from .motion_config import PandaControlConfig
+from .motion_controller import MotionController, MotionSnapshot, Phase
 from .panda_io import PandaIO
 from .scene import Scene
 from .stream_config import StreamConfig
@@ -111,6 +107,7 @@ class ControlSession:
         self._stream_config = stream_config
         self._commands = CommandHistory(max_history)
         self._chunks = ChunkHistory(max_chunk_history)
+        self._journal = CommandJournal(self._chunks)
         self._leases = LeaseBook()
         self._motion = MotionController(
             scene,
@@ -128,9 +125,8 @@ class ControlSession:
         )
         self._current_command_id: str | None = None
         self._highest_sequence = 0
-        self._event_sequence = 0
         self._last_wall_ns: int | None = None
-        self._deferred_events = DeferredEvents()
+        self._deferred = DeferredEvents()
 
     # ------------------------------------------------------------- public API
 
@@ -145,17 +141,10 @@ class ControlSession:
         return self._motion.phase
 
     def hold_reference(self) -> tuple[float, ...]:
-        """Read-only last hold positions for a planner's MOTION compilation.
-
-        A caller must not substitute the current measured positions: doing so
-        would silently re-fit a new request from a state the motion was never
-        holding.  The physics owner rechecks these exact values at admission.
-        """
         self._check_thread()
         return self._motion.hold_positions
 
     def lease_held(self, context: RunContext, lease_id: str, wall_ns: int) -> bool:
-        """Read-only lease check for task prepare/start; never renews or moves."""
         self._check_thread()
         try:
             self._require_lease(context, lease_id)
@@ -170,12 +159,6 @@ class ControlSession:
         max_arm_speed_rad_s: float = 0.05,
         max_gripper_speed_m_s: float = 0.01,
     ) -> bool:
-        """Require no active motion and measured joints close to rest.
-
-        Prepare is read-only, but a snapshot taken while a command is running
-        would silently plan from a moving scene.  Both the controller phase and
-        the measured velocities must be quiescent.
-        """
         self._check_thread()
         if self._motion.phase in _MOTION_ACTIVE:
             return False
@@ -187,11 +170,6 @@ class ControlSession:
         return True
 
     def current_status(self) -> ControlStatus | None:
-        """Return a fresh immutable aggregate status, or ``None`` without history.
-
-        A terminal record returns its already frozen ``terminal_status``; later
-        live measurements never rewrite it.
-        """
         self._check_thread()
         record = self._current_record()
         return None if record is None else _status_from_record(record)
@@ -199,14 +177,9 @@ class ControlSession:
     def prepared_command(
         self, context: RunContext, command_id: str, chunk_seq: int | None = None
     ) -> PreparedControlCommand | None:
-        """Return the immutable original packet from the bounded history.
-
-        The mutable ``CommandRecord`` never leaves the owner thread.  ``None``
-        means the command was never accepted or has been evicted; callers must
-        not invent a replacement packet in that case.
-        """
         self._check_thread()
-        self._query_generation(context)
+        validate_context(context)
+        check_generation(context, self._context)
         if not isinstance(command_id, str) or not command_id or len(command_id) > 128:
             return None
         record = self._commands.get(command_id)
@@ -231,7 +204,7 @@ class ControlSession:
         self._check_thread()
         wall = self._begin_call(wall_ns)
         _snapshot, events = self._settle_expiry(wall)
-        self._defer_events(events)
+        self._deferred.defer(events)
         validate_context(context)
         check_generation(context, self._context)
         if not context.episode_id:
@@ -264,7 +237,7 @@ class ControlSession:
         self._check_thread()
         wall = self._begin_call(wall_ns)
         _snapshot, events = self._settle_expiry(wall)
-        self._defer_events(events)
+        self._deferred.defer(events)
         self._require_lease(context, lease_id)
         validate_lease_duration(duration_ns)
         self._leases.renew(lease_id, duration_ns, wall)
@@ -273,7 +246,7 @@ class ControlSession:
         self._check_thread()
         wall = self._begin_call(wall_ns)
         expiry_snapshot, expiry_events = self._settle_expiry(wall)
-        self._defer_events(expiry_events)
+        self._deferred.defer(expiry_events)
         events: list[ControlEvent] = []
         self._require_lease(context, lease_id)
         self._leases.release(lease_id)
@@ -298,7 +271,7 @@ class ControlSession:
         self._check_thread()
         wall = self._begin_call(wall_ns)
         _snapshot, expiry_events = self._settle_expiry(wall)
-        self._defer_events(expiry_events)
+        self._deferred.defer(expiry_events)
         events: list[ControlEvent] = []
         if not isinstance(packet, PreparedControlCommand):
             raise _invalid("INVALID_PREPARED_COMMAND", "packet must be a PreparedControlCommand")
@@ -306,14 +279,11 @@ class ControlSession:
         check_generation(command.context, self._context)
         existing = self._commands.get(command.command_id)
         if existing is not None:
-            self._check_command_conflict(existing, packet)
+            self._journal.check_conflict(existing, packet)
             self._require_lease(command.context, command.lease_id)
             assert existing.latest_snapshot is not None
             return self._reply(
-                existing.latest_snapshot,
-                events,
-                accepted=True,
-                reason=existing.phase,
+                existing.latest_snapshot, events, accepted=True, reason=existing.phase
             )
         self._require_lease(command.context, command.lease_id)
         if self._current_sim_ns() > command.accept_before_ns:
@@ -321,43 +291,28 @@ class ControlSession:
         if command.command_seq <= self._highest_sequence:
             raise _invalid("COMMAND_OUT_OF_ORDER", "command_seq must strictly increase")
         record = self._current_record()
-        if record is not None and record.phase in COMMAND_ACTIVE_PHASES:
-            raise _invalid("CONTROL_BUSY", "a previous command is still active")
-        if self._motion.phase in _MOTION_ACTIVE:
-            raise _invalid("CONTROL_BUSY", "motion is active or stopping")
-        if packet.kind != "FOLLOWER":
-            raise _invalid(
-                "INVALID_PREPARED_COMMAND",
-                "submit requires a PreparedFollowerPlan",
-            )
+        if (record is not None and record.phase in COMMAND_ACTIVE_PHASES) or (
+            self._motion.phase in _MOTION_ACTIVE
+        ):
+            raise _invalid("CONTROL_BUSY", "a previous command or motion is still active")
         prepared = packet.prepared
         if prepared.seq != 1 or prepared.anchor.predecessor_seq != 0:
             raise _invalid("INVALID_CHUNK_ORDER", "first follower must start the stream")
-        if not self._commands.has_capacity():
-            raise _invalid("HISTORY_FULL", "command history has no evictable terminal record")
-        if not self._chunks.has_capacity():
-            raise _invalid(
-                "CHUNK_HISTORY_FULL",
-                "chunk history has no evictable terminal record",
-            )
+        if not self._commands.has_capacity() or not self._chunks.has_capacity():
+            raise _invalid("HISTORY_FULL", "command/chunk history has no evictable record")
         snapshot = self._motion.start_stream(prepared, wall)
         accepted_sim = snapshot.measurement_sim_time_ns
         new_record = CommandRecord(
-            packet=packet,
-            phase=_COMMAND_ACCEPTED,
-            reason="",
-            stop_reason=None,
-            accepted_sim_ns=accepted_sim,
-            accepted_wall_ns=wall,
-            motion_seq=snapshot.motion_seq,
-            stream_id=snapshot.stream_id,
+            packet=packet, phase=_COMMAND_ACCEPTED, reason="", stop_reason=None,
+            accepted_sim_ns=accepted_sim, accepted_wall_ns=wall,
+            motion_seq=snapshot.motion_seq, stream_id=snapshot.stream_id,
             latest_snapshot=snapshot,
         )
         self._commands.add(new_record)
         self._current_command_id = command.command_id
         self._highest_sequence = command.command_seq
-        self._record_chunk(new_record, prepared, snapshot, wall)
-        events.append(self._emit(new_record, _COMMAND_ACCEPTED, "", accepted_sim))
+        self._journal.record_chunk(new_record, prepared, snapshot, wall)
+        events.append(self._journal.emit(new_record, _COMMAND_ACCEPTED, "", accepted_sim))
         self._sync_stream(snapshot, wall, events)
         return self._reply(snapshot, events, accepted=True, reason=_COMMAND_ACCEPTED)
 
@@ -365,26 +320,15 @@ class ControlSession:
         self._check_thread()
         wall = self._begin_call(wall_ns)
         _snapshot, expiry_events = self._settle_expiry(wall)
-        self._defer_events(expiry_events)
+        self._deferred.defer(expiry_events)
         events: list[ControlEvent] = []
         if not isinstance(packet, PreparedControlCommand):
             raise _invalid("INVALID_PREPARED_COMMAND", "packet must be a PreparedControlCommand")
-        if packet.kind != "FOLLOWER":
-            raise _invalid(
-                "INVALID_PREPARED_COMMAND",
-                "queue_chunk requires a PreparedFollowerPlan",
-            )
         command = packet.command
         check_generation(command.context, self._context)
         record = self._current_record()
         if record is None or record.command.command_id != command.command_id:
             raise _invalid("STALE_STREAM", "no current command with this id")
-        self._require_lease(command.context, command.lease_id)
-        if packet.kind != record.kind:
-            raise _invalid(
-                "STREAM_MODE_MISMATCH",
-                "a stream cannot change its prepared block kind",
-            )
         if (
             command.context != record.command.context
             or command.lease_id != record.command.lease_id
@@ -394,29 +338,23 @@ class ControlSession:
                 "COMMAND_ID_CONFLICT",
                 "successor context/lease/command_seq differs from the stream",
             )
+        self._require_lease(command.context, command.lease_id)
         prepared = packet.prepared
         existing = self._chunks.get(command.command_id, prepared.seq)
         if existing is not None:
-            self._require_lease(command.context, command.lease_id)
             if existing.packet.fingerprint != packet.fingerprint:
                 raise _invalid(
                     "CHUNK_ID_CONFLICT",
                     "same command/chunk sequence has a different complete payload",
                 )
             assert existing.latest_snapshot is not None
-            accepted = existing.phase in ("ACCEPTED", "STARTED", "RETIRED")
             return self._reply(
-                existing.latest_snapshot,
-                events,
-                accepted=accepted,
+                existing.latest_snapshot, events,
+                accepted=existing.phase in ("ACCEPTED", "STARTED", "RETIRED"),
                 reason=existing.reason or existing.phase,
             )
-        self._require_lease(command.context, command.lease_id)
         if prepared.seq <= record.max_chunk_seq:
-            raise _invalid(
-                "CHUNK_RESULT_EXPIRED",
-                "an older chunk was already retired or evicted",
-            )
+            raise _invalid("CHUNK_RESULT_EXPIRED", "an older chunk was retired or evicted")
         if prepared.seq != record.max_chunk_seq + 1:
             raise _invalid("INVALID_CHUNK_ORDER", "chunk sequence is not the next successor")
         if record.terminal_status is not None:
@@ -424,38 +362,27 @@ class ControlSession:
         if record.phase not in (_COMMAND_ACCEPTED, _COMMAND_STARTED):
             assert record.latest_snapshot is not None
             return self._reply(
-                record.latest_snapshot,
-                events,
-                accepted=False,
+                record.latest_snapshot, events, accepted=False,
                 reason=record.reason or record.phase,
             )
         if not self._chunks.has_capacity():
-            raise _invalid(
-                "CHUNK_HISTORY_FULL",
-                "chunk history has no evictable terminal record",
-            )
+            raise _invalid("CHUNK_HISTORY_FULL", "chunk history has no evictable record")
         if self._current_sim_ns() > command.accept_before_ns and not self._candidate_would_latch(
             prepared
         ):
             raise _invalid("COMMAND_EXPIRED", "robot time is after accept_before_ns")
         submission = self._motion.queue_chunk(prepared, wall)
         if submission.accepted:
-            chunk_record = ChunkRecord(
-                packet=packet,
-                phase="ACCEPTED",
-                reason="PENDING",
+            self._chunks.add(ChunkRecord(
+                packet=packet, phase="ACCEPTED", reason="PENDING",
                 accepted_sim_ns=submission.snapshot.measurement_sim_time_ns,
-                accepted_wall_ns=wall,
-                latest_snapshot=submission.snapshot,
-            )
-            self._chunks.add(chunk_record)
+                accepted_wall_ns=wall, latest_snapshot=submission.snapshot,
+            ))
             record.max_chunk_seq = prepared.seq
         self._sync_stream(submission.snapshot, wall, events)
         return self._reply(
-            submission.snapshot,
-            events,
-            accepted=submission.accepted,
-            reason=submission.reason,
+            submission.snapshot, events,
+            accepted=submission.accepted, reason=submission.reason,
         )
 
     def stop(
@@ -468,7 +395,7 @@ class ControlSession:
         self._check_thread()
         wall = self._begin_call(wall_ns)
         expiry_snapshot, expiry_events = self._settle_expiry(wall)
-        self._defer_events(expiry_events)
+        self._deferred.defer(expiry_events)
         events: list[ControlEvent] = []
         self._require_lease(context, lease_id)
         reason = _reason_text(reason)
@@ -494,7 +421,7 @@ class ControlSession:
         self._check_thread()
         wall = self._begin_call(wall_ns)
         _snapshot, expiry_events = self._settle_expiry(wall)
-        self._defer_events(expiry_events)
+        self._deferred.defer(expiry_events)
         events: list[ControlEvent] = []
         snapshot = self._motion.step(wall)
         self._sync_stream(snapshot, wall, events)
@@ -504,7 +431,7 @@ class ControlSession:
         self._check_thread()
         wall = self._begin_call(wall_ns)
         _snapshot, expiry_events = self._settle_expiry(wall)
-        self._defer_events(expiry_events)
+        self._deferred.defer(expiry_events)
         events: list[ControlEvent] = []
         snapshot = self._motion.poll(wall)
         self._sync_stream(snapshot, wall, events)
@@ -512,7 +439,8 @@ class ControlSession:
 
     def query_command(self, context: RunContext, command_id: str) -> ControlStatus:
         self._check_thread()
-        self._query_generation(context)
+        validate_context(context)
+        check_generation(context, self._context)
         if not isinstance(command_id, str) or not command_id or len(command_id) > 128:
             raise _invalid("RESULT_EXPIRED", "unknown command id")
         record = self._commands.get(command_id)
@@ -529,7 +457,8 @@ class ControlSession:
         chunk_seq: int,
     ) -> ChunkStatus:
         self._check_thread()
-        self._query_generation(context)
+        validate_context(context)
+        check_generation(context, self._context)
         if not isinstance(command_id, str) or not command_id or len(command_id) > 128:
             raise _invalid("RESULT_EXPIRED", "unknown command id")
         if isinstance(chunk_seq, bool) or not isinstance(chunk_seq, Integral) or int(chunk_seq) < 1:
@@ -554,19 +483,11 @@ class ControlSession:
         self._check_thread()
         wall = self._begin_call(wall_ns)
         _snapshot, events = self._settle_expiry(wall)
-        self._defer_events(events)
+        self._deferred.defer(events)
         self._require_lease(context, lease_id)
         return self._motion.chunk_anchor(start_sim_time_ns)
 
     def system_stop(self, reason: str, wall_ns: int) -> ControlReply:
-        """Brake on behalf of the process, bypassing an expired lease.
-
-        This is deliberately not a ROS entry point.  It is used for shutdown,
-        logger/queue/renderer faults and other software failures.  The real
-        ``MotionController`` brake and terminal rules still decide the physical
-        outcome; a CANCELED terminal result does not make the software failure
-        disappear (the worker keeps its own nonzero fault state).
-        """
         self._check_thread()
         wall = self._begin_call(wall_ns)
         reason = _reason_text(reason)
@@ -586,7 +507,7 @@ class ControlSession:
         self._check_thread()
         wall = self._begin_call(wall_ns)
         _snapshot, events = self._settle_expiry(wall)
-        self._defer_events(events)
+        self._deferred.defer(events)
         self._require_lease(context, lease_id)
         validated_seed = validate_seed(seed)
         if self._motion.phase not in _MOTION_RESETTABLE:
@@ -644,13 +565,6 @@ class ControlSession:
             return True
         return now - observed > config.max_observation_age_ns
 
-    def _defer_events(self, events: list[ControlEvent]) -> None:
-        self._deferred_events.defer(events)
-
-    def _query_generation(self, context: object) -> None:
-        validate_context(context)
-        check_generation(context, self._context)
-
     def _require_lease(self, context: RunContext, lease_id: str) -> None:
         check_generation(context, self._context)
         lease = self._leases.current
@@ -659,6 +573,15 @@ class ControlSession:
         check_lease_context(context, lease.context)
         if lease_id != lease.lease_id:
             raise _invalid("LEASE_EXPIRED", "control lease does not match")
+
+    def _sync_stream(
+        self, snapshot: MotionSnapshot, wall: int, events: list[ControlEvent]
+    ) -> None:
+        record = self._current_record()
+        if record is not None:
+            self._journal.sync_stream(
+                record, snapshot, wall, self._motion.result, events
+            )
 
     def _current_record(self) -> CommandRecord | None:
         if self._current_command_id is None:
@@ -696,253 +619,11 @@ class ControlSession:
             record.reason = reason
             record.stop_reason = reason
             record.latest_snapshot = snapshot
-            events.append(
-                self._emit(record, _COMMAND_STOPPING, reason, snapshot.measurement_sim_time_ns)
-            )
+            events.append(self._journal.emit(
+                record, _COMMAND_STOPPING, reason, snapshot.measurement_sim_time_ns
+            ))
         self._sync_stream(snapshot, wall, events)
         return snapshot, events
-
-    def _sync_stream(
-        self,
-        snapshot: MotionSnapshot,
-        wall: int,
-        events: list[ControlEvent],
-    ) -> None:
-        record = self._current_record()
-        if record is None:
-            return
-        record.latest_snapshot = snapshot
-        if record.motion_seq is None:
-            record.motion_seq = snapshot.motion_seq
-        if record.stream_id is None and snapshot.stream_id is not None:
-            record.stream_id = snapshot.stream_id
-        self._translate_chunk_events(record, snapshot, wall, events)
-        if record.terminal_status is not None:
-            return
-        phase = snapshot.phase
-        if phase is Phase.COMPLETED:
-            self._finish_record(record, snapshot, wall, _COMMAND_COMPLETED, events)
-            return
-        if phase is Phase.FAILED:
-            self._finish_record(record, snapshot, wall, _COMMAND_FAILED, events)
-            return
-        if phase is Phase.STOPPED:
-            self._finish_record(record, snapshot, wall, _COMMAND_CANCELED, events)
-            return
-        if phase is Phase.STOPPING:
-            if record.phase in (_COMMAND_ACCEPTED, _COMMAND_STARTED):
-                reason = snapshot.reason or record.reason or "STOP_REQUESTED"
-                record.phase = _COMMAND_STOPPING
-                record.reason = reason
-                record.stop_reason = reason
-                events.append(
-                    self._emit(
-                        record,
-                        _COMMAND_STOPPING,
-                        reason,
-                        snapshot.measurement_sim_time_ns,
-                    )
-                )
-            return
-        if record.phase == _COMMAND_ACCEPTED and snapshot.started_sim_ns is not None:
-            record.phase = _COMMAND_STARTED
-            record.started_sim_ns = snapshot.started_sim_ns
-            record.started_wall_ns = snapshot.started_wall_ns
-            record.reason = ""
-            events.append(
-                self._emit(
-                    record,
-                    _COMMAND_STARTED,
-                    "",
-                    snapshot.started_sim_ns,
-                )
-            )
-
-    def _translate_chunk_events(
-        self,
-        record: CommandRecord,
-        snapshot: MotionSnapshot,
-        wall: int,
-        events: list[ControlEvent],
-    ) -> None:
-        for control_event in sorted(snapshot.chunk_events, key=lambda item: item.event_seq):
-            if control_event.event_seq <= record.last_control_event_seq:
-                continue
-            record.last_control_event_seq = control_event.event_seq
-            chunk = self._chunks.get(record.command.command_id, control_event.chunk_seq)
-            if chunk is not None:
-                chunk.latest_snapshot = snapshot
-                if control_event.phase == "STARTED":
-                    chunk.phase = "STARTED"
-                    chunk.started_sim_ns = control_event.sim_time_ns
-                    chunk.started_wall_ns = wall
-                    chunk.reason = control_event.reason
-                elif control_event.phase == "RETIRED":
-                    chunk.phase = "RETIRED"
-                    chunk.finished_sim_ns = control_event.sim_time_ns
-                    chunk.finished_wall_ns = wall
-                    chunk.reason = control_event.reason
-                elif control_event.phase == "CANCELED":
-                    chunk.phase = "CANCELED"
-                    chunk.finished_sim_ns = control_event.sim_time_ns
-                    chunk.finished_wall_ns = wall
-                    chunk.reason = control_event.reason
-                elif control_event.phase == "REJECTED":
-                    chunk.phase = "REJECTED"
-                    chunk.finished_sim_ns = control_event.sim_time_ns
-                    chunk.finished_wall_ns = wall
-                    chunk.reason = control_event.reason
-                elif control_event.phase == "ACCEPTED":
-                    chunk.reason = control_event.reason or chunk.reason
-            self._event_sequence += 1
-            if self._event_sequence > MAX_EVENT_SEQUENCE:
-                raise _invalid("EVENT_SEQUENCE_EXHAUSTED", "controller event sequence")
-            events.append(
-                ControlEvent(
-                    event_seq=self._event_sequence,
-                    context=record.command.context,
-                    command_id=record.command.command_id,
-                    command_seq=record.command.command_seq,
-                    observation_id=control_event.observation_id,
-                    chunk_seq=control_event.chunk_seq,
-                    phase=control_event.phase,
-                    reason=control_event.reason,
-                    sim_time_ns=control_event.sim_time_ns,
-                )
-            )
-
-    def _finish_record(
-        self,
-        record: CommandRecord,
-        snapshot: MotionSnapshot,
-        wall: int,
-        phase: str,
-        events: list[ControlEvent],
-    ) -> None:
-        result = self._motion.result
-        if phase == _COMMAND_COMPLETED:
-            reason = _COMMAND_COMPLETED
-            stop_reason = None
-        elif phase == _COMMAND_CANCELED:
-            reason = (
-                (result.stop_reason if result is not None else None)
-                or record.stop_reason
-                or snapshot.reason
-                or "STOPPED"
-            )
-            stop_reason = reason
-        else:
-            reason = (
-                (result.reason if result is not None else None)
-                or snapshot.reason
-                or _COMMAND_FAILED
-            )
-            stop_reason = (result.stop_reason if result is not None else None) or record.stop_reason
-        record.phase = phase
-        record.reason = reason
-        record.stop_reason = stop_reason
-        record.finished_sim_ns = snapshot.measurement_sim_time_ns
-        record.finished_wall_ns = wall
-        record.terminal_status = _status_from_record(record)
-        events.append(self._emit(record, phase, reason, snapshot.measurement_sim_time_ns))
-        self._close_chunks(record, snapshot, wall, phase, reason, events)
-
-    def _close_chunks(
-        self,
-        record: CommandRecord,
-        snapshot: MotionSnapshot,
-        wall: int,
-        phase: str,
-        reason: str,
-        events: list[ControlEvent],
-    ) -> None:
-        for chunk in self._chunks.values():
-            if chunk.command.command_id != record.command.command_id:
-                continue
-            if chunk.phase not in ("ACCEPTED", "STARTED"):
-                continue
-            chunk.phase = "RETIRED" if phase == _COMMAND_COMPLETED else "CANCELED"
-            chunk.reason = _COMMAND_COMPLETED if phase == _COMMAND_COMPLETED else reason
-            chunk.finished_sim_ns = snapshot.measurement_sim_time_ns
-            chunk.finished_wall_ns = wall
-            chunk.latest_snapshot = snapshot
-            # A forced stream stop also closes the active block. Its immutable
-            # status and its public event must describe the same terminal fact.
-            events.append(
-                self._emit(
-                    record,
-                    chunk.phase,
-                    chunk.reason,
-                    snapshot.measurement_sim_time_ns,
-                    chunk_seq=chunk.chunk.seq,
-                    observation_id=chunk.command.observation_id,
-                )
-            )
-
-    def _record_chunk(
-        self,
-        record: CommandRecord,
-        prepared: PreparedFollowerPlan,
-        snapshot: MotionSnapshot,
-        wall: int,
-    ) -> None:
-        chunk_record = ChunkRecord(
-            packet=record.packet,
-            phase="ACCEPTED",
-            reason="",
-            accepted_sim_ns=snapshot.measurement_sim_time_ns,
-            accepted_wall_ns=wall,
-            latest_snapshot=snapshot,
-        )
-        self._chunks.add(chunk_record)
-        record.max_chunk_seq = prepared.seq
-
-    def _emit(
-        self,
-        record: CommandRecord,
-        phase: str,
-        reason: str,
-        sim_time_ns: int,
-        *,
-        chunk_seq: int | None = None,
-        observation_id: int | None = None,
-    ) -> ControlEvent:
-        self._event_sequence += 1
-        if self._event_sequence > MAX_EVENT_SEQUENCE:
-            raise _invalid("EVENT_SEQUENCE_EXHAUSTED", "controller event sequence")
-        return ControlEvent(
-            event_seq=self._event_sequence,
-            context=record.command.context,
-            command_id=record.command.command_id,
-            command_seq=record.command.command_seq,
-            observation_id=(
-                record.command.observation_id if observation_id is None else observation_id
-            ),
-            chunk_seq=chunk_seq,
-            phase=phase,
-            reason=reason,
-            sim_time_ns=sim_time_ns,
-        )
-
-    def _check_command_conflict(
-        self, record: CommandRecord, packet: PreparedControlCommand
-    ) -> None:
-        command = packet.command
-        original = record.command
-        if (
-            command.command_seq != original.command_seq
-            or command.context != original.context
-            or command.lease_id != original.lease_id
-        ):
-            raise _invalid(
-                "COMMAND_ID_CONFLICT",
-                "same command_id has different sequence/context/lease",
-            )
-        if record.packet.fingerprint != packet.fingerprint:
-            raise _invalid(
-                "COMMAND_ID_CONFLICT",
-                "same command_id has a different source or plan",
-            )
 
     def _reply(
         self,
@@ -954,5 +635,5 @@ class ControlSession:
     ) -> ControlReply:
         record = self._current_record()
         status = None if record is None else _status_from_record(record)
-        delivered = self._deferred_events.drain() + tuple(events)
+        delivered = self._deferred.drain() + tuple(events)
         return ControlReply(snapshot, status, delivered, accepted, reason)

@@ -28,9 +28,7 @@ from robot_api_msgs.msg import (
     ExecutionFeedback as ExecutionFeedbackMessage,
 )
 from robot_api_msgs.msg import FollowerReference as FollowerReferenceMessage
-from robot_api_msgs.msg import (
-    StackTaskState as StackTaskStateMessage,
-)
+from robot_api_msgs.msg import TaskState as TaskStateMessage
 from robot_api_msgs.srv import EndEpisode, StartEpisode
 from robot_contracts.execution_feedback import ExecutionFeedback
 from robot_contracts.models import ContractError, RunContext
@@ -66,7 +64,7 @@ from dual_arm_runtime.run_logging import (
     EventSink,
 )
 from dual_arm_runtime.runtime_config import RuntimeConfiguration
-from dual_arm_runtime.stack_task_client import StackTaskClient
+from dual_arm_runtime.task_client import TaskClient
 
 _TERMINAL = frozenset({"COMPLETED", "CANCELED", "FAILED"})
 _MAX_EXPECTED_COMMANDS = 64
@@ -150,8 +148,8 @@ class RuntimeNode(Node):
             initial_episode_id=initial_episode_id,
         )
         self._control = self._episode.control
-        self._stack_task = (
-            StackTaskClient(
+        self._task_client = (
+            TaskClient(
                 self,
                 self._root,
                 call_timeout_s=self._recipe.call_timeout_s,
@@ -192,12 +190,9 @@ class RuntimeNode(Node):
                 lambda message, camera=name: self._on_frame(camera, message),
                 sensor_qos,
             )
-        if self._stack_task is not None:
+        if self._task_client is not None:
             self.create_subscription(
-                StackTaskStateMessage,
-                f"{self._root}/stack_task_state",
-                self._on_stack_task_state,
-                EVENT_QOS,
+                TaskStateMessage, f"{self._root}/task_state", self._on_task_state, EVENT_QOS
             )
         self.create_subscription(
             ControlEvent,
@@ -435,7 +430,7 @@ class RuntimeNode(Node):
 
     def record_task_state(self, fact: object) -> None:
         message = fact
-        if not isinstance(message, StackTaskStateMessage):
+        if not isinstance(message, TaskStateMessage):
             raise ContractError("TASK_STATE_MISMATCH", "task fact is not a ROS state message")
         sample_ns = time_ns(message.sample_time)
         with self._condition:
@@ -443,12 +438,12 @@ class RuntimeNode(Node):
             if sequence <= self._last_task_state_seq:
                 return
             self._last_task_state_seq = sequence
-        self._episode.record(f"{self._root}/stack_task_state", message, sample_ns)
+        self._episode.record(f"{self._root}/task_state", message, sample_ns)
 
-    def stack_task_client(self) -> object:
-        return self._stack_task
+    def task_client(self) -> object:
+        return self._task_client
 
-    def _on_stack_task_state(self, message: StackTaskStateMessage) -> None:
+    def _on_task_state(self, message: TaskStateMessage) -> None:
         context = self._episode_context()
         if context is None or context_from_message(message.context) != context:
             self._rejected += 1
@@ -595,8 +590,8 @@ class RuntimeNode(Node):
         }
         if self._follower_limits is not None:
             topics[f"{self._root}/follower_references"] = "robot_api_msgs/msg/FollowerReference"
-        if self._stack_task is not None:
-            topics[f"{self._root}/stack_task_state"] = "robot_api_msgs/msg/StackTaskState"
+        if self._task_client is not None:
+            topics[f"{self._root}/task_state"] = "robot_api_msgs/msg/TaskState"
         for topic in self._camera_topics.values():
             topics[topic] = "robot_api_msgs/msg/CameraFrame"
         return topics

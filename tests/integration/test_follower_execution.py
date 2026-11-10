@@ -11,7 +11,8 @@ import json
 import math
 import os
 import sys
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
+from dataclasses import replace as _dataclass_replace
 from pathlib import Path
 
 import pytest
@@ -29,8 +30,8 @@ from robot_backend_sim.control import ControlSession  # noqa: E402
 from robot_backend_sim.control_state import PreparedControlCommand  # noqa: E402
 from robot_backend_sim.follower_config import load_follower_config  # noqa: E402
 from robot_backend_sim.follower_plan import prepare_follower_plan  # noqa: E402
-from robot_backend_sim.motion import MotionController, Phase  # noqa: E402
 from robot_backend_sim.motion_config import load_control_config  # noqa: E402
+from robot_backend_sim.motion_controller import MotionController, Phase  # noqa: E402
 from robot_backend_sim.panda_io import PandaIO  # noqa: E402
 from robot_backend_sim.scene import build_scene  # noqa: E402
 from robot_backend_sim.scene_config import load_scene_config  # noqa: E402
@@ -44,6 +45,14 @@ from robot_contracts.trajectory import (  # noqa: E402
     PreparedFollowerPlan,  # noqa: E402
     normalize_follower_positions,  # noqa: E402
 )
+
+
+def replace(value, **changes):
+    """Replace fields on a Pydantic contract model or a plain dataclass."""
+    if hasattr(value, "model_copy"):
+        return value.model_copy(update=changes)
+    return _dataclass_replace(value, **changes)
+
 
 SCENE_PATH = ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml"
 CONTROL_PATH = ROOT / "profiles/control/panda_control_v1.yaml"

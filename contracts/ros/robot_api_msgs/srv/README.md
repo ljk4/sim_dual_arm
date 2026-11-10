@@ -3,7 +3,7 @@
 控制与 episode：`AcquireControl`、`RenewControl`、`ReleaseControl`、
 `StartEpisode`、`EndEpisode`、`Stop`、`ResetSimulation`。
 流式：`QueryStreamCommand`、`GetStreamAnchor`。跟随：`SubmitFollower`。
-任务/示教：`PrepareStackTask`、`StartStackTask`、`GetStackTaskState`、
+任务/示教：`PrepareTask`、`StartTask`、`GetTaskState`、
 `GetTeacherChunk`。
 
 目录导航：[上级目录](../README.md)。

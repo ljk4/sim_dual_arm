@@ -5,7 +5,7 @@ _TOOLS = Path(__file__).resolve().parents[2] / "runtime/ros2/scripts"
 if str(_TOOLS) not in sys.path:
     sys.path.insert(0, str(_TOOLS))
 
-import stack_export  # noqa: E402
+import export_episode  # noqa: E402
 
 
 def _event(sim_time_ns, pixels):
@@ -43,7 +43,7 @@ def _rules(required=64, ratio=0.85, blackout=0.2):
 
 
 def test_quality_reports_record_only_without_gating_and_covers_full_phase():
-    summary = stack_export.quality_summary(
+    summary = export_episode.quality_summary(
         [
             _event(1_000_000_000, 80),
             _event(1_050_000_000, 80),
@@ -60,7 +60,7 @@ def test_quality_reports_record_only_without_gating_and_covers_full_phase():
 
 
 def test_required_ratio_and_blackout_fail_but_record_only_does_not():
-    summary = stack_export.quality_summary(
+    summary = export_episode.quality_summary(
         [
             _event(1_000_000_000, 80),
             _event(1_050_000_000, 0),
@@ -76,13 +76,13 @@ def test_required_ratio_and_blackout_fail_but_record_only_does_not():
 
 
 def test_missing_required_samples_or_phase_cannot_be_qualified():
-    no_samples = stack_export.quality_summary(
+    no_samples = export_episode.quality_summary(
         [], {"pregrasp": 1}, {1: 1_000_000_000}, _rules()
     )
     assert no_samples["qualified"] is False
     assert any("no right_wrist.source" in reason for reason in no_samples["failure_reasons"])
 
-    no_phase = stack_export.quality_summary(
+    no_phase = export_episode.quality_summary(
         [_event(1_000_000_000, 80)], {}, {1: 1_000_000_000}, _rules()
     )
     assert no_phase["phase_based"] is False

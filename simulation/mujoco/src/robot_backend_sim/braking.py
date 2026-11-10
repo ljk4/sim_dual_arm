@@ -26,7 +26,9 @@ from robot_contracts.trajectory import (
     compute_reference_extremes,
 )
 
-__all__ = ["BrakingPlan", "plan_braking"]
+from .motion_config import PandaControlConfig
+
+__all__ = ["BrakingController", "BrakingPlan", "plan_braking"]
 
 _MAX_NS = 2**63 - 1
 _CONTINUITY_ATOL = 1e-9
@@ -365,3 +367,104 @@ def _validate_merged_plan(
             raise _invalid("braking hold position differs from the segment endpoint")
         if abs(end_velocity) > _CONTINUITY_ATOL:
             raise _invalid(f"joints[{index}]: braking endpoint velocity is not zero")
+
+
+class BrakingController:
+    """Explicit stop component: plan one brake and own its stability window.
+
+    The controller starts from the last reference that actually reached the
+    actuators and never reads wall time or steps physics.  Stability is a
+    physical fact measured on the owner thread: the plan duration has elapsed
+    and every measured velocity is within its configured tolerance.
+    """
+
+    def __init__(self, config: PandaControlConfig) -> None:
+        self._config = config
+        self._plan: BrakingPlan | None = None
+        self._stop_sim_start_ns: int | None = None
+        self._stable_since_ns: int | None = None
+
+    def reset(self) -> None:
+        self._plan = None
+        self._stop_sim_start_ns = None
+        self._stable_since_ns = None
+
+    @property
+    def plan(self) -> BrakingPlan | None:
+        return self._plan
+
+    @property
+    def duration_ns(self) -> int:
+        if self._plan is None:
+            raise AssertionError("braking has no plan")
+        return self._plan.duration_ns
+
+    @property
+    def hold_positions(self) -> tuple[float, ...]:
+        if self._plan is None:
+            raise AssertionError("braking has no plan")
+        return self._plan.hold_positions
+
+    @property
+    def stop_sim_start_ns(self) -> int | None:
+        return self._stop_sim_start_ns
+
+    @property
+    def stable_since_ns(self) -> int | None:
+        return self._stable_since_ns
+
+    def begin(
+        self,
+        *,
+        base_positions: tuple[float, ...],
+        base_velocities: tuple[float, ...],
+        joints: Sequence[JointSpec],
+        sim_time_ns: int,
+        application_sim_time_ns: int | None,
+    ) -> BrakingPlan:
+        """Plan a bounded brake; ``application_sim_time_ns`` is ``None`` only
+        before the first physical application, where the current sim time is
+        the brake origin."""
+        plan = plan_braking(
+            base_positions, base_velocities, joints, self._config.max_accelerations
+        )
+        self._plan = plan
+        self._stop_sim_start_ns = (
+            int(sim_time_ns)
+            if application_sim_time_ns is None
+            else int(application_sim_time_ns)
+        )
+        self._stable_since_ns = None
+        return plan
+
+    def sample(self, elapsed_ns: int) -> ReferenceSample:
+        if self._plan is None:
+            raise AssertionError("braking has no plan")
+        return self._plan.sample(elapsed_ns)
+
+    def update_stability(self, measurement: object, elapsed_ns: int) -> tuple[bool, int]:
+        """Return ``(settled, stable_for_ns)`` for one post-step measurement."""
+        if self._plan is None:
+            raise AssertionError("braking has no plan")
+        speeds_ok = all(
+            abs(velocity) <= tolerance
+            for velocity, tolerance in zip(
+                measurement.velocities,  # type: ignore[attr-defined]
+                self._config.velocity_tolerances,
+                strict=True,
+            )
+        )
+        if elapsed_ns >= self._plan.duration_ns and speeds_ok:
+            if self._stable_since_ns is None:
+                self._stable_since_ns = measurement.sim_time_ns  # type: ignore[attr-defined]
+            stable_for = max(
+                0, measurement.sim_time_ns - self._stable_since_ns  # type: ignore[attr-defined]
+            )
+            return stable_for >= self._config.stable_duration_ns, stable_for
+        self._stable_since_ns = None
+        return False, 0
+
+    def stable_for_ns(self, measurement: object) -> int:
+        if self._stable_since_ns is None:
+            return 0
+        return max(0, measurement.sim_time_ns - self._stable_since_ns)  # type: ignore[attr-defined]

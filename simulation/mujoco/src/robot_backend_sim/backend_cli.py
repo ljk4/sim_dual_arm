@@ -14,7 +14,6 @@ import re
 import signal
 import sys
 import time
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -127,7 +126,7 @@ def run(argv: list[str] | None = None) -> int:
             "created_utc": _now_utc(),
             "config": str(config.source),
             "panda_model": str(assets.model_paths()[1]),
-            "effective_configuration": json.loads(json.dumps(asdict(config), default=str)),
+            "effective_configuration": config.canonical_dict(),
             "configuration_sources": {
                 name: {
                     "path": str(path.resolve()),
@@ -271,7 +270,9 @@ def run(argv: list[str] | None = None) -> int:
                 "closed": summary.closed,
                 "physics_stopped": summary.physics_stopped,
                 "reason": summary.reason,
-                "fault": None if summary.fault is None else asdict(summary.fault),
+                "fault": None if summary.fault is None else {
+                    "reason": summary.fault.reason, "detail": summary.fault.detail
+                },
                 "phase": summary.phase,
                 "accepted_commands": summary.accepted_commands,
                 "events_emitted": summary.events_emitted,

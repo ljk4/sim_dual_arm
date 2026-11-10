@@ -206,7 +206,7 @@ def test_follower_fingerprint_payload_keeps_all_terminal_and_deviation_evidence(
     start = list(BASE)
     start[7] = 0.002
     prepared = follower_plan(source=tuple(closing), handoff_ns=0, positions=tuple(start))
-    payload = control_state_module._follower_payload(prepared)
+    payload = control_state_module._fingerprint_payload(prepared)
     assert payload["kind"] == "FOLLOWER"
     assert payload["algorithm"] == FOLLOWER_ALGORITHM_VERSION
     assert payload["raw_terminal_velocities"] == list(prepared.raw_terminal_velocities)

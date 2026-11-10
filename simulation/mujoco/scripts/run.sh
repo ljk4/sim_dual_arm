@@ -118,19 +118,19 @@ case "$command" in
       python3 -m robot_backend_sim.viewer --config "$config" "${viewer_args[@]}"
     ;;
   environment)
-    exec python3 -m robot_backend_sim.probe_environment \
+    exec python3 -m robot_backend_sim.tools.probe_environment \
       --report-root "$REPORT_ROOT" \
       "$@"
     ;;
   scene)
-    exec python3 -m robot_backend_sim.check_scene \
+    exec python3 -m robot_backend_sim.tools.check_scene \
       --scene-config "$ROOT/configs/scene/panda_stack.yaml" \
       --check-config "$ROOT/configs/checks/scene_check.yaml" \
       --report-root "$REPORT_ROOT" \
       "$@"
     ;;
   kinematics)
-    exec python3 -m robot_backend_sim.check_kinematics \
+    exec python3 -m robot_backend_sim.tools.check_kinematics \
       --scene-config "$ROOT/configs/scene/panda_stack.yaml" \
       --check-config "$ROOT/configs/checks/scene_check.yaml" \
       --kinematics-config "$ROOT/configs/checks/kinematics_check.yaml" \

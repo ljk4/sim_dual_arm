@@ -22,15 +22,15 @@ from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import assets, kinematics, probe_environment, visibility
-from .diagnostics import (
+from .. import assets, kinematics, visibility
+from ..diagnostics import (
     code_provenance,
     scene_config_document,
     sha256_file,
     utc_now,
     write_json_atomic,
 )
-from .kinematics import (
+from ..kinematics import (
     IKResult,
     KinematicsError,
     PathResult,
@@ -41,14 +41,14 @@ from .kinematics import (
     extract_object_pose,
     solve_key_poses,
 )
-from .kinematics_config import (
+from ..kinematics_config import (
     KinematicsCheckConfig,
     KinematicsConfigError,
     TargetConfig,
     load_kinematics_config,
 )
-from .scene_config import SceneConfig, SceneConfigError, load_scene_config
-from .visibility import (
+from ..scene_config import SceneConfig, SceneConfigError, load_scene_config
+from ..visibility import (
     LayoutSpec,
     SceneCheckConfig,
     SceneCheckConfigError,
@@ -58,8 +58,10 @@ from .visibility import (
 if TYPE_CHECKING:
     import numpy as np
 
-    from .rendering import SceneRenderer, Snapshot
-    from .scene import Scene
+    from ..rendering import SceneRenderer, Snapshot
+    from ..scene import Scene
+
+from . import probe_environment
 
 COMPONENT = "kinematics_check"
 KIND = "kinematics"
@@ -240,7 +242,7 @@ def _kinematics_config_document(config: KinematicsCheckConfig) -> dict[str, obje
 
 
 def _build_scene(scene_config: SceneConfig) -> object:
-    from .scene import SceneBuildError, build_scene
+    from ..scene import SceneBuildError, build_scene
 
     try:
         return build_scene(scene_config)
@@ -284,7 +286,7 @@ def _scene_info(scene: object, scene_config: SceneConfig) -> dict[str, object]:
 
 
 def _make_renderer(scene: object, scene_config: SceneConfig) -> object:
-    from .rendering import SceneRenderer
+    from ..rendering import SceneRenderer
 
     first = scene_config.cameras[0]
     return SceneRenderer(

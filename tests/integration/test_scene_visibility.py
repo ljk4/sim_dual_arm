@@ -14,10 +14,11 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim import check_scene, rendering, visibility  # noqa: E402
+from robot_backend_sim import rendering, visibility  # noqa: E402
 from robot_backend_sim.rendering import SceneRenderer, SceneRenderError  # noqa: E402
 from robot_backend_sim.scene import build_scene  # noqa: E402
 from robot_backend_sim.scene_config import load_scene_config  # noqa: E402
+from robot_backend_sim.tools import check_scene  # noqa: E402
 
 CONFIG_PATH = ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml"
 CHECK_PATH = ROOT / "simulation/mujoco/configs/checks/scene_check.yaml"

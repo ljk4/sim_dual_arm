@@ -152,7 +152,7 @@ runtime/ros2/scripts/run.sh campaign status
 含义：运行一次正式的教师采集。每次执行只尝试一局，失败也计入台账。
 
 ```bash
-runtime/ros2/scripts/run.sh campaign run --purpose formal --mode teacher -- python3 /workspace/runtime/ros2/scripts/collect_stack_attempt.py
+runtime/ros2/scripts/run.sh campaign run --purpose formal --mode teacher -- python3 /workspace/runtime/ros2/scripts/collect_attempt.py
 ```
 
 含义：重复运行上一行，直到台账中累计 50 条合格正式 episode。

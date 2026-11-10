@@ -1,10 +1,4 @@
-"""The single physics-owner thread for the backend.
-
-All live ``MjData`` access and every ``mj_step`` happen here.  Callers can only
-enqueue fixed operations with a bounded queue and wait on their own ``Future``.
-The separate planner, renderer and public worker live in
-:mod:`robot_backend_sim.worker` and :mod:`robot_backend_sim.render_worker`.
-"""
+"""The single physics-owner thread; the only place live ``MjData`` is touched."""
 
 from __future__ import annotations
 
@@ -32,39 +26,18 @@ from .control_state import (
 )
 from .feedback_mailbox import FeedbackMailbox
 from .follower_protocol import follower_reference_from_chunk_status
-from .kinematics import extract_object_pose
-from .motion import Phase
 from .motion_config import PandaControlConfig
+from .motion_controller import Phase
 from .panda_io import PandaIO
-from .render_worker import (
-    Capture,
-    RenderedCapture,
-    RendererThread,
-)
+from .render_worker import Capture, RenderedCapture, RendererThread
 from .rendering import capture_snapshot
 from .scene import Scene, build_scene
 from .scene_config import SceneConfig
-from .stack_task import (
-    StackChunkView,
-    StackPrepareResult,
-    StackPrepareSnapshot,
-    StackTaskError,
-    StackTaskRuntime,
-    capture_task_observation,
-    make_task_binding,
-)
 from .stream_config import StreamConfig
-from .task_config import StackTaskConfig
-from .teacher import TeacherFeedback, TeacherProgress
+from .tasks import SimTaskPlugin
 
-__all__ = [
-    "BackendClosed",
-    "SubmitOutcome",
-    "WorkerFault",
-    "WorkerSummary",
-]
+__all__ = ["BackendClosed", "SubmitOutcome", "WorkerFault", "WorkerSummary"]
 
-_MAX_OWNER_WAIT_S = 60.0
 _MAX_OPERATION_CYCLE = 16
 _ACTIVE_PHASES = frozenset({Phase.ACCEPTED, Phase.RUNNING, Phase.SETTLING, Phase.STOPPING})
 _TERMINAL_PHASES = frozenset({Phase.COMPLETED, Phase.STOPPED, Phase.FAILED})
@@ -130,8 +103,6 @@ class _Operation:
 
 
 class _Owner:
-    """The only thread allowed to read/write the live scene."""
-
     def __init__(
         self,
         config: BackendConfig,
@@ -139,53 +110,32 @@ class _Owner:
         profile: RobotProfile,
         control_config: PandaControlConfig,
         stream_config: StreamConfig,
-        task_config: StackTaskConfig | None,
+        task_plugin: SimTaskPlugin | None,
+        task_kinematics: object | None,
         log: _LoggerSink | None,
     ) -> None:
-        self._config = config
-        self._scene_config = scene_config
-        self._profile = profile
-        self._control_config = control_config
-        self._stream_config = stream_config
-        self._task_config = task_config
-        self._stack: StackTaskRuntime | None = None
-        self._task_evaluation_fault: WorkerFault | None = None
-        self._last_task_observation: object | None = None
-        self._prepared_command_id = ""
-        self._teacher_progress: TeacherProgress | None = None
-        self._teacher_feedback: dict[int, tuple[TeacherFeedback, object]] = {}
-        self._reset_seed = config.seed
-        self._log = log
+        self._config, self._scene_config, self._profile = config, scene_config, profile
+        self._control_config, self._stream_config = control_config, stream_config
+        self._task_plugin, self._task_kinematics = task_plugin, task_kinematics
+        self._last_task_observation = None
+        self._reset_seed, self._log = config.seed, log
         self._queue: queue.Queue[_Operation] = queue.Queue(maxsize=config.owner_queue_capacity)
-        self._ready: Future = Future()
-        self._done = threading.Event()
-        self._closing = threading.Event()
-        self._close_reason = "SHUTDOWN"
-        self.final_phase: str | None = None
-        self._close_deadline_ns = 0
-        self._fault_lock = threading.Lock()
-        self._fault: WorkerFault | None = None
-        self._system_stop_requested = False
-        self._renderer: RendererThread | None = None
+        self._ready, self._done, self._closing = Future(), threading.Event(), threading.Event()
+        self._close_reason, self.final_phase, self._close_deadline_ns = "SHUTDOWN", None, 0
+        self._fault_lock, self._fault, self._system_stop_requested = threading.Lock(), None, False
+        self._renderer = self._health_check = self._controller = None
+        self._scene = self._owner_context = None
         self._renderer_lock = threading.Lock()
-        self._health_check = None
-        self._controller: ControlSession | None = None
-        self._scene: Scene | None = None
-        self._owner_context: RunContext | None = None
         self._captures: queue.Queue[Capture] = queue.Queue(maxsize=config.capture_queue_capacity)
         self._feedback = FeedbackMailbox(config.feedback_queue_capacity)
         self._events: queue.Queue[ControlEvent] = queue.Queue(maxsize=config.event_queue_capacity)
         self._follower_references: queue.Queue[FollowerReference] = queue.Queue(
             maxsize=config.follower_reference_queue_capacity
         )
-        self._dropped_captures = 0
-        self._stale_outputs = 0
-        self._capture_seq = 0
-        self._capture_count = 0
+        self._dropped_captures = self._stale_outputs = 0
+        self._capture_seq = self._capture_count = 0
         self._capture_times: deque[tuple[int, int]] = deque(maxlen=2048)
-        self._next_capture_sim_ns = 0
-        self._accepted_commands = 0
-        self._events_emitted = 0
+        self._next_capture_sim_ns = self._accepted_commands = self._events_emitted = 0
         self._feedback_key: tuple[str, str] | None = None
         self._thread = threading.Thread(target=self._run, name="backend-physics", daemon=True)
 
@@ -200,8 +150,7 @@ class _Owner:
         error = self._ready.exception()
         if error is not None:
             raise error
-        scene, profile, scene_config = self._ready.result()
-        return scene, profile, scene_config
+        return self._ready.result()
 
     def attach_renderer(self, renderer: RendererThread) -> None:
         with self._renderer_lock:
@@ -210,53 +159,32 @@ class _Owner:
     def set_health_check(self, callback: object) -> None:
         self._health_check = callback
 
-    @property
-    def done(self) -> bool:
-        return self._done.is_set()
+    done = property(lambda self: self._done.is_set())
 
-    @property
-    def captures(self) -> queue.Queue[Capture]:
-        return self._captures
+    captures = property(lambda self: self._captures)
 
-    @property
-    def feedback(self) -> FeedbackMailbox:
-        return self._feedback
+    feedback = property(lambda self: self._feedback)
 
-    @property
-    def events(self) -> queue.Queue[ControlEvent]:
-        return self._events
+    events = property(lambda self: self._events)
 
-    @property
-    def follower_references(self) -> queue.Queue[FollowerReference]:
-        return self._follower_references
+    follower_references = property(lambda self: self._follower_references)
 
-    @property
-    def dropped_captures(self) -> int:
-        return self._dropped_captures
+    dropped_captures = property(lambda self: self._dropped_captures)
 
-    @property
-    def stale_outputs(self) -> int:
-        return self._stale_outputs
+    stale_outputs = property(lambda self: self._stale_outputs)
 
     @property
     def fault(self) -> WorkerFault | None:
         with self._fault_lock:
             return self._fault
 
-    def context(self) -> RunContext | None:
-        return self._owner_context
+    context = property(lambda self: self._owner_context)
 
-    @property
-    def stack_task(self) -> StackTaskRuntime | None:
-        return self._stack
+    task_plugin = property(lambda self: self._task_plugin)
 
-    @property
-    def model(self) -> object | None:
-        return None if self._scene is None else self._scene.model
+    task_kinematics = property(lambda self: self._task_kinematics)
 
-    @property
-    def task_config(self) -> StackTaskConfig | None:
-        return self._task_config
+    model = property(lambda self: None if self._scene is None else self._scene.model)
 
     def latch_fault(self, reason: str, detail: str = "") -> WorkerFault:
         with self._fault_lock:
@@ -306,22 +234,14 @@ class _Owner:
                 scene, self._profile, velocity_feedforward=self._config.velocity_feedforward
             )
             controller = ControlSession(
-                scene,
-                io,
-                self._control_config,
-                stream_config=self._stream_config,
+                scene, io, self._control_config, stream_config=self._stream_config,
                 max_history=self._config.command_history_capacity,
                 max_chunk_history=self._config.chunk_history_capacity,
             )
             self._scene = scene
             self._controller = controller
-            if self._task_config is not None:
-                binding = make_task_binding(
-                    scene.model,
-                    self._task_config,
-                    table_top_z_m=scene.config.table.top_z,
-                )
-                self._stack = StackTaskRuntime(self._task_config, binding)
+            if self._task_plugin is not None:
+                self._task_plugin.bind_scene(scene)
             self._owner_context = controller.context
             self._next_capture_sim_ns = self._sim_ns() + round(
                 1_000_000_000 / self._config.capture_hz
@@ -346,9 +266,6 @@ class _Owner:
             while True:
                 if self._closing.is_set():
                     if not self._system_stop_requested:
-                        # Refuse every operation admitted before the close flag
-                        # became visible; they must not start a new motion while
-                        # the process is braking.
                         self._drain_pending(self._close_reason or "backend closing")
                         self._system_stop(self._close_reason or "shutdown")
                     if self._braking_complete(controller, time.monotonic_ns()):
@@ -363,13 +280,10 @@ class _Owner:
                     self._step_and_capture(controller, now)
                     next_step_ns += round(period_ns)
                     if now - next_step_ns > self._config.max_catchup_steps * period_ns:
-                        # Wall lateness is bounded; no physical step is skipped,
-                        # but the next pacing target restarts from now.
                         next_step_ns = now
                     continue
                 timeout = min(
-                    _OWNER_IDLE_SLEEP_S,
-                    max(0.0, (next_step_ns - now) / 1_000_000_000),
+                    _OWNER_IDLE_SLEEP_S, max(0.0, (next_step_ns - now) / 1_000_000_000)
                 )
                 try:
                     operation = self._queue.get(timeout=timeout)
@@ -394,8 +308,9 @@ class _Owner:
         if not operation.future.set_running_or_notify_cancel():
             return
         try:
-            result = self._dispatch(controller, operation.name, operation.payload)
-            operation.future.set_result(result)
+            operation.future.set_result(
+                self._dispatch(controller, operation.name, operation.payload)
+            )
         except BaseException as error:  # noqa: BLE001 - every caller gets the error
             operation.future.set_exception(error)
 
@@ -415,14 +330,14 @@ class _Owner:
         if name == "release":
             context, lease_id = payload
             reply = controller.release(context, lease_id, now)  # type: ignore[arg-type]
-            if self._stack is not None:
-                self._stack.fail_control("CONTROL_RELEASED")
+            if self._task_plugin is not None:
+                self._task_plugin.fail_control("CONTROL_RELEASED")
             return self._record_reply(controller, reply)
         if name == "stop":
             context, lease_id, reason = payload
             reply = controller.stop(context, lease_id, reason, now)  # type: ignore[arg-type]
-            if self._stack is not None:
-                self._stack.fail_control(f"CONTROL_STOPPED:{reason}")
+            if self._task_plugin is not None:
+                self._task_plugin.fail_control(f"CONTROL_STOPPED:{reason}")
             return self._record_reply(controller, reply)
         if name == "lookup":
             context, command_id, chunk_seq = payload
@@ -436,113 +351,25 @@ class _Owner:
             return self._admit(controller, request, packet)  # type: ignore[arg-type]
         if name == "anchor":
             context, lease_id, start_sim_time_ns = payload
-            return controller.chunk_anchor(
-                context,
-                lease_id,
-                now,
-                start_sim_time_ns,  # type: ignore[arg-type]
-            )
+            return controller.chunk_anchor(context, lease_id, now, start_sim_time_ns)  # type: ignore[arg-type]
         if name == "query_command":
             context, command_id = payload
             return controller.query_command(context, command_id)  # type: ignore[arg-type]
         if name == "query_chunk":
             context, command_id, chunk_seq = payload
             return controller.query_chunk(context, command_id, chunk_seq)  # type: ignore[arg-type]
-        if name == "stack_snapshot":
-            (
-                context,
-                lease_id,
-                request_id,
-                content_digest,
-                episode_id,
-                seed,
-            ) = payload
-            return self._stack_snapshot(
-                controller,
-                context,  # type: ignore[arg-type]
-                lease_id,  # type: ignore[arg-type]
-                request_id,  # type: ignore[arg-type]
-                content_digest,  # type: ignore[arg-type]
-                episode_id,  # type: ignore[arg-type]
-                seed,  # type: ignore[arg-type]
-                now,
-            )
-        if name == "stack_commit":
-            (
-                context,
-                lease_id,
-                request_id,
-                content_digest,
-                plan,
-                plan_digest,
-                duration_ns,
-                prepare_kind,
-                snapshot_epoch,
-                snapshot_command_id,
-                snapshot_source_qpos,
-                snapshot_target_qpos,
-            ) = payload
-            return self._stack_commit(
-                controller,
-                context,  # type: ignore[arg-type]
-                lease_id,  # type: ignore[arg-type]
-                request_id,  # type: ignore[arg-type]
-                content_digest,  # type: ignore[arg-type]
-                plan,
-                plan_digest,  # type: ignore[arg-type]
-                duration_ns,  # type: ignore[arg-type]
-                prepare_kind,  # type: ignore[arg-type]
-                snapshot_epoch,  # type: ignore[arg-type]
-                snapshot_command_id,  # type: ignore[arg-type]
-                snapshot_source_qpos,  # type: ignore[arg-type]
-                snapshot_target_qpos,  # type: ignore[arg-type]
-                now,
-            )
-        if name == "stack_start":
-            (
-                context,
-                lease_id,
-                request_id,
-                content_digest,
-                plan_digest,
-                task_epoch,
-                episode_id,
-            ) = payload
-            return self._stack_start(
-                controller,
-                context,  # type: ignore[arg-type]
-                lease_id,  # type: ignore[arg-type]
-                request_id,  # type: ignore[arg-type]
-                content_digest,  # type: ignore[arg-type]
-                plan_digest,  # type: ignore[arg-type]
-                task_epoch,  # type: ignore[arg-type]
-                episode_id,  # type: ignore[arg-type]
-                now,
-            )
-        if name == "stack_chunk_view":
-            context, task_epoch, capture_seq, observation_time_ns = payload
-            return self._stack_chunk_view(
-                context,  # type: ignore[arg-type]
-                task_epoch,  # type: ignore[arg-type]
-                capture_seq,  # type: ignore[arg-type]
-                observation_time_ns,  # type: ignore[arg-type]
-            )
-        if name == "stack_state":
-            context, task_epoch = payload
-            return self._stack_state(context, task_epoch)  # type: ignore[arg-type]
+        if name.startswith("task_"):
+            return self._dispatch_task(controller, name, payload, now)
         if name == "reset":
             context, lease_id, seed = payload
-            if self._stack is not None and self._stack.state.state == "RUNNING":
-                raise StackTaskError(
-                    "TASK_BUSY",
-                    "ResetSimulation is rejected while a stack task is running",
+            if self._task_plugin is not None and self._task_plugin.state.phase == "RUNNING":
+                raise ContractError(
+                    "TASK_BUSY", "ResetSimulation is rejected while a task is running"
                 )
             new_context = controller.reset(context, lease_id, seed, now)  # type: ignore[arg-type]
-            if self._stack is not None:
-                self._stack.reset("EPISODE_RESET")
+            if self._task_plugin is not None:
+                self._task_plugin.reset("EPISODE_RESET")
             self._reset_seed = int(seed)
-            self._teacher_progress = None
-            self._teacher_feedback.clear()
             self._last_task_observation = None
             self._owner_context = new_context
             self._capture_seq = 0
@@ -559,306 +386,60 @@ class _Owner:
         if name == "system_stop":
             (reason,) = payload
             self._system_stop_requested = True
-            return self._record_reply(
-                controller,
-                controller.system_stop(reason, now),  # type: ignore[arg-type]
-            )
+            return self._record_reply(controller, controller.system_stop(reason, now))
         raise ContractError("UNKNOWN_OPERATION", name)
 
-    def _require_stack(self) -> StackTaskRuntime:
-        if self._stack is None or self._task_config is None:
-            raise StackTaskError("TASK_DISABLED", "stack task is not configured")
-        return self._stack
-
-    def _stack_snapshot(
-        self,
-        controller: ControlSession,
-        context: RunContext,
-        lease_id: str,
-        request_id: str,
-        content_digest: str,
-        episode_id: str,
-        seed: int,
-        now: int,
+    def _dispatch_task(
+        self, controller: ControlSession, name: str, payload: tuple[object, ...], now: int
     ) -> object:
-        runtime = self._require_stack()
-        if not isinstance(request_id, str) or not request_id:
-            raise StackTaskError("INVALID_REQUEST_ID", "request_id must be non-empty")
-        if not isinstance(content_digest, str) or not content_digest:
-            raise StackTaskError("INVALID_REQUEST_ID", "content digest must be non-empty")
-        if not isinstance(seed, int) or isinstance(seed, bool) or seed < 0:
-            raise StackTaskError("INVALID_SEED", "seed must be a non-negative integer")
-        if not controller.lease_held(context, lease_id, now):
-            raise StackTaskError("LEASE_EXPIRED", "prepare does not own the current lease")
-        if context != controller.context or episode_id != context.episode_id:
-            raise StackTaskError("STALE_CONTEXT", "prepare context/episode differs")
-        if runtime.state.state == "RUNNING":
-            raise StackTaskError("TASK_BUSY", "a stack task is already running")
-        if not controller.is_quiescent():
-            raise StackTaskError("TASK_NOT_QUIESCENT", "prepare requires a still robot")
-        if seed != self._reset_seed:
-            raise StackTaskError(
-                "SEED_MISMATCH",
-                f"prepare seed {seed} differs from the last Scene.reset seed {self._reset_seed}",
+        plugin = self._task_plugin
+        if plugin is None or self._scene is None:
+            raise ContractError("TASK_DISABLED", "no task plugin is configured")
+        if name == "task_snapshot":
+            context, lease_id, request_id, content_digest, episode_id, seed = payload
+            return plugin.prepare_snapshot(
+                scene=self._scene, controller=controller, context=context,  # type: ignore[arg-type]
+                lease_id=lease_id, request_id=request_id,  # type: ignore[arg-type]
+                content_digest=content_digest, episode_id=episode_id,  # type: ignore[arg-type]
+                seed=seed, capture_seq=self._capture_seq,  # type: ignore[arg-type]
+                sim_time_ns=self._sim_ns(), now=now, reset_seed=self._reset_seed,
             )
-        cached = runtime.lookup_prepare(request_id, content_digest)
-        if cached is not None:
-            fact = cached.fact
-            return StackPrepareResult(
-                task_epoch=fact.state.task_epoch,
-                config_digest=fact.state.task_config_digest,
-                plan_digest=fact.plan_digest,
-                key_pose_count=fact.key_pose_count,
-                collision_segment_count=fact.collision_segment_count,
-                ik_max_position_error_m=fact.ik_max_position_error_m,
-                ik_max_orientation_error_rad=fact.ik_max_orientation_error_rad,
-                planned_duration_s=fact.plan_duration_s,
-                idempotent=True,
-                state=fact.state,
-                prepare_kind=getattr(fact, "prepare_kind", "teacher"),
+        if name == "task_commit":
+            snapshot, plan, request_id, content_digest, context, lease_id = payload
+            return plugin.commit_prepare(
+                scene=self._scene, controller=controller, snapshot=snapshot,  # type: ignore[arg-type]
+                plan=plan, request_id=request_id, content_digest=content_digest,  # type: ignore[arg-type]
+                context=context, lease_id=lease_id, now=now,  # type: ignore[arg-type]
             )
-        runtime.require_prepare_slot()
-        assert self._scene is not None
-        scene = self._scene
-        binding = runtime.binding
-        qpos = tuple(float(value) for value in scene.data.qpos)
-        source = extract_object_pose(
-            qpos, binding.source_qpos_address, self._task_config.source_object
-        )
-        target = extract_object_pose(
-            qpos, binding.target_qpos_address, self._task_config.target_object
-        )
-        indices = scene.indices
-        left = tuple(qpos[address] for address in indices.arm_joint_qpos["left"])
-        right = tuple(qpos[address] for address in indices.arm_joint_qpos["right"])
-        left_gripper = float(sum(qpos[address] for address in indices.finger_joint_qpos["left"]))
-        right_gripper = float(sum(qpos[address] for address in indices.finger_joint_qpos["right"]))
-        return StackPrepareSnapshot(
-            context=context,
-            task_epoch=runtime.task_epoch + 1,
-            sim_time_ns=self._sim_ns(),
-            capture_seq=self._capture_seq,
-            qpos=qpos,
-            source=source,
-            target=target,
-            left_positions=left,
-            right_positions=right,
-            left_gripper_opening_m=left_gripper,
-            right_gripper_opening_m=right_gripper,
-            table_top_z_m=float(scene.config.table.top_z),
-            seed=seed,
-            controller_command_id=(
-                ""
-                if controller.current_status() is None
-                else controller.current_status().command_id
-            ),
-        )
-
-    def _stack_commit(
-        self,
-        controller: ControlSession,
-        context: RunContext,
-        lease_id: str,
-        request_id: str,
-        content_digest: str,
-        plan: object,
-        plan_digest: str,
-        duration_ns: int,
-        prepare_kind: str,
-        snapshot_epoch: int,
-        snapshot_command_id: str,
-        snapshot_source_qpos: tuple[float, ...],
-        snapshot_target_qpos: tuple[float, ...],
-        now: int,
-    ) -> StackPrepareResult:
-        runtime = self._require_stack()
-        if not controller.lease_held(context, lease_id, now):
-            raise StackTaskError("LEASE_EXPIRED", "prepare lease expired before commit")
-        if context != controller.context:
-            raise StackTaskError("STALE_CONTEXT", "prepare context changed before commit")
-        if runtime.state.state != "IDLE" or runtime.task_epoch != snapshot_epoch - 1:
-            raise StackTaskError("STALE_TASK_PREPARE", "task generation changed before commit")
-        status = controller.current_status()
-        current_command_id = "" if status is None else status.command_id
-        if current_command_id != snapshot_command_id:
-            raise StackTaskError(
-                "STALE_TASK_PREPARE", "another motion ran while task planning was pending"
+        if name == "task_start":
+            (
+                context, lease_id, request_id, content_digest, plan_digest, task_epoch, episode_id,
+            ) = payload
+            status = controller.current_status()
+            return plugin.start(
+                controller=controller, context=context, lease_id=lease_id,  # type: ignore[arg-type]
+                request_id=request_id, content_digest=content_digest,  # type: ignore[arg-type]
+                plan_digest=plan_digest, task_epoch=task_epoch,  # type: ignore[arg-type]
+                episode_id=episode_id, sim_time_ns=self._sim_ns(),  # type: ignore[arg-type]
+                wall_ns=now, command_id="" if status is None else status.command_id,
             )
-        if not controller.is_quiescent():
-            raise StackTaskError("TASK_NOT_QUIESCENT", "robot moved before prepare commit")
-        assert self._scene is not None
-        scene = self._scene
-        binding = runtime.binding
-        current_source = tuple(
-            float(value)
-            for value in scene.data.qpos[
-                binding.source_qpos_address : binding.source_qpos_address + 7
-            ]
-        )
-        current_target = tuple(
-            float(value)
-            for value in scene.data.qpos[
-                binding.target_qpos_address : binding.target_qpos_address + 7
-            ]
-        )
-
-        def moved(current: tuple[float, ...], original: tuple[float, ...]) -> bool:
-            if any(abs(a - b) > 1e-4 for a, b in zip(current[:3], original[:3], strict=True)):
-                return True
-            dot = abs(sum(a * b for a, b in zip(current[3:7], original[3:7], strict=True)))
-            return abs(dot - 1.0) > 1e-6
-
-        if moved(current_source, snapshot_source_qpos) or moved(
-            current_target, snapshot_target_qpos
-        ):
-            raise StackTaskError(
-                "STALE_TASK_PREPARE", "scene objects moved between snapshot and commit"
+        if name == "task_chunk_view":
+            context, task_epoch, capture_seq, observation_time_ns = payload
+            return plugin.chunk_view(
+                context=context, task_epoch=task_epoch,  # type: ignore[arg-type]
+                capture_seq=capture_seq, observation_time_ns=observation_time_ns,  # type: ignore[arg-type]
+                latest_capture_seq=self._capture_seq, capture_times=self._capture_times,
+                current_sim_time_ns=self._sim_ns(),
             )
-        ik_results = getattr(plan, "ik_results", ())
-        collision_results = getattr(plan, "collision_results", ())
-        key_poses = getattr(plan, "key_poses", ())
-        max_position = 0.0
-        max_orientation = 0.0
-        for result in ik_results:
-            max_position = max(max_position, float(result.position_error_m))
-            max_orientation = max(max_orientation, float(result.orientation_error_rad))
-        self._teacher_progress = None
-        self._teacher_feedback.clear()
-        self._last_task_observation = None
-        outcome = runtime.commit_prepare(
-            request_id=request_id,
-            content_digest=content_digest,
-            context=context,
-            plan=plan,
-            plan_digest=plan_digest,
-            plan_duration_ns=duration_ns,
-            key_pose_count=len(key_poses),
-            collision_segment_count=len(collision_results),
-            ik_max_position_error_m=max_position,
-            ik_max_orientation_error_rad=max_orientation,
-            prepare_kind=prepare_kind,
-        )
-        self._prepared_command_id = snapshot_command_id
-        return StackPrepareResult(
-            task_epoch=outcome.fact.state.task_epoch,
-            config_digest=outcome.fact.state.task_config_digest,
-            plan_digest=plan_digest,
-            key_pose_count=len(key_poses),
-            collision_segment_count=len(collision_results),
-            ik_max_position_error_m=max_position,
-            ik_max_orientation_error_rad=max_orientation,
-            planned_duration_s=duration_ns / 1e9,
-            idempotent=outcome.idempotent,
-            prepare_kind=prepare_kind,
-            state=outcome.fact.state,
-        )
-
-    def _stack_start(
-        self,
-        controller: ControlSession,
-        context: RunContext,
-        lease_id: str,
-        request_id: str,
-        content_digest: str,
-        plan_digest: str,
-        task_epoch: int,
-        episode_id: str,
-        now: int,
-    ) -> object:
-        runtime = self._require_stack()
-        if not controller.lease_held(context, lease_id, now):
-            raise StackTaskError("LEASE_EXPIRED", "start does not own the current lease")
-        if context != controller.context or episode_id != context.episode_id:
-            raise StackTaskError("STALE_CONTEXT", "start context/episode differs")
-        status = controller.current_status()
-        command_id = "" if status is None else status.command_id
-        if runtime.state.state == "PREPARED" and command_id != self._prepared_command_id:
-            raise StackTaskError("STALE_TASK_PREPARE", "robot command changed after prepare")
-        state, idempotent = runtime.start(
-            request_id=request_id,
-            content_digest=content_digest,
-            context=context,
-            plan_digest=plan_digest,
-            task_epoch=task_epoch,
-            sim_time_ns=self._sim_ns(),
-            wall_ns=now,
-        )
-        if (
-            idempotent is False
-            and self._task_config is not None
-            and self._config.task_mode == "teacher"
-            and self._task_config.teacher.enabled
-            and runtime.plan is not None
-            and hasattr(runtime.plan, "segments")
-        ):
-            self._teacher_progress = TeacherProgress(runtime.plan, self._task_config)  # type: ignore[arg-type]
-            self._teacher_feedback.clear()
-        return state, idempotent
-
-    def _stack_chunk_view(
-        self,
-        context: RunContext,
-        task_epoch: int,
-        capture_seq: int,
-        observation_time_ns: int,
-    ) -> object:
-        runtime = self._require_stack()
-        state = runtime.state
-        if state.state != "RUNNING":
-            raise StackTaskError("TASK_NOT_RUNNING", "teacher chunks require a running task")
-        if state.context != context or task_epoch != state.task_epoch:
-            raise StackTaskError("STALE_TASK_CONTEXT", "teacher chunk task epoch differs")
-        if isinstance(capture_seq, bool) or not isinstance(capture_seq, int) or capture_seq < 1:
-            raise StackTaskError("INVALID_CAPTURE", "capture_seq must be positive")
-        if capture_seq > self._capture_seq:
-            raise StackTaskError("CAPTURE_NOT_RETAINED", "capture_seq is not retained yet")
-        current_sim = self._sim_ns()
-        if observation_time_ns > current_sim:
-            raise StackTaskError(
-                "TEACHER_FUTURE_OBSERVATION",
-                "observation time is later than the current simulation time",
-            )
-        retained_time = next(
-            (sim_ns for seq, sim_ns in reversed(self._capture_times) if seq == capture_seq),
-            None,
-        )
-        if retained_time is None:
-            raise StackTaskError("CAPTURE_NOT_RETAINED", "capture_seq is no longer retained")
-        if observation_time_ns != retained_time:
-            raise StackTaskError(
-                "TEACHER_OBSERVATION_MISMATCH",
-                "observation time does not belong to the retained capture",
-            )
-        if observation_time_ns < state.task_start_sim_time_ns:
-            raise StackTaskError("TEACHER_BEFORE_START", "observation precedes task start")
-        plan = runtime.plan
-        if plan is None:
-            raise StackTaskError("TASK_NOT_PREPARED", "task has no immutable plan")
-        feedback = self._teacher_feedback.get(capture_seq)
-        if feedback is None or self._teacher_progress is None:
-            raise StackTaskError(
-                "CAPTURE_FEEDBACK_MISSING",
-                "no immutable teacher feedback exists for this capture",
-            )
-        return StackChunkView(
-            plan=plan,
-            task_epoch=state.task_epoch,
-            task_start_sim_time_ns=state.task_start_sim_time_ns,
-            current_sim_time_ns=current_sim,
-            latest_capture_seq=self._capture_seq,
-            state=state,
-            feedback=feedback[0],
-            progress=feedback[1],
-        )
-
-    def _stack_state(self, context: RunContext, task_epoch: int) -> object:
-        runtime = self._require_stack()
-        state = runtime.state
-        if state.context is not None and context != state.context:
-            raise StackTaskError("STALE_CONTEXT", "task state context differs")
-        if task_epoch not in (0, state.task_epoch):
-            raise StackTaskError("STALE_TASK_CONTEXT", "task state epoch differs")
-        return state
+        if name == "task_state":
+            context, task_epoch = payload
+            state = plugin.state
+            if state.context is not None and context != state.context:
+                raise ContractError("STALE_CONTEXT", "task state context differs")
+            if task_epoch not in (0, state.task_epoch):
+                raise ContractError("STALE_TASK_CONTEXT", "task state epoch differs")
+            return state
+        raise ContractError("UNKNOWN_OPERATION", name)
 
     def _admit(
         self,
@@ -890,16 +471,12 @@ class _Owner:
         self._accepted_commands += int(original is None and request.kind != REQUEST_STREAM_NEXT)
         status = reply.status
         if (
-            original is None
-            and reply.accepted
-            and status is not None
+            original is None and reply.accepted and status is not None
             and packet.request is not None
         ):
             prepared = packet.prepared
             chunk = controller.query_chunk(
-                packet.command.context,
-                packet.command.command_id,
-                prepared.seq,
+                packet.command.context, packet.command.command_id, prepared.seq
             )
             reference = follower_reference_from_chunk_status(
                 packet.request, packet, chunk, motion_seq=status.motion_seq or 0
@@ -915,8 +492,6 @@ class _Owner:
         if status is not None:
             key = (status.command_id, status.phase)
             if key != self._feedback_key:
-                # A phase transition or terminal fact must reach the node even
-                # if the high-frequency feedback queue is under pressure.
                 self._feedback_key = key
                 self._offer(self._feedback, status, "feedback_critical")
         return reply
@@ -935,15 +510,11 @@ class _Owner:
         except queue.Full:
             pass
         if label in ("event", "follower_reference"):
-            # Control transitions and follower references must never disappear
-            # silently.  Latch a hard fault and stop the backend instead of
-            # dropping the fact; the node reports the nonzero run failure.
             fault = self.latch_fault(
                 "QUEUE_FULL", f"{label} queue is full; refusing to drop a control fact"
             )
             self._begin_fault_stop(fault)
             return
-        # Periodic feedback is intentionally lossy at its bound.
         try:
             queue_.get_nowait()
         except queue.Empty:  # pragma: no cover - single producer/consumer
@@ -961,14 +532,10 @@ class _Owner:
             self._begin_fault_stop(self.fault)
             return
         self._record_reply(controller, reply)
-        if self._stack is not None:
+        if self._task_plugin is not None:
             try:
-                observation = capture_task_observation(
-                    self._scene,
-                    self._stack.binding,
-                    self._task_config,  # type: ignore[arg-type]
-                )
-                self._stack.tick(observation, now)
+                observation = self._task_plugin.capture_observation(self._scene)
+                self._task_plugin.tick(observation, now)
                 self._last_task_observation = observation
             except BaseException as error:  # noqa: BLE001 - evaluation failure is fatal
                 self.latch_fault("TASK_EVALUATION_FAILED", f"{type(error).__name__}: {error}")
@@ -1000,17 +567,15 @@ class _Owner:
         self._capture_count += 1
         self._capture_times.append((self._capture_seq, reply.snapshot.measurement_sim_time_ns))
         capture = Capture(
-            context=context,
-            capture_seq=self._capture_seq,
+            context=context, capture_seq=self._capture_seq,
             sim_time_ns=reply.snapshot.measurement_sim_time_ns,
             joint_names=reply.snapshot.joint_names,
             positions=reply.snapshot.measured_positions,
             velocities=reply.snapshot.measured_velocities,
             phase=reply.snapshot.phase.value,
-            command_id=None if status is None else status.command_id,
-            snapshot=snapshot,
+            command_id=None if status is None else status.command_id, snapshot=snapshot,
         )
-        self._update_teacher_feedback(capture)
+        self._update_task_feedback(capture)
         if not renderer.submit(capture):
             self._dropped_captures += 1
             return
@@ -1027,27 +592,14 @@ class _Owner:
             except queue.Full:  # pragma: no cover - bounded race
                 pass
 
-    def _update_teacher_feedback(self, capture: Capture) -> None:
-        if (
-            self._teacher_progress is None
-            or self._stack is None
-            or self._task_config is None
-            or self._last_task_observation is None
-        ):
+    def _update_task_feedback(self, capture: Capture) -> None:
+        if self._task_plugin is None or self._last_task_observation is None:
             return
         try:
-            feedback = self._teacher_progress.feedback_for(
-                capture,
-                self._last_task_observation,  # type: ignore[arg-type]
-            )
-            fact = self._teacher_progress.update(feedback, self._stack.state.state)
+            self._task_plugin.on_capture(capture, self._last_task_observation)
         except BaseException as error:  # noqa: BLE001 - gate evidence is required
             self.latch_fault("TASK_GATE_FAILED", f"{type(error).__name__}: {error}")
             self._begin_fault_stop(self.fault)
-            return
-        if len(self._teacher_feedback) >= 2048:
-            self._teacher_feedback.clear()
-        self._teacher_feedback[capture.capture_seq] = (feedback, fact)
 
     def _check_health(self, controller: ControlSession, now: int) -> None:
         if self._health_check is None:
@@ -1071,15 +623,14 @@ class _Owner:
 
     def _system_stop(self, reason: str) -> None:
         self._system_stop_requested = True
-        if self._stack is not None:
-            self._stack.fail_control(reason)
+        if self._task_plugin is not None:
+            self._task_plugin.fail_control(reason)
         if self._controller is not None:
             self._safe_system_stop(self._controller, reason)
 
     def _safe_system_stop(self, controller: ControlSession, reason: str) -> None:
         try:
-            reply = controller.system_stop(reason, time.monotonic_ns())
-            self._record_reply(controller, reply)
+            self._record_reply(controller, controller.system_stop(reason, time.monotonic_ns()))
         except BaseException as error:  # noqa: BLE001 - braking failure is another fault
             self.latch_fault("SYSTEM_STOP_FAILED", f"{type(error).__name__}: {error}")
 
@@ -1099,8 +650,6 @@ class _Owner:
         return round(float(self._scene.data.time) * 1_000_000_000)
 
     def _clear_queues(self) -> None:
-        # Old control facts keep their original context and must still be
-        # delivered. Only replaceable capture payloads are invalidated here.
         for queue_ in (self._captures,):
             while True:
                 try:

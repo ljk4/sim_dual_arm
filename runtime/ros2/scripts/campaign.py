@@ -427,15 +427,15 @@ def _run_command(
     environment = dict(os.environ)
     environment.update(
         {
-            "STACK_CAMPAIGN_ATTEMPT_ID": attempt.attempt_id,
-            "STACK_CAMPAIGN_PURPOSE": attempt.purpose,
-            "STACK_CAMPAIGN_KIND": attempt.kind,
-            "STACK_CAMPAIGN_MODE": attempt.mode,
-            "STACK_SEED": str(attempt.seed),
-            "STACK_RUN_ID": attempt.run_id,
-            "STACK_EPISODE_ID": attempt.episode_id,
-            "STACK_ATTEMPT_DIR": str(attempt.directory),
-            "STACK_RUNTIME_CONFIG": attempt.config,
+            "CAMPAIGN_ATTEMPT_ID": attempt.attempt_id,
+            "CAMPAIGN_PURPOSE": attempt.purpose,
+            "CAMPAIGN_KIND": attempt.kind,
+            "CAMPAIGN_MODE": attempt.mode,
+            "CAMPAIGN_SEED": str(attempt.seed),
+            "CAMPAIGN_RUN_ID": attempt.run_id,
+            "CAMPAIGN_EPISODE_ID": attempt.episode_id,
+            "CAMPAIGN_ATTEMPT_DIR": str(attempt.directory),
+            "CAMPAIGN_RUNTIME_CONFIG": attempt.config,
         }
     )
     started = time.monotonic()

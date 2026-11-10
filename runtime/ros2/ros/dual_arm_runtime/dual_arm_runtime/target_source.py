@@ -74,9 +74,9 @@ class TargetSource(Protocol):
 
 
 def task_terminal_fact(state: object) -> tuple[str, str]:
-    """Map a frozen StackTaskState message to runtime/task vocabulary."""
-    name = str(getattr(state, "state", ""))
-    reason = str(getattr(state, "reason", ""))
+    """Map a frozen TaskState message to runtime/task vocabulary."""
+    name = str(getattr(state, "phase", ""))
+    reason = str(getattr(state, "failure_reason", ""))
     if name == "SUCCEEDED":
         return "TASK_SUCCEEDED", "TASK_SUCCEEDED"
     if name == "FAILED":

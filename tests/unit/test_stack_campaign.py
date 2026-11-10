@@ -8,7 +8,7 @@ _TOOLS = Path(__file__).resolve().parents[2] / "runtime/ros2/scripts"
 if str(_TOOLS) not in sys.path:
     sys.path.insert(0, str(_TOOLS))
 
-import stack_campaign  # noqa: E402
+import campaign  # noqa: E402
 
 
 def _project(tmp_path):
@@ -53,7 +53,7 @@ def _project(tmp_path):
 
 
 def _run(root, run_id):
-    return stack_campaign.main(
+    return campaign.main(
         [
             "--project-root",
             str(root),
@@ -82,7 +82,7 @@ def test_campaign_reserves_sequential_seeds_and_counts_failures(tmp_path):
     ]
     seeds = [item["seed"] for item in records if item["event"] == "RESERVED"]
     assert seeds == [1000, 1001]
-    assert stack_campaign.main(["--project-root", str(root), "status"]) == 0
+    assert campaign.main(["--project-root", str(root), "status"]) == 0
     assert _run(root, "three") == 2
 
 
@@ -114,7 +114,7 @@ def test_label_replay_consumes_a_pilot_attempt_and_needs_used_seed(tmp_path):
     root = _project(tmp_path)
     assert _run(root, "one") == 0
     assert (
-        stack_campaign.main(
+        campaign.main(
             [
                 "--project-root",
                 str(root),
@@ -161,13 +161,13 @@ def test_formal_is_teacher_only_and_test_is_act_only(tmp_path):
         "runtime/ros2/configs/teacher_collect.yaml",
     ]
     assert (
-        stack_campaign.main(
+        campaign.main(
             [*base, "--purpose", "formal", "--mode", "act", "--", sys.executable, "-c", "pass"]
         )
         == 2
     )
     assert (
-        stack_campaign.main(
+        campaign.main(
             [*base, "--purpose", "test", "--mode", "teacher", "--", sys.executable, "-c", "pass"]
         )
         == 2
@@ -207,7 +207,7 @@ def test_formal_stops_after_fifty_qualified(tmp_path):
         )
     ledger.write_text("\n".join(lines) + "\n", encoding="utf-8")
     assert (
-        stack_campaign.main(
+        campaign.main(
             [
                 "--project-root",
                 str(root),
@@ -258,7 +258,7 @@ def test_teacher_and_replay_cannot_consume_reserved_act_attempts(tmp_path):
         }
         for index in range(8)
     ]
-    with pytest.raises(stack_campaign.CampaignError, match="preserve"):
-        stack_campaign._allocate(config, records, "pilot", "rollout", "teacher", None, root)
-    seed, mode = stack_campaign._allocate(config, records, "pilot", "rollout", "act", None, root)
+    with pytest.raises(campaign.CampaignError, match="preserve"):
+        campaign._allocate(config, records, "pilot", "rollout", "teacher", None, root)
+    seed, mode = campaign._allocate(config, records, "pilot", "rollout", "act", None, root)
     assert (seed, mode) == (1008, "act")

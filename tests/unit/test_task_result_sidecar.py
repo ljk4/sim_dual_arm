@@ -1,29 +1,35 @@
+import json
 from types import SimpleNamespace
 
 from dual_arm_runtime.task_result import task_fact_document, task_result_for_runtime
 from robot_contracts.episodes import TaskOutcome
 
 
-def _fact(state, reason):
+def _fact(phase, reason):
     return SimpleNamespace(
-        state=state,
-        reason=reason,
+        phase=phase,
+        failure_reason=reason,
+        task_type="stack",
         task_epoch=3,
         state_seq=9,
         sample_time=SimpleNamespace(sec=1, nanosec=2),
-        task_start_time=SimpleNamespace(sec=1, nanosec=0),
-        first_satisfied_time=SimpleNamespace(sec=2, nanosec=0),
-        completed_time=SimpleNamespace(sec=2, nanosec=500_000_000),
-        stable_elapsed_s=2.0,
         task_config_digest="config",
         plan_digest="plan",
-        conditions_passed=True,
-        conditions_bitmask=16383,
-        source_target_normal_force=1.0,
-        target_table_normal_force=1.0,
-        finger_contact_count=0,
-        right_gripper_opening=0.08,
-        right_tcp_distance=0.1,
+        metrics_json=json.dumps(
+            {
+                "task_start_sim_time_ns": 1_000_000_000,
+                "first_satisfied_sim_time_ns": 2_000_000_000,
+                "completed_sim_time_ns": 2_500_000_000,
+                "stable_elapsed_s": 2.0,
+                "conditions_passed": True,
+                "conditions_bitmask": 16383,
+                "source_target_normal_force_n": 1.0,
+                "target_table_normal_force_n": 1.0,
+                "finger_contact_count": 0,
+                "right_gripper_opening_m": 0.08,
+                "right_tcp_distance_m": 0.1,
+            }
+        ),
     )
 
 

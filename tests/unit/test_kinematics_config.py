@@ -279,7 +279,7 @@ def test_path_sampling_rejects_excessive_or_invalid_input():
 
 def test_png_budget_is_checked_before_creating_a_file(tmp_path):
     from PIL import Image
-    from robot_backend_sim import check_kinematics
+    from robot_backend_sim.tools import check_kinematics
 
     image = Image.new("RGB", (8, 8), (120, 60, 20))
     budget = check_kinematics.ArtifactBudget(limit_bytes=1)

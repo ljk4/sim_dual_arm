@@ -7,4 +7,4 @@ Importing the execution modules requires MuJoCo; configuration helpers remain
 independent of it.
 """
 
-__all__ = ["probe_environment"]
+__all__: list[str] = []

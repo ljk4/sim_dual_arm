@@ -26,7 +26,7 @@ from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "runtime/ros2/scripts"))
-import stack_campaign  # noqa: E402
+import campaign  # noqa: E402
 
 CAMERA_ORDER = ("global", "left_wrist", "right_wrist")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -886,20 +886,20 @@ def build_report(
     output: Path,
     generate_media: bool = True,
 ) -> dict[str, Any]:
-    config = stack_campaign._load(config_path)
+    config = campaign._load(config_path)
     paths = config["paths"]
-    ledger = stack_campaign.Ledger(
+    ledger = campaign.Ledger(
         project_root / paths["ledger"], project_root / paths["lock"]
     )
     with ledger.locked():
         records = ledger.records()
-    terminal = stack_campaign._finished(records)
+    terminal = campaign._finished(records)
     seed_first = int(config["budget"]["test_seed_first"])
     seed_last = int(config["budget"]["test_seed_last"])
     by_seed: dict[int, dict[str, Any]] = {}
     duplicates: list[int] = []
     for purpose in purposes:
-        for record in stack_campaign._attempts(records, purpose):
+        for record in campaign._attempts(records, purpose):
             seed = int(record.get("seed", -1))
             if seed in by_seed:
                 duplicates.append(seed)
@@ -987,7 +987,7 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--config",
         type=Path,
-        default=Path("runtime/ros2/configs/experiments/stack_campaign.yaml"),
+        default=Path("runtime/ros2/configs/experiments/campaign.yaml"),
     )
     parser.add_argument("--purpose", choices=("all", "test", "evaluation"), default="all")
     parser.add_argument(
@@ -1012,7 +1012,7 @@ def main(argv: list[str] | None = None) -> int:
             generate_media=not args.no_media,
         )
     except Exception as error:  # noqa: BLE001 - report failure must be visible
-        print(f"stack_evaluate: {type(error).__name__}: {error}", file=sys.stderr)
+        print(f"evaluate: {type(error).__name__}: {error}", file=sys.stderr)
         return 1
     print(json.dumps(document["summary"], indent=2, sort_keys=True))
     return 0

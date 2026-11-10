@@ -24,12 +24,12 @@ from dual_arm_runtime.chunk_stream import (
 from dual_arm_runtime.observation import ExactObservation
 from dual_arm_runtime.run_logging import EventSink
 from dual_arm_runtime.runtime_config import RuntimeConfiguration, TeacherConfig
-from dual_arm_runtime.stack_task_client import StackTaskClient
 from dual_arm_runtime.target_source import (
     Prediction,
     TaskTerminal,
     task_terminal_fact,
 )
+from dual_arm_runtime.task_client import TaskClient
 
 __all__ = ["TeacherStreamRunner", "TeacherTargetSource"]
 
@@ -39,7 +39,7 @@ class TeacherTargetSource:
 
     def __init__(
         self,
-        client: StackTaskClient,
+        client: TaskClient,
         teacher: TeacherConfig,
         profile: RobotProfile,
         *,
@@ -124,7 +124,7 @@ class TeacherTargetSource:
                     raise TaskTerminal(runtime, task, state) from error
                 raise ContractError(
                     "TEACHER_STREAM_RACE",
-                    f"teacher chunk unavailable while task is {getattr(state, 'state', '?')}",
+                    f"teacher chunk unavailable while task is {getattr(state, 'phase', '?')}",
                 ) from error
             if error.reason == "TEACHER_GATE_FAILED":
                 self._task_end = (

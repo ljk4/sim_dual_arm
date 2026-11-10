@@ -11,14 +11,14 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim.stack_task import (  # noqa: E402
+from robot_backend_sim.tasks.stack.config import load_task_config  # noqa: E402
+from robot_backend_sim.tasks.stack.evaluator import (  # noqa: E402
     ObjectState,
     StackTaskRuntime,
     TaskBinding,
     TaskObservation,
     evaluate_task,
 )
-from robot_backend_sim.task_config import load_task_config  # noqa: E402
 from robot_contracts.models import ContractError, RunContext  # noqa: E402
 
 CONFIG_PATH = ROOT / "simulation/mujoco/configs/scene/panda_stack_task.yaml"
@@ -159,18 +159,18 @@ def _runtime(config) -> tuple[StackTaskRuntime, RunContext]:
 def test_stable_window_requires_two_seconds_and_latches(config):
     runtime, _context = _runtime(config)
     state = runtime.tick(observation(sim_time_ns=0), 10)
-    assert state.state == "RUNNING"
-    assert state.first_satisfied_sim_time_ns == 0
+    assert state.phase == "RUNNING"
+    assert state.metric("first_satisfied_sim_time_ns") == 0
     state = runtime.tick(observation(sim_time_ns=1_999_000_000), 10)
-    assert state.state == "RUNNING"
+    assert state.phase == "RUNNING"
     state = runtime.tick(observation(sim_time_ns=2_000_000_000), 10)
-    assert state.state == "SUCCEEDED"
-    assert state.reason == "SUCCESS"
-    assert state.first_satisfied_sim_time_ns == 0
-    assert state.completed_sim_time_ns == 2_000_000_000
+    assert state.phase == "SUCCEEDED"
+    assert state.metric("reason") == "SUCCESS"
+    assert state.metric("first_satisfied_sim_time_ns") == 0
+    assert state.metric("completed_sim_time_ns") == 2_000_000_000
     # Success is latched even if a later sample jitters.
     state = runtime.tick(observation(sim_time_ns=2_100_000_000, finger_contact_count=1), 10)
-    assert state.state == "SUCCEEDED"
+    assert state.phase == "SUCCEEDED"
 
 
 def test_any_failed_condition_resets_the_window(config):
@@ -180,25 +180,25 @@ def test_any_failed_condition_resets_the_window(config):
     state = runtime.tick(
         observation(sim_time_ns=1_500_000_000, finger_contact_count=1), 10
     )
-    assert state.state == "RUNNING"
-    assert state.first_satisfied_sim_time_ns == 0
+    assert state.phase == "RUNNING"
+    assert state.metric("first_satisfied_sim_time_ns") == 0
     state = runtime.tick(observation(sim_time_ns=2_000_000_000), 10)
-    assert state.first_satisfied_sim_time_ns == 2_000_000_000
+    assert state.metric("first_satisfied_sim_time_ns") == 2_000_000_000
     state = runtime.tick(observation(sim_time_ns=3_999_000_000), 10)
-    assert state.state == "RUNNING"
+    assert state.phase == "RUNNING"
     state = runtime.tick(observation(sim_time_ns=4_000_000_000), 10)
-    assert state.state == "SUCCEEDED"
+    assert state.phase == "SUCCEEDED"
 
 
 def test_timeout_and_wall_watchdog_are_independent_reasons(config):
     runtime, _context = _runtime(config)
     state = runtime.tick(observation(sim_time_ns=30_000_000_001), 10)
-    assert state.state == "FAILED"
-    assert state.reason.startswith("TIMEOUT")
+    assert state.phase == "FAILED"
+    assert state.metric("reason").startswith("TIMEOUT")
     runtime, _context = _runtime(config)
     state = runtime.tick(observation(sim_time_ns=1_000_000_000), 60_000_000_001)
-    assert state.state == "FAILED"
-    assert state.reason.startswith("WALL_TIMEOUT")
+    assert state.phase == "FAILED"
+    assert state.metric("reason").startswith("WALL_TIMEOUT")
 
 
 def test_reset_clears_plan_window_epoch_and_rpc(config):
@@ -206,7 +206,7 @@ def test_reset_clears_plan_window_epoch_and_rpc(config):
     epoch = runtime.task_epoch
     runtime.tick(observation(sim_time_ns=0), 10)
     state = runtime.reset()
-    assert state.state == "IDLE"
+    assert state.phase == "IDLE"
     assert state.task_epoch == epoch + 1
     assert state.plan_digest == ""
     assert runtime.plan is None
@@ -265,7 +265,7 @@ def test_prepare_and_start_idempotency_and_conflict(config):
         wall_ns=0,
     )
     assert idempotent
-    assert state.task_start_sim_time_ns == 0
+    assert state.metric("task_start_sim_time_ns") == 0
     with pytest.raises(ContractError, match="START_CONFLICT"):
         runtime.start(
             request_id="start-2",

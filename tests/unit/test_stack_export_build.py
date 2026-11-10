@@ -8,7 +8,7 @@ _TOOLS = Path(__file__).resolve().parents[2] / "runtime/ros2/scripts"
 if str(_TOOLS) not in sys.path:
     sys.path.insert(0, str(_TOOLS))
 
-import stack_export  # noqa: E402
+import export_episode  # noqa: E402
 
 PROFILE = load_profile(
     Path(__file__).resolve().parents[2] / "profiles/robots/panda_stack_v1/profile.json",
@@ -87,7 +87,9 @@ def test_rebuilds_20hz_frames_with_4hz_raw_predictions():
         "brakes": [],
         "camera_names": cameras,
     }
-    rows, raw, summary, times, frame_map = stack_export._build(metadata, cameras, [], 700, PROFILE)
+    rows, raw, summary, times, frame_map = export_episode._build(
+        metadata, cameras, [], 700, PROFILE
+    )
     assert len(rows) > 30
     assert summary["rejected"]["missing_raw_block"] == 0
     assert len(raw) == 8

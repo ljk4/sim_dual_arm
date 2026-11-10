@@ -13,7 +13,7 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim import probe_environment as probe  # noqa: E402
+from robot_backend_sim.tools import probe_environment as probe  # noqa: E402
 
 
 def test_requirements_lock_is_the_only_pinned_simulation_source():
@@ -68,7 +68,7 @@ def test_probe_check_dependencies_uses_current_packages_and_modules_without_repo
     assert set(info["packages"].values()) == {"1.0"}
     assert imported == list(probe._IMPORT_MODULES)
     assert set(info["imports"]) == set(probe._IMPORT_MODULES)
-    assert info["sim_package_root"] == str(Path(probe.__file__).resolve().parent)
+    assert info["sim_package_root"] == str(Path(probe.__file__).resolve().parents[1])
     assert "requirements" not in info
     assert "requirements_sha256" not in info
     assert not (tmp_path / "versions.json").exists()

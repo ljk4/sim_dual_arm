@@ -1,49 +1,63 @@
-"""Bounded ROS client for the 033 prepare/start/chunk/state services.
+"""Bounded ROS client for the generic prepare/start/chunk/state services.
 
-Only wire conversion and service deadlines live here.  Physical task
-evaluation and teacher planning stay in the backend; the runtime never imports
-MuJoCo or mink and never reads object truth from a live model.
+Only wire conversion and service deadlines live here.  Physical task evaluation
+and teacher planning stay in the backend; the runtime never imports MuJoCo or
+mink and never reads object truth from a live model.
 """
 
 from __future__ import annotations
 
+import json
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import rclpy
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.node import Node
 from rclpy.task import Future
-from robot_api_msgs.srv import (
-    GetStackTaskState,
-    GetTeacherChunk,
-    PrepareStackTask,
-    StartStackTask,
-)
+from robot_api_msgs.srv import GetTaskState, GetTeacherChunk, PrepareTask, StartTask
 from robot_contracts.models import ContractError, RunContext
 from robot_ros_support.conversions import context_message, stamp, time_ns
 
 from dual_arm_runtime.run_logging import EventSink, emit_best_effort
 
-__all__ = ["PrepareFact", "StackTaskClient", "TeacherChunkFact"]
+__all__ = ["PrepareFact", "TaskClient", "TeacherChunkFact"]
 
-# Upper bound on one interruptible wait slice.  The prepare retry cadence remains
-# the configured poll interval; this only bounds stop/shutdown detection latency.
 _CANCEL_CHECK_S = 0.05
 
 
 @dataclass(frozen=True, slots=True)
 class PrepareFact:
     task_epoch: int
+    task_type: str
     task_config_digest: str
     plan_digest: str
     prepare_kind: str
-    planned_duration_s: float
-    key_pose_count: int
-    collision_segment_count: int
-    ik_max_position_error_m: float
-    ik_max_orientation_error_rad: float
+    metrics: dict[str, object] = field(default_factory=dict)
+
+    def metric(self, name: str, default: object = None) -> object:
+        return self.metrics.get(name, default)
+
+    @property
+    def planned_duration_s(self) -> float:
+        return float(self.metrics.get("planned_duration_s", 0.0))
+
+    @property
+    def key_pose_count(self) -> int:
+        return int(self.metrics.get("key_pose_count", 0))
+
+    @property
+    def collision_segment_count(self) -> int:
+        return int(self.metrics.get("collision_segment_count", 0))
+
+    @property
+    def ik_max_position_error_m(self) -> float:
+        return float(self.metrics.get("ik_max_position_error_m", 0.0))
+
+    @property
+    def ik_max_orientation_error_rad(self) -> float:
+        return float(self.metrics.get("ik_max_orientation_error_rad", 0.0))
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,7 +81,7 @@ class TeacherChunkFact:
     ik_max_orientation_error_rad: float
 
 
-class StackTaskClient:
+class TaskClient:
     """Own the four task service clients and their bounded waits."""
 
     def __init__(
@@ -87,10 +101,8 @@ class StackTaskClient:
         self._root = root.rstrip("/")
         self._call_timeout_s = call_timeout_s
         self._timeouts = {
-            "prepare": prepare_timeout_s,
-            "start": start_timeout_s,
-            "chunk": chunk_timeout_s,
-            "state": call_timeout_s,
+            "prepare": prepare_timeout_s, "start": start_timeout_s,
+            "chunk": chunk_timeout_s, "state": call_timeout_s,
         }
         self._poll_interval_s = poll_interval_s
         self._log = log
@@ -98,24 +110,16 @@ class StackTaskClient:
         self._group = ReentrantCallbackGroup()
         self._clients = {
             "prepare": node.create_client(
-                PrepareStackTask,
-                f"{self._root}/prepare_stack_task",
-                callback_group=self._group,
+                PrepareTask, f"{self._root}/prepare_task", callback_group=self._group
             ),
             "start": node.create_client(
-                StartStackTask,
-                f"{self._root}/start_stack_task",
-                callback_group=self._group,
+                StartTask, f"{self._root}/start_task", callback_group=self._group
             ),
             "chunk": node.create_client(
-                GetTeacherChunk,
-                f"{self._root}/get_teacher_chunk",
-                callback_group=self._group,
+                GetTeacherChunk, f"{self._root}/get_task_chunk", callback_group=self._group
             ),
             "state": node.create_client(
-                GetStackTaskState,
-                f"{self._root}/get_stack_task_state",
-                callback_group=self._group,
+                GetTaskState, f"{self._root}/get_task_state", callback_group=self._group
             ),
         }
         self._lock = threading.Lock()
@@ -126,7 +130,7 @@ class StackTaskClient:
     def wait_ready(self) -> None:
         for name, client in self._clients.items():
             if not client.wait_for_service(timeout_sec=self._call_timeout_s):
-                raise ContractError("NOT_READY", f"stack task service {name}")
+                raise ContractError("NOT_READY", f"task service {name}")
 
     def prepare(
         self,
@@ -135,15 +139,13 @@ class StackTaskClient:
         request_id: str,
         lease_id: str,
         seed: int,
+        task_type: str = "",
     ) -> PrepareFact:
         started = time.monotonic()
         deadline = started + self._timeouts["prepare"]
-        request = PrepareStackTask.Request(
-            context=context_message(context),
-            episode_id=episode_id,
-            request_id=request_id,
-            lease_id=lease_id,
-            seed=seed,
+        request = PrepareTask.Request(
+            context=context_message(context), episode_id=episode_id, request_id=request_id,
+            lease_id=lease_id, seed=seed, task_type=task_type,
         )
         attempts = 0
         waiting_logged = False
@@ -156,32 +158,23 @@ class StackTaskClient:
                 if error.reason == "TASK_NOT_QUIESCENT":
                     last_rejection = error
                 elif error.reason == "CALL_TIMEOUT" and last_rejection is not None:
-                    # The shared deadline expired while the retry RPC was in
-                    # flight; keep the last quiescence rejection as the cause.
                     self._prepare_timeout(
-                        attempts=attempts,
-                        started=started,
-                        last_rejection=last_rejection,
-                        request_id=request_id,
+                        attempts=attempts, started=started,
+                        last_rejection=last_rejection, request_id=request_id,
                     )
                 else:
                     raise
                 if time.monotonic() >= deadline:
                     self._prepare_timeout(
-                        attempts=attempts,
-                        started=started,
-                        last_rejection=last_rejection,
-                        request_id=request_id,
+                        attempts=attempts, started=started,
+                        last_rejection=last_rejection, request_id=request_id,
                     )
                 if not waiting_logged:
-                    # One entry per prepare call, not one per poll interval.
                     self.emit(
-                        "task.prepare_waiting",
-                        reason="TASK_NOT_QUIESCENT",
-                        message="stack task prepare waiting for a still robot",
+                        "task.prepare_waiting", reason="TASK_NOT_QUIESCENT",
+                        message="task prepare waiting for a still robot",
                         fields={
-                            "request_id": request_id,
-                            "episode_id": episode_id,
+                            "request_id": request_id, "episode_id": episode_id,
                             "attempt": attempts,
                             "prepare_timeout_s": self._timeouts["prepare"],
                             "poll_interval_s": self._poll_interval_s,
@@ -191,25 +184,25 @@ class StackTaskClient:
                 self._wait_before_retry(deadline)
                 if time.monotonic() >= deadline:
                     self._prepare_timeout(
-                        attempts=attempts,
-                        started=started,
-                        last_rejection=last_rejection,
-                        request_id=request_id,
+                        attempts=attempts, started=started,
+                        last_rejection=last_rejection, request_id=request_id,
                     )
                 continue
+            try:
+                metrics = json.loads(response.metrics_json or "{}")
+            except (TypeError, ValueError) as error:
+                raise ContractError("INVALID_TASK_PREPARE", "metrics_json is not JSON") from error
+            if not isinstance(metrics, dict):
+                raise ContractError("INVALID_TASK_PREPARE", "prepare metrics is not an object")
             fact = PrepareFact(
-                int(response.task_epoch),
-                str(response.task_config_digest),
-                str(response.plan_digest),
-                str(response.prepare_kind),
-                float(response.planned_duration_s),
-                int(response.key_pose_count),
-                int(response.collision_segment_count),
-                float(response.ik_max_position_error_m),
-                float(response.ik_max_orientation_error_rad),
+                int(response.task_epoch), str(response.task_type),
+                str(response.task_config_digest), str(response.plan_digest),
+                str(response.prepare_kind), metrics,
             )
             if not fact.plan_digest or not fact.task_config_digest:
                 raise ContractError("INVALID_TASK_PREPARE", "prepare fact has no digest")
+            if not fact.task_type:
+                raise ContractError("INVALID_TASK_PREPARE", "prepare fact has no task type")
             if fact.prepare_kind not in {"teacher", "evaluation_only"}:
                 raise ContractError(
                     "INVALID_TASK_PREPARE", f"unknown prepare_kind {fact.prepare_kind!r}"
@@ -217,10 +210,9 @@ class StackTaskClient:
             if waiting_logged:
                 self.emit(
                     "task.prepare_succeeded",
-                    message="stack task prepare succeeded after quiescence wait",
+                    message="task prepare succeeded after quiescence wait",
                     fields={
-                        "request_id": request_id,
-                        "attempts": attempts,
+                        "request_id": request_id, "attempts": attempts,
                         "elapsed_s": time.monotonic() - started,
                         "last_rejection": (
                             last_rejection.reason if last_rejection is not None else ""
@@ -239,63 +231,42 @@ class StackTaskClient:
             if now >= retry_at:
                 return
             if not rclpy.ok():
-                raise ContractError(
-                    "EPISODE_STOPPED", "stack task prepare during shutdown"
-                )
+                raise ContractError("EPISODE_STOPPED", "task prepare during shutdown")
             if self._stop.is_set():
-                raise ContractError("EPISODE_STOPPED", "stack task prepare stopped")
-            # The retry cadence stays _poll_interval_s; short slices only make
-            # stop/shutdown checks responsive when the interval is long.
+                raise ContractError("EPISODE_STOPPED", "task prepare stopped")
             pause = min(retry_at - now, _CANCEL_CHECK_S)
             if pause <= 0.0:
                 return
             if self._stop.wait(pause):
-                raise ContractError("EPISODE_STOPPED", "stack task prepare stopped")
+                raise ContractError("EPISODE_STOPPED", "task prepare stopped")
 
     def _prepare_timeout(
-        self,
-        *,
-        attempts: int,
-        started: float,
-        last_rejection: ContractError,
-        request_id: str,
+        self, *, attempts: int, started: float, last_rejection: ContractError, request_id: str,
     ) -> None:
         elapsed = time.monotonic() - started
         self.emit(
-            "task.prepare_timeout",
-            level="WARNING",
-            reason="PREPARE_TIMEOUT",
-            message="stack task prepare budget expired while waiting for quiescence",
+            "task.prepare_timeout", level="WARNING", reason="PREPARE_TIMEOUT",
+            message="task prepare budget expired while waiting for quiescence",
             fields={
-                "request_id": request_id,
-                "attempts": attempts,
-                "elapsed_s": elapsed,
+                "request_id": request_id, "attempts": attempts, "elapsed_s": elapsed,
                 "last_rejection": last_rejection.reason,
             },
         )
         raise ContractError(
             "PREPARE_TIMEOUT",
-            f"stack task prepare budget expired after {attempts} attempts "
+            f"task prepare budget expired after {attempts} attempts "
             f"in {elapsed:.3f}s; last rejection: {last_rejection.reason}",
         ) from last_rejection
 
     def start(
-        self,
-        context: RunContext,
-        episode_id: str,
-        request_id: str,
-        lease_id: str,
-        task_epoch: int,
-        plan_digest: str,
+        self, context: RunContext, episode_id: str, request_id: str, lease_id: str,
+        task_epoch: int, plan_digest: str,
     ) -> int:
         response = self._call(
             "start",
-            StartStackTask.Request(
-                context=context_message(context),
-                episode_id=episode_id,
-                request_id=request_id,
-                lease_id=lease_id,
-                task_epoch=task_epoch,
+            StartTask.Request(
+                context=context_message(context), episode_id=episode_id,
+                request_id=request_id, lease_id=lease_id, task_epoch=task_epoch,
                 plan_digest=plan_digest,
             ),
         )
@@ -308,26 +279,15 @@ class StackTaskClient:
         return start_ns
 
     def chunk(
-        self,
-        context: RunContext,
-        episode_id: str,
-        task_epoch: int,
-        request_id: str,
-        capture_seq: int,
-        observation_time_ns: int,
-        *,
-        robot_profile_hash: str,
-        chunk_size: int,
-        period_ns: int,
+        self, context: RunContext, episode_id: str, task_epoch: int, request_id: str,
+        capture_seq: int, observation_time_ns: int, *, robot_profile_hash: str,
+        chunk_size: int, period_ns: int,
     ) -> TeacherChunkFact:
         response = self._call(
             "chunk",
             GetTeacherChunk.Request(
-                context=context_message(context),
-                episode_id=episode_id,
-                task_epoch=task_epoch,
-                request_id=request_id,
-                capture_seq=capture_seq,
+                context=context_message(context), episode_id=episode_id,
+                task_epoch=task_epoch, request_id=request_id, capture_seq=capture_seq,
                 observation_time=stamp(observation_time_ns),
             ),
         )
@@ -336,9 +296,7 @@ class StackTaskClient:
         if int(response.capture_seq) != capture_seq:
             raise ContractError("TEACHER_CAPTURE_MISMATCH", "teacher capture differs")
         if time_ns(response.observation_time) != observation_time_ns:
-            raise ContractError(
-                "TEACHER_FEEDBACK_MISMATCH", "teacher observation time differs"
-            )
+            raise ContractError("TEACHER_FEEDBACK_MISMATCH", "teacher observation time differs")
         if str(response.robot_profile_hash) != robot_profile_hash:
             raise ContractError("TEACHER_PROFILE_MISMATCH", "teacher profile differs")
         if int(response.point_count) != chunk_size or int(response.joint_count) != 16:
@@ -354,38 +312,23 @@ class StackTaskClient:
                 raise ContractError(
                     "TEACHER_CHUNK_CLOCK", "teacher time grid is not a uniform 50 ms"
                 )
-        positions = tuple(
-            flat[point * 16 : point * 16 + 16] for point in range(chunk_size)
-        )
+        positions = tuple(flat[point * 16 : point * 16 + 16] for point in range(chunk_size))
         phase_codes = tuple(int(value) for value in response.phase_codes)
         if len(phase_codes) != chunk_size:
             raise ContractError("TEACHER_CHUNK_SHAPE", "teacher phase codes are incomplete")
         return TeacherChunkFact(
-            int(response.task_epoch),
-            int(response.capture_seq),
-            str(response.plan_digest),
-            str(response.chunk_digest),
-            time_ns(response.observation_time),
-            time_ns(response.source_time),
-            str(response.robot_profile_hash),
-            str(response.phase),
-            times,
-            positions,
-            phase_codes,
-            str(response.gate_state),
-            str(response.gate_failure),
-            time_ns(response.phase_start_time),
-            float(response.phase_wait_s),
-            float(response.ik_max_position_error_m),
+            int(response.task_epoch), int(response.capture_seq), str(response.plan_digest),
+            str(response.chunk_digest), time_ns(response.observation_time),
+            time_ns(response.source_time), str(response.robot_profile_hash),
+            str(response.phase), times, positions, phase_codes, str(response.gate_state),
+            str(response.gate_failure), time_ns(response.phase_start_time),
+            float(response.phase_wait_s), float(response.ik_max_position_error_m),
             float(response.ik_max_orientation_error_rad),
         )
 
     def state(self, context: RunContext, task_epoch: int = 0) -> object:
         response = self._call(
-            "state",
-            GetStackTaskState.Request(
-                context=context_message(context), task_epoch=task_epoch
-            ),
+            "state", GetTaskState.Request(context=context_message(context), task_epoch=task_epoch)
         )
         state = response.state
         if context != _state_context(state):
@@ -398,23 +341,20 @@ class StackTaskClient:
         client = self._clients[name]
         if deadline is None:
             if not client.wait_for_service(timeout_sec=self._call_timeout_s):
-                raise ContractError("NOT_READY", f"stack task service {name}")
+                raise ContractError("NOT_READY", f"task service {name}")
             deadline = time.monotonic() + self._timeouts[name]
         else:
             remaining = deadline - time.monotonic()
             if remaining <= 0.0:
-                raise ContractError("CALL_TIMEOUT", f"stack task {name}")
-            if not client.wait_for_service(
-                timeout_sec=min(remaining, self._call_timeout_s)
-            ):
-                raise ContractError("NOT_READY", f"stack task service {name}")
+                raise ContractError("CALL_TIMEOUT", f"task {name}")
+            if not client.wait_for_service(timeout_sec=min(remaining, self._call_timeout_s)):
+                raise ContractError("NOT_READY", f"task service {name}")
             if time.monotonic() >= deadline:
-                raise ContractError("CALL_TIMEOUT", f"stack task {name}")
+                raise ContractError("CALL_TIMEOUT", f"task {name}")
         future: Future = client.call_async(request)
         completed = threading.Event()
 
         def wake(_future: Future) -> None:
-            # Executor callbacks only signal; they never spin, log or clean up.
             completed.set()
 
         future.add_done_callback(wake)
@@ -423,13 +363,12 @@ class StackTaskClient:
         while not future.done():
             if time.monotonic() > deadline:
                 future.cancel()
-                raise ContractError("CALL_TIMEOUT", f"stack task {name}")
+                raise ContractError("CALL_TIMEOUT", f"task {name}")
             if not rclpy.ok():
-                raise ContractError("EPISODE_STOPPED", f"stack task {name} during shutdown")
+                raise ContractError("EPISODE_STOPPED", f"task {name} during shutdown")
             if self._stop.is_set() and name in {"prepare", "start", "chunk"}:
                 future.cancel()
-                raise ContractError("EPISODE_STOPPED", f"stack task {name} stopped")
-            # poll_interval bounds only stop/deadline checks; an ACK wakes us sooner.
+                raise ContractError("EPISODE_STOPPED", f"task {name} stopped")
             remaining = deadline - time.monotonic()
             completed.wait(min(self._poll_interval_s, max(0.0, remaining)))
         try:

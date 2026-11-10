@@ -4,6 +4,6 @@
 `BackendInfo`、`RuntimeStatus`；流式 `StreamCommand`、`ExecutionFeedback`、
 `StreamChunkStatus`、`ControlEvent`、`GripperFeedback`、`FingerFeedback`；
 跟随 `FollowerReference`、`ReferenceAnchor`、`ReferenceSegment`；任务
-`StackTaskState`。
+`TaskState`。
 
 目录导航：[上级目录](../README.md)。

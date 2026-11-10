@@ -1,0 +1,8 @@
+robot_api_msgs/RunContext context
+string episode_id
+# Zero asks for the current task epoch; a nonzero value must match it.
+uint64 task_epoch
+---
+bool success
+string reason
+robot_api_msgs/TaskState state

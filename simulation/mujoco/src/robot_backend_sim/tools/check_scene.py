@@ -20,33 +20,34 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import assets, probe_environment, visibility
-from .diagnostics import (
+from .. import assets, visibility
+from ..diagnostics import (
     code_provenance as _shared_code_provenance,
 )
-from .diagnostics import (
+from ..diagnostics import (
     python_source_manifest as _python_source_manifest,  # noqa: F401
 )
-from .diagnostics import (
+from ..diagnostics import (
     scene_config_document as _scene_config_document,
 )
-from .diagnostics import (
+from ..diagnostics import (
     sha256_file as _sha256_file,
 )
-from .diagnostics import (
+from ..diagnostics import (
     utc_now as _utc_now,
 )
-from .diagnostics import (
+from ..diagnostics import (
     write_json_atomic as _write_json_atomic,
 )
-from .scene_config import SceneConfig, SceneConfigError, load_scene_config
-from .visibility import (
+from ..scene_config import SceneConfig, SceneConfigError, load_scene_config
+from ..visibility import (
     LayoutSpec,
     LayoutVisibility,
     SceneCheckConfig,
     SceneCheckConfigError,
     load_check_config,
 )
+from . import probe_environment
 
 COMPONENT = "scene_check"
 KIND = "scene"
@@ -176,7 +177,7 @@ def _code_provenance() -> dict[str, object]:
 
 
 def _build_scene(scene_config: SceneConfig) -> object:
-    from .scene import SceneBuildError, build_scene
+    from ..scene import SceneBuildError, build_scene
 
     try:
         return build_scene(scene_config)
@@ -219,7 +220,7 @@ def _scene_info(scene: object, scene_config: SceneConfig) -> dict[str, object]:
 
 
 def _make_renderer(scene: object, scene_config: SceneConfig) -> object:
-    from .rendering import SceneRenderer, SceneRenderError
+    from ..rendering import SceneRenderer, SceneRenderError
 
     first = scene_config.cameras[0]
     try:

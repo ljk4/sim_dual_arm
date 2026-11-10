@@ -9,12 +9,14 @@ from model_helpers import replace
 from robot_contracts.trajectory import ReferenceSample
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "simulation/mujoco/src"))
-from robot_backend_sim.contact_unload import ContactUnload  # noqa: E402
 from robot_backend_sim.contacts import (  # noqa: E402
     FingerContactEvidence,
     GripperContactEvidence,
 )
-from robot_backend_sim.motion import MotionController  # noqa: E402
+from robot_backend_sim.gripper_contact import (  # noqa: E402
+    ContactUnloader,
+    GripperContactTracker,
+)
 from robot_backend_sim.motion_config import CONTROL_JOINT_NAMES  # noqa: E402
 from robot_backend_sim.panda_io import Measurement  # noqa: E402
 from robot_backend_sim.stream_config import StreamConfig, StreamConfigError  # noqa: E402
@@ -88,20 +90,21 @@ def captured_measurement():
     return Measurement(1_000_000, CONTROL_JOINT_NAMES, tuple(positions), tuple(velocities))
 
 
-def constrained_motion():
-    # Construct only the state _constrained_axes reads; the rest of MotionController
-    # requires a live MuJoCo scene and is unrelated to this classification.
-    motion = MotionController.__new__(MotionController)
-    motion._config = SimpleNamespace(
+def constrained_tracker():
+    # Construct only the state constrained_axes reads; MuJoCo is unrelated.
+    tracker = GripperContactTracker.__new__(GripperContactTracker)
+    tracker._config = SimpleNamespace(
         position_tolerances=(0.012,) * 7 + (0.002,) + (0.012,) * 7 + (0.002,),
         velocity_tolerances=(0.025,) * 7 + (0.004,) + (0.025,) * 7 + (0.004,),
         contact_force_min_n=0.5,
         finger_velocity_max_m_s=0.003,
     )
-    motion._stream_config = StreamConfig(0.25, 0.05, 0.5, 120.0, 3.0, 2.0, 2.0)
-    motion._contact_unload = {side: ContactUnload() for side in ("left", "right")}
-    motion._unloading_axes = frozenset()
-    return motion
+    tracker._contact_unload_timeout_ns = round(
+        StreamConfig(0.25, 0.05, 0.5, 120.0, 3.0, 2.0, 2.0).contact_unload_timeout_s * 1e9
+    )
+    tracker._unloaders = {side: ContactUnloader() for side in ("left", "right")}
+    tracker._unloading_axes = frozenset()
+    return tracker
 
 
 @pytest.mark.parametrize(
@@ -109,19 +112,19 @@ def constrained_motion():
     [5.339220363198457e-14, 0.0, -5.339220363198457e-14],
 )
 def test_numerical_standstill_contact_is_constrained(reference_velocity):
-    motion = constrained_motion()
-    constrained = motion._constrained_axes(
+    tracker = constrained_tracker()
+    constrained = tracker.constrained_axes(
         captured_reference(reference_velocity),
         captured_measurement(),
         captured_contacts(),
     )
     assert constrained == frozenset({15})
-    assert motion._unloading_axes == frozenset()
+    assert tracker.unloading_axes == frozenset()
 
 
 def test_real_opening_contact_is_not_exempt_without_prior_hold():
-    motion = constrained_motion()
-    constrained = motion._constrained_axes(
+    tracker = constrained_tracker()
+    constrained = tracker.constrained_axes(
         captured_reference(0.01),
         captured_measurement(),
         captured_contacts(),
@@ -140,8 +143,8 @@ def test_real_opening_contact_is_not_exempt_without_prior_hold():
     ),
 )
 def test_contact_exemption_still_requires_full_valid_evidence(case, right):
-    motion = constrained_motion()
-    constrained = motion._constrained_axes(
+    tracker = constrained_tracker()
+    constrained = tracker.constrained_axes(
         captured_reference(5.339220363198457e-14),
         captured_measurement(),
         captured_contacts(right),
@@ -150,10 +153,10 @@ def test_contact_exemption_still_requires_full_valid_evidence(case, right):
 
 
 def test_unload_needs_prior_contact_current_same_object_and_opening():
-    tracker = ContactUnload()
+    tracker = ContactUnloader()
     args = inputs()
     assert not tracker.update(**{**args, "reference_velocity": 0.03, "closing_contact_ok": False})
-    tracker = ContactUnload()
+    tracker = ContactUnloader()
     assert not tracker.update(**args)
     args.update(now_ns=100, reference_velocity=0.03, closing_contact_ok=False)
     assert tracker.update(**args)
@@ -164,7 +167,7 @@ def test_unload_needs_prior_contact_current_same_object_and_opening():
 
 
 def test_timeout_cannot_be_rearmed_by_pausing_but_new_closing_can_arm():
-    tracker = ContactUnload()
+    tracker = ContactUnloader()
     args = inputs()
     tracker.update(**args)
     args.update(reference_velocity=0.03, closing_contact_ok=False)
