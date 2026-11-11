@@ -5,11 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from .config import StackTaskConfig
-from .evaluator import TaskObservation
+from robot_backend_sim.tasks.stack.config import StackTaskConfig
+from robot_backend_sim.tasks.stack.evaluator import TaskObservation
 
 if TYPE_CHECKING:
-    from .teacher import TeacherPlan, TeacherSegment
+    from robot_backend_sim.tasks.stack.teacher import TeacherPlan, TeacherSegment
 
 __all__ = ["TeacherFeedback", "TeacherGateFact", "TeacherProgress"]
 

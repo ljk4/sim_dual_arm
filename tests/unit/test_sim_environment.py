@@ -25,7 +25,9 @@ def test_requirements_lock_is_the_only_pinned_simulation_source():
         lock,
         re.MULTILINE,
     )
-    assert len(pins) == 16
+    assert len(pins) == len({name for name, _version, _hash in pins})
+    assert len(pins) == sum(bool(line.strip()) and not line.startswith(("#", "--"))
+                            for line in lock.splitlines())
     locked = {name: version for name, version, _digest in pins}
     hashes = {name: digest for name, _version, digest in pins}
     assert {

@@ -28,6 +28,7 @@ services:
       - ../../../profiles:/profiles:ro
       - ../../../libraries/ros_support/src:/deps/ros_support:ro
       - ../../../libraries/run_logging/src:/deps/run_logging:ro
+      - ../../../libraries/trajectory/src:/deps/trajectory:ro
       - ../../../infrastructure/docker/setup.sh:/config/setup.sh:ro
       - ../../../infrastructure/scripts/dev_workspace.py:/config/check_ros_sdk.py:ro
       - ../../../infrastructure/docker/fastdds.xml:/config/fastdds.xml:ro

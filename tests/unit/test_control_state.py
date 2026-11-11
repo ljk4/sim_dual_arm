@@ -7,14 +7,17 @@ from robot_contracts.action_chunks import ActionWindow, ChunkAnchor
 from robot_contracts.control import ControlCommand
 from robot_contracts.models import ContractError, RunContext, Target
 from robot_contracts.profiles import load_profile
-from robot_contracts.trajectory import PreparedFollowerPlan, ReferenceSample
+from robot_contracts.trajectory.spline import ReferenceSample
+from robot_trajectory.follower import PreparedFollowerPlan
 
 ROOT = Path(__file__).resolve().parents[2]
 SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim.control_state import (  # noqa: E402
+from robot_backend_sim.config.follower_config import load_follower_config  # noqa: E402
+from robot_backend_sim.config.motion_config import load_control_config  # noqa: E402
+from robot_backend_sim.control.control_state import (  # noqa: E402
     ChunkHistory,
     ChunkRecord,
     CommandHistory,
@@ -24,9 +27,7 @@ from robot_backend_sim.control_state import (  # noqa: E402
     LeaseBook,
     PreparedControlCommand,
 )
-from robot_backend_sim.follower_config import load_follower_config  # noqa: E402
-from robot_backend_sim.follower_plan import prepare_follower_plan  # noqa: E402
-from robot_backend_sim.motion_config import load_control_config  # noqa: E402
+from robot_backend_sim.follower.follower_plan import prepare_follower_plan  # noqa: E402
 
 ruckig = pytest.importorskip("ruckig")
 

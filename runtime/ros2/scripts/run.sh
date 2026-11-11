@@ -8,9 +8,8 @@ source "$SCRIPT_ROOT/infrastructure/docker/setup.sh"
 
 ROOT="${PROJECT_ROOT:-$SCRIPT_ROOT}"
 DATA_ROOT="${DATA_ROOT:-/data}"
-ROS_SDK="${ROS_SDK_ROOT:-/opt/ros-dev}"
-POLICY_SDK="${POLICY_SDK_ROOT:-/opt/policy-sdk}"
-DEFAULT_RUNTIME_CONFIG="$ROOT/runtime/ros2/configs/teacher_collect.yaml"
+ROS_SDK="${ROS_SDK_ROOT:-/build/ros-dev}"
+POLICY_SDK="${POLICY_SDK_ROOT:-/build/generated/policy-sdk}"
 DEFAULT_POLICY_CONFIG="$ROOT/runtime/ros2/configs/policy_rollout.yaml"
 
 has_help=false
@@ -61,11 +60,10 @@ commands:
   build-ros-sdk   build the mounted ROS contract workspace in the container
   build-policy-sdk generate the mounted Policy SDK in the container
   prepare         bind a generic Policy JSON to runtime.yaml + run_manifest.json
-  collect         run one ROS teacher collection (requires --output)
   policy          run one policy execution (requires --output)
   interactive     prompt, reset via episode start, run one policy episode, hold until Ctrl-C
   export          export one episode to labels/RGB/quality (export_episode.py)
-  campaign        reserve and run one budgeted campaign attempt (campaign.py)
+  campaign        inspect budgets, select data, or run a custom attempt (campaign.py)
   evaluate        build a read-only evaluation report (evaluate.py)
   test            run pytest with plugin autoload disabled
 
@@ -73,9 +71,7 @@ Examples:
   runtime/ros2/scripts/run.sh build-ros-sdk
   runtime/ros2/scripts/run.sh build-policy-sdk
   runtime/ros2/scripts/run.sh prepare --help
-  runtime/ros2/scripts/run.sh collect --config \
-    /workspace/runtime/ros2/configs/teacher_collect.yaml \
-    --run-id collect-001 --output /data/raw/collect-001
+  runtime/ros2/scripts/record.sh --count 10 --max-consecutive-failures 3
   runtime/ros2/scripts/run.sh export --episode-dir /data/raw/e-001 \
     --out /data/exports/e-001
   runtime/ros2/scripts/run.sh test -q tests/unit
@@ -97,17 +93,7 @@ case "$command" in
     exec bash "$ROOT/infrastructure/scripts/build_policy_sdk.sh" "$@"
     ;;
   prepare)
-    exec python3 "$ROOT/runtime/ros2/scripts/prepare_run.py" "$@"
-    ;;
-  collect)
-    require_output "collect" "$@" || exit 2
-    check_ros_sdk
-    exec python3 -m dual_arm_runtime.runtime_node \
-      --project-root "$ROOT" \
-      --config "${RUNTIME_CONFIG:-$DEFAULT_RUNTIME_CONFIG}" \
-      --runs-output "$DATA_ROOT/runs" \
-      --once \
-      "$@"
+    exec python3 -m dual_arm_runtime.offline.prepare_run "$@"
     ;;
   policy)
     require_output "policy" "$@" || exit 2
@@ -220,16 +206,16 @@ case "$command" in
     ;;
   export)
     check_ros_sdk
-    exec python3 "$ROOT/runtime/ros2/scripts/export_episode.py" "$@"
+    exec python3 -m dual_arm_runtime.offline.export_episode "$@"
     ;;
   campaign)
     check_ros_sdk
-    exec python3 "$ROOT/runtime/ros2/scripts/campaign.py" \
+    exec python3 -m dual_arm_runtime.offline.campaign \
       --project-root "$ROOT" "$@"
     ;;
   evaluate)
     check_ros_sdk
-    exec python3 "$ROOT/runtime/ros2/scripts/evaluate.py" \
+    exec python3 -m dual_arm_runtime.offline.evaluate \
       --project-root "$ROOT" "$@"
     ;;
   test)

@@ -1,6 +1,6 @@
 """Generic simulation-task plugin surface (no ROS imports at import time)."""
 
-from .base import (
+from robot_backend_sim.tasks.base import (
     SimTaskPlugin,
     TaskChunk,
     TaskChunkView,
@@ -8,7 +8,7 @@ from .base import (
     TaskPrepareResult,
     TaskPrepareSnapshot,
 )
-from .registry import SUPPORTED_TASK_TYPES, create_task_plugin
+from robot_backend_sim.tasks.registry import SUPPORTED_TASK_TYPES, create_task_plugin
 
 __all__ = [
     "SUPPORTED_TASK_TYPES",

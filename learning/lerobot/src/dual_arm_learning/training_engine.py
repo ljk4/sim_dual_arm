@@ -16,6 +16,7 @@ import numpy as np
 from .budget import BudgetLedger, BudgetTicket
 from .checkpoints import load_checkpoint, save_checkpoint, validate_checkpoint_binding
 from .config import TrainingConfig
+from .console_progress import ConsoleProgress
 from .sample_filter import SampleFilterMask
 from .training_manifest import sample_filter as _sample_filter
 from .training_manifest import verify_dataset_manifest
@@ -76,6 +77,7 @@ class _TrainingContext:
     started: float
     steps_total: int
     resume: dict[str, Any] | None
+    progress: ConsoleProgress | None = None
     stop_signal: int | None = None
     final_reason: str = "completed"
     interrupted: TrainingInterrupted | None = None
@@ -123,7 +125,8 @@ def _resume_state(
 
 
 def _create_context(
-    config: TrainingConfig, allow_synthetic: bool, resume_run: Path | None, max_steps: int | None
+    config: TrainingConfig, allow_synthetic: bool, resume_run: Path | None, max_steps: int | None,
+    *, progress: ConsoleProgress | None = None,
 ) -> _TrainingContext:
     if config.mode == "full" and allow_synthetic:
         raise TrainingError("full mode never accepts synthetic source data")
@@ -155,6 +158,7 @@ def _create_context(
             else min(config.mode_spec.steps, max_steps)
         ),
         resume=checkpoint,
+        progress=progress,
     )
     context.previous_sigint = signal.signal(signal.SIGINT, _request_stop(context))
     context.previous_sigterm = signal.signal(signal.SIGTERM, _request_stop(context))
@@ -312,6 +316,9 @@ def _emit_model_ready(context: _TrainingContext) -> None:
 def _prepare_training_context(context: _TrainingContext) -> None:
     config = context.config
     _begin_budget(context)
+    if context.progress is not None:
+        context.progress.message(f"训练目录：{context.run_root}")
+        context.progress.phase("初始化模型和数据")
     _seed_everything(config)
     _prepare_datasets(context)
     _prepare_model(context)
@@ -326,6 +333,8 @@ def _prepare_training_context(context: _TrainingContext) -> None:
     )
     context.iterator = iter(context.policy_loader)
     context.policy.train()
+    if context.progress is not None:
+        context.progress.phase("训练", context.steps_total, unit="step", initial=context.step)
 
 
 def _signal_reason(context: _TrainingContext) -> TrainingInterrupted:
@@ -411,6 +420,8 @@ def _step_row(context: _TrainingContext, metrics: dict[str, Any]) -> dict[str, A
 
 
 def _save_checkpoint(context: _TrainingContext, kind: str, reason: str) -> None:
+    if context.progress is not None:
+        context.progress.detail(f"保存 {kind} 检查点")
     record = save_checkpoint(
         context.run_root / f"{kind}.pt",
         config=context.config,
@@ -448,6 +459,7 @@ def _maybe_validate(context: _TrainingContext) -> None:
         context.validation_dataset,
         config,
         max_batches=config.val_batches,
+        progress=context.progress,
     )
     validation.update({"step": context.step, "phase": "validation", "unit": "step"})
     context.metrics.write(validation)
@@ -463,12 +475,19 @@ def _run_training_steps(context: _TrainingContext) -> None:
     amp = _amp_settings(config)
     while context.step < context.steps_total:
         metrics = _train_step(context, amp)
+        if context.progress is not None:
+            context.progress.update(context.step, detail=f"loss={metrics['loss']:.5f}")
         if context.step % config.log_every_steps == 0 or context.step == 1:
             row = _step_row(context, metrics)
             context.metrics.write(row)
             _emit(context.logger, "training.step", **row)
         _maybe_checkpoint(context)
         _maybe_validate(context)
+        if context.progress is not None:
+            detail = f"loss={metrics['loss']:.5f}"
+            if context.best_val is not None:
+                detail += f" · best_val={context.best_val:.5f}"
+            context.progress.detail(detail)
         assert context.ticket is not None
         if context.ticket.remaining_seconds <= config.budget.stop_margin_seconds:
             context.final_reason = "budget_near_exhausted"

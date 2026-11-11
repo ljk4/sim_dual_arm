@@ -26,7 +26,7 @@ from robot_contracts.execution_feedback import (
 )
 from robot_contracts.models import ContractError
 from robot_contracts.stream_request import StreamRequest, Trajectory
-from robot_contracts.trajectory import ReferenceSample
+from robot_contracts.trajectory.spline import ReferenceSample
 
 from .conversions import (
     context_from_message,

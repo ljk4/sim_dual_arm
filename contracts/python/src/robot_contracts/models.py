@@ -21,8 +21,8 @@ MAX_JOINTS, MAX_CAMERAS = 64, 8
 _SAFE_CAMERA_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 FloatVector = Annotated[tuple[StrictFloat, ...], BeforeValidator(as_tuple),
                         Field(min_length=1, max_length=MAX_JOINTS)]
-CameraDigest = Annotated[str, Field(strict=True, pattern=r"^(?:[0-9a-f]{64})?$")]
-SchemaVersion = Annotated[int, Field(strict=True, ge=1, le=2)]
+CameraDigest = Annotated[str, Field(strict=True, pattern=r"^[0-9a-f]{64}$")]
+SchemaVersion = Annotated[int, Field(strict=True, ge=2, le=2)]
 
 
 class RunContext(StrictContractModel):
@@ -61,7 +61,7 @@ class CameraSpec(StrictContractModel):
     width: Annotated[PositiveInt, Field(le=640)]
     height: Annotated[PositiveInt, Field(le=480)]
     frame_id: NonEmptyStr
-    calibration_digest: CameraDigest = ""
+    calibration_digest: CameraDigest
 
 
 class RobotProfile(StrictContractModel):
@@ -73,15 +73,7 @@ class RobotProfile(StrictContractModel):
                       Field(min_length=1, max_length=MAX_JOINTS)]
     cameras: Annotated[tuple[CameraSpec, ...], BeforeValidator(as_tuple),
                        Field(min_length=1, max_length=MAX_CAMERAS)]
-    schema_version: SchemaVersion = 1
-
-    @model_validator(mode="before")
-    @classmethod
-    def _v1_camera(cls, data: object) -> object:
-        if isinstance(data, dict) and "camera" in data and "cameras" not in data:
-            data = dict(data)
-            data["cameras"] = [data.pop("camera")]
-        return data
+    schema_version: SchemaVersion = 2
 
     @model_validator(mode="after")
     def _profile_identity(self) -> RobotProfile:
@@ -94,10 +86,8 @@ class RobotProfile(StrictContractModel):
         if len(set(frames)) != len(frames):
             raise contract_error("cameras", "duplicate camera frame_id values")
         for camera in self.cameras:
-            if self.schema_version == 2 and not _SAFE_CAMERA_NAME.fullmatch(camera.name):
+            if not _SAFE_CAMERA_NAME.fullmatch(camera.name):
                 raise contract_error(f"cameras.{camera.name}.name", "invalid ROS topic basename")
-            if self.schema_version == 2 and not camera.calibration_digest:
-                raise contract_error(f"cameras.{camera.name}.calibration_digest", "required")
         return self
 
     joint_names = property(lambda self: tuple(joint.name for joint in self.joints))

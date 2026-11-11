@@ -26,7 +26,6 @@ from robot_api_msgs.srv import (
     QueryStreamCommand,
     ReleaseControl,
     RenewControl,
-    ResetSimulation,
     Stop,
     SubmitFollower,
 )
@@ -34,12 +33,9 @@ from robot_contracts.action_chunks import ChunkAnchor
 from robot_contracts.execution_feedback import ExecutionFeedback
 from robot_contracts.models import ContractError, RobotProfile, RunContext
 from robot_contracts.stream_request import REQUEST_STREAM_FIRST, REQUEST_STREAM_NEXT, StreamRequest
-from robot_contracts.trajectory import (
+from robot_contracts.trajectory.follower_reference import (
     FollowerReference,
     FollowerValidationLimits,
-)
-from robot_contracts.trajectory import (
-    validate as validate_follower_reference,
 )
 from robot_ros_support.conversions import context_from_message, context_message, duration
 from robot_ros_support.follower_conversions import follower_reference_from_message
@@ -50,6 +46,7 @@ from robot_ros_support.stream_conversions import (
     stream_command_message,
 )
 from robot_run_logging import EventContext, Scalar
+from robot_trajectory.follower_reference import validate as validate_follower_reference
 
 from dual_arm_runtime.follower_submit import (
     rejection_type,
@@ -64,7 +61,6 @@ _ServiceResponse = (
     | ReleaseControl.Response
     | Stop.Response
     | QueryStreamCommand.Response
-    | ResetSimulation.Response
 )
 
 
@@ -135,7 +131,6 @@ class RobotControlClient:
             (SubmitFollower, "submit_follower"),
             (GetStreamAnchor, "get_stream_anchor"),
             (QueryStreamCommand, "query_stream_command"),
-            (ResetSimulation, "reset_simulation"),
         ):
             self._clients[name] = node.create_client(
                 service, f"{self._root}/{name}", callback_group=self._group
@@ -518,6 +513,13 @@ class RobotControlClient:
     # ---- Reset and cleanup --------------------------------------------------------
 
     def reset(self, context: RunContext, lease_id: str, seed: int) -> RunContext:
+        from dual_arm_runtime.task_client import reset_service_type
+
+        ResetSimulation = reset_service_type()
+        if "reset_simulation" not in self._clients:
+            self._clients["reset_simulation"] = self._node.create_client(
+                ResetSimulation, f"{self._root}/reset_simulation", callback_group=self._group
+            )
         if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:
             raise ContractError("INVALID_SEED", "seed must be a non-negative integer")
         if context != self.lease_context or lease_id != self.lease_id:

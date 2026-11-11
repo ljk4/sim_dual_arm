@@ -11,8 +11,10 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from .. import kinematics, visibility
-from ..kinematics import (
+from robot_backend_sim.config.kinematics_config import KinematicsCheckConfig, TargetConfig
+from robot_backend_sim.config.scene_config import SceneConfig
+from robot_backend_sim.kinematics import kinematics
+from robot_backend_sim.kinematics.kinematics import (
     IKResult,
     KinematicsError,
     PathResult,
@@ -23,18 +25,17 @@ from ..kinematics import (
     extract_object_pose,
     solve_key_poses,
 )
-from ..kinematics_config import KinematicsCheckConfig, TargetConfig
-from ..scene_config import SceneConfig
-from ..visibility import LayoutSpec, SceneCheckConfig
-from .check_kinematics_common import (
+from robot_backend_sim.render import visibility
+from robot_backend_sim.render.visibility import LayoutSpec, SceneCheckConfig
+from robot_backend_sim.tools.check_kinematics_common import (
     ArtifactBudget,
     KinematicsCheckFailure,
     _emit,
 )
 
 if TYPE_CHECKING:
-    from ..rendering import SceneRenderer, Snapshot
-    from ..scene import Scene
+    from robot_backend_sim.physics.scene import Scene
+    from robot_backend_sim.render.rendering import SceneRenderer, Snapshot
 
 
 def _apply_updates(qpos: object, updates: dict[int, tuple[float, ...]]) -> object:

@@ -10,7 +10,7 @@ from robot_contracts.action_chunks import (
     ChunkAnchor,
 )
 from robot_contracts.models import ContractError, Target
-from robot_contracts.trajectory import ReferenceSample
+from robot_contracts.trajectory.spline import ReferenceSample
 
 
 def target(time_ns: int, positions: tuple[float, ...] = (0.0,)) -> Target:

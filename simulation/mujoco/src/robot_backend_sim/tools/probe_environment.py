@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .. import assets
+from robot_backend_sim.physics import assets
 
 COMPONENT = "sim_probe"
 REPORT_SCHEMA_VERSION = 1

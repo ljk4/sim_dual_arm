@@ -1,14 +1,8 @@
 import json
 import sys
-from pathlib import Path
 
 import yaml
-
-_TOOLS = Path(__file__).resolve().parents[2] / "runtime/ros2/scripts"
-if str(_TOOLS) not in sys.path:
-    sys.path.insert(0, str(_TOOLS))
-
-import campaign  # noqa: E402
+from dual_arm_runtime.offline import campaign
 
 
 def _project(tmp_path):
@@ -84,6 +78,12 @@ def test_campaign_reserves_sequential_seeds_and_counts_failures(tmp_path):
     assert seeds == [1000, 1001]
     assert campaign.main(["--project-root", str(root), "status"]) == 0
     assert _run(root, "three") == 2
+
+
+def test_campaign_status_exposes_formal_target(tmp_path, capsys):
+    root = _project(tmp_path)
+    assert campaign.main(["--project-root", str(root), "status"]) == 0
+    assert json.loads(capsys.readouterr().out)["formal_target_qualified"] == 50
 
 
 def test_reserved_without_finish_still_consumes_budget(tmp_path):

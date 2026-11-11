@@ -253,7 +253,7 @@ def check_compose_document(document: object, *, name: str) -> list[str]:
                     issues.append(f"{name}: service {service_name} must mount {target} writable")
             readonly = {
                 "/app", "/contracts", "/profiles",
-                "/deps/ros_support", "/deps/run_logging", "/config/setup.sh",
+                "/deps/ros_support", "/deps/run_logging", "/deps/trajectory", "/config/setup.sh",
                 "/config/check_ros_sdk.py", "/config/fastdds.xml",
                 "/opt/ros-dev",
             }
@@ -295,15 +295,16 @@ def check_compose_document(document: object, *, name: str) -> list[str]:
                     issues.append(f"{name}: learning must not define {key}")
             if "ros" in service.get("networks", []):
                 issues.append(f"{name}: learning must not join the ROS network")
-        else:
+        elif service_name == "simulation":
             if not ros_mount or ros_mount.get("read_only") is not True:
                 issues.append(f"{name}: service {service_name} must mount /opt/ros-dev read-only")
         if service_name in {"runtime", "learning"}:
-            policy = volumes.get("/opt/policy-sdk")
-            if not policy or policy.get("read_only") is not True:
-                issues.append(
-                    f"{name}: service {service_name} must mount /opt/policy-sdk read-only"
-                )
+            for nested in ("/opt/ros-dev", "/opt/policy-sdk", "/opt/learning-cache"):
+                if nested in volumes:
+                    issues.append(
+                        f"{name}: service {service_name} must not bind-mount {nested}; "
+                        "use /build subdirectories instead"
+                    )
         if service_name == "simulation" and volumes.get("/opt/policy-sdk"):
             issues.append(f"{name}: simulation must not mount the Policy SDK")
         networks = service.get("networks", [])

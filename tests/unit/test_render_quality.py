@@ -12,8 +12,8 @@ for source in (ROOT / "simulation/mujoco/src", ROOT / "contracts/python/src"):
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
 
-from robot_backend_sim.render_worker import Capture, RendererThread  # noqa: E402
-from robot_backend_sim.rendering import Snapshot  # noqa: E402
+from robot_backend_sim.render.render_worker import Capture, RendererThread  # noqa: E402
+from robot_backend_sim.render.rendering import Snapshot  # noqa: E402
 from robot_contracts.models import RunContext  # noqa: E402
 
 

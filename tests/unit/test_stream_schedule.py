@@ -14,7 +14,7 @@ for source in (SIM_SRC, CONTRACT_SRC):
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
 
-from robot_backend_sim.stream_schedule import (  # noqa: E402
+from robot_backend_sim.motion.stream_schedule import (  # noqa: E402
     ChunkEvent,
     StreamSchedule,
     boundary_rejection,
@@ -34,11 +34,13 @@ def window(observation_time_ns: int, observation_id: int = 1):
 
 
 def plan(positions, velocities):
-    return SimpleNamespace(
-        duration_ns=1_000_000_000,
-        sample_interval=lambda _elapsed: SimpleNamespace(
-            positions=tuple(positions), velocities=tuple(velocities)
-        ),
+    from robot_contracts.trajectory.spline import CubicSegment, ReferencePlan
+
+    # Exact terminal p/v in a real data-only plan; no fake sample method.
+    zero = (0.0,) * len(positions)
+    c0 = tuple(p - v for p, v in zip(positions, velocities, strict=True))
+    return ReferencePlan(
+        ("a", "b"), (CubicSegment(1_000_000_000, c0, tuple(velocities), zero, zero),)
     )
 
 

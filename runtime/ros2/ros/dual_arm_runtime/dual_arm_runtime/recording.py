@@ -23,7 +23,7 @@ from robot_contracts.episodes import (
 from robot_contracts.models import ContractError
 from robot_contracts.profiles import validate_document
 
-from dual_arm_runtime.episode_audit import audit_follower_recording
+from dual_arm_runtime.offline.mcap_reader import audit_follower_recording
 from dual_arm_runtime.recording_queue import (
     BoundedRecordingQueue,
     RecordingQueueError,

@@ -2,13 +2,15 @@ from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
 
-from dual_arm_runtime.label_export import (
+import pytest
+from dual_arm_runtime.offline.audit import label_export
+from dual_arm_runtime.offline.audit.label_export import (
     AppliedBlock,
     BrakeInterval,
     ObservationFact,
     RawPrediction,
 )
-from dual_arm_runtime.label_export import (
+from dual_arm_runtime.offline.audit.label_export import (
     build_labels as _build_labels,
 )
 from robot_contracts.profiles import load_profile
@@ -162,3 +164,13 @@ def test_max_labels_default_covers_30s_at_20hz():
         _observation(index + 1, 1_000_000_000 + index * 50_000_000) for index in range(600)
     ]
     assert len(observations) == 600
+
+
+@pytest.fixture(autouse=True)
+def sample_test_reference(monkeypatch):
+    """Explicit test_only sampler for the synthetic reference used in these label tests."""
+    monkeypatch.setattr(
+        label_export,
+        "applied_follower_sample",
+        lambda reference, stamp, profile: reference.applied_sample_at(stamp, profile),
+    )

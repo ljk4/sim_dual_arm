@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .budget import BudgetExceeded
+from .console_progress import ConsoleProgress
 from .training_engine import (
     _create_context,
     _finalize_training,
@@ -50,10 +51,11 @@ def train(
     allow_synthetic: bool = False,
     resume_run: Path | None = None,
     max_steps: int | None = None,
+    progress: ConsoleProgress | None = None,
 ) -> dict[str, Any]:
     """Run one mode with a stable run id and one unique budget segment."""
     context: _TrainingContext = _create_context(
-        config, allow_synthetic, resume_run, max_steps
+        config, allow_synthetic, resume_run, max_steps, progress=progress
     )
     try:
         _prepare_training_context(context)
@@ -69,6 +71,8 @@ def train(
         context.final_reason = "failed"
         context.original_error = error
     finally:
+        if progress is not None:
+            progress.phase("保存检查点与训练报告")
         report = _finalize_training(context)
     _raise_training_outcome(context, report)
     return report

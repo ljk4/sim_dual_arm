@@ -18,9 +18,10 @@ from learning_fixtures import make_select  # noqa: E402
 
 
 def test_public_act_training_resume_and_bundle_use_real_model(tmp_path):
-    pytest.importorskip("torch")
+    torch = pytest.importorskip("torch")
     from dual_arm_learning.config import load_dataset_config
     from dual_arm_learning.dataset import convert
+    from torchvision.models import resnet18
 
     dataset_config = load_dataset_config(ROOT / "learning/lerobot/configs/act_dataset.yaml", ROOT)
     from model_helpers import replace
@@ -40,7 +41,10 @@ def test_public_act_training_resume_and_bundle_use_real_model(tmp_path):
         n_decoder_layers=1,
         n_vae_encoder_layers=1,
     )
-    document["model"]["weights"]["path"] = "/learning-cache/hub/checkpoints/resnet18-f37072fd.pth"
+    # Synthetic lifecycle checks must not depend on downloaded production weights.
+    weights = tmp_path / "synthetic-resnet18.pth"
+    torch.save(resnet18(weights=None).state_dict(), weights)
+    document["model"]["weights"]["path"] = str(weights)
     document["training"].update(
         batch_size=2, log_every_steps=1, val_every_steps=1, save_every_steps=1, val_batches=1
     )
@@ -53,18 +57,26 @@ def test_public_act_training_resume_and_bundle_use_real_model(tmp_path):
     config = tmp_path / "training.yaml"
     config.write_text(yaml.safe_dump(document))
 
-    def cli(*arguments):
+    def cli(*arguments, operator=False):
         result = subprocess.run(
-            ["bash", str(ROOT / "learning/lerobot/scripts/run.sh"), "cli", *arguments],
+            ["bash", str(ROOT / "learning/lerobot/scripts/run.sh"),
+             *([] if operator else ["cli"]), *arguments],
             capture_output=True,
             text=True,
             timeout=180,
         )
         assert result.returncode == 0, result.stdout + "\n" + result.stderr
-        return json.loads(result.stdout)
+        return result if operator else json.loads(result.stdout)
 
-    first = cli("train", "--config", str(config), "--max-steps", "2", "--allow-synthetic")
-    run = Path(first["run_dir"])
+    log = tmp_path / "train-console.log"
+    first = cli("train", "--config", str(config), "--max-steps", "2", "--allow-synthetic",
+                "--log-file", str(log), operator=True)
+    run, = (tmp_path / "runs").iterdir()
+    assert f"run_dir: {run}" in first.stdout
+    assert "2/2 step 100.0%" in first.stderr
+    assert "loss=" in first.stderr
+    assert "Traceback" not in log.read_text()
+    assert len(first.stderr.splitlines()) < 20
     resumed = cli("train", "--config", str(config), "--resume-run", str(run), "--allow-synthetic")
     assert resumed["steps"] == 3
     budget = cli("budget-status", "--config", str(config))

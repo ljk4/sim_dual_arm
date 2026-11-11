@@ -16,11 +16,7 @@ try:
     import rclpy
     from rclpy.serialization import deserialize_message, serialize_message
     from robot_api_msgs.msg import FollowerReference as FollowerReferenceMessage
-    from robot_api_msgs.srv import (
-        GetStreamAnchor,
-        QueryStreamCommand,
-        SubmitFollower,
-    )
+    from robot_api_msgs.srv import GetStreamAnchor, QueryStreamCommand, SubmitFollower
     from robot_contracts.action_chunks import ChunkAnchor
     from robot_contracts.models import RunContext, Target
     from robot_contracts.profiles import load_profile
@@ -30,13 +26,14 @@ try:
         StreamRequest,
         Trajectory,
     )
-    from robot_contracts.trajectory import ReferenceSample, validate
+    from robot_contracts.trajectory.spline import ReferenceSample
     from robot_ros_support.conversions import context_message, time_ns
     from robot_ros_support.follower_conversions import (
         follower_reference_from_message,
         follower_reference_message,
     )
     from robot_ros_support.stream_conversions import anchor_from_message, stream_command_message
+    from robot_trajectory.follower_reference import validate
 except ImportError as error:  # pragma: no cover - host without ROS
     pytest.skip(f"ROS unavailable: {error}", allow_module_level=True)
 
@@ -49,14 +46,14 @@ for source in (
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
 
-from robot_backend_sim.control_state import ChunkStatus  # noqa: E402
-from robot_backend_sim.follower_config import load_follower_config  # noqa: E402
-from robot_backend_sim.follower_protocol import (  # noqa: E402
+from robot_backend_sim.config.follower_config import load_follower_config  # noqa: E402
+from robot_backend_sim.config.motion_config import load_control_config  # noqa: E402
+from robot_backend_sim.control.control_state import ChunkStatus  # noqa: E402
+from robot_backend_sim.follower.follower_protocol import (  # noqa: E402
     follower_reference_from_chunk_status,
     prepare_follower_request,
     validation_limits,
 )
-from robot_backend_sim.motion_config import load_control_config  # noqa: E402
 from test_backend_ros import Stack, _profile_context, acquire  # noqa: E402
 
 PROFILE_PATH = ROOT / "profiles/robots/panda_stack_v1/profile.json"

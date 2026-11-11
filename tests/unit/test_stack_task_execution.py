@@ -14,8 +14,8 @@ for source in (SIM_SRC, CONTRACTS):
 
 pytest.importorskip("mujoco")
 import mujoco  # noqa: E402
-from robot_backend_sim.scene import build_scene  # noqa: E402
-from robot_backend_sim.scene_config import load_scene_config  # noqa: E402
+from robot_backend_sim.config.scene_config import load_scene_config  # noqa: E402
+from robot_backend_sim.physics.scene import build_scene  # noqa: E402
 from robot_backend_sim.tasks.stack.config import load_task_config  # noqa: E402
 from robot_backend_sim.tasks.stack.evaluator import (  # noqa: E402
     StackTaskRuntime,

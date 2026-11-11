@@ -18,34 +18,25 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from .. import assets, visibility
-from ..diagnostics import (
-    code_provenance as _shared_code_provenance,
-)
-from ..diagnostics import (
-    python_source_manifest as _python_source_manifest,  # noqa: F401
-)
-from ..diagnostics import (
-    scene_config_document as _scene_config_document,
-)
-from ..diagnostics import (
-    sha256_file as _sha256_file,
-)
-from ..diagnostics import (
-    utc_now as _utc_now,
-)
-from ..diagnostics import (
-    write_json_atomic as _write_json_atomic,
-)
-from ..scene_config import SceneConfig, SceneConfigError, load_scene_config
-from ..visibility import (
+from robot_backend_sim.config.scene_config import SceneConfig, SceneConfigError, load_scene_config
+from robot_backend_sim.physics import assets
+from robot_backend_sim.render import visibility
+from robot_backend_sim.render.visibility import (
     SceneCheckConfig,
     SceneCheckConfigError,
     load_check_config,
 )
-from . import probe_environment
-from .check_scene_common import SceneCheckFailure, SceneCheckUsageError
-from .check_scene_views import (
+from robot_backend_sim.runtime.diagnostics import code_provenance as _shared_code_provenance
+from robot_backend_sim.runtime.diagnostics import (
+    python_source_manifest as _python_source_manifest,  # noqa: F401
+)
+from robot_backend_sim.runtime.diagnostics import scene_config_document as _scene_config_document
+from robot_backend_sim.runtime.diagnostics import sha256_file as _sha256_file
+from robot_backend_sim.runtime.diagnostics import utc_now as _utc_now
+from robot_backend_sim.runtime.diagnostics import write_json_atomic as _write_json_atomic
+from robot_backend_sim.tools import probe_environment
+from robot_backend_sim.tools.check_scene_common import SceneCheckFailure, SceneCheckUsageError
+from robot_backend_sim.tools.check_scene_views import (
     _actual_object_poses,
     _boundary_object_poses,
     _boundary_updates,
@@ -53,8 +44,10 @@ from .check_scene_views import (
     _layout_document,
     _measure_throughput,
     _save_rgb_images,
-    _select_contact_layouts,  # noqa: F401 - re-exported for tests
     _write_contact_sheet,
+)
+from robot_backend_sim.tools.check_scene_views import (
+    _select_contact_layouts as _select_contact_layouts,
 )
 
 COMPONENT = "scene_check"
@@ -176,7 +169,7 @@ def _code_provenance() -> dict[str, object]:
 
 
 def _build_scene(scene_config: SceneConfig) -> object:
-    from ..scene import SceneBuildError, build_scene
+    from robot_backend_sim.physics.scene import SceneBuildError, build_scene
 
     try:
         return build_scene(scene_config)
@@ -219,7 +212,7 @@ def _scene_info(scene: object, scene_config: SceneConfig) -> dict[str, object]:
 
 
 def _make_renderer(scene: object, scene_config: SceneConfig) -> object:
-    from ..rendering import SceneRenderer, SceneRenderError
+    from robot_backend_sim.render.rendering import SceneRenderer, SceneRenderError
 
     first = scene_config.cameras[0]
     try:

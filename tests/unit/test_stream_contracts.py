@@ -18,7 +18,7 @@ from robot_contracts.stream_request import (
     StreamRequest,
     Trajectory,
 )
-from robot_contracts.trajectory import ReferenceSample
+from robot_contracts.trajectory.spline import ReferenceSample
 
 PROFILE_DIGEST = "profile-digest"
 

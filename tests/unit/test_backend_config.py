@@ -12,7 +12,7 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim.backend_config import (  # noqa: E402
+from robot_backend_sim.config.backend_config import (  # noqa: E402
     BackendConfigError,
     load_backend_config,
 )
@@ -72,6 +72,14 @@ def test_repository_config_loads():
     assert config.scene_path.is_file()
     assert config.profile_path.is_file()
     assert config.log.max_event_bytes <= config.log.max_file_bytes
+
+
+def test_visualization_can_be_disabled_without_disabling_cameras(tmp_path):
+    document = document_with_paths(tmp_path)
+    document["robot"]["visualization_enabled"] = False
+    config = load_backend_config(write_document(tmp_path, document))
+    assert config.visualization_enabled is False
+    assert config.capture_hz == 20.0
 
 
 def test_unknown_key_is_rejected(tmp_path):

@@ -14,7 +14,7 @@
 # rad, m, s, rad/s, m/s, rad/s^2, m/s^2, N.
 # Joint position/velocity hard limits come from the accepted robot profile and
 # are intentionally not duplicated here.  Arrays follow the fixed 16-joint
-# order checked by robot_backend_sim.motion_config.CONTROL_JOINT_NAMES.
+# order checked by robot_backend_sim.config.motion_config.CONTROL_JOINT_NAMES.
 joint_names:
   - left_joint1
   - left_joint2

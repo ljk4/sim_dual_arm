@@ -18,45 +18,41 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .. import assets, visibility
-from ..diagnostics import (
-    code_provenance,
-    scene_config_document,
-    sha256_file,
-)
-from ..kinematics import (
-    KinematicsError,
-)
-from ..kinematics_config import (
+from robot_backend_sim.config.kinematics_config import (
     KinematicsCheckConfig,
     KinematicsConfigError,
     load_kinematics_config,
 )
-from ..scene_config import SceneConfig, SceneConfigError, load_scene_config
-from ..visibility import (
+from robot_backend_sim.config.scene_config import SceneConfig, SceneConfigError, load_scene_config
+from robot_backend_sim.kinematics.kinematics import KinematicsError
+from robot_backend_sim.physics import assets
+from robot_backend_sim.render import visibility
+from robot_backend_sim.render.visibility import (
     SceneCheckConfig,
     SceneCheckConfigError,
     load_check_config,
+)
+from robot_backend_sim.runtime.diagnostics import (
+    code_provenance,
+    scene_config_document,
+    sha256_file,
 )
 
 if TYPE_CHECKING:
 
     pass
 
-from . import probe_environment
-from .check_kinematics_checks import (
-    _run_layouts,
-    _save_png,  # noqa: F401 - re-exported for tests
-    _vision_document,  # noqa: F401 - re-exported for tests
-    _write_overview,
-)
-from .check_kinematics_common import (
+from robot_backend_sim.tools import probe_environment
+from robot_backend_sim.tools.check_kinematics_checks import _run_layouts, _write_overview
+from robot_backend_sim.tools.check_kinematics_checks import _save_png as _save_png
+from robot_backend_sim.tools.check_kinematics_checks import _vision_document as _vision_document
+from robot_backend_sim.tools.check_kinematics_common import (
     ArtifactBudget,
     KinematicsCheckFailure,
     KinematicsCheckUsageError,
     _emit,
 )
-from .check_kinematics_report import (
+from robot_backend_sim.tools.check_kinematics_report import (
     _close_resources,
     _new_report,
     _publish_report,
@@ -211,7 +207,7 @@ def _kinematics_config_document(config: KinematicsCheckConfig) -> dict[str, obje
 
 
 def _build_scene(scene_config: SceneConfig) -> object:
-    from ..scene import SceneBuildError, build_scene
+    from robot_backend_sim.physics.scene import SceneBuildError, build_scene
 
     try:
         return build_scene(scene_config)
@@ -255,7 +251,7 @@ def _scene_info(scene: object, scene_config: SceneConfig) -> dict[str, object]:
 
 
 def _make_renderer(scene: object, scene_config: SceneConfig) -> object:
-    from ..rendering import SceneRenderer
+    from robot_backend_sim.render.rendering import SceneRenderer
 
     first = scene_config.cameras[0]
     return SceneRenderer(

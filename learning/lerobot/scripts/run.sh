@@ -8,7 +8,7 @@ source "$SCRIPT_ROOT/infrastructure/docker/setup.sh"
 
 ROOT="${PROJECT_ROOT:-$SCRIPT_ROOT}"
 DATA_ROOT="${DATA_ROOT:-/data}"
-POLICY_SDK="${POLICY_SDK_ROOT:-/opt/policy-sdk}"
+POLICY_SDK="${POLICY_SDK_ROOT:-/build/generated/policy-sdk}"
 POLICY_CONFIG="${POLICY_SERVICE_CONFIG:-${ACT_POLICY_CONFIG:-$ROOT/learning/lerobot/configs/policy_temporal.yaml}}"
 ACT_LOG_DIRECTORY="${ACT_LOG_DIRECTORY:-$DATA_ROOT/logs/act-policy}"
 DATASET_CONFIG="${ACT_DATASET_CONFIG:-$ROOT/learning/lerobot/configs/act_dataset.container.yaml}"
@@ -71,7 +71,7 @@ case "$command" in
     ;;
   convert)
     exec python3 -m dual_arm_learning.cli --project-root "$ROOT" convert \
-      --config "$DATASET_CONFIG" "$@"
+      --config "$DATASET_CONFIG" --progress "$@"
     ;;
   validate)
     exec python3 -m dual_arm_learning.cli --project-root "$ROOT" verify-data \
@@ -82,7 +82,7 @@ case "$command" in
     ;;
   train)
     exec python3 -m dual_arm_learning.cli --project-root "$ROOT" train \
-      --config "$TRAINING_CONFIG" "$@"
+      --config "$TRAINING_CONFIG" --progress "$@"
     ;;
   bundle)
     exec python3 -m dual_arm_learning.cli --project-root "$ROOT" bundle \

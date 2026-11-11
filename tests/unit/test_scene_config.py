@@ -15,7 +15,7 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim.scene_config import (  # noqa: E402
+from robot_backend_sim.config.scene_config import (  # noqa: E402
     SceneConfigError,
     camera_declared_description,
     load_scene_config,

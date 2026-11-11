@@ -13,7 +13,7 @@ from dual_arm_runtime.policy_client import PolicyPrediction
 from dual_arm_runtime.runtime_config import load_runtime_configuration
 from robot_contracts.action_chunks import ChunkAnchor
 from robot_contracts.models import ContractError, RunContext
-from robot_contracts.trajectory import ReferenceSample
+from robot_contracts.trajectory.spline import ReferenceSample
 
 ROOT = Path(__file__).resolve().parents[2]
 POLICY_CONFIG = ROOT / "tests/fixtures/simulation/policy_unit.yaml"
@@ -238,6 +238,31 @@ def _runner(configuration, io, control, log=None, *, stop=None, clock=None):
     )
 
 
+def test_stopped_successor_reports_physical_failure_instead_of_anchor_symptom(tmp_path):
+    configuration = policy_configuration(tmp_path, settle_ns=0)
+    profile = configuration.profile
+    io = _IO(profile)
+
+    class StoppedControl(_Control):
+        def get_anchor(self, context, start_sim_time_ns=None):
+            if self.anchors:
+                raise ContractError("STREAM_ANCHOR_UNAVAILABLE", "stopping motion")
+            return super().get_anchor(context, start_sim_time_ns)
+
+        def query(self, context, command_id, *, ignore_stop=False):
+            assert command_id == "episode-policy" and ignore_stop
+            return SimpleNamespace(
+                phase="STOPPING", stop_reason="TRACKING_TIMEOUT", reason="TRACKING_TIMEOUT"
+            )
+
+    runner = _runner(configuration, io, StoppedControl(profile))
+    with pytest.raises(ContractError) as caught:
+        runner.run()
+    assert caught.value.reason == "TRACKING_TIMEOUT"
+    assert len(io.commands) == 1
+    assert io.executions[-1].stop_reason == "TRACKING_TIMEOUT"
+
+
 def test_eight_chunks_use_fresh_captures_keep_raw_60_and_settle_only_last(tmp_path):
     configuration = policy_configuration(tmp_path, settle_ns=0)
     profile = configuration.profile
@@ -273,6 +298,47 @@ def test_eight_chunks_use_fresh_captures_keep_raw_60_and_settle_only_last(tmp_pa
         for command in io.commands
     )
     assert all(command.trajectory.targets[0].time_ns == 50_000_000 for command in io.commands)
+
+
+@pytest.mark.parametrize("task_start_ns", [999_999_999, 1_000_000_000, 1_050_000_000])
+def test_first_task_prediction_uses_capture_strictly_after_start(
+    tmp_path, monkeypatch, task_start_ns
+):
+    configuration = policy_configuration(tmp_path, settle_ns=0)
+    io = _IO(configuration.profile)
+    original_begin = PolicyTargetSource.begin
+
+    def begin(self, *args):
+        original_begin(self, *args)
+        return task_start_ns
+
+    monkeypatch.setattr(PolicyTargetSource, "begin", begin)
+    runner = _runner(configuration, io, _Control(configuration.profile))
+
+    runner.run()
+
+    first = io.commands[0]
+    assert first.observation_time_ns > task_start_ns
+    assert first.observation_time_ns - task_start_ns <= 50_000_000
+    assert runner.chunks == 8
+
+
+def test_same_time_capture_cannot_replace_missing_post_start_capture(tmp_path, monkeypatch):
+    configuration = policy_configuration(tmp_path, settle_ns=0)
+    io = _MissingIO(configuration.profile)
+    original_begin = PolicyTargetSource.begin
+
+    def begin(self, *args):
+        original_begin(self, *args)
+        return 1_000_000_000
+
+    monkeypatch.setattr(PolicyTargetSource, "begin", begin)
+    runner = _runner(configuration, io, _Control(configuration.profile))
+
+    with pytest.raises(ContractError, match="WALL_TIMEOUT"):
+        runner.run()
+
+    assert io.commands == []
 
 
 def test_zero_startup_settle_consumes_no_extra_observation(tmp_path, monkeypatch):

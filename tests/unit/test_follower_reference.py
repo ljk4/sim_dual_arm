@@ -19,19 +19,23 @@ from robot_contracts.models import (
     Target,
 )
 from robot_contracts.stream_request import REQUEST_STREAM_FIRST, StreamRequest, Trajectory
-from robot_contracts.trajectory import (
-    FOLLOWER_ALGORITHM_VERSION,
+from robot_contracts.trajectory.constants import FOLLOWER_ALGORITHM_VERSION
+from robot_contracts.trajectory.follower_reference import (
     FOLLOWER_NORMALIZATION_VERSION,
     FOLLOWER_SAMPLER_VERSION,
-    CubicSegment,
     FollowerReference,
     FollowerValidationLimits,
-    PreparedFollowerPlan,
-    ReferencePlan,
-    ReferenceSample,
     compute_follower_reference_digest,
+)
+from robot_contracts.trajectory.spline import CubicSegment, ReferencePlan, ReferenceSample
+from robot_trajectory.follower import PreparedFollowerPlan
+from robot_trajectory.follower_reference import (
+    applied_follower_sample,
+    follower_reference_from_prepared,
+    sample_follower_reference,
     validate,
 )
+from robot_trajectory.sampling import sample_reference_interval
 
 ROOT = Path(__file__).resolve().parents[2]
 PROFILE_DIGEST = "profile-hash"
@@ -64,7 +68,7 @@ def profile() -> RobotProfile:
             JointSpec("joint1", "rad", -10.0, TARGET_POSITION - OVERSHOOT, 10.0, 0.0),
             JointSpec("joint2", "rad", -10.0, 10.0, 10.0, 0.0),
         ),
-        (CameraSpec("front", 64, 48, "front", ""),),
+        (CameraSpec("front", 64, 48, "front", "0" * 64),),
     )
 
 
@@ -147,7 +151,7 @@ def request() -> StreamRequest:
 
 
 def reference(**changes) -> FollowerReference:
-    base = FollowerReference.from_prepared(
+    base = follower_reference_from_prepared(
         prepared(),
         request(),
         motion_seq=1,
@@ -230,7 +234,7 @@ def test_tampered_raw_source_tail_is_covered():
 
 def test_digest_changes_with_acceptance_time_and_same_fact_is_stable():
     first = reference()
-    repeated = FollowerReference.from_prepared(
+    repeated = follower_reference_from_prepared(
         prepared(),
         request(),
         motion_seq=1,
@@ -239,7 +243,7 @@ def test_digest_changes_with_acceptance_time_and_same_fact_is_stable():
     )
     assert repeated == first
     assert repeated.reference_digest == first.reference_digest
-    later = FollowerReference.from_prepared(
+    later = follower_reference_from_prepared(
         prepared(),
         request(),
         motion_seq=1,
@@ -264,20 +268,20 @@ def test_validate_rejects_stored_evidence_that_does_not_rebuild():
 
 def test_independent_actual_reference_reconstruction_and_corrections():
     record = reference()
-    applied = record.applied_sample_at(record.end_sim_time_ns, profile())
+    applied = applied_follower_sample(record, record.end_sim_time_ns, profile())
     assert applied.sampled_positions[0] == pytest.approx(TARGET_POSITION)
     assert applied.applied_positions[0] == profile().joints[0].maximum
     assert applied.corrections[0] == pytest.approx(OVERSHOOT)
     assert applied.applied_positions[1] == 0.0
     assert applied.has_correction
-    assert record.applied_sample_at(record.end_sim_time_ns, profile()).applied_positions[
+    assert applied_follower_sample(record, record.end_sim_time_ns, profile()).applied_positions[
         0
     ] == pytest.approx(profile().joints[0].maximum)
-    start = record.applied_sample_at(record.start_sim_time_ns, profile())
+    start = applied_follower_sample(record, record.start_sim_time_ns, profile())
     assert start.applied_positions == (0.0, 0.0)
     mid = record.start_sim_time_ns + PLAN_NS // 2
-    raw = record.sample_at(mid)
-    assert raw.positions == record.plan.sample_interval(PLAN_NS // 2).positions
+    raw = sample_follower_reference(record, mid)
+    assert raw.positions == sample_reference_interval(record.plan, PLAN_NS // 2).positions
 
 
 def test_unknown_versions_are_rejected_not_silently_reinterpreted():

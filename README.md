@@ -20,12 +20,13 @@
 ```bash
 git clone https://github.com/ljk4/sim_dual_arm.git
 cd sim_dual_arm
-mkdir -p var .build
 ```
 
 ---
 
 ## 2. 数据采集流程
+
+按顺序完成：**单路试采一次（pilot，可观察可视化）→ 停止手动后端与 viewer → 宿主机并行补足 50 条合格正式数据 → 筛选 45 条训练 / 5 条验证 → 第 3 节转换与训练**。
 
 ### 2.1 启动 Runtime 容器并构建 SDK
 
@@ -45,7 +46,7 @@ runtime/ros2/scripts/run.sh build-ros-sdk
 runtime/ros2/scripts/run.sh build-policy-sdk
 ```
 
-### 2.2 启动 Simulation 容器与示教后端
+### 2.2 启动 Simulation 容器与试采示教后端
 
 在宿主机新终端中构建并进入 `simulation` 容器：
 
@@ -70,7 +71,7 @@ scripts/run.sh backend \
   --run-id teacher-backend
 ```
 
-### 2.3 开启实时 MuJoCo 可视化（可选）
+### 2.3 试采时开启实时 MuJoCo 可视化（可选）
 
 `viewer` 独立订阅后端发布的只读物理状态快照，不参与物理步进与控制。在宿主机桌面环境下（若报 X11 权限错误，先在宿主机执行 `xhost +SI:localuser:$(id -un)`）：
 
@@ -85,29 +86,59 @@ docker compose run --rm \
   --config /data/prepared/teacher-backend/backend.yaml
 ```
 
-### 2.4 执行示教采集与数据集筛选
+### 2.4 单路试采一次，确认完整链路
 
-回到 `runtime` 容器终端，初始化采集台账并执行单局示教采集：
+回到 `runtime` 容器终端，使用刚启动的手动 teacher backend 试采一次。试采指定 `pilot`，不占用正式 50 条的名额：
 
 ```bash
 mkdir -p /data/campaigns/panda_stack_v1
 runtime/ros2/scripts/run.sh campaign status
 
-# 每次执行采集一局，失败尝试同样计入台账
-runtime/ros2/scripts/run.sh campaign run \
-  --purpose formal \
-  --mode teacher \
-  -- python3 /workspace/runtime/ros2/scripts/collect_attempt.py
+# 只试一次：合格即结束，失败也立即结束
+runtime/ros2/scripts/record.sh \
+  --purpose pilot --count 1 --max-consecutive-failures 1
 ```
 
-重复执行 `campaign run` 直至累计 50 条合格正式 episode，随后生成 45 条训练 / 5 条验证的划分清单：
+确认试采命令退出码为 0，末尾 `recording.finished` 的 `reason` 为 `target_reached`、`qualified` 为 1；本局应同时满足任务成功、录制完整、导出质量合格。若失败，先检查日志并修复，再重新执行本节的试采命令。
+
+`--count` 统计本次新增合格条数；`--max-consecutive-failures 1` 让试采最多尝试一次。每次试采继续记录在原台账并占用 pilot 预算，种子自动递增；pilot 数据不会进入后面的正式训练/验证清单。
+
+### 2.5 停止试采后端和 viewer
+
+试采合格后，在 viewer 终端（若已开启）和手动 teacher backend 终端分别按 `Ctrl-C`，释放计算资源。保留 runtime 容器运行；simulation 容器可保持空闲，后续第 3.4 节仍会使用它启动推理后端。
+
+### 2.6 宿主机并行采集，补足 50 条合格正式数据
+
+在**宿主机新终端的项目根目录**执行：
 
 ```bash
-runtime/ros2/scripts/run.sh campaign status
-runtime/ros2/scripts/run.sh campaign select > /data/campaigns/panda_stack_v1/formal-select.json
+runtime/ros2/scripts/record_parallel.sh \
+  --purpose formal --target-total 50 \
+  --workers auto --max-consecutive-failures 3
 ```
 
-采集完成后，在 `simulation` 后端终端按 `Ctrl-C` 停止示教后端。
+`--target-total 50` 表示正式台账累计达到 50 条合格数据：已有正式数据时只补足差额；已经达到目标则直接成功退出。若中断或连续失败提前结束，修复原因后再次执行相同命令即可续采，不需要手动计算剩余条数或清空台账。该参数不能与表示“新增条数”的 `--count` 同时指定。
+
+入口自动创建独立的 MuJoCo backend，复用 runtime 容器并行录制与导出。每路使用独立的 ROS domain、命名空间和日志目录，共用原 campaign 的种子和预算。自动档按 CPU、可用内存和显存选择至多 4 路；如需固定并发，将 `--workers auto` 改为 `--workers 4`。
+
+并行 worker 禁用 viewer 状态发布、预览 PNG 和 GIF，保留训练 RGB、标签及质量门禁。连续失败按完成顺序计数，合格一次清零；连续 3 次不合格会取消在途任务并提前退出，取消项仍占预算。预算/种子不足也会停止。按 `Ctrl-C` 可中断本批次；命令结束时自动清理本批次后台实例。配置、backend 日志和性能汇总保存到 `var/record-pools/pool-*/`。
+
+### 2.7 筛选正式数据，生成训练/验证清单
+
+并行采集结束后，回到 **runtime 容器终端**检查正式合格数并生成清单：
+
+```bash
+cd /workspace
+runtime/ros2/scripts/run.sh campaign status
+
+# 仅筛选成功后替换正式清单，避免数量不足时覆盖已有文件
+runtime/ros2/scripts/run.sh campaign select \
+  > /data/campaigns/panda_stack_v1/formal-select.json.tmp &&
+mv /data/campaigns/panda_stack_v1/formal-select.json.tmp \
+  /data/campaigns/panda_stack_v1/formal-select.json
+```
+
+确认筛选成功且清单中的 `status` 为 `SELECTED`、`qualified` 为 50，再进入第 3 节。清单只选择合格 formal 数据，自动划分为 45 条训练 / 5 条验证，排除 pilot 试采。
 
 ---
 
@@ -125,12 +156,14 @@ docker compose -f learning/lerobot/docker/docker-compose.yml exec learning bash
 
 ### 3.2 转换数据集与训练 ACT 模型
 
-在 `learning` 容器内将导出的合格 episode 转换为 LeRobot 数据集（输出至 `/data/learning/panda_stack_learning_v1`）：
+完成第 2.7 节后，在 `learning` 容器内将正式清单中的 50 条合格 episode 转换为 LeRobot 数据集（45 条训练 / 5 条验证，输出至 `/data/learning/panda_stack_learning_v1`）。转换配置直接读取 `/data/campaigns/panda_stack_v1/formal-select.json`，无需移动原始数据：
 
 ```bash
 cd /workspace
 learning/lerobot/scripts/run.sh convert
 ```
+
+转换时终端只显示配置、日志路径和原地刷新的进度，包括已完成条数、百分比、用时和预计剩余时间；编码器等详细输出写入日志。训练使用同样的显示方式，额外显示 step、loss 和验证状态。重定向输出时仅保留阶段摘要，避免生成大量进度行。可用 `--log-file /data/logs/<文件名>.log` 指定详细日志；需要原始输出和 JSON 结果时添加 `--no-progress`。
 
 启动完整模式训练（默认启用 PyAV 视频解码、张量批处理、多进程预取与 CUDA bfloat16 混合精度）：
 
@@ -138,10 +171,10 @@ learning/lerobot/scripts/run.sh convert
 learning/lerobot/scripts/run.sh train --mode full
 ```
 
-训练完成后，记录终端输出 JSON 中的 `run_dir` 并导出可部署的 safetensors 模型包（Bundle）：
+训练完成后，记录终端输出的 `run_dir` 并导出可部署的 safetensors 模型包（Bundle）：
 
 ```bash
-TRAIN_RUN=/data/learning/runs/<实际生成的-run-目录名>
+TRAIN_RUN="/data/learning/runs/<实际生成的-run-目录名>"
 learning/lerobot/scripts/run.sh bundle \
   --mode full \
   --run "$TRAIN_RUN" \
@@ -253,7 +286,7 @@ policy_binding.json
 | 流式动作块超时与卸载过渡 | `profiles/control/panda_stream_v1.yaml` | 重新执行 simulation `prepare`，重启 `backend` |
 | 跟随窗口 `target_count` 与偏差预算 | `profiles/control/panda_follower_v1.yaml` | 同时重新执行 simulation `prepare` 与 runtime `prepare`，重启 `backend` 与 `runtime` |
 | 策略运行端模板 | `runtime/ros2/configs/policy_rollout.yaml` | 重新执行 runtime `prepare`，重新运行 `interactive` |
-| 示教运行端模板 | `runtime/ros2/configs/teacher_collect.yaml` | 下一次 `campaign run` 自动生成新配置，无需手动 `prepare` |
+| 示教运行端模板 | `runtime/ros2/configs/teacher_collect.yaml` | 下一次 `record.sh` 自动生成新配置，无需手动 `prepare` |
 | Policy 服务与时间融合模板 | `learning/lerobot/configs/policy_temporal.yaml` | 重新执行 `prepare-policy` 与 runtime `prepare`，重启 `policy` 服务 |
 | 数据集转换规则 | `learning/lerobot/configs/act_dataset.container.yaml` | 使用新输出目录重新执行 `convert` |
 | 训练超参数与 DataLoader/AMP | `learning/lerobot/configs/act_training.container.yaml` | 重新执行 `train` → `bundle` → `prepare-policy` → runtime `prepare` |
@@ -271,3 +304,5 @@ policy_binding.json
 - **`viewer` 无法打开窗口**：确认已通过 `docker compose run` 显式挂载 `/tmp/.X11-unix` 与 `.Xauthority` 并传递 `DISPLAY` 环境变量，且宿主机已执行 `xhost +SI:localuser:$(id -un)`。无图形界面的服务器可正常运行 `backend`、采集与推理。
 
 更多文档请参阅 [文档索引](docs/README.md)、[项目状态](docs/project-status.md) 与 [项目规范](docs/standards.md)。
+
+架构目录与 A1～A7 迁移说明见 [架构执行记录](docs/architecture-tasks/implementation-2026-11-10.md)。ROS 接口调整后请在空闲时重建 SDK，并重建使用新源码挂载与环境变量的 simulation/runtime 容器。

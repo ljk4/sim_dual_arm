@@ -7,6 +7,7 @@ fast; the candidate report records the actual heavy run.
 
 import json
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -30,7 +31,23 @@ def test_two_independent_datasets_train_only_processors_and_padding(tmp_path):
     config = load_dataset_config(ROOT / "learning/lerobot/configs/act_dataset.yaml", ROOT)
     config = replace(config, output_root=tmp_path / "data", cache_root=tmp_path / "cache")
     select = make_select(tmp_path, config, first_frames=61)
-    manifest = convert(select_path=select, config=config, synthetic=True)
+    log = tmp_path / "convert.log"
+    result = subprocess.run(
+        ["bash", str(ROOT / "learning/lerobot/scripts/run.sh"), "convert",
+         "--config", str(ROOT / "learning/lerobot/configs/act_dataset.yaml"),
+         "--select", str(select), "--output-root", str(config.output_root),
+         "--synthetic", "--log-file", str(log)],
+        capture_output=True, text=True, timeout=180,
+        env=os.environ | {"LEARNING_CACHE_ROOT": str(config.cache_root)},
+    )
+    assert result.returncode == 0, result.stdout + "\n" + result.stderr + log.read_text()
+    assert "转换完成：训练 45 条 / 149 帧；验证 5 条 / 10 帧" in result.stdout
+    assert "45/45 条 100.0%" in result.stderr
+    assert "5/5 条 100.0%" in result.stderr
+    assert "libx264" not in result.stdout + result.stderr
+    assert len(result.stderr.splitlines()) < 25
+    assert "Traceback" not in log.read_text()
+    manifest = json.loads((config.output_root / "manifest.json").read_text())
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
     assert manifest["synthetic"] is True

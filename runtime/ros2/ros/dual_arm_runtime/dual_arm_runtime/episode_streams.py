@@ -6,8 +6,9 @@ from robot_contracts.episodes import RuntimeOutcome, RuntimeResult
 from robot_contracts.models import ContractError, RunContext
 from robot_run_logging import EventContext
 
+from dual_arm_runtime.offline.audit.task_result import task_result_for_runtime
+from dual_arm_runtime.offline.mcap_reader import task_fact_from_message
 from dual_arm_runtime.runtime_errors import FirstFollowerRejected
-from dual_arm_runtime.task_result import task_result_for_runtime
 
 
 def run_policy(runner: object, episode_id: str, actual_context: RunContext, task_id: str) -> None:
@@ -222,7 +223,7 @@ def finish_managed_task(
             "TASK_STATE_CONFLICT", "runtime observed success but the frozen judge did not"
         )
     runner._frozen_task_fact = fact
-    runner._task_result = task_result_for_runtime(runtime_reason, fact)
+    runner._task_result = task_result_for_runtime(runtime_reason, task_fact_from_message(fact))
     runner._last_stream_command_id = stream.command_id
     _task_ending(runner, context, budget_ns)
 

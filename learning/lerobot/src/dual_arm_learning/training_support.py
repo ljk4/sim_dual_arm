@@ -205,10 +205,12 @@ def validation_loss(
     config: TrainingConfig,
     *,
     max_batches: int,
+    progress: Any = None,
 ) -> dict[str, Any]:
     import torch
 
     loader_ = loader(dataset, config, training=False)
+    expected_batches = min(len(loader_), max_batches) if progress is not None else 0
     was_training = bool(policy.training)
     total = 0.0
     count = 0
@@ -228,6 +230,8 @@ def validation_loss(
                 total += float(loss.detach().cpu()) * scalars
                 count += scalars
                 batches += 1
+                if progress is not None:
+                    progress.detail(f"验证 {batches}/{expected_batches} 批")
                 if batches >= max_batches:
                     break
     finally:

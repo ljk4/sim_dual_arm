@@ -33,7 +33,7 @@ Run this inside the simulation container, for example after
 docker compose exec simulation bash from simulation/mujoco/docker.
 
 commands:
-  backend       run the MuJoCo Robot API backend (robot_backend_sim.node)
+  backend       run the MuJoCo Robot API backend (robot_backend_sim.ros.node)
   viewer        open the live MuJoCo GUI for a running backend
   environment   probe the MuJoCo/EGL/camera environment
   scene         check three-camera scene visibility
@@ -66,7 +66,7 @@ case "$command" in
     ;;
   backend)
     check_ros_sdk
-    exec python3 -m robot_backend_sim.node \
+    exec python3 -m robot_backend_sim.ros.node \
       --run-root "${DATA_ROOT:-/data}/runs/backend" \
       "$@"
     ;;
@@ -115,7 +115,7 @@ case "$command" in
       exit 2
     fi
     exec env MUJOCO_GL=glfw PYOPENGL_PLATFORM=glx \
-      python3 -m robot_backend_sim.viewer --config "$config" "${viewer_args[@]}"
+      python3 -m robot_backend_sim.render.viewer --config "$config" "${viewer_args[@]}"
     ;;
   environment)
     exec python3 -m robot_backend_sim.tools.probe_environment \

@@ -39,13 +39,13 @@ try:
         GetStreamAnchor,
         QueryStreamCommand,
         ReleaseControl,
-        ResetSimulation,
         Stop,
     )
     from robot_contracts.models import RunContext
     from robot_contracts.profiles import load_profile
     from robot_ros_support.conversions import context_from_message, duration
     from robot_ros_support.qos import SENSOR_QOS
+    from sim_api_msgs.srv import ResetSimulation
 except ImportError as error:  # pragma: no cover - host without ROS
     pytest.skip(f"ROS unavailable: {error}", allow_module_level=True)
 
@@ -54,10 +54,10 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim.backend_config import load_backend_config  # noqa: E402
-from robot_backend_sim.node import BackendNode  # noqa: E402
-from robot_backend_sim.ros_bridge import RosFutureBridge  # noqa: E402
-from robot_backend_sim.worker import Worker  # noqa: E402
+from robot_backend_sim.config.backend_config import load_backend_config  # noqa: E402
+from robot_backend_sim.ros.node import BackendNode  # noqa: E402
+from robot_backend_sim.ros.ros_bridge import RosFutureBridge  # noqa: E402
+from robot_backend_sim.runtime.worker import Worker  # noqa: E402
 
 CONFIG = ROOT / "simulation/mujoco/configs/backend/backend.yaml"
 PROFILE_PATH = ROOT / "profiles/robots/panda_stack_v1/profile.json"
@@ -120,7 +120,7 @@ class Stack:
             [
                 sys.executable,
                 "-m",
-                "robot_backend_sim.node",
+                "robot_backend_sim.ros.node",
                 "--config",
                 str(self.config),
                 "--run-root",

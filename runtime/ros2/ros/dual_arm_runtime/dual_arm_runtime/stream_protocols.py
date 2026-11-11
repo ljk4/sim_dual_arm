@@ -20,6 +20,10 @@ class StreamControl(Protocol):
 
     def submit_follower(self, request: StreamRequest): ...
 
+    def query(
+        self, context: RunContext, command_id: str, *, ignore_stop: bool = False
+    ) -> ExecutionFeedback: ...
+
 
 class StreamIO(Protocol):
     def wait_observation(

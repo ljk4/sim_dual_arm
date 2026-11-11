@@ -235,7 +235,7 @@ class RuntimeCallbacks:
                 raise ContractError(
                     "REFERENCE_REQUEST_MISMATCH", "follower reference request differs"
                 )
-            from robot_contracts.trajectory import validate as validate_follower_reference
+            from robot_trajectory.follower_reference import validate as validate_follower_reference
 
             validate_follower_reference(reference, node.config.profile, node._follower_limits)
         except Exception as error:

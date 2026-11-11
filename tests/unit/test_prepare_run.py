@@ -2,15 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-import sys
 from pathlib import Path
 
 import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "runtime/ros2/scripts"))
-import prepare_run  # noqa: E402
+from dual_arm_runtime.offline import prepare_run  # noqa: E402
 
 
 def _write(path: Path, value: object) -> Path:

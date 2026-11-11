@@ -13,7 +13,7 @@ import time
 from collections.abc import Callable
 
 from robot_contracts.models import ContractError, RobotProfile, RunContext
-from robot_contracts.trajectory import FollowerValidationLimits
+from robot_contracts.trajectory.follower_reference import FollowerValidationLimits
 
 from dual_arm_runtime.chunk_stream import (
     ContinuousStreamRunner,

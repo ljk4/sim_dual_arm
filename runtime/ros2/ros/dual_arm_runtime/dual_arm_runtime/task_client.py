@@ -16,7 +16,6 @@ import rclpy
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.node import Node
 from rclpy.task import Future
-from robot_api_msgs.srv import GetTaskState, GetTeacherChunk, PrepareTask, StartTask
 from robot_contracts.models import ContractError, RunContext
 from robot_ros_support.conversions import context_message, stamp, time_ns
 
@@ -97,6 +96,8 @@ class TaskClient:
         log: EventSink | None = None,
         stop_requested: threading.Event | None = None,
     ) -> None:
+        from sim_api_msgs.srv import GetTaskState, GetTeacherChunk, PrepareTask, StartTask
+
         self._node = node
         self._root = root.rstrip("/")
         self._call_timeout_s = call_timeout_s
@@ -167,6 +168,7 @@ class TaskClient:
         seed: int,
         task_type: str = "",
     ) -> PrepareFact:
+        from sim_api_msgs.srv import PrepareTask
         started = time.monotonic()
         deadline = started + self._timeouts["prepare"]
         request = PrepareTask.Request(
@@ -270,6 +272,7 @@ class TaskClient:
         self, context: RunContext, episode_id: str, request_id: str, lease_id: str,
         task_epoch: int, plan_digest: str,
     ) -> int:
+        from sim_api_msgs.srv import StartTask
         response = self._call(
             "start",
             StartTask.Request(
@@ -291,6 +294,7 @@ class TaskClient:
         capture_seq: int, observation_time_ns: int, *, robot_profile_hash: str,
         chunk_size: int, period_ns: int,
     ) -> TeacherChunkFact:
+        from sim_api_msgs.srv import GetTeacherChunk
         response = self._call(
             "chunk",
             GetTeacherChunk.Request(
@@ -335,6 +339,7 @@ class TaskClient:
         )
 
     def state(self, context: RunContext, task_epoch: int = 0) -> object:
+        from sim_api_msgs.srv import GetTaskState
         response = self._call(
             "state", GetTaskState.Request(context=context_message(context), task_epoch=task_epoch)
         )
@@ -398,3 +403,15 @@ def _state_context(state: object) -> RunContext:
     from robot_ros_support.conversions import context_from_message
 
     return context_from_message(state.context)  # type: ignore[attr-defined]
+
+
+def task_state_message_type():
+    """Resolve the optional simulation task wire type only on a task path."""
+    from sim_api_msgs.msg import TaskState
+    return TaskState
+
+
+def reset_service_type():
+    """Resolve the simulation reset type when a reset is explicitly requested."""
+    from sim_api_msgs.srv import ResetSimulation
+    return ResetSimulation

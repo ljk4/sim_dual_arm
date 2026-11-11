@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from robot_contracts.models import ContractError
-from robot_contracts.trajectory import FollowerValidationLimits
+from robot_contracts.trajectory.follower_reference import FollowerValidationLimits
 
 from dual_arm_runtime.runtime_config import RuntimeConfiguration
 

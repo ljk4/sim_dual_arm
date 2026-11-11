@@ -7,10 +7,10 @@ import statistics
 import time
 from pathlib import Path
 
-from .. import visibility
-from ..scene_config import SceneConfig
-from ..visibility import LayoutSpec, LayoutVisibility, SceneCheckConfig
-from .check_scene_common import SceneCheckFailure
+from robot_backend_sim.config.scene_config import SceneConfig
+from robot_backend_sim.render import visibility
+from robot_backend_sim.render.visibility import LayoutSpec, LayoutVisibility, SceneCheckConfig
+from robot_backend_sim.tools.check_scene_common import SceneCheckFailure
 
 
 def _actual_object_poses(scene: object, scene_config: SceneConfig) -> list[dict[str, object]]:

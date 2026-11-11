@@ -22,7 +22,7 @@ from robot_contracts.stream_request import (
     StreamRequest,
     Trajectory,
 )
-from robot_contracts.trajectory import FollowerValidationLimits
+from robot_contracts.trajectory.follower_reference import FollowerValidationLimits
 from robot_run_logging import EventContext, Scalar
 
 from dual_arm_runtime.follower_limits import follower_limits  # noqa: F401 - re-export
@@ -249,10 +249,10 @@ class ContinuousStreamRunner:
             self._check_stop()
             if (
                 self.task_start_sim_time_ns is not None
-                and observation.stamp_ns < self.task_start_sim_time_ns
+                and observation.stamp_ns <= self.task_start_sim_time_ns
             ):
-                # Start may race a capture that predates the task clock.  Never
-                # predict from a pre-start cache entry.
+                # A capture at the start timestamp may have been taken before
+                # StartTask initialized teacher feedback. Require a later step.
                 continue
             return observation
 
@@ -432,6 +432,23 @@ class ContinuousStreamRunner:
             try:
                 anchor = self.control.get_anchor(self.context)
             except ContractError as error:
+                if error.reason == "STREAM_ANCHOR_UNAVAILABLE":
+                    # A stopped stream cannot produce a successor. Recover its
+                    # authoritative failure instead of reporting the symptom.
+                    try:
+                        execution = self.control.query(
+                            self.context, self.command_id, ignore_stop=True
+                        )
+                    except ContractError:
+                        raise error from None
+                    self.io.record_execution(execution)
+                    if execution.phase in ("STOPPING", "FAILED", "CANCELED"):
+                        reason = execution.stop_reason or execution.reason
+                        if reason:
+                            raise ContractError(
+                                reason, "stream stopped before successor"
+                            ) from error
+                    raise
                 if error.reason not in {
                     "STREAM_PENDING_EXISTS",
                     "STREAM_NOT_STARTED",
@@ -475,7 +492,7 @@ class ContinuousStreamRunner:
         self, prediction: Prediction, observation: ExactObservation
     ) -> None:
         from robot_contracts.models import Target
-        from robot_contracts.trajectory import validate_reference_inputs
+        from robot_trajectory.spline_math import validate_reference_inputs
 
         if prediction.context != self.context:
             raise ContractError("STREAM_CONTEXT_MISMATCH", "prediction context differs")

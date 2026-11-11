@@ -38,11 +38,16 @@ REQUIRED_MODULES = (
     "robot_api_msgs",
     "robot_api_msgs.msg",
     "robot_api_msgs.srv",
+    "sim_api_msgs",
+    "sim_api_msgs.msg",
+    "sim_api_msgs.srv",
 )
 INSPECT_MODULES = (
     "robot_contracts",
     "robot_ros_support",
     "robot_run_logging",
+    "robot_trajectory",
+    "sim_api_msgs",
     "robot_api_msgs",
     "dual_arm_runtime",
 )
@@ -206,17 +211,19 @@ def run_colcon(project_root: Path, build_root: Path) -> int:
     return completed.returncode
 
 
-def generated_module_root(install_root: Path) -> Path:
+def generated_module_root(install_root: Path, name: str = "robot_api_msgs") -> Path:
     """Find the generated ament Python module root below one install base."""
     install = Path(install_root)
-    matches = sorted(install.glob("robot_api_msgs/lib/python*/site-packages/robot_api_msgs"))
+    matches = sorted(install.glob(f"{name}/lib/python*/site-packages/{name}"))
     candidates = [path for path in matches if path.is_dir()]
     if len(candidates) != 1:
         raise DevWorkspaceError(
-            f"expected one generated robot_api_msgs module below {install}, found {len(candidates)}"
+            f"expected one generated {name} module below {install}, found {len(candidates)}"
         )
     package = candidates[0]
     for module in REQUIRED_MODULES:
+        if module.split(".")[0] != name:
+            continue
         parts = module.split(".")[1:]
         directory = package.joinpath(*parts)
         if not (directory / "__init__.py").is_file():
@@ -246,7 +253,9 @@ def _environment() -> dict[str, object]:
 
 def _marker_document(build_root: Path, *, digest: str, files: int) -> dict[str, object]:
     root = Path(build_root).resolve()
-    package = generated_module_root(root / "install")
+    packages = {name: generated_module_root(root / "install", name)
+                for name in ("robot_api_msgs", "sim_api_msgs")}
+    package = packages["robot_api_msgs"]
     return {
         "schema_version": MARKER_SCHEMA_VERSION,
         "contracts": {
@@ -259,6 +268,8 @@ def _marker_document(build_root: Path, *, digest: str, files: int) -> dict[str, 
             "directory": "install",
             "setup": "install/setup.bash",
             "module_root": package.relative_to(root).as_posix(),
+            "module_roots": {name: path.relative_to(root).as_posix()
+                             for name, path in packages.items()},
         },
         "finished_at": datetime.now(UTC).isoformat(timespec="seconds"),
     }
@@ -495,7 +506,15 @@ def verify_workspace(project_root: Path, build_root: Path) -> dict[str, object]:
         raise ContractCheckError(
             f"generated ROS install setup is missing: {setup}; rebuild with: {BUILD_COMMAND}"
         )
+    module_roots = install.get("module_roots")
+    if not isinstance(module_roots, dict):
+        raise ContractCheckError(
+            f"missing module roots: {marker_path}; rebuild with: {BUILD_COMMAND}"
+        )
     for module in REQUIRED_MODULES:
+        module_root = _relative_install_path(
+            root, module_roots.get(module.split(".")[0]), "module root"
+        )
         parts = module.split(".")[1:]
         if not (module_root.joinpath(*parts) / "__init__.py").is_file():
             raise ContractCheckError(
@@ -510,6 +529,8 @@ def _import_paths(project_root: Path, build_root: Path) -> dict[str, str]:
         "robot_contracts": project_root / "contracts/python/src",
         "robot_ros_support": project_root / "libraries/ros_support/src",
         "robot_run_logging": project_root / "libraries/run_logging/src",
+        "robot_trajectory": project_root / "libraries/trajectory/src",
+        "sim_api_msgs": build_root / "install",
         "dual_arm_runtime": project_root / "runtime/ros2/ros/dual_arm_runtime",
         "robot_api_msgs": build_root / "install",
     }

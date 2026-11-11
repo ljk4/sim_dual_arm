@@ -10,6 +10,7 @@
 # robot.render_quality.enabled：是否在同一次渲染快照上统计可见像素质量。
 # robot.velocity_feedforward：是否启用参考速度前馈，不改变硬限位。
 # robot.reliable_sensors：是否使用可靠传感器 QoS。
+# robot.visualization_enabled：可选，默认 true；并行采集自动设为 false，关闭 viewer 状态发布。
 # robot.task_mode：teacher 表示程序示教，inference 表示无教师推理。
 # run.seed：默认场景复位种子；prepare 会用命令行 seed 覆盖。
 # run.capture_hz：完整状态/三路图像快照频率，单位 Hz。

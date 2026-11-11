@@ -29,9 +29,7 @@ services:
       - ../../../.build:/workspace/.build
       - ../../../.build:/build
       - ../../../var:/data
-      - ../../../.build/generated/policy-sdk:/opt/policy-sdk:ro
       - ../../../third_party:/third_party:ro
-      - ../../../.build/cache:/opt/learning-cache:ro
     networks: [learning]
 
 networks:

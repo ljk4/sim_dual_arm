@@ -17,9 +17,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from robot_contracts.models import ContractError, RobotProfile, RunContext, Target
-from robot_contracts.trajectory import validate_reference_inputs
+from robot_trajectory.spline_math import validate_reference_inputs
 
-from ...kinematics import (
+from robot_backend_sim.config.kinematics_config import KinematicsCheckConfig
+from robot_backend_sim.config.motion_config import PandaControlConfig
+from robot_backend_sim.kinematics.kinematics import (
     CollisionPairSet,
     KeyPoseTarget,
     ObjectPose,
@@ -30,11 +32,9 @@ from ...kinematics import (
     measure_clearance,
     solve_key_poses,
 )
-from ...kinematics_config import KinematicsCheckConfig
-from ...motion_config import PandaControlConfig
-from ..base import TaskChunk
-from .config import PHASES, StackTaskConfig
-from .gate import TeacherFeedback, TeacherGateFact, TeacherProgress
+from robot_backend_sim.tasks.base import TaskChunk
+from robot_backend_sim.tasks.stack.config import PHASES, StackTaskConfig
+from robot_backend_sim.tasks.stack.gate import TeacherFeedback, TeacherGateFact, TeacherProgress
 
 __all__ = [
     "TeacherChunk", "TeacherError", "TeacherFeedback", "TeacherGateFact",

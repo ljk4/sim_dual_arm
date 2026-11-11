@@ -1,21 +1,19 @@
-import json
-from types import SimpleNamespace
-
-from dual_arm_runtime.task_result import task_fact_document, task_result_for_runtime
+from dual_arm_runtime.offline.audit.records import TaskFact
+from dual_arm_runtime.offline.audit.task_result import task_fact_document, task_result_for_runtime
 from robot_contracts.episodes import TaskOutcome
 
 
 def _fact(phase, reason):
-    return SimpleNamespace(
+    return TaskFact(
         phase=phase,
         failure_reason=reason,
         task_type="stack",
         task_epoch=3,
         state_seq=9,
-        sample_time=SimpleNamespace(sec=1, nanosec=2),
+        sample_time_ns=1_000_000_002,
         task_config_digest="config",
         plan_digest="plan",
-        metrics_json=json.dumps(
+        metrics=(
             {
                 "task_start_sim_time_ns": 1_000_000_000,
                 "first_satisfied_sim_time_ns": 2_000_000_000,

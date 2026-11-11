@@ -19,9 +19,9 @@ for source in (SIM_SRC, CONTRACTS_SRC):
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
 
-from robot_backend_sim.panda_io import JOINT_NAMES, Measurement, PandaIO  # noqa: E402
-from robot_backend_sim.scene import build_scene  # noqa: E402
-from robot_backend_sim.scene_config import load_scene_config  # noqa: E402
+from robot_backend_sim.config.scene_config import load_scene_config  # noqa: E402
+from robot_backend_sim.physics.panda_io import JOINT_NAMES, Measurement, PandaIO  # noqa: E402
+from robot_backend_sim.physics.scene import build_scene  # noqa: E402
 from robot_contracts.models import ContractError  # noqa: E402
 from robot_contracts.profiles import load_profile  # noqa: E402
 

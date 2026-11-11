@@ -26,24 +26,24 @@ for source in (ROOT / "simulation/mujoco/src", ROOT / "contracts/python/src"):
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
 
-from robot_backend_sim.control import ControlSession  # noqa: E402
-from robot_backend_sim.control_state import PreparedControlCommand  # noqa: E402
-from robot_backend_sim.follower_config import load_follower_config  # noqa: E402
-from robot_backend_sim.follower_plan import prepare_follower_plan  # noqa: E402
-from robot_backend_sim.motion_config import load_control_config  # noqa: E402
-from robot_backend_sim.motion_controller import MotionController, Phase  # noqa: E402
-from robot_backend_sim.panda_io import PandaIO  # noqa: E402
-from robot_backend_sim.scene import build_scene  # noqa: E402
-from robot_backend_sim.scene_config import load_scene_config  # noqa: E402
-from robot_backend_sim.stream_config import StreamConfig  # noqa: E402
-from robot_backend_sim.stream_schedule import next_grid_time  # noqa: E402
+from robot_backend_sim.config.follower_config import load_follower_config  # noqa: E402
+from robot_backend_sim.config.motion_config import load_control_config  # noqa: E402
+from robot_backend_sim.config.scene_config import load_scene_config  # noqa: E402
+from robot_backend_sim.config.stream_config import StreamConfig  # noqa: E402
+from robot_backend_sim.control.control import ControlSession  # noqa: E402
+from robot_backend_sim.control.control_state import PreparedControlCommand  # noqa: E402
+from robot_backend_sim.follower.follower_plan import prepare_follower_plan  # noqa: E402
+from robot_backend_sim.motion.motion_controller import MotionController, Phase  # noqa: E402
+from robot_backend_sim.motion.stream_schedule import next_grid_time  # noqa: E402
+from robot_backend_sim.physics.panda_io import PandaIO  # noqa: E402
+from robot_backend_sim.physics.scene import build_scene  # noqa: E402
 from robot_contracts.action_chunks import ActionWindow  # noqa: E402
 from robot_contracts.control import ControlCommand  # noqa: E402
 from robot_contracts.models import ContractError, RunContext, Target  # noqa: E402
 from robot_contracts.profiles import load_profile  # noqa: E402
-from robot_contracts.trajectory import (  # noqa: E402
-    PreparedFollowerPlan,  # noqa: E402
-    normalize_follower_positions,  # noqa: E402
+from robot_trajectory.follower import (  # noqa: E402
+    PreparedFollowerPlan,
+    normalize_follower_positions,
 )
 
 
@@ -85,7 +85,9 @@ def control_config():
 
 @pytest.fixture(scope="module")
 def follower_config():
-    return load_follower_config(FOLLOWER_PATH)
+    # This regression exercises eleven 5-target handoffs over a 60-point source.
+    # Production now uses ten targets; keep this fixture independent of that recipe.
+    return replace(load_follower_config(FOLLOWER_PATH), target_count=5)
 
 
 @pytest.fixture(scope="module")
@@ -549,7 +551,11 @@ def test_eleven_continuous_follower_chunks_retire_and_final_extension(
         assert_close(tick.reference_velocities, expected_velocities)
         normalized = normalize_follower_positions(expected_positions, profile.joints)
         assert_close(tick.reference_positions, normalized.applied_positions, atol=1e-12)
-        assert_close(tick.reference_corrections, normalized.corrections, atol=1e-12)
+        if normalized.has_correction:
+            assert_close(tick.reference_corrections, normalized.corrections, atol=1e-12)
+        else:
+            # The controller already encodes an unchanged reference as an empty correction tuple.
+            assert tick.reference_corrections == ()
         for position, joint in zip(tick.reference_positions, profile.joints, strict=True):
             assert joint.minimum <= position <= joint.maximum
         assert any(

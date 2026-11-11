@@ -12,7 +12,6 @@ from __future__ import annotations
 import threading
 import uuid
 from collections.abc import Callable
-from dataclasses import asdict
 from pathlib import Path
 
 from robot_contracts.episodes import (
@@ -373,7 +372,7 @@ class EpisodeRunner:
             "source": str(info.backend_kind),
             "test_only": bool(info.test_only) or policy_test_only,
             "task_id": task_id,
-            "run_context": asdict(actual_context),
+            "run_context": actual_context.canonical_dict(),
             "reset_used": bool(self._configuration.recipe.reset.enabled),
             "reset_seed": self._configuration.recipe.reset.seed,
         }
@@ -503,7 +502,7 @@ class EpisodeRunner:
         )
 
     def _finish(self, episode_id: str) -> None:
-        from dual_arm_runtime.episode_finalization import finish
+        from dual_arm_runtime.offline.episode_finalization import finish
 
         finish(self, episode_id)
 

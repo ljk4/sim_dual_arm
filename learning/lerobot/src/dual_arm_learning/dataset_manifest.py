@@ -12,6 +12,7 @@ import numpy as np
 from PIL import Image
 
 from .config import DatasetConfig
+from .console_progress import ConsoleProgress
 from .dataset_common import (
     ExportError,
     canonical_hash,
@@ -54,6 +55,7 @@ def _write_split(
     config: DatasetConfig,
     joint_names: tuple[str, ...],
     profile_id: str,
+    progress: ConsoleProgress | None = None,
 ) -> None:
     from lerobot.configs.video import RGBEncoderConfig
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
@@ -83,8 +85,12 @@ def _write_split(
         image_writer_threads=config.image_writer_threads,
     )
     try:
-        for episode in episodes:
+        for episode_index, episode in enumerate(episodes):
             for _index, row in enumerate(episode.rows):
+                if progress is not None and _index % 10 == 0:
+                    progress.detail(
+                        f"第 {episode_index + 1} 条 · {_index + 1}/{len(episode.rows)} 帧"
+                    )
                 frame: dict[str, Any] = {
                     "observation.state": row["_vectors"]["measured"].astype(np.float32),
                     "observation.velocity": row["_vectors"]["velocity"].astype(np.float32),
@@ -108,8 +114,14 @@ def _write_split(
                             raise ExportError(f"rgb: {entry['path']} is not RGB")
                         frame[f"observation.images.{camera}"] = np.asarray(image, dtype=np.uint8)
                 dataset.add_frame(frame)
+            if progress is not None:
+                progress.detail(f"第 {episode_index + 1} 条 · 编码视频")
             dataset.save_episode(parallel_encoding=False)
+            if progress is not None:
+                progress.advance()
     finally:
+        if progress is not None:
+            progress.detail("整理数据集文件")
         dataset.finalize()
 
 
@@ -286,7 +298,7 @@ def _manifest_body(
             "path": str(config_path.resolve()) if config_path else "",
             "sha256": file_sha256(config_path) if config_path else "",
             "dataset_config_sha256": hashlib.sha256(
-                json.dumps(config.to_document(), sort_keys=True).encode()
+                json.dumps(config.model_dump(mode="json"), sort_keys=True).encode()
             ).hexdigest(),
         },
         "profile": {

@@ -1,13 +1,10 @@
 import json
-import sys
 from pathlib import Path
 
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "runtime/ros2/scripts"))
-import campaign  # noqa: E402
-import evaluate  # noqa: E402
+from dual_arm_runtime.offline import campaign, evaluate  # noqa: E402
 
 
 def _write(path: Path, value: object) -> None:

@@ -11,8 +11,8 @@ __all__ = ["task_state_message"]
 
 def task_state_message(state: TaskState) -> Any:
     """Copy one immutable generic state into the diagnostic ROS topic."""
-    from robot_api_msgs.msg import TaskState as TaskStateMessage
     from robot_ros_support.conversions import context_message, stamp
+    from sim_api_msgs.msg import TaskState as TaskStateMessage
 
     if state.context is None:
         raise ValueError("task state has no context")

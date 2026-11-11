@@ -1,11 +1,6 @@
-import sys
-from pathlib import Path
 
-_TOOLS = Path(__file__).resolve().parents[2] / "runtime/ros2/scripts"
-if str(_TOOLS) not in sys.path:
-    sys.path.insert(0, str(_TOOLS))
 
-import export_episode  # noqa: E402
+from dual_arm_runtime.offline import export_episode
 
 
 def _event(sim_time_ns, pixels):

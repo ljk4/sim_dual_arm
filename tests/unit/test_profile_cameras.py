@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
-from robot_contracts.models import CameraSpec, ContractError
+from robot_contracts.models import CameraSpec, ContractError, RobotProfile
 from robot_contracts.profiles import (
     load_document,
     load_profile,
@@ -15,7 +15,6 @@ from robot_contracts.profiles import (
 
 ROOT = Path(__file__).resolve().parents[2]
 SCHEMAS = ROOT / "contracts/schemas"
-V1_PROFILE = ROOT / "profiles/robots/mock_dual_arm_v1/profile.json"
 PANDA_PROFILE = ROOT / "profiles/robots/panda_stack_v1/profile.json"
 PANDA_OBSERVATION = ROOT / "profiles/observations/panda_rgb_joint_v1.json"
 PANDA_ACTION = ROOT / "profiles/actions/panda_joint_position_v1.json"
@@ -31,16 +30,16 @@ def _write(tmp_path, document, name="profile.json"):
     return path
 
 
-def test_v1_profile_keeps_original_hash_and_normalizes_one_camera():
-    raw = load_document(V1_PROFILE)
-    profile = load_profile(V1_PROFILE, SCHEMAS)
+def test_v2_profile_supports_one_camera_and_preserves_the_source_hash(tmp_path):
+    document = _panda_document()
+    document["cameras"] = document["cameras"][:1]
+    path = _write(tmp_path, document)
+    profile = load_profile(path, SCHEMAS)
 
-    assert profile.digest == semantic_hash(raw)
-    assert profile.test_only is True
-    assert profile.camera_names == ("front",)
-    assert profile.cameras == (CameraSpec("front", 64, 48, "front_optical_frame", ""),)
-    # A version-specific schema directory remains a valid call site.
-    assert load_profile(V1_PROFILE, SCHEMAS / "v1").digest == profile.digest
+    assert profile.schema_version == 2
+    assert profile.digest == semantic_hash(document)
+    assert profile.camera_names == ("global",)
+    assert load_profile(path, SCHEMAS / "v1") == profile
 
 
 def test_v2_profile_is_an_immutable_multi_camera_view():
@@ -93,8 +92,8 @@ def test_panda_bindings_have_si_units_and_exact_orders():
     ]
 
 
-@pytest.mark.parametrize("version", [True, False, "2", 0, 3, None])
-def test_unknown_or_boolean_profile_version_is_rejected(tmp_path, version):
+@pytest.mark.parametrize("version", [True, False, "2", 0, 1, 2.0, 3, None])
+def test_non_v2_profile_version_is_rejected(tmp_path, version):
     document = _panda_document()
     document["schema_version"] = version
     path = _write(tmp_path, document)
@@ -239,9 +238,41 @@ def test_v2_camera_name_accepts_safe_topic_basenames(tmp_path, name):
     assert load_profile(path, SCHEMAS).cameras[0].name == name
 
 
-def test_v1_legacy_camera_name_is_not_retroactively_restricted(tmp_path):
-    document = deepcopy(load_document(V1_PROFILE))
-    document["camera"]["name"] = "legacy/camera"
-    path = _write(tmp_path, document, "legacy.json")
+def test_legacy_camera_object_is_rejected_by_file_and_model_loaders(tmp_path):
+    document = _panda_document()
+    document["camera"] = document.pop("cameras")[0]
+    path = _write(tmp_path, document)
 
-    assert load_profile(path, SCHEMAS).camera_names == ("legacy/camera",)
+    with pytest.raises(ContractError, match="camera"):
+        load_profile(path, SCHEMAS)
+    with pytest.raises(ContractError, match="cameras"):
+        RobotProfile.validate_dict(document)
+    with pytest.raises(ContractError, match="cameras"):
+        normalize_cameras(document)
+
+
+@pytest.mark.parametrize("version", [1, True, 2.0])
+def test_direct_profile_model_rejects_non_v2_versions(version):
+    document = _panda_document()
+    document["schema_version"] = version
+    with pytest.raises(ContractError, match="schema_version"):
+        RobotProfile.validate_dict(document)
+
+
+@pytest.mark.parametrize("digest", [None, "", "0" * 63])
+def test_direct_camera_model_requires_a_calibration_digest(digest):
+    document = _panda_document()["cameras"][0]
+    if digest is None:
+        del document["calibration_digest"]
+    else:
+        document["calibration_digest"] = digest
+    with pytest.raises(ContractError, match="calibration_digest"):
+        CameraSpec.validate_dict(document)
+
+
+def test_profile_model_defaults_to_v2_but_files_require_an_explicit_version(tmp_path):
+    document = _panda_document()
+    del document["schema_version"]
+    assert RobotProfile.validate_dict(document).schema_version == 2
+    with pytest.raises(ContractError, match="schema_version"):
+        load_profile(_write(tmp_path, document), SCHEMAS)

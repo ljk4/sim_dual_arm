@@ -12,7 +12,8 @@ from robot_api_msgs.msg import ReferenceSegment as ReferenceSegmentMessage
 from robot_contracts.action_chunks import ActionWindow
 from robot_contracts.models import ContractError
 from robot_contracts.stream_request import plan_from_segments
-from robot_contracts.trajectory import CubicSegment, FollowerReference
+from robot_contracts.trajectory.follower_reference import FollowerReference
+from robot_contracts.trajectory.spline import CubicSegment
 
 from .stream_conversions import (
     anchor_from_message,

@@ -1,5 +1,5 @@
 import pytest
-from dual_arm_runtime.policy_audit_rules import require_completed_chunks
+from dual_arm_runtime.offline.audit.policy_audit_rules import require_completed_chunks
 from robot_contracts.models import ContractError
 
 

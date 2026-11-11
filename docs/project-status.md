@@ -30,7 +30,7 @@
 
 ## 3. 已完成阶段总览
 
-完整历史演进见[项目历史](history/README.md)，六阶段代码重构细节见[重构任务书](refactoring-tasks/README.md)。
+完整历史演进见[项目历史](history/README.md)，当前架构任务与迁移验收见[架构任务书](architecture-tasks/README.md)。
 
 | 阶段 | 核心进展 | 验证结果与边界 |
 | --- | --- | --- |
@@ -50,6 +50,8 @@
    - 通过引入 **10 点（0.5 s）执行窗口**、**绝对仿真时间预测融合**、**任务前 2.0 s 稳定等待** 以及 **Ruckig 零纳秒前缀折叠与 `1e-9 m/s` 静止速度容差统一**，20K 步模型已在种子 `30600` 的同场景修复回归中完成真实物理堆叠（详细分析见 [ACT 推理修复经验](experiments/2026-11-03-act-inference-execution-repair.md)）。
    - 该次成功中物理任务判定 `task_success=true`，但因右腕相机视角下底块存在 1.85 s 遮挡（超出 0.35 s 阈值），图像质量门禁记为 `quality_qualified=false`。
    - 当前工作区保留用于快速验证链路的 5K 步模型包；5K 模型可跑通完整推理闭环，但在部分种子下仍会出现跟随偏差超限（`FOLLOWER_DEVIATION_EXCEEDED`）或夹持阶段跟踪超时（`TRACKING_TIMEOUT`）。
+   - 2026-11-11 复核最近 8 局并修复制动前缀导出、夹持接触误判和停止原因掩盖。初次两局完整回归均录制完整、未复现这些工程错误，但均因方块掉落失败。证据与边界见[本次排查记录](experiments/2026-11-11-inference-execution-failures.md)。
+   - 后续同种子 `20001` 的用户运行出现一次真实 `TRACKING_TIMEOUT` 和一次任务成功（成功条件持续 2 s；未做导出图像质量门禁）。数据逐行检查未发现标签转换错误；新增诊断发现融合关闭延迟、跟随参考桌面净空不足及模型过渡误差，仍需分开验证，不能视为稳定成功。
 2. **代码与工程架构状态**：
    - 六阶段全量重构已完成：废弃的 S1 Mock 后端、非受限 SciPy 样条接口、旧版 Schema（v2～v4）及 `Native*` 命名前缀已彻底清理。
    - 训练端已默认切换为 `PyAV` 视频解码、`default_collate` 批张量直出、多进程 `num_workers`/`pin_memory` 与 CUDA `torch.amp`（bfloat16）混合精度训练。

@@ -4,6 +4,7 @@
 
 - **MuJoCo 物理与场景**：`test_sim_scene.py`、`test_panda_io.py`、`test_scene_visibility.py`、`test_scene_kinematics.py`。
 - **受限跟随与 ROS 2 协议**：`test_follower_execution.py`、`test_follower_protocol_ros.py`、`test_backend_ros.py`。
+- **运行端接口隔离与清理**：`test_optional_sim_interfaces_ros.py`、`test_task_prepare_ros.py`、`test_runtime_cleanup_ros.py`、`test_export_previews_ros.py`。
 - **学习端 CPU 生命周期**：`test_learning_cpu_lifecycle.py`。
 
 集成测试须在提供对应依赖（ROS 2、MuJoCo/EGL 或 PyTorch/LeRobot）的容器环境中执行。

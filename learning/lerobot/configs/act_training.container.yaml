@@ -44,7 +44,7 @@ model:
   # strictly, so model construction can never trigger an implicit download.
   pretrained_backbone_weights: null
   weights:
-    path: /opt/learning-cache/torch/hub/checkpoints/resnet18-f37072fd.pth
+    path: /build/cache/torch/hub/checkpoints/resnet18-f37072fd.pth
 training:
   batch_size: 32
   num_workers: 4

@@ -1,14 +1,10 @@
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+from dual_arm_runtime.offline import export_episode
+from dual_arm_runtime.offline.audit import label_export
 from robot_contracts.profiles import load_profile
-
-_TOOLS = Path(__file__).resolve().parents[2] / "runtime/ros2/scripts"
-if str(_TOOLS) not in sys.path:
-    sys.path.insert(0, str(_TOOLS))
-
-import export_episode  # noqa: E402
 
 PROFILE = load_profile(
     Path(__file__).resolve().parents[2] / "profiles/robots/panda_stack_v1/profile.json",
@@ -96,3 +92,13 @@ def test_rebuilds_20hz_frames_with_4hz_raw_predictions():
     assert len(frame_map) == 52
     assert rows[0]["capture_source"] == "state_rebuild"
     assert rows[0]["raw_source_observation_id"] in {1, 6, 11, 16, 21, 26, 31, 36}
+
+
+@pytest.fixture(autouse=True)
+def sample_test_reference(monkeypatch):
+    """Explicit test_only sampler for the synthetic reference used in these label tests."""
+    monkeypatch.setattr(
+        label_export,
+        "applied_follower_sample",
+        lambda reference, stamp, profile: reference.applied_sample_at(stamp, profile),
+    )

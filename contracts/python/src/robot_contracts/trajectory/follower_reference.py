@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
-from collections.abc import Sequence
 from typing import Annotated, ClassVar, Self
 
 from pydantic import BeforeValidator, Field, model_validator
 
+from robot_contracts.trajectory.constants import MAX_HORIZON_NS, MAX_JOINTS
+from robot_contracts.trajectory.follower import FollowerLimitFlags
+from robot_contracts.trajectory.spline import ReferencePlan
+
 from ..action_chunks import MAX_TARGET_COUNT, ActionWindow, ChunkAnchor
-from ..models import ContractError, FloatVector, JointSpec, RobotProfile
+from ..models import ContractError, FloatVector
 from ..stream_request import (
     REQUEST_STREAM_FIRST,
     REQUEST_STREAM_NEXT,
@@ -24,18 +26,7 @@ from ..validation import (
     as_tuple,
     contract_error,
 )
-from .follower import (
-    FOLLOWER_ALGORITHM_VERSION,
-    FollowerLimitFlags,
-    PreparedFollowerPlan,
-    normalize_follower_positions,
-)
-from .spline import (
-    MAX_HORIZON_NS,
-    MAX_JOINTS,
-    ReferencePlan,
-    ReferenceSample,
-)
+from .constants import FOLLOWER_ALGORITHM_VERSION
 
 FOLLOWER_SAMPLER_VERSION = "follower-sampler-v1"
 FOLLOWER_NORMALIZATION_VERSION = "hard-boundary-normalization-v1"
@@ -222,77 +213,9 @@ class FollowerReference(StrictContractModel):
     flags = property(lambda self: FollowerLimitFlags(
         self.velocity_limited, self.acceleration_limited, self.boundary_preserved))
 
-    def sample_at(self, sim_time_ns: int) -> ReferenceSample:
-        """Return the untouched coefficient sample."""
-        return self._plan_sample_at(sim_time_ns)
 
-    def applied_sample_at(
-        self, sim_time_ns: int, profile_or_joints: RobotProfile | Sequence[JointSpec],
-    ) -> FollowerAppliedSample:
-        """Reconstruct the physically applied reference and its corrections."""
-        joints = _joints_from(profile_or_joints)
-        sample = self.sample_at(sim_time_ns)
-        normalized = normalize_follower_positions(sample.positions, joints)
-        return FollowerAppliedSample(
-            sampled_positions=normalized.sampled_positions,
-            applied_positions=normalized.applied_positions,
-            corrections=normalized.corrections,
-            sampled_velocities=sample.velocities,
-            sampled_accelerations=sample.accelerations,
-        )
 
-    def _plan_sample_at(self, sim_time_ns: int) -> ReferenceSample:
-        if isinstance(sim_time_ns, bool) or not isinstance(sim_time_ns, int):
-            raise _invalid("sim_time_ns", "must be an integer")
-        if sim_time_ns < self.start_sim_time_ns or sim_time_ns > self.end_sim_time_ns:
-            raise ContractError(
-                "REFERENCE_EXPIRED",
-                f"sim_time_ns {sim_time_ns} is outside "
-                f"[{self.start_sim_time_ns}, {self.end_sim_time_ns}]")
-        return self.plan.sample_interval(sim_time_ns - self.start_sim_time_ns)
 
-    @classmethod
-    def from_prepared(
-        cls,
-        prepared: PreparedFollowerPlan,
-        request: StreamRequest,
-        *,
-        motion_seq: int,
-        accepted_sim_time_ns: int,
-        accepted_wall_time_ns: int,
-        joint_names: Sequence[str] | None = None,
-    ) -> FollowerReference:
-        """Capture one prepared follower plan as an immutable accepted record."""
-        if not isinstance(prepared, PreparedFollowerPlan):
-            raise _invalid("prepared", "must be a PreparedFollowerPlan")
-        if not isinstance(request, StreamRequest):
-            raise _invalid("request", "must be a StreamRequest")
-        names = prepared.joint_names if joint_names is None else tuple(joint_names)
-        return cls(
-            request=request,
-            motion_seq=motion_seq,
-            accepted_sim_time_ns=accepted_sim_time_ns,
-            accepted_wall_time_ns=accepted_wall_time_ns,
-            joint_names=names,
-            plan=prepared.plan,
-            anchor=prepared.anchor,
-            window=prepared.window,
-            max_accelerations=prepared.max_accelerations,
-            max_target_deviation_limits=prepared.max_target_deviation_limits,
-            raw_terminal_velocities=prepared.raw_terminal_velocities,
-            restricted_terminal_velocities=prepared.restricted_terminal_velocities,
-            actual_terminal_positions=prepared.actual_terminal_positions,
-            actual_terminal_velocities=prepared.actual_terminal_velocities,
-            actual_terminal_accelerations=prepared.actual_terminal_accelerations,
-            max_target_deviations=prepared.max_target_deviations,
-            is_final=prepared.is_final,
-            requested_window_ns=prepared.requested_window_ns,
-            ruckig_duration_ns=prepared.ruckig_duration_ns,
-            duration_grid_ns=prepared.duration_grid_ns,
-            velocity_limited=prepared.flags.velocity_limited,
-            acceleration_limited=prepared.flags.acceleration_limited,
-            boundary_preserved=prepared.flags.boundary_preserved,
-        )
 
     def to_document(self) -> dict[str, object]:
         document = self.model_dump(mode="json")
@@ -300,20 +223,8 @@ class FollowerReference(StrictContractModel):
         return document
 
 
-def _joints_from(profile_or_joints: RobotProfile | Sequence[JointSpec]) -> tuple[JointSpec, ...]:
-    if isinstance(profile_or_joints, RobotProfile):
-        return tuple(profile_or_joints.joints)
-    joints = tuple(profile_or_joints)
-    if not joints or any(not isinstance(joint, JointSpec) for joint in joints):
-        raise _invalid("joints", "must contain JointSpec values")
-    return joints
 
 
-def _same_vector(left: Sequence[float], right: Sequence[float]) -> bool:
-    return len(left) == len(right) and all(
-        math.isclose(a, b, rel_tol=0.0, abs_tol=_DEVIATION_ATOL)
-        for a, b in zip(left, right, strict=True)
-    )
 
 
 class FollowerValidationLimits(StrictContractModel):
@@ -338,81 +249,3 @@ class FollowerValidationLimits(StrictContractModel):
             if any(value <= 0.0 for value in values):
                 raise contract_error(f"limits.{name}", "must be positive")
         return self
-
-
-def validate(record: FollowerReference, profile: RobotProfile,
-             limits: FollowerValidationLimits) -> PreparedFollowerPlan:
-    if not isinstance(record, FollowerReference):
-        raise _invalid("record", "must be a FollowerReference")
-    if not isinstance(profile, RobotProfile):
-        raise ContractError("PROFILE_MISMATCH", "profile must be a RobotProfile")
-    if not isinstance(limits, FollowerValidationLimits):
-        raise _invalid("limits", "must be a FollowerValidationLimits")
-    if limits.joint_names != tuple(profile.joint_names):
-        raise ContractError("PROFILE_MISMATCH", "limits joint order differs from profile")
-    if record.joint_names != limits.joint_names:
-        raise ContractError("PROFILE_MISMATCH", "record joint order differs from limits")
-    if record.anchor.robot_profile_hash != profile.digest:
-        raise ContractError("PROFILE_MISMATCH", "record anchor profile digest differs")
-    if not _same_vector(limits.max_accelerations, record.max_accelerations):
-        raise ContractError("FOLLOWER_LIMIT_MISMATCH",
-                            "record max_accelerations differ from the validation limits")
-    if not _same_vector(limits.max_target_deviations, record.max_target_deviation_limits):
-        raise ContractError("FOLLOWER_LIMIT_MISMATCH",
-                            "record deviation limits differ from the validation limits")
-    if record.window.target_count != limits.target_count:
-        raise ContractError("FOLLOWER_LIMIT_MISMATCH",
-                            "record window.target_count differs from the validation limits")
-    if record.request.target_count != limits.target_count:
-        raise ContractError("FOLLOWER_LIMIT_MISMATCH",
-                            "raw request target_count differs from the validation limits")
-    if record.duration_grid_ns != limits.duration_grid_ns:
-        raise ContractError("FOLLOWER_GRID_MISMATCH",
-                            "record duration grid differs from the validation limits")
-    if (record.requested_window_ns > limits.max_terminal_tail_duration_ns
-            or record.plan.duration_ns > limits.max_terminal_tail_duration_ns):
-        raise ContractError("FOLLOWER_HORIZON_EXCEEDED",
-                            "record horizon exceeds the configured terminal tail")
-    if record.is_final != record.request.settle_at_end:
-        raise _invalid("is_final", "differs from the raw request settle_at_end flag")
-    if not (record.request.observation_time_ns <= record.accepted_sim_time_ns
-            <= record.anchor.start_sim_time_ns
-            and record.accepted_sim_time_ns <= record.request.trajectory.accept_before_ns):
-        raise _invalid("accepted_sim_time_ns",
-                       "must follow the observation and precede both deadlines")
-    rebuilt = PreparedFollowerPlan(
-        anchor=record.anchor,
-        window=record.window,
-        plan=record.plan,
-        joints=tuple(profile.joints),
-        max_accelerations=record.max_accelerations,
-        max_target_deviation_limits=record.max_target_deviation_limits,
-        raw_terminal_velocities=record.raw_terminal_velocities,
-        restricted_terminal_velocities=record.restricted_terminal_velocities,
-        is_final=record.is_final,
-        requested_window_ns=record.requested_window_ns,
-        ruckig_duration_ns=record.ruckig_duration_ns,
-        duration_grid_ns=record.duration_grid_ns,
-    )
-    if rebuilt.plan != record.plan:
-        raise _invalid("plan", "reconstructed plan differs")
-    for name in (
-        "actual_terminal_positions", "actual_terminal_velocities",
-        "actual_terminal_accelerations", "max_target_deviations",
-        "raw_terminal_velocities", "restricted_terminal_velocities",
-    ):
-        if not _same_vector(getattr(record, name), getattr(rebuilt, name)):
-            raise _invalid(name, "differs from the independently rebuilt DSH-030 plan")
-    if record.flags != rebuilt.flags:
-        raise _invalid("flags", "limit flags differ from the independently rebuilt plan")
-    if record.extension_ns != rebuilt.extension_ns:
-        raise _invalid("extension_ns", "extended horizon differs from the rebuilt plan")
-    return rebuilt
-
-
-__all__ = [
-    "DIGEST_HEX_LENGTH", "FOLLOWER_NORMALIZATION_VERSION", "FOLLOWER_REFERENCE_DIGEST_VERSION",
-    "FOLLOWER_REFERENCE_KINDS", "FOLLOWER_SAMPLER_VERSION",
-    "FollowerAppliedSample", "FollowerReference", "FollowerValidationLimits",
-    "compute_follower_reference_digest", "validate",
-]

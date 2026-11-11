@@ -41,8 +41,9 @@ def test_standalone_compose_files_share_only_required_networks():
 
 
 def test_business_scripts_still_refuse_host_execution():
-    for service_name, path in COMPOSES.items():
-        script = path.parent.parent / "scripts/run.sh"
+    scripts = [path.parent.parent / "scripts/run.sh" for path in COMPOSES.values()]
+    scripts.append(ROOT / "runtime/ros2/scripts/record.sh")
+    for script in scripts:
         result = subprocess.run(
             ["bash", str(script), "--help"],
             cwd=ROOT,
@@ -51,5 +52,25 @@ def test_business_scripts_still_refuse_host_execution():
             text=True,
             timeout=10,
         )
-        assert result.returncode == 2, service_name
+        assert result.returncode == 2, script
         assert "must run inside a project container" in result.stderr
+
+
+def test_parallel_entry_shows_help_on_host_without_starting_docker():
+    result = subprocess.run(
+        ["bash", str(ROOT / "runtime/ros2/scripts/record_parallel.sh"), "--help"],
+        env={**os.environ, "PROJECT_CONTAINER": "0"},
+        capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == 0
+    assert "--workers" in result.stdout and "--count" in result.stdout
+
+
+def test_parallel_entry_explains_host_requirement_inside_container():
+    result = subprocess.run(
+        ["bash", str(ROOT / "runtime/ros2/scripts/record_parallel.sh"), "--help"],
+        env={**os.environ, "PROJECT_CONTAINER": "1"},
+        capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == 2
+    assert "宿主机" in result.stderr

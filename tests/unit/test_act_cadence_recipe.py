@@ -6,8 +6,8 @@ from pathlib import Path
 
 import yaml
 from dual_arm_runtime.runtime_config import load_runtime_configuration
-from robot_backend_sim.backend_config import load_backend_config
-from robot_backend_sim.follower_config import load_follower_config
+from robot_backend_sim.config.backend_config import load_backend_config
+from robot_backend_sim.config.follower_config import load_follower_config
 
 ROOT = Path(__file__).resolve().parents[2]
 FOLLOWER = ROOT / "profiles/control/panda_follower_v1.yaml"

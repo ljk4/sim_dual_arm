@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import dataclasses
 import json
 import sys
+import time
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -13,6 +15,7 @@ from .budget import BudgetError, BudgetLedger
 from .bundle import BundleError, export_bundle, load_bundle
 from .checkpoints import CheckpointError
 from .config import ConfigError, load_dataset_config, load_training_config
+from .console_progress import OperatorConsole
 from .dataset import ExportError, convert
 from .sample_filter import (
     FilterError,
@@ -62,6 +65,13 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--data-root", type=Path, default=None)
     train_parser.add_argument("--allow-synthetic", action="store_true")
 
+    for command_parser in (convert_parser, train_parser):
+        command_parser.add_argument(
+            "--progress", action=argparse.BooleanOptionalAction, default=False,
+            help="show concise operator progress and send detailed output to a log file",
+        )
+        command_parser.add_argument("--log-file", type=Path, help="detail log with --progress")
+
     filter_parser = sub.add_parser(
         "filter-anchors", help="write an auditable static-anchor sampling mask"
     )
@@ -108,17 +118,24 @@ def _training_config(args: argparse.Namespace) -> object:
         args.project_root,
     )
     if getattr(args, "mode", None):
-        config = dataclasses.replace(config, mode=args.mode)
+        config = config.model_copy(update={"mode": args.mode})
     if getattr(args, "data_root", None):
         data_root = args.data_root
         if not data_root.is_absolute():
             data_root = args.project_root / data_root
-        config = dataclasses.replace(config, data_root=data_root)
+        config = config.model_copy(update={"data_root": data_root})
     return config
 
 
 def _resolve(path: Path, root: Path) -> Path:
     return path if path.is_absolute() else root / path
+
+
+def _operator_console(args, title, settings, default_log):
+    if not args.progress:
+        return contextlib.nullcontext(None)
+    path = args.log_file or default_log
+    return OperatorConsole(_resolve(path, args.project_root), title, settings)
 
 
 def _command_convert(args: argparse.Namespace, root: Path) -> int:
@@ -130,14 +147,28 @@ def _command_convert(args: argparse.Namespace, root: Path) -> int:
     if args.output_root is not None:
         changes["output_root"] = _resolve(args.output_root, root)
     if changes:
-        config = dataclasses.replace(config, **changes)  # type: ignore[arg-type]
-    manifest = convert(
-        select_path=config.select_path,
-        config=config,
-        config_path=config_path,
-        replace=args.replace,
-        synthetic=args.synthetic,
-    )
+        config = config.model_copy(update=changes)
+    settings = [
+        f"清单：{config.select_path}", f"输出：{config.output_root}",
+        f"划分：{config.expected_training_episodes} 条训练 / "
+        f"{config.expected_validation_episodes} 条验证；{config.fps} Hz；"
+        f"{len(config.camera_names)} 路 {config.camera_width}×{config.camera_height} RGB",
+    ]
+    default_log = config.output_root.parent / "logs" / f"convert-{time.time_ns()}.log"
+    with _operator_console(args, "数据转换配置", settings, default_log) as console:
+        manifest = convert(
+            select_path=config.select_path, config=config, config_path=config_path,
+            replace=args.replace, synthetic=args.synthetic,
+            progress=None if console is None else console.progress,
+        )
+    if args.progress:
+        splits = manifest["splits"]
+        print(f"转换完成：训练 {splits['training']['episode_count']} 条 / "
+              f"{splits['training']['frame_count']} 帧；"
+              f"验证 {splits['validation']['episode_count']} 条 / "
+              f"{splits['validation']['frame_count']} 帧")
+        print(f"数据集：{config.output_root}")
+        return 0
     _print(
         {
             "status": manifest["status"],
@@ -156,12 +187,30 @@ def _command_convert(args: argparse.Namespace, root: Path) -> int:
 def _command_train(args: argparse.Namespace, root: Path) -> int:
     del root
     config = _training_config(args)
-    report = train(
-        config,
-        allow_synthetic=args.allow_synthetic,
-        resume_run=args.resume_run,
-        max_steps=args.max_steps,
+    steps = config.mode_spec.steps if args.max_steps is None else min(
+        config.mode_spec.steps, args.max_steps
     )
+    settings = [
+        f"模式：{config.mode}；设备：{config.device}；目标：{steps} step；"
+        f"batch：{config.batch_size}",
+        f"学习率：{config.lr:g}；AMP：{config.amp_dtype if config.use_amp else '关闭'}；"
+        f"数据 worker：{config.num_workers}",
+        f"数据集：{config.data_root}",
+        f"验证：每 {config.val_every_steps} step；检查点：每 {config.save_every_steps} step",
+    ]
+    default_log = config.logging.root / "_console" / f"train-{time.time_ns()}.log"
+    with _operator_console(args, "ACT 训练配置", settings, default_log) as console:
+        if console is not None:
+            console.progress.phase("校验训练数据")
+        report = train(
+            config, allow_synthetic=args.allow_synthetic, resume_run=args.resume_run,
+            max_steps=args.max_steps, progress=None if console is None else console.progress,
+        )
+    if args.progress:
+        print(f"训练结束：{report['reason']}；{report['steps']}/{steps} step；"
+              f"best_val_l1={report['best_val_l1']}；用时 {report['duration_seconds']:.1f}s")
+        print(f"run_dir: {config.checkpoint.root / report['run_id']}")
+        return 0
     _print(
         {
             "status": report["reason"],
@@ -226,9 +275,7 @@ def _command_budget(args: argparse.Namespace, root: Path) -> int:
 
 
 def _command_bundle(args: argparse.Namespace, root: Path) -> int:
-    config = load_training_config(_resolve(args.config, root), root)
-    if args.data_root is not None:
-        config = dataclasses.replace(config, data_root=_resolve(args.data_root, root))
+    config = _training_config(args)
     run = _resolve(args.run, root)
     output = _resolve(args.output, root)
     manifest = export_bundle(
@@ -303,6 +350,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         ValueError,
     ) as error:
         if args.debug:
+            raise
+        print(f"learning: {type(error).__name__}: {error}", file=sys.stderr)
+        return 1
+    except Exception as error:
+        if args.debug or not getattr(args, "progress", False):
             raise
         print(f"learning: {type(error).__name__}: {error}", file=sys.stderr)
         return 1

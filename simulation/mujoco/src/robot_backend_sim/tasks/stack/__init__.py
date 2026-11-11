@@ -10,19 +10,33 @@ from typing import Any
 from robot_contracts.models import ContractError, RobotProfile, RunContext
 from robot_contracts.task_state import TaskState
 
-from ...kinematics import extract_object_pose
-from ...scene_config import SceneConfig
-from ..base import TaskChunk, TaskChunkView, TaskPlan, TaskPrepareResult, TaskPrepareSnapshot
-from .config import StackTaskConfig, StackTaskConfigError, load_task_config
-from .evaluator import (
+from robot_backend_sim.config.scene_config import SceneConfig
+from robot_backend_sim.kinematics.kinematics import extract_object_pose
+from robot_backend_sim.tasks.base import (
+    TaskChunk,
+    TaskChunkView,
+    TaskPlan,
+    TaskPrepareResult,
+    TaskPrepareSnapshot,
+)
+from robot_backend_sim.tasks.stack.config import (
+    StackTaskConfig,
+    StackTaskConfigError,
+    load_task_config,
+)
+from robot_backend_sim.tasks.stack.evaluator import (
     ObjectState,
     StackTaskError,
     StackTaskRuntime,
     capture_task_observation,
     make_task_binding,
 )
-from .gate import TeacherFeedback, TeacherProgress
-from .teacher import TeacherSnapshot, build_teacher_plan, sample_teacher_chunk
+from robot_backend_sim.tasks.stack.gate import TeacherFeedback, TeacherProgress
+from robot_backend_sim.tasks.stack.teacher import (
+    TeacherSnapshot,
+    build_teacher_plan,
+    sample_teacher_chunk,
+)
 
 __all__ = ["StackPrepareSnapshot", "StackTaskPlugin"]
 
@@ -105,7 +119,7 @@ class StackTaskPlugin:
     def load_kinematics(self, scene_config: SceneConfig) -> object | None:
         if not self.config.teacher.enabled:
             return None
-        from ...kinematics_config import load_kinematics_config
+        from robot_backend_sim.config.kinematics_config import load_kinematics_config
 
         return load_kinematics_config(self.config.teacher.kinematics_config_path, scene_config)
 
@@ -469,7 +483,7 @@ class StackTaskPlugin:
         return chunk
 
     def fill_chunk_response(self, response: object, chunk: TaskChunk) -> object:
-        from .ros_conv import fill_teacher_chunk_response
+        from robot_backend_sim.tasks.stack.ros_conv import fill_teacher_chunk_response
 
         return fill_teacher_chunk_response(response, chunk)
 

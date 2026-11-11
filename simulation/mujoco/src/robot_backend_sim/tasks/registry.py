@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .base import SimTaskPlugin
+from robot_backend_sim.tasks.base import SimTaskPlugin
 
 __all__ = ["create_task_plugin", "SUPPORTED_TASK_TYPES"]
 
@@ -14,7 +14,7 @@ def create_task_plugin(
 ) -> SimTaskPlugin:
     """Create one plugin without importing any ROS or task-specific module."""
     if task_type == "stack":
-        from .stack import StackTaskPlugin
+        from robot_backend_sim.tasks.stack import StackTaskPlugin
 
         return StackTaskPlugin.from_path(
             task_path, task_mode=task_mode, scene_config=scene_config

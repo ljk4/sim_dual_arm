@@ -6,13 +6,10 @@ import pytest
 from model_helpers import replace
 from pydantic import ValidationError
 from robot_contracts.models import ContractError, JointSpec, Target
-from robot_contracts.trajectory import (
-    MAX_HORIZON_NS,
-    MAX_JOINTS,
-    MAX_SEGMENTS,
-    CubicSegment,
-    ReferencePlan,
-    ReferenceSample,
+from robot_contracts.trajectory.constants import MAX_HORIZON_NS, MAX_JOINTS, MAX_SEGMENTS
+from robot_contracts.trajectory.spline import CubicSegment, ReferencePlan, ReferenceSample
+from robot_trajectory.sampling import sample_reference_interval, sample_reference_plan
+from robot_trajectory.spline_math import (
     compute_reference_extremes,
     validate_reference_inputs,
     validate_velocity_boundaries,
@@ -67,18 +64,18 @@ def test_single_segment_closed_form_sample_and_hold():
         (CubicSegment(1_000_000_000, (1.0,), (2.0,), (3.0,), (4.0,)),),
     )
 
-    start = plan.sample(0)
+    start = sample_reference_plan(plan, 0)
     assert start == ReferenceSample((1.0,), (2.0,), (6.0,))
 
-    middle = plan.sample(500_000_000)
+    middle = sample_reference_plan(plan, 500_000_000)
     assert middle == ReferenceSample((3.25,), (8.0,), (18.0,))
 
-    end = plan.sample(1_000_000_000)
+    end = sample_reference_plan(plan, 1_000_000_000)
     assert end == ReferenceSample((10.0,), (20.0,), (30.0,))
 
-    held = plan.sample(1_000_000_001)
+    held = sample_reference_plan(plan, 1_000_000_001)
     assert held == ReferenceSample((10.0,), (0.0,), (0.0,))
-    assert plan.sample(10**100) == held
+    assert sample_reference_plan(plan, 10**100) == held
 
 
 def test_constant_multi_axis_plan_and_internal_boundary_choice():
@@ -87,13 +84,15 @@ def test_constant_multi_axis_plan_and_internal_boundary_choice():
     plan = ReferencePlan(("left", "right"), (first, second))
 
     assert plan.duration_ns == 3_000_000_000
-    assert plan.sample(0) == ReferenceSample((1.0, -2.0), (0.0, 0.0), (0.0, 0.0))
-    assert plan.sample(999_999_999).positions == (1.0, -2.0)
-    assert plan.sample(1_000_000_000) == ReferenceSample((1.0, -2.0), (0.0, 0.0), (0.0, 0.0))
-    after_boundary = plan.sample(1_000_000_001)
+    assert sample_reference_plan(plan, 0) == ReferenceSample((1.0, -2.0), (0.0, 0.0), (0.0, 0.0))
+    assert sample_reference_plan(plan, 999_999_999).positions == (1.0, -2.0)
+    assert sample_reference_plan(plan, 1_000_000_000) == ReferenceSample(
+        (1.0, -2.0), (0.0, 0.0), (0.0, 0.0)
+    )
+    after_boundary = sample_reference_plan(plan, 1_000_000_001)
     assert after_boundary.positions[0] == pytest.approx(5.0 + 2e-9)
     assert after_boundary.velocities == pytest.approx((2.0, -3.0))
-    irregular = plan.sample(2_500_000_000)
+    irregular = sample_reference_plan(plan, 2_500_000_000)
     assert irregular.positions == pytest.approx((5.0 + 2.0 * 1.5, 7.0 - 3.0 * 1.5))
     assert irregular.velocities == pytest.approx((2.0, -3.0))
 
@@ -114,7 +113,7 @@ def test_plan_and_segment_are_deeply_immutable():
     plan = ReferencePlan(["joint1"], segments)
     segments.clear()
     assert plan.segments == (first,)
-    sample = plan.sample(0)
+    sample = sample_reference_plan(plan, 0)
     assert isinstance(sample.positions, tuple)
     with pytest.raises(ValidationError):
         sample.positions = (0.0,)  # type: ignore[misc]
@@ -194,7 +193,7 @@ def test_plan_accepts_exact_limits_and_max_segment_count():
 def test_sample_rejects_non_integer_or_negative_elapsed(elapsed_ns):
     plan = ReferencePlan(("joint1",), (segment(),))
     with pytest.raises(ContractError) as caught:
-        plan.sample(elapsed_ns)  # type: ignore[arg-type]
+        sample_reference_plan(plan, elapsed_ns)  # type: ignore[arg-type]
     assert caught.value.reason == "INVALID_REFERENCE_PLAN"
 
 
@@ -454,7 +453,7 @@ def test_nonfinite_polynomial_values_are_clear_failures():
     with pytest.raises(ContractError, match="not finite"):
         compute_reference_extremes(plan)
     with pytest.raises(ContractError, match="not finite"):
-        plan.sample(1_000_000_000)
+        sample_reference_plan(plan, 1_000_000_000)
 
 
 def test_verify_accepts_declared_nonzero_polynomial_velocity_boundaries():
@@ -474,7 +473,7 @@ def test_verify_accepts_declared_nonzero_polynomial_velocity_boundaries():
     )
     assert extremes.joints[0].maximum_velocity == pytest.approx(20.0)
     assert extremes.joints[0].maximum_acceleration == pytest.approx(30.0)
-    assert plan.sample_interval(1_000_000_000).velocities == pytest.approx((20.0,))
+    assert sample_reference_interval(plan, 1_000_000_000).velocities == pytest.approx((20.0,))
 
     with pytest.raises(ContractError, match="start_velocities"):
         verify_reference_plan(
@@ -551,15 +550,17 @@ def test_sample_interval_is_strict_and_never_holds_a_nonzero_end():
         ("joint1",),
         (CubicSegment(1_000_000_000, (1.0,), (2.0,), (3.0,), (4.0,)),),
     )
-    assert plan.sample_interval(0) == plan.sample(0)
-    assert plan.sample_interval(1_000_000_000) == plan.sample(1_000_000_000)
-    assert plan.sample_interval(1_000_000_000).velocities == pytest.approx((20.0,))
+    assert sample_reference_interval(plan, 0) == sample_reference_plan(plan, 0)
+    assert sample_reference_interval(plan, 1_000_000_000) == sample_reference_plan(
+        plan, 1_000_000_000
+    )
+    assert sample_reference_interval(plan, 1_000_000_000).velocities == pytest.approx((20.0,))
 
     for elapsed in (1_000_000_001, -1):
         with pytest.raises(ContractError) as caught:
-            plan.sample_interval(elapsed)
+            sample_reference_interval(plan, elapsed)
         assert caught.value.reason == "REFERENCE_EXPIRED"
     for elapsed in (True, 1.0, "0"):
         with pytest.raises(ContractError) as caught:
-            plan.sample_interval(elapsed)  # type: ignore[arg-type]
+            sample_reference_interval(plan, elapsed)  # type: ignore[arg-type]
         assert caught.value.reason == "INVALID_REFERENCE_PLAN"

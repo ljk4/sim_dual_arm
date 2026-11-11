@@ -12,7 +12,7 @@ from robot_contracts.episodes import RuntimeResult, TaskResult
 from robot_contracts.execution_feedback import ExecutionFeedback
 from robot_contracts.models import RunContext
 from robot_contracts.stream_request import StreamRequest
-from robot_contracts.trajectory import FollowerReference
+from robot_contracts.trajectory.follower_reference import FollowerReference
 
 from dual_arm_runtime.observation import ExactObservation
 from dual_arm_runtime.recording_queue import RecordingStats

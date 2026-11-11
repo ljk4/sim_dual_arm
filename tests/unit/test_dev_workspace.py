@@ -35,11 +35,12 @@ def write_contract(project: Path, body: str = "int32 value\n") -> Path:
 
 def create_generated_install(build_root: Path) -> None:
     install = build_root / "install"
-    package = install / "robot_api_msgs/lib/python3.12/site-packages/robot_api_msgs"
-    for relative in ("", "msg", "srv", "action"):
-        directory = package / relative if relative else package
-        directory.mkdir(parents=True, exist_ok=True)
-        (directory / "__init__.py").write_text("# generated\n")
+    for name in ("robot_api_msgs", "sim_api_msgs"):
+        package = install / f"{name}/lib/python3.12/site-packages/{name}"
+        for relative in ("", "msg", "srv", "action"):
+            directory = package / relative if relative else package
+            directory.mkdir(parents=True, exist_ok=True)
+            (directory / "__init__.py").write_text("# generated, test_only\n")
     install.mkdir(parents=True, exist_ok=True)
     (install / "setup.bash").write_text("# generated setup\n")
 

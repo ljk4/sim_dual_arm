@@ -12,6 +12,7 @@ testpaths = ["tests/unit"]
 pythonpath = [
   "contracts/python/src",
   "libraries/run_logging/src",
+  "libraries/trajectory/src",
   "simulation/mujoco/src",
   "runtime/ros2/ros/dual_arm_runtime",
   "learning/lerobot/src",

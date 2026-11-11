@@ -9,7 +9,7 @@
 `simulation` 容器实行最小化权限挂载：
 
 - 本端目录 `simulation/mujoco/` 只读挂载至 `/app:ro`（含 `/app/assets/franka_emika_panda/` 模型资产）。
-- `contracts/`、`profiles/`、`libraries/` 与公共配置文件分别只读挂载至 `/contracts:ro`、`/profiles:ro`、`/deps/*:ro` 与 `/config/*:ro`。
+- `contracts/`、`profiles/`、`libraries/` 与公共配置文件分别只读挂载至 `/contracts:ro`、`/profiles:ro`、`/deps/*:ro` 与 `/config/*:ro`；共享源码包括 `ros_support`、`run_logging` 和 `trajectory`。
 - ROS 2 SDK 只读挂载至 `/opt/ros-dev:ro`（宿主机 `.build/ros-dev/`）。
 - 运行产物目录可写挂载至 `/data`（宿主机 `var/`）。
 
@@ -35,7 +35,7 @@ scripts/run.sh --help
 scripts/run.sh environment --run-id env-001
 scripts/run.sh scene --run-id scene-001
 scripts/run.sh kinematics --run-id kin-001
-scripts/run.sh test -q /workspace_or_mounted_tests  # 如需运行单测
+# 仓库单测需额外挂载完整仓库并使用相应 PROJECT_ROOT/PYTHONPATH；标准挂载不含 tests/infrastructure。
 ```
 
 ---

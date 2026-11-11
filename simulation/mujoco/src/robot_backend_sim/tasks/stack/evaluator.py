@@ -9,7 +9,7 @@ from typing import Any
 from robot_contracts.models import ContractError, RunContext
 from robot_contracts.task_state import TaskState
 
-from .config import StackTaskConfig, SuccessThresholds
+from robot_backend_sim.tasks.stack.config import StackTaskConfig, SuccessThresholds
 
 __all__ = ["ObjectState", "StackTaskError", "StackTaskRuntime", "TaskBinding",
            "TaskCondition", "TaskEvaluation", "TaskObservation",

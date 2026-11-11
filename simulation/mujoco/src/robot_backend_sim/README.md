@@ -1,14 +1,17 @@
 # robot_backend_sim
 
-MuJoCo 双 Panda 物理仿真后端 Python 包，按状态所有权与职责划分为六个子域：
+MuJoCo 双 Panda 后端按职责拆分。顶层只保留包标记与导航，不提供旧模块路径兼容导出。
 
-- **节点、工作线程与通信桥**：`backend_cli.py`、`backend_config.py`、`node.py`、`node_services.py`、`worker.py`、`worker_owner.py`、`ros_bridge.py`、`feedback_mailbox.py`、`viewer.py`、`diagnostics.py`。
-- **场景构建、资产映射与相机渲染**：`scene.py`、`scene_config.py`、`assets.py`、`panda_io.py`、`rendering.py`、`render_worker.py`、`visibility.py`、`kinematics.py`、`kinematics_config.py`、`kinematics_clearance.py`。
-- **运动控制、接触跟踪与制动**：`motion_controller.py`、`motion_runtime.py`、`motion_types.py`、`motion_math.py`、`motion_snapshot.py`、`motion_transitions.py`、`motion_config.py`、`gripper_contact.py`、`braking.py`、`contacts.py`。
-- **控制会话与受限跟随规划**：`control.py`、`control_state.py`、`control_events.py`、`control_history.py`、`protocol.py`、`planner.py`、`follower_plan.py`、`follower_protocol.py`、`follower_config.py`、`stream_config.py`、`stream_schedule.py`、`ruckig_export.py`。
-- **可插拔任务与示教插件（`tasks/`）**：
-  - `base.py`、`registry.py`、`ros_conv.py`：无 ROS 依赖的通用 `SimTaskPlugin` 协议、插件注册表与延迟 ROS 转换器。
-  - `stack/`：双 Panda 方块堆叠插件，包含配置（`config.py`）、物理状态机评估器（`evaluator.py`）、准入门禁（`gate.py`）、程序示教器（`teacher.py`）与 ROS 适配（`ros_conv.py`）。
-- **离线检查工具（`tools/`）**：`probe_environment.py`、`check_scene.py`（及 `check_scene_common.py`、`check_scene_views.py`）、`check_kinematics.py`（及 `check_kinematics_common.py`、`check_kinematics_checks.py`、`check_kinematics_report.py`）。
+- **[`config/`](config/README.md)**：声明式配置及校验。
+- **[`control/`](control/README.md)**：控制会话、历史、制动和反馈邮箱。
+- **[`follower/`](follower/README.md)**：受限跟随规划及协议。
+- **[`kinematics/`](kinematics/README.md)**：逆运动学和间隙检查。
+- **[`motion/`](motion/README.md)**：运动执行、状态转换、Ruckig 导出和流式接续。
+- **[`physics/`](physics/README.md)**：场景、资产、接触与 Panda I/O。
+- **[`render/`](render/README.md)**：相机渲染、可见性与 viewer。
+- **[`ros/`](ros/README.md)**：ROS 节点、服务适配与 CLI。
+- **[`runtime/`](runtime/README.md)**：物理线程所有权、跨线程协议与诊断。
+- **[`tasks/`](tasks/README.md)**：任务插件与独立 ROS 转换器。
+- **[`tools/`](tools/README.md)**：场景和环境离线检查。
 
-目录导航：[上级目录](../README.md)
+按原 import 图保留现有组合关系；`motion/planner.py` 仍协调任务规划线程，`physics/gripper_contact.py` 仍与运动类型协作，本轮未重写控制生命周期。

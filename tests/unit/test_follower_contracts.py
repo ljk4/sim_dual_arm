@@ -11,15 +11,10 @@ from model_helpers import replace
 from pydantic import ValidationError
 from robot_contracts.action_chunks import ActionWindow, ChunkAnchor
 from robot_contracts.models import ContractError, JointSpec, Target
-from robot_contracts.trajectory import (
-    CubicSegment,
-    FollowerLimitFlags,
-    PreparedFollowerPlan,
-    ReferencePlan,
-    ReferenceSample,
-    compute_follower_deviations,
-    restrict_terminal_velocities,
-)
+from robot_contracts.trajectory.follower import FollowerLimitFlags
+from robot_contracts.trajectory.spline import CubicSegment, ReferencePlan, ReferenceSample
+from robot_trajectory.follower import PreparedFollowerPlan
+from robot_trajectory.follower_math import compute_follower_deviations, restrict_terminal_velocities
 
 ROOT = Path(__file__).resolve().parents[2]
 SIM_SRC = ROOT / "simulation/mujoco/src"
@@ -272,7 +267,7 @@ def changed(**changes: object) -> dict[str, object]:
 
 
 def test_follower_config_values_and_round_trip(tmp_path):
-    from robot_backend_sim.follower_config import load_follower_config, parse_follower_config
+    from robot_backend_sim.config.follower_config import load_follower_config, parse_follower_config
 
     config = load_follower_config(CONFIG_PATH)
     assert config.target_count == 10
@@ -315,7 +310,7 @@ def test_follower_config_values_and_round_trip(tmp_path):
     ),
 )
 def test_follower_config_strictly_rejects_bad_documents(mutate, field):
-    from robot_backend_sim.follower_config import FollowerConfigError, parse_follower_config
+    from robot_backend_sim.config.follower_config import FollowerConfigError, parse_follower_config
 
     document = changed()
     mutate(document)
@@ -325,7 +320,7 @@ def test_follower_config_strictly_rejects_bad_documents(mutate, field):
 
 
 def test_follower_config_rejects_duplicate_keys(tmp_path):
-    from robot_backend_sim.follower_config import FollowerConfigError, load_follower_config
+    from robot_backend_sim.config.follower_config import FollowerConfigError, load_follower_config
 
     path = tmp_path / "duplicate.yaml"
     path.write_text(

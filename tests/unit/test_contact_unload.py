@@ -8,20 +8,14 @@ import pytest
 
 pytest.importorskip("mujoco")
 from model_helpers import replace
-from robot_contracts.trajectory import ReferenceSample
+from robot_contracts.trajectory.spline import ReferenceSample
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "simulation/mujoco/src"))
-from robot_backend_sim.contacts import (  # noqa: E402
-    FingerContactEvidence,
-    GripperContactEvidence,
-)
-from robot_backend_sim.gripper_contact import (  # noqa: E402
-    ContactUnloader,
-    GripperContactTracker,
-)
-from robot_backend_sim.motion_config import CONTROL_JOINT_NAMES  # noqa: E402
-from robot_backend_sim.panda_io import Measurement  # noqa: E402
-from robot_backend_sim.stream_config import StreamConfig, StreamConfigError  # noqa: E402
+from robot_backend_sim.config.motion_config import CONTROL_JOINT_NAMES
+from robot_backend_sim.config.stream_config import StreamConfig, StreamConfigError
+from robot_backend_sim.physics.contacts import FingerContactEvidence, GripperContactEvidence
+from robot_backend_sim.physics.gripper_contact import ContactUnloader, GripperContactTracker
+from robot_backend_sim.physics.panda_io import Measurement
 
 
 def evidence(object_name="source"):
@@ -111,9 +105,9 @@ def constrained_tracker():
 
 @pytest.mark.parametrize(
     "reference_velocity",
-    [5.339220363198457e-14, 0.0, -5.339220363198457e-14],
+    [5.339220363198457e-14, 0.0, -5.339220363198457e-14, 0.005113313932863591],
 )
-def test_numerical_standstill_contact_is_constrained(reference_velocity):
+def test_loaded_contact_below_measured_aperture_is_constrained(reference_velocity):
     tracker = constrained_tracker()
     constrained = tracker.constrained_axes(
         captured_reference(reference_velocity),
@@ -124,14 +118,34 @@ def test_numerical_standstill_contact_is_constrained(reference_velocity):
     assert tracker.unloading_axes == frozenset()
 
 
-def test_real_opening_contact_is_not_exempt_without_prior_hold():
+def test_reference_reaching_measured_aperture_is_not_contact_exempt():
     tracker = constrained_tracker()
+    reference = captured_reference(0.01)
+    positions = list(reference.positions)
+    positions[15] = 0.04
+    reference = replace(reference, positions=tuple(positions))
     constrained = tracker.constrained_axes(
-        captured_reference(0.01),
+        reference,
         captured_measurement(),
         captured_contacts(),
     )
     assert constrained == frozenset()
+
+
+def test_loaded_grip_does_not_timeout_on_repeated_reference_opening_below_object():
+    tracker = constrained_tracker()
+    # Previously the derivative started a 2 s release budget despite a stable
+    # two-finger grip and a reference narrower than the source cube (~4 cm).
+    for now_ns in range(0, 5_000_000_000, 50_000_000):
+        reference = captured_reference(0.005 if now_ns % 100_000_000 else -0.005)
+        measurement = captured_measurement()._replace(sim_time_ns=now_ns)
+        assert tracker.constrained_axes(reference, measurement, captured_contacts()) == {15}
+
+    # Losing one finger still removes the exception immediately.
+    assert tracker.constrained_axes(
+        reference, measurement,
+        captured_contacts(gripper_evidence(objects=("source", None), candidate=None)),
+    ) == frozenset()
 
 
 @pytest.mark.parametrize(

@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..base import TaskChunk
-from .config import PHASES
+from robot_backend_sim.tasks.base import TaskChunk
+from robot_backend_sim.tasks.stack.config import PHASES
 
 __all__ = ["PHASE_CODES", "fill_teacher_chunk_response", "phase_code"]
 

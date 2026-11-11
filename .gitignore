@@ -1,8 +1,10 @@
 # Persistent data and experiments: store/backup separately from source control.
-/var/
+/var/*
+!/var/.gitkeep
 
 # Reproducible build and generated SDK outputs.
-/.build/
+/.build/*
+!/.build/.gitkeep
 
 # Machine-specific deployment bindings and downloaded external checkouts.
 /infrastructure/local/

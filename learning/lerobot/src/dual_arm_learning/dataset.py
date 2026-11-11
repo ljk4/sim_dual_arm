@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import DatasetConfig
+from .console_progress import ConsoleProgress
 from .dataset_common import (
     ExportError,
     canonical_hash,
@@ -47,6 +48,7 @@ def _resolve_episodes(
     select: dict[str, Any],
     config: DatasetConfig,
     profile_hash: str,
+    progress: ConsoleProgress | None = None,
 ) -> list[SourceEpisode]:
     training_entries, validation_entries = _select_entries(select, config)
     validation_slots = set(config.validation_positions)
@@ -64,7 +66,13 @@ def _resolve_episodes(
         dict(entry, global_index=slot, split="validation")
         for entry, slot in zip(validation_entries, config.validation_positions, strict=True)
     ]
-    parsed = [_predict_episode(entry, config, profile_hash) for entry in selected]
+    if progress is not None:
+        progress.phase("校验源数据", len(selected), unit="条")
+    parsed = []
+    for entry in selected:
+        parsed.append(_predict_episode(entry, config, profile_hash))
+        if progress is not None:
+            progress.advance()
     if len(parsed) != config.expected_formal_episodes:
         raise ExportError("select: did not resolve exactly 50 accepted exports")
     if len({episode.attempt_id for episode in parsed}) != len(parsed):
@@ -108,6 +116,7 @@ def _write_datasets(
     config: DatasetConfig,
     joint_names: tuple[str, ...],
     profile_id: str,
+    progress: ConsoleProgress | None = None,
 ) -> tuple[list[SourceEpisode], list[SourceEpisode]]:
     train_eps = [item for item in parsed if item.global_index not in validation_slots]
     validation_eps = [item for item in parsed if item.global_index in validation_slots]
@@ -116,6 +125,8 @@ def _write_datasets(
         or len(validation_eps) != config.expected_validation_episodes
     ):
         raise ExportError("select: split cardinality is inconsistent")
+    if progress is not None:
+        progress.phase("转换训练集", len(train_eps), unit="条")
     _write_split(
         root=temp / "train",
         repo_id=f"local/{output_name}-train",
@@ -123,7 +134,10 @@ def _write_datasets(
         config=config,
         joint_names=joint_names,
         profile_id=profile_id,
+        progress=progress,
     )
+    if progress is not None:
+        progress.phase("转换验证集", len(validation_eps), unit="条")
     _write_split(
         root=temp / "validation",
         repo_id=f"local/{output_name}-validation",
@@ -131,6 +145,7 @@ def _write_datasets(
         config=config,
         joint_names=joint_names,
         profile_id=profile_id,
+        progress=progress,
     )
     return train_eps, validation_eps
 
@@ -161,6 +176,7 @@ def convert(
     config_path: Path | None = None,
     replace: bool = False,
     synthetic: bool = False,
+    progress: ConsoleProgress | None = None,
 ) -> dict[str, Any]:
     """Materialise the two independent datasets and return the manifest.
 
@@ -171,7 +187,7 @@ def convert(
     profile_doc, joint_names, camera_names = _profile_document(config)
     profile_hash = canonical_hash(profile_doc)
     profile_id = str(profile_doc.get("profile_id", "panda_stack_learning_v1"))
-    parsed = _resolve_episodes(select, config, profile_hash)
+    parsed = _resolve_episodes(select, config, profile_hash, progress)
     output = _prepare_output(config, replace, synthetic)
     configure_local_caches(config.cache_root, data_root=config.output_root)
     free = shutil.disk_usage(output.parent).free
@@ -190,10 +206,15 @@ def convert(
             config=config,
             joint_names=joint_names,
             profile_id=profile_id,
+            progress=progress,
         )
         from .dataset_manifest import _write_processors
 
+        if progress is not None:
+            progress.phase("保存训练统计")
         _write_processors(temp, output.name, config)
+        if progress is not None:
+            progress.phase("核对哈希并生成清单")
         manifest = build_manifest(
             temp=temp,
             output_name=output.name,

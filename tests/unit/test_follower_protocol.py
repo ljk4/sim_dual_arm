@@ -16,23 +16,24 @@ from robot_contracts.stream_request import (
     StreamRequest,
     Trajectory,
 )
-from robot_contracts.trajectory import ReferenceSample, validate
+from robot_contracts.trajectory.spline import ReferenceSample
+from robot_trajectory.follower_reference import validate
 
 ROOT = Path(__file__).resolve().parents[2]
 for source in (ROOT / "simulation/mujoco/src", ROOT / "contracts/python/src"):
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
 
-from robot_backend_sim.control_state import ChunkStatus, ControlStatus  # noqa: E402
-from robot_backend_sim.follower_config import load_follower_config  # noqa: E402
-from robot_backend_sim.follower_protocol import (  # noqa: E402
+from robot_backend_sim.config.follower_config import load_follower_config  # noqa: E402
+from robot_backend_sim.config.motion_config import load_control_config  # noqa: E402
+from robot_backend_sim.control.control_state import ChunkStatus, ControlStatus  # noqa: E402
+from robot_backend_sim.follower.follower_protocol import (  # noqa: E402
     follower_reference,
     follower_reference_from_chunk_status,
     follower_reference_from_status,
     prepare_follower_request,
     validation_limits,
 )
-from robot_backend_sim.motion_config import load_control_config  # noqa: E402
 
 ruckig = pytest.importorskip("ruckig")
 

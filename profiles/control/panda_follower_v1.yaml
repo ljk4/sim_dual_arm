@@ -7,7 +7,7 @@
 
 # Bounded target-follower parameters.  This is a following budget, not a
 # relaxation of the robot profile's joint position/velocity hard limits.
-# Joint names follow robot_backend_sim.motion_config.CONTROL_JOINT_NAMES.
+# Joint names follow robot_backend_sim.config.motion_config.CONTROL_JOINT_NAMES.
 joint_names:
   - left_joint1
   - left_joint2

@@ -21,7 +21,6 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/ExecutionFeedback.msg"
   "msg/StreamChunkStatus.msg"
   "msg/ControlEvent.msg"
-  "msg/TaskState.msg"
   "srv/AcquireControl.srv"
   "srv/RenewControl.srv"
   "srv/ReleaseControl.srv"
@@ -31,11 +30,6 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/SubmitFollower.srv"
   "srv/GetStreamAnchor.srv"
   "srv/QueryStreamCommand.srv"
-  "srv/ResetSimulation.srv"
-  "srv/PrepareTask.srv"
-  "srv/StartTask.srv"
-  "srv/GetTeacherChunk.srv"
-  "srv/GetTaskState.srv"
   DEPENDENCIES builtin_interfaces sensor_msgs trajectory_msgs
 )
 ament_export_dependencies(rosidl_default_runtime)

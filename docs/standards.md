@@ -15,7 +15,7 @@ docs/
 ├── features/                功能说明（一个功能一篇，描述当前实现）
 ├── experiments/             重要实验记录与故障排查经验（YYYY-MM-DD-<topic>.md）
 ├── history/                 阶段演进摘要与 DSH 关键结论索引
-└── refactoring-tasks/       六阶段架构瘦身与重构任务归档
+└── architecture-tasks/      架构改进任务书与执行验收记录
 <各维护目录>/README.md        该目录的职责、核心入口、模块列表与依赖边界
 ```
 
@@ -36,8 +36,9 @@ docs/
 | `runtime/<middleware>/` | 运行端实现（`ros/`、`configs/`、`docker/`、`scripts/`） | 当前为 `ros2/`；不导入仿真物理实现，不执行模型训练 |
 | `learning/<framework>/` | 学习与推理实现（`src/`、`configs/`、`docker/`、`scripts/`） | 当前为 `lerobot/`；严格保持 ROS-free，不导入 ROS 或 `runtime` |
 | `infrastructure/` | 公共容器配置（`docker/`）与构建/SDK/检查脚本（`scripts/`） | 仅放跨端基础设施，不包含业务逻辑、场景参数或训练算法 |
-| `libraries/` | 具有明确调用方的跨端共享库（`ros_support/`、`run_logging/`） | 不持有运行生命周期，不建立泛化的杂项 `utils` |
-| `contracts/` | Protobuf、ROS 2 IDL、JSON Schema v1 与轻量 Python 契约包 | 跨端数据结构与轨迹数学的唯一定义源，不依赖 ROS、MuJoCo 或 PyTorch |
+| `libraries/` | 具有明确调用方的跨端共享库（`ros_support/`、`run_logging/`、`trajectory/`） | 不持有运行生命周期，不建立泛化的杂项 `utils` |
+| `libraries/trajectory/` | 共享轨迹求值、跟随规划数学和数值验证 | 依赖 `robot_contracts`，保持 ROS-free；契约不得反向依赖本库 |
+| `contracts/` | Protobuf、ROS 2 IDL、JSON Schema v1 与轻量 Python 契约包 | 跨端数据结构与语义校验的唯一定义源，不依赖 ROS、MuJoCo 或 PyTorch |
 | `profiles/` | 机器人语义档案、观测/动作绑定与共享控制配置（`control/`） | 严禁写入主机路径、IP、账号或设备序列号 |
 | `tests/` | 单元测试（`unit/`）、集成测试（`integration/`）、测试替身（`fakes/`）与夹具（`fixtures/`） | 测试替身与合成数据均标记 `test_only`，严禁冒充正式实验数据 |
 | `third_party/` | 固定的外部上游源码（如 `lerobot-act-v0.6.1`） | 保持上游源码与许可证原样；Panda 资产直接置于 `simulation/mujoco/assets/` |
@@ -49,11 +50,13 @@ docs/
 ## 3. 架构解耦与状态所有权
 
 1. **后端物理所有权（`simulation`）**：独占 MuJoCo `MjModel`/`MjData`、物理步进、Ruckig 规划、EGL 渲染与接触检测。控制、渲染与状态查询严格遵守线程所有权，跨线程通过只读快照或有界邮箱通信。任务逻辑通过通用 `SimTaskPlugin` 接口（如 `tasks/stack/`）解耦，核心评估器不直接依赖 ROS 消息。
-2. **运行端会话管理（`runtime`）**：负责多路相机与关节状态同步、控制租约（Lease）管理、流式动作块接续、MCAP 录制与离线审计。通过 ROS 2 `robot_api_msgs` 与后端通信，通过 gRPC `PolicyService` 与策略服务通信。
+2. **运行端会话管理（`runtime`）**：负责多路相机与关节状态同步、控制租约（Lease）管理、流式动作块接续、MCAP 录制与离线审计。通过 ROS 2 `robot_api_msgs` 与后端通信；仿真复位、任务/Teacher 使用独立的 `sim_api_msgs`，通过 gRPC `PolicyService` 与策略服务通信。
 3. **无 ROS 学习端（`learning`）**：负责将运行端导出的合格数据转换为 LeRobot 数据集、执行 ACT 训练、导出 safetensors 模型包并提供 gRPC 策略推理服务。推理流水线（会话锁、RGB 解码、夹爪准入、绝对时间融合）收口于 `ChunkedPolicyPipeline`。
 4. **示教与评估隔离**：程序示教（Teacher）与物体真值仅限数据采集阶段使用。正式 ACT 策略评估严禁读取物体真值、调用 Teacher/IK 补救或用脚本替换模型输出。
 
 ---
+
+运行端命令与离线处理位于 `dual_arm_runtime/offline`；`offline/mcap_reader` 解码消息，`offline/audit` 仅接收纯数据。`offline/episode_finalization` 保持在线收尾编排。仿真按 `config/control/motion/follower/kinematics/physics/render/runtime/ros/tasks/tools` 分包，只有 ROS 适配层、任务转换器与 viewer 可加载 ROS。
 
 ## 4. 接口、动作语义、时钟与反馈
 
@@ -77,6 +80,7 @@ docs/
 
 ## 6. 配置管理与单一数据源（SSOT）
 
+- **Profile 格式**：Robot Profile 仅支持 `schema_version=2`，唯一 Schema 为 `contracts/schemas/v1/robot_profile.schema.json`；使用 1～8 路具名 `cameras`，每路必须提供标定摘要。不保留 v1 加载转换。Schema 集合目录版本不代表所有契约内部格式版本。
 - **职责分层**：JSON Schema（`contracts/schemas/v1/`）定义结构约束，Profile（`profiles/`）定义机器人物理与控制参数，业务 YAML 定义运行配方，`container.env` 定义容器环境路径。
 - **控制参数集中维护**：跨 `simulation` 与 `runtime` 共享的控制限值（`panda_control_v1.yaml`）、跟随窗口与偏差预算（`panda_follower_v1.yaml`）以及流式超时（`panda_stream_v1.yaml`）唯一维护在 `profiles/control/` 中，不在各端配置中内联复制。
 - **运行时动态摘要绑定**：源 YAML 配置中不手写静态文件 SHA-256。准备脚本（`prepare` / `prepare-policy`）在生成运行配置时自动计算模型包、Profile 与 Schema 的真实摘要并写入 `policy_binding.json` 与 `run_manifest.json`。
@@ -100,7 +104,8 @@ docs/
    - 停止单个服务使用 `docker compose stop <service>` 与 `docker compose rm -f <service>`，不对单端执行 `down --remove-orphans`。
 2. **纯粹的依赖镜像**：
    - `Dockerfile` 仅安装固定版本的系统与 Python 依赖（如仿真端通过单次 `pip install --require-hashes -r /opt/dependencies/requirements.lock` 安装含固定 Ruckig wheel 在内的依赖），不 `COPY` 业务源码、配置或启动脚本，不内嵌多行脚本或控制流。
-   - 镜像统一设置 `ENTRYPOINT []` 与 `CMD ["sleep", "infinity"]`。容器启动后保持空闲，由用户通过 `docker compose exec <service> bash` 进入容器手动执行 `scripts/run.sh <command>`。
+   - 镜像统一设置 `ENTRYPOINT []` 与 `CMD ["sleep", "infinity"]`。容器启动后保持空闲，由用户通过 `docker compose exec <service> bash` 进入容器手动执行命令；运行端示教录制使用 `runtime/ros2/scripts/record.sh --count N`，其余业务使用 `scripts/run.sh <command>`。
+   - 并行录制的宿主机入口 `runtime/ros2/scripts/record_parallel.sh` 仅负责编排独立 simulation 容器；预算分配、录制和导出继续在 runtime 容器内执行。不得向 runtime 挂载 Docker socket 或安装物理仿真依赖。
 3. **显式挂载与 SDK 校验**：
    - `simulation` 仅将自身目录只读挂载至 `/app:ro`，按需只读挂载 `/contracts`、`/profiles`、`/deps/*`、`/config/*` 与 `/opt/ros-dev`。
    - `runtime` 与 `learning` 将仓库根只读挂载至 `/workspace:ro`，将 `var/` 与 `.build/` 可写挂载至 `/data` 和 `/build`。

@@ -13,12 +13,13 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim import kinematics, visibility  # noqa: E402
-from robot_backend_sim.kinematics_config import (  # noqa: E402
+from robot_backend_sim.config.kinematics_config import (  # noqa: E402
     KinematicsConfigError,
     load_kinematics_config,
 )
-from robot_backend_sim.scene_config import load_scene_config  # noqa: E402
+from robot_backend_sim.config.scene_config import load_scene_config  # noqa: E402
+from robot_backend_sim.kinematics import kinematics  # noqa: E402
+from robot_backend_sim.render import visibility  # noqa: E402
 
 SCENE_PATH = ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml"
 CHECK_PATH = ROOT / "simulation/mujoco/configs/checks/scene_check.yaml"

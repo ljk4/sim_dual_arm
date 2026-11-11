@@ -29,8 +29,6 @@ services:
       - ../../../.build:/workspace/.build
       - ../../../.build:/build
       - ../../../var:/data
-      - ../../../.build/ros-dev:/opt/ros-dev:ro
-      - ../../../.build/generated/policy-sdk:/opt/policy-sdk:ro
     networks: [ros, learning]
 
 networks:

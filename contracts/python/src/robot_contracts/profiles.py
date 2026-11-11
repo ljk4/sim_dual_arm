@@ -18,13 +18,10 @@ __all__ = [
     "normalize_cameras",
     "profile_from_document",
     "profile_schema_path",
-    "profile_schema_version",
     "semantic_hash",
     "validate_bindings",
     "validate_document",
 ]
-
-_PROFILE_SCHEMA_FILES = {1: "robot_profile.schema.json", 2: "robot_profile_v2.schema.json"}
 
 
 def validate_document(document: dict[str, Any], schema_path: Path) -> None:
@@ -54,35 +51,21 @@ def semantic_hash(document: dict[str, Any]) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
-def profile_schema_version(document: dict[str, Any], source: Path | str = "<profile>") -> int:
-    """Return a strictly typed profile version; booleans are never version numbers."""
-    if "schema_version" not in document:
-        raise ContractError("SCHEMA_MISMATCH", f"{source}: schema_version: field is required")
-    version = document["schema_version"]
-    if isinstance(version, bool) or not isinstance(version, int) or version not in (1, 2):
-        raise ContractError(
-            "SCHEMA_MISMATCH", f"{source}: schema_version: must be the integer 1 or 2"
-        )
-    return version
-
-
 def _schema_directory(schema_root: Path) -> Path:
-    if schema_root.name in {"v1", "v2"}:
-        return schema_root.parent / "v1"
+    if schema_root.name == "v1":
+        return schema_root
     return schema_root / "v1"
 
 
-def profile_schema_path(schema_root: Path, version: int) -> Path:
-    filename = _PROFILE_SCHEMA_FILES.get(version)
-    if filename is None:
-        raise ContractError("SCHEMA_MISMATCH", f"unsupported profile schema version {version!r}")
-    return _schema_directory(schema_root) / filename
+def profile_schema_path(schema_root: Path) -> Path:
+    """Return the sole Profile v2 schema in the shared schema collection."""
+    return _schema_directory(schema_root) / "robot_profile.schema.json"
 
 
 def normalize_cameras(
     document: dict[str, Any], source: Path | str = "<profile>"
 ) -> tuple[CameraSpec, ...]:
-    """Normalize v1's single camera or v2's named list through RobotProfile."""
+    """Validate the named camera list of a Profile v2 document."""
     return RobotProfile.validate_dict(document, source=str(source)).cameras
 
 
@@ -94,9 +77,8 @@ def profile_from_document(
     document: dict[str, Any], schema_root: Path, *, source: Path | str = "<profile>"
 ) -> RobotProfile:
     """Validate a recorded profile snapshot with the same rules as a file."""
-    version = profile_schema_version(document, source)
     try:
-        validate_document(document, profile_schema_path(schema_root, version))
+        validate_document(document, profile_schema_path(schema_root))
     except ContractError as error:
         raise ContractError(error.reason or "SCHEMA_MISMATCH",
                             f"{source}: {str(error).split(': ', 1)[-1]}") from error

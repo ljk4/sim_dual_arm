@@ -14,11 +14,11 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim.backend_config import (  # noqa: E402
+from robot_backend_sim.config.backend_config import (  # noqa: E402
     BackendConfigError,
     load_backend_config,
 )
-from robot_backend_sim.follower_config import load_follower_config  # noqa: E402
+from robot_backend_sim.config.follower_config import load_follower_config  # noqa: E402
 
 BASE = ROOT / "simulation/mujoco/configs/backend/backend.yaml"
 FOLLOWER = ROOT / "tests/fixtures/simulation/backend_follower.yaml"

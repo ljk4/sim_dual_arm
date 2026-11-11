@@ -26,13 +26,14 @@ from robot_api_msgs.msg import (
 )
 from robot_api_msgs.msg import ExecutionFeedback as ExecutionFeedbackMessage
 from robot_api_msgs.msg import FollowerReference as FollowerReferenceMessage
-from robot_api_msgs.msg import TaskState as TaskStateMessage
 from robot_api_msgs.srv import EndEpisode, StartEpisode
 from robot_contracts.execution_feedback import ExecutionFeedback
 from robot_contracts.models import ContractError, RunContext
 from robot_contracts.stream_request import StreamRequest
-from robot_contracts.trajectory import FollowerReference as DomainFollowerReference
-from robot_contracts.trajectory import FollowerValidationLimits
+from robot_contracts.trajectory.follower_reference import (
+    FollowerReference as DomainFollowerReference,
+)
+from robot_contracts.trajectory.follower_reference import FollowerValidationLimits
 from robot_ros_support.conversions import (
     context_from_message,
     context_message,
@@ -55,7 +56,7 @@ from dual_arm_runtime.runtime_callbacks import RuntimeCallbacks
 from dual_arm_runtime.runtime_config import RuntimeConfiguration
 from dual_arm_runtime.runtime_identity import execution_identity
 from dual_arm_runtime.runtime_limits import control_limits, task_enabled
-from dual_arm_runtime.task_client import TaskClient
+from dual_arm_runtime.task_client import TaskClient, task_state_message_type
 
 _TERMINAL = frozenset({"COMPLETED", "CANCELED", "FAILED"})
 _MAX_EXPECTED_COMMANDS = 64
@@ -199,7 +200,10 @@ class RuntimeNode(Node):
             )
         if self._task_client is not None:
             self.create_subscription(
-                TaskStateMessage, f"{self._root}/task_state", self._on_task_state, EVENT_QOS
+                task_state_message_type(),
+                f"{self._root}/task_state",
+                self._on_task_state,
+                EVENT_QOS,
             )
         self.create_subscription(
             ControlEvent, f"{self._root}/control_events", self._on_event, EVENT_QOS
@@ -398,7 +402,7 @@ class RuntimeNode(Node):
         self._commands.publish(message)
 
     def record_task_state(self, fact: object) -> None:
-        if not isinstance(fact, TaskStateMessage):
+        if not isinstance(fact, task_state_message_type()):
             raise ContractError("TASK_STATE_MISMATCH", "task fact is not a ROS state message")
         sample_ns = time_ns(fact.sample_time)
         with self._condition:
@@ -473,6 +477,9 @@ class RuntimeNode(Node):
     def wait_stop_settled(self, command_ids: Sequence[str], timeout_s: float) -> None:
         deadline = time.monotonic() + timeout_s
         with self._condition:
+            # Stream IDs exist before prediction. Only published requests can
+            # have backend terminal facts, including submissions with lost ACKs.
+            command_ids = tuple(name for name in command_ids if name in self._expected_requests)
             missing = {name for name in command_ids if not self._control_facts_complete(name)}
         while missing:
             if time.monotonic() >= deadline:
@@ -544,7 +551,7 @@ class RuntimeNode(Node):
         if self._follower_limits is not None:
             topics[f"{self._root}/follower_references"] = "robot_api_msgs/msg/FollowerReference"
         if self._task_client is not None:
-            topics[f"{self._root}/task_state"] = "robot_api_msgs/msg/TaskState"
+            topics[f"{self._root}/task_state"] = "sim_api_msgs/msg/TaskState"
         for topic in self._camera_topics.values():
             topics[topic] = "robot_api_msgs/msg/CameraFrame"
         return topics
@@ -574,7 +581,7 @@ class RuntimeNode(Node):
     def _on_follower_reference(self, message: FollowerReferenceMessage) -> None:
         self._callbacks.on_follower_reference(message)
 
-    def _on_task_state(self, message: TaskStateMessage) -> None:
+    def _on_task_state(self, message: object) -> None:
         self._callbacks.on_task_state(message)
 
     def _simulation_now_ns(self) -> int:
