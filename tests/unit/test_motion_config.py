@@ -21,7 +21,7 @@ from robot_backend_sim.config.motion_config import (  # noqa: E402
     parse_control_config,
 )
 
-CONFIG_PATH = ROOT / "profiles/control/panda_control_v1.yaml"
+CONFIG_PATH = ROOT / "shared/scenarios/panda_stack/profiles/control/panda_control_v1.yaml"
 DEFAULT_DOCUMENT = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
 
 

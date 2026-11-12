@@ -367,14 +367,17 @@ def build_report(
     peak_reserved: float,
     sample_filter: SampleFilterMask | None = None,
     weights_sha256: str = "",
+    selection: dict[str, Any] | None = None,
+    overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    report = {
         "format": "dual-arm-act-training-report-v1",
         "run_id": run_id,
         "budget_run_id": run_id,
         "budget_segment_id": segment_id,
         "budget_instance_id": instance_id,
         "mode": config.mode,
+        "diagnostic": bool(config.dataset.diagnostic),
         "reason": reason,
         "steps": step,
         "planned_steps": steps_total,
@@ -405,6 +408,11 @@ def build_report(
             "synthetic fixtures never count as the 50 formal episodes",
         ],
     }
+    if selection is not None:
+        report["selection"] = selection
+    if overrides is not None:
+        report["overrides"] = overrides
+    return report
 
 
 __all__ = [

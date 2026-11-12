@@ -8,9 +8,22 @@ from robot_contracts.models import ContractError
 from dual_arm_runtime.offline.audit.audit_common import record_error
 from dual_arm_runtime.offline.audit.episode_audit import _Audit
 from dual_arm_runtime.offline.audit.records import BackendInfo, CameraFrame, Observation, State
+from dual_arm_runtime.offline.feedback_definition import (
+    require_supported_feedback_definition,
+)
+from dual_arm_runtime.offline.follower_definition import (
+    require_current_follower_reference_definition,
+)
 
 
-def decode_message(topic: str, message: object, root: str, reference_topic: str):
+def decode_message(
+    topic: str,
+    message: object,
+    root: str,
+    reference_topic: str,
+    *,
+    legacy_reference_digest: bool = False,
+):
     from robot_ros_support.conversions import context_from_message, time_ns
     from robot_ros_support.follower_conversions import follower_reference_from_message
     from robot_ros_support.stream_conversions import (
@@ -21,7 +34,9 @@ def decode_message(topic: str, message: object, root: str, reference_topic: str)
     if topic == "/runtime/commands":
         return stream_command_from_message(message)
     if topic == reference_topic:
-        return follower_reference_from_message(message)
+        return follower_reference_from_message(
+            message, legacy_digest=legacy_reference_digest
+        )
     if topic == f"{root}/control_events":
         return control_event_from_message(message)
     if topic == f"{root}/execution_feedback":
@@ -59,58 +74,85 @@ def _run_audit(audit: _Audit, directory: Path) -> dict:
         )
     except Exception as error:
         raise record_error(f"cannot open recording: {error}") from error
-    types = {topic.name: topic.type for topic in reader.get_all_topics_and_types()}
-    audit.topics = set(types)
-    required = {
-        f"{audit.root}/info",
-        f"{audit.root}/state",
-        f"{audit.root}/control_events",
-        f"{audit.root}/execution_feedback",
-        audit.reference_topic,
-        "/runtime/commands",
-        "/runtime/observation_index",
-    } | {f"{audit.root}/cameras/{name}/frame" for name in audit.camera_names}
-    missing = required - audit.topics
-    if missing:
-        raise record_error("recording is missing topics: " + ", ".join(sorted(missing)))
-    decoded_types = {topic: get_message(types[topic]) for topic in required}
-    camera_topics = {f"{audit.root}/cameras/{name}/frame" for name in audit.camera_names}
-    while reader.has_next():
-        topic, payload, _bag_time_ns = reader.read_next()
-        audit.counts[topic] += 1
-        if topic not in required:
-            continue
-        try:
-            message = deserialize_message(payload, decoded_types[topic])
-            # The original rules skip foreign contexts before decoding event/feedback bodies.
-            if topic in {f"{audit.root}/control_events", f"{audit.root}/execution_feedback"}:
-                from robot_ros_support.conversions import context_from_message
-                if not audit.context_value(context_from_message(message.context)):
+    try:
+        types = {topic.name: topic.type for topic in reader.get_all_topics_and_types()}
+        audit.topics = set(types)
+        required = {
+            f"{audit.root}/info",
+            f"{audit.root}/state",
+            f"{audit.root}/control_events",
+            f"{audit.root}/execution_feedback",
+            audit.reference_topic,
+            "/runtime/commands",
+            "/runtime/observation_index",
+        } | {f"{audit.root}/cameras/{name}/frame" for name in audit.camera_names}
+        missing = required - audit.topics
+        if missing:
+            raise record_error("recording is missing topics: " + ", ".join(sorted(missing)))
+        legacy_feedback = require_supported_feedback_definition(reader, types, rosbag2_py)
+        if legacy_feedback:
+            # The exact stored fixed-array layout is the compatibility evidence;
+            # the old backend predates the bounded-gripper capability string.
+            audit.required_capabilities = audit.required_capabilities - {
+                "execution_feedback.gripper_set.v1"
+            }
+        legacy_reference_digest = require_current_follower_reference_definition(
+            reader, types, rosbag2_py
+        )
+        decoded_types = {topic: get_message(types[topic]) for topic in required}
+        camera_topics = {f"{audit.root}/cameras/{name}/frame" for name in audit.camera_names}
+        while reader.has_next():
+            topic, payload, _bag_time_ns = reader.read_next()
+            audit.counts[topic] += 1
+            if topic not in required:
+                continue
+            try:
+                if legacy_feedback and topic == f"{audit.root}/execution_feedback":
+                    # The recorded fixed-array bytes are not valid for the
+                    # current generated type; decode them with the legacy reader.
+                    from dual_arm_runtime.offline.legacy_feedback import (
+                        decode_legacy_execution_feedback,
+                    )
+
+                    execution = decode_legacy_execution_feedback(payload)
+                    if audit.context_value(execution.context):
+                        audit.feedback_message(execution)
                     continue
-            message = decode_message(topic, message, audit.root, audit.reference_topic)
-            if topic == f"{audit.root}/info":
-                audit.info(message)
-            elif topic == f"{audit.root}/state":
-                audit.capture_payload(topic, message, payload)
-                audit.state(message)
-            elif topic in camera_topics:
-                audit.capture_payload(topic, message, payload)
-                audit.frame(topic, message)
-            elif topic == "/runtime/observation_index":
-                audit.observation(message)
-            elif topic == "/runtime/commands":
-                audit.command(message)
-            elif topic == audit.reference_topic:
-                audit.reference(message)
-            elif topic == f"{audit.root}/control_events":
-                audit.event(message)
-            elif topic == f"{audit.root}/execution_feedback":
-                audit.feedback_message(message)
-        except ContractError:
-            raise
-        except Exception as error:
-            raise record_error(f"{topic}: {type(error).__name__}: {error}") from error
-    return audit.finish()
+                message = deserialize_message(payload, decoded_types[topic])
+                # The original rules skip foreign contexts before decoding event/feedback bodies.
+                if topic in {f"{audit.root}/control_events", f"{audit.root}/execution_feedback"}:
+                    from robot_ros_support.conversions import context_from_message
+                    if not audit.context_value(context_from_message(message.context)):
+                        continue
+                message = decode_message(
+                    topic, message, audit.root, audit.reference_topic,
+                    legacy_reference_digest=legacy_reference_digest,
+                )
+                if topic == f"{audit.root}/info":
+                    audit.info(message)
+                elif topic == f"{audit.root}/state":
+                    audit.capture_payload(topic, message, payload)
+                    audit.state(message)
+                elif topic in camera_topics:
+                    audit.capture_payload(topic, message, payload)
+                    audit.frame(topic, message)
+                elif topic == "/runtime/observation_index":
+                    audit.observation(message)
+                elif topic == "/runtime/commands":
+                    audit.command(message)
+                elif topic == audit.reference_topic:
+                    audit.reference(message)
+                elif topic == f"{audit.root}/control_events":
+                    audit.event(message)
+                elif topic == f"{audit.root}/execution_feedback":
+                    audit.feedback_message(message)
+            except ContractError:
+                raise
+            except Exception as error:
+                raise record_error(f"{topic}: {type(error).__name__}: {error}") from error
+        return audit.finish()
+    finally:
+        reader.close()
 
 
 def audit_follower_recording(

@@ -4,7 +4,7 @@ var/
 .agents/
 .aws/
 .codex/
-infrastructure/local/
+shared/common/tools/local/
 /third_party/src/
 **/__pycache__/
 **/.venv/

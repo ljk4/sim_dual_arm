@@ -1,0 +1,14 @@
+# Deployment requirements checked by shared/common/tools/scripts/check_dockerfiles.py.
+# Mount sources, build settings and environment stay in docker-compose.yml and container.env.
+service: runtime
+source:
+  mount: /workspace
+  scope: repository
+mounts:
+  /workspace/var: writable
+  /workspace/.build: writable
+  /build: writable
+  /data: writable
+networks: [ros, learning]
+gpu: false
+commands: [build-ros-sdk, build-policy-sdk, test]

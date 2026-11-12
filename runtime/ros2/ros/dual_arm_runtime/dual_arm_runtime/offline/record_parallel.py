@@ -16,6 +16,62 @@ import time
 from pathlib import Path
 
 ROOT = Path(os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[6])
+DEFAULT_CAMPAIGN = (
+    "shared/scenarios/panda_stack/configs/runtime/experiments/stack_campaign.yaml"
+)
+DEFAULT_RUNTIME_TEACHER = (
+    "shared/scenarios/panda_stack/configs/runtime/teacher_collect.yaml"
+)
+DEFAULT_BACKEND_TEMPLATE = (
+    "shared/scenarios/panda_stack/configs/simulation/backend/backend_stack_teacher.yaml"
+)
+CONTAINER_MOUNTS = (
+    ("/workspace", Path(".")),
+    ("/shared", Path("shared")),
+    ("/data", Path("var")),
+    ("/build", Path(".build")),
+)
+
+
+def _host_path(value: str | Path, project_root: Path) -> Path:
+    path = Path(value)
+    if not path.is_absolute():
+        path = project_root / path
+    return path.resolve()
+
+
+def host_path_to_container(value: str | Path, project_root: Path) -> str:
+    """Map a host path to the runtime container; reject unmounted paths."""
+    path = _host_path(value, project_root)
+    project_root = project_root.resolve()
+    if path.is_relative_to(project_root):
+        return str(Path("/workspace") / path.relative_to(project_root))
+    raise ValueError(
+        f"host path is outside the mounted project root and has no container "
+        f"equivalent: {path}"
+    )
+
+
+def container_path_to_host(value: str | Path, project_root: Path) -> Path:
+    """Map a runtime/simulation container path back to the host project."""
+    path = Path(value)
+    project_root = project_root.resolve()
+    for container, relative in CONTAINER_MOUNTS:
+        root = Path(container)
+        if path == root or path.is_relative_to(root):
+            return (project_root / relative / path.relative_to(root)).resolve()
+    raise ValueError(f"container path is not mounted in the project: {path}")
+
+
+def shared_root_to_container(value: str | Path | None, project_root: Path) -> str:
+    """The scenario shared tree is mounted at /shared; anything else must map."""
+    host = _host_path(value, project_root) if value is not None else (
+        project_root / "shared"
+    ).resolve()
+    expected = (project_root / "shared").resolve()
+    if host == expected:
+        return "/shared"
+    return host_path_to_container(host, project_root)
 
 
 def positive_int(value: str) -> int:
@@ -65,10 +121,22 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--max-consecutive-failures", type=positive_int, default=3)
     result.add_argument("--purpose", choices=("formal", "pilot"), default="formal")
     result.add_argument("--project-root", type=Path, default=ROOT)
-    result.add_argument("--config", default="runtime/ros2/configs/experiments/stack_campaign.yaml")
-    result.add_argument("--runtime-config", default="runtime/ros2/configs/teacher_collect.yaml")
+    result.add_argument("--scenario")
     result.add_argument(
-        "--backend-template", default="simulation/mujoco/configs/backend/backend_stack_teacher.yaml"
+        "--shared-root", type=Path,
+        help="host path of the scenario shared tree (default: <project>/shared)",
+    )
+    result.add_argument(
+        "--config", default=None,
+        help="direct campaign recipe (conflicts with --scenario)",
+    )
+    result.add_argument(
+        "--runtime-config", default=None,
+        help="direct runtime teacher recipe (conflicts with --scenario)",
+    )
+    result.add_argument(
+        "--backend-template", default=None,
+        help="direct simulation teacher recipe (conflicts with --scenario)",
     )
     result.add_argument("--realtime-speed", type=float, default=1.0)
     result.add_argument("--domain-base", type=int)
@@ -82,6 +150,7 @@ class DockerWorkers:
         self.runtime = ""
         self.controller: subprocess.Popen | None = None
         self.controller_pid = directory / "controller.pid"
+        self.plan: dict | None = None
 
     def compose(self, service: str) -> list[str]:
         section = "simulation/mujoco" if service == "simulation" else "runtime/ros2"
@@ -89,7 +158,7 @@ class DockerWorkers:
         return ["docker", "compose", "-f", str(compose)]
 
     def runtime_command(self, arguments: list[str], *, pid_file: str | None = None) -> list[str]:
-        shell = "source /workspace/infrastructure/docker/setup.sh; "
+        shell = "source /shared/common/tools/docker/setup.sh; "
         if pid_file is not None:
             shell += 'echo "$$" > "$1"; shift; '
         return [
@@ -115,16 +184,60 @@ class DockerWorkers:
             ).stdout.strip()
         self.runtime = runtime
 
-    def resolve_target(self) -> bool:
-        """Read campaign progress before creating any simulation workers."""
+    def preflight_command(self) -> list[str]:
+        command = [
+            "python3", "-m", "dual_arm_runtime.offline.record_preflight",
+            "--project-root", "/workspace", "--purpose", self.args.purpose, "--parallel",
+        ]
+        if getattr(self.args, "scenario", None) is not None:
+            command += [
+                "--scenario", self.args.scenario,
+                "--shared-root", shared_root_to_container(
+                    getattr(self.args, "shared_root", None), self.args.project_root
+                ),
+            ]
+        else:
+            command += [
+                "--config", host_path_to_container(self.args.config, self.args.project_root),
+                "--runtime-config",
+                host_path_to_container(self.args.runtime_config, self.args.project_root),
+                "--backend-template",
+                host_path_to_container(self.args.backend_template, self.args.project_root),
+            ]
+        if self.args.target_total is not None:
+            command += ["--target-total", str(self.args.target_total)]
+        return command
+
+    def preflight(self) -> dict:
+        """Resolve the binding and validate every read-only gate before Docker work."""
         self.ensure_runtime()
         result = subprocess.run(
-            self.runtime_command(
-                ["python3", "-m", "dual_arm_runtime.offline.campaign",
-                 "--project-root", "/workspace", "--config", self.args.config, "status"]
-            ), check=True, capture_output=True, text=True, timeout=30,
+            self.runtime_command(self.preflight_command()),
+            check=False, capture_output=True, text=True, timeout=120,
         )
-        status = json.loads(result.stdout)
+        if result.returncode:
+            message = result.stderr.strip()
+            try:
+                message = json.loads(message.splitlines()[-1])["error"]
+            except (ValueError, KeyError, IndexError):
+                message = message or f"preflight exited {result.returncode}"
+            raise RuntimeError(f"preflight failed: {message}")
+        self.plan = json.loads(result.stdout)
+        return self.plan
+
+    def resolve_target(self, plan: dict | None = None) -> bool:
+        """Read campaign progress before creating any simulation workers."""
+        if plan is None:
+            self.ensure_runtime()
+            result = subprocess.run(
+                self.runtime_command(
+                    ["python3", "-m", "dual_arm_runtime.offline.campaign",
+                     "--project-root", "/workspace", "--config", self.args.config, "status"]
+                ), check=True, capture_output=True, text=True, timeout=30,
+            )
+            status = json.loads(result.stdout)
+        else:
+            status = plan["campaign_status"]
         if self.args.purpose == "formal" and self.args.target_total > int(
             status["formal_target_qualified"]
         ):
@@ -137,7 +250,31 @@ class DockerWorkers:
         )
         return self.args.count == 0
 
-    def prepare(self) -> list[dict]:
+    def _scenario_selection_arguments(self, plan: dict | None) -> list[str] | None:
+        if plan is None or plan["selection"]["mode"] != "scenario":
+            return None
+        return [
+            "--scenario", plan["selection"]["scenario_id"],
+            "--shared-root", shared_root_to_container(
+                getattr(self.args, "shared_root", None), self.args.project_root
+            ),
+            "--binding-sha256", plan["selection"]["binding"]["sha256"],
+        ]
+
+    def _worker_selection_arguments(self, plan: dict | None) -> list[str]:
+        scenario = self._scenario_selection_arguments(plan)
+        if scenario is not None:
+            return scenario
+        if getattr(self.args, "scenario", None) is not None:
+            raise RuntimeError("scenario preflight did not return a scenario selection")
+        return [
+            "--runtime-config",
+            host_path_to_container(self.args.runtime_config, self.args.project_root),
+            "--backend-template",
+            host_path_to_container(self.args.backend_template, self.args.project_root),
+        ]
+
+    def prepare(self, plan: dict | None = None) -> list[dict]:
         self.ensure_runtime()
         relative = self.directory.relative_to(self.args.project_root)
         subprocess.run(
@@ -148,8 +285,7 @@ class DockerWorkers:
                     "--workers", str(self.args.workers),
                     "--domain-base", str(self.args.domain_base),
                     "--realtime-speed", str(self.args.realtime_speed),
-                    "--runtime-config", str(Path("/workspace") / self.args.runtime_config),
-                    "--backend-template", str(Path("/workspace") / self.args.backend_template),
+                    *self._worker_selection_arguments(plan),
                 ]
             ), check=True, timeout=30,
         )
@@ -176,8 +312,9 @@ class DockerWorkers:
         while time.monotonic() < deadline:
             ready = []
             for worker in workers:
-                relative = Path(worker["backend_log"]).relative_to("/workspace")
-                log = self.args.project_root / relative
+                log = container_path_to_host(
+                    worker["backend_log"], self.args.project_root
+                )
                 ready.append(any('"event":"backend.start"' in p.read_text()
                                  for p in log.glob("events*.jsonl")))
             if all(ready):
@@ -185,14 +322,23 @@ class DockerWorkers:
             time.sleep(0.25)
         raise RuntimeError("parallel backends did not become ready within 60 seconds")
 
-    def run(self) -> int:
+    def run(self, plan: dict | None = None) -> int:
         relative = Path("/workspace") / self.directory.relative_to(self.args.project_root)
+        selection_arguments = self._scenario_selection_arguments(plan)
+        if selection_arguments is None:
+            selection_arguments = [
+                "--config",
+                host_path_to_container(self.args.config, self.args.project_root),
+                "--runtime-config",
+                host_path_to_container(self.args.runtime_config, self.args.project_root),
+            ]
         command = self.runtime_command(
             [
                 "python3", "-m", "dual_arm_runtime.offline.record",
                 "--count", str(self.args.count),
                 "--max-consecutive-failures", str(self.args.max_consecutive_failures),
-                "--purpose", self.args.purpose, "--config", self.args.config,
+                "--purpose", self.args.purpose,
+                *selection_arguments,
                 "--worker-manifest", str(relative / "workers.json"),
                 *(["--target-total", str(self.args.target_total)]
                   if self.args.target_total is not None else []),
@@ -204,6 +350,12 @@ class DockerWorkers:
         return self.controller.wait()
 
     def cleanup(self) -> None:
+        if (
+            not self.created
+            and self.controller is None
+            and not self.directory.exists()
+        ):
+            return
         if self.controller is not None and self.controller.poll() is None:
             try:
                 deadline = time.monotonic() + 3
@@ -242,6 +394,23 @@ def main(argv: list[str] | None = None) -> int:
     if args.count is None and args.target_total is None:
         args.count = 1
     try:
+        if args.scenario is not None:
+            explicit = [
+                name
+                for name in ("config", "runtime_config", "backend_template")
+                if getattr(args, name) is not None
+            ]
+            if explicit:
+                cli.error(
+                    "--scenario cannot be combined with "
+                    + ", ".join("--" + name.replace("_", "-") for name in explicit)
+                )
+        else:
+            if args.shared_root is not None:
+                cli.error("--shared-root requires --scenario")
+            args.config = args.config or DEFAULT_CAMPAIGN
+            args.runtime_config = args.runtime_config or DEFAULT_RUNTIME_TEACHER
+            args.backend_template = args.backend_template or DEFAULT_BACKEND_TEMPLATE
         args.workers = automatic_workers() if args.workers == "auto" else int(args.workers)
         if not 1 <= args.workers <= 16:
             raise ValueError("workers must be 1..16 or auto")
@@ -252,31 +421,30 @@ def main(argv: list[str] | None = None) -> int:
         if not 0 <= args.domain_base <= 232 - args.workers + 1:
             raise ValueError("ROS domain IDs must stay in 0..232")
         args.project_root = args.project_root.resolve()
-        for field in ("config", "runtime_config", "backend_template"):
-            path = (args.project_root / getattr(args, field)).resolve()
-            setattr(args, field, str(path.relative_to(args.project_root)))
     except ValueError as error:
         cli.error(str(error))
     directory = args.project_root / "var/record-pools" / f"pool-{time.time_ns()}"
-    directory.parent.mkdir(parents=True, exist_ok=True)
     docker = DockerWorkers(args, directory)
     def interrupted(signum: int, frame: object) -> None:
         raise KeyboardInterrupt
 
     previous = signal.signal(signal.SIGTERM, interrupted)
     try:
-        if args.target_total is not None and docker.resolve_target():
+        plan = docker.preflight()
+        if args.target_total is not None and docker.resolve_target(plan):
             return 0
+        # Only now may this batch create worker configuration and containers.
+        directory.parent.mkdir(parents=True, exist_ok=True)
         args.workers = min(args.workers, args.count)
-        workers = docker.prepare()
+        workers = docker.prepare(plan)
         print(f"并行 worker：{args.workers}；可视化与预览已禁用；日志：{directory}", flush=True)
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as executor:
             list(executor.map(docker.start_backend, workers))
         docker.wait_ready(workers)
-        return docker.run()
+        return docker.run(plan)
     except KeyboardInterrupt:
         return 130
-    except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
         print(f"parallel recording: {error}", file=sys.stderr)
         return 2
     finally:

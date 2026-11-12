@@ -74,7 +74,10 @@ def _resolve_episodes(
         if progress is not None:
             progress.advance()
     if len(parsed) != config.expected_formal_episodes:
-        raise ExportError("select: did not resolve exactly 50 accepted exports")
+        raise ExportError(
+            "select: did not resolve exactly "
+            f"{config.expected_formal_episodes} accepted exports"
+        )
     if len({episode.attempt_id for episode in parsed}) != len(parsed):
         raise ExportError("select: duplicate attempt IDs after resolution")
     if len({episode.seed for episode in parsed}) != len(parsed):
@@ -177,11 +180,13 @@ def convert(
     replace: bool = False,
     synthetic: bool = False,
     progress: ConsoleProgress | None = None,
+    selection: dict[str, Any] | None = None,
+    overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Materialise the two independent datasets and return the manifest.
 
     ``synthetic=True`` is only for fixture tests.  It is recorded in the
-    manifest and never claims the 50 formal episodes were collected.
+    manifest and never claims the formal episodes were collected.
     """
     select = load_json_document(select_path)
     profile_doc, joint_names, camera_names = _profile_document(config)
@@ -231,6 +236,8 @@ def convert(
             profile_id=profile_id,
             started=started,
             synthetic=synthetic,
+            selection=selection,
+            overrides=overrides,
         )
         temp.replace(output)
         return manifest

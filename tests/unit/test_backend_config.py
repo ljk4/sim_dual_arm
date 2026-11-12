@@ -17,7 +17,7 @@ from robot_backend_sim.config.backend_config import (  # noqa: E402
     load_backend_config,
 )
 
-CONFIG_PATH = ROOT / "simulation/mujoco/configs/backend/backend.yaml"
+CONFIG_PATH = ROOT / "shared/scenarios/panda_stack/configs/simulation/backend/backend.yaml"
 DEFAULT_DOCUMENT = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
 
 

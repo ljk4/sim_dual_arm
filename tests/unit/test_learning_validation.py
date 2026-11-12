@@ -6,6 +6,7 @@ from dual_arm_learning.config import load_training_config
 
 torch = pytest.importorskip("torch")
 ROOT = Path(__file__).resolve().parents[2]
+SCENARIO = ROOT / "shared/scenarios/panda_stack"
 
 
 class _Policy:
@@ -30,7 +31,7 @@ class _Policy:
 
 
 def test_validation_restores_mode_and_never_passes_labels_to_model(monkeypatch):
-    config = load_training_config(ROOT / "learning/lerobot/configs/act_training.yaml", ROOT)
+    config = load_training_config(SCENARIO / "configs/learning/act_training.yaml", ROOT)
     batch = {
         "observation.state": torch.zeros((1, 16)),
         "action": torch.zeros((1, 60, 16)),

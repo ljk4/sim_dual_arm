@@ -38,6 +38,7 @@ UINT64_MAX = 2**64 - 1
 REQUIRED_CAPABILITIES = (
     "continuous_chunks", "exact_capture", "simulation_reset", "lease", "stop",
     "command_query", "control_events", "follower_reference",
+    "execution_feedback.gripper_set.v1",
 )
 _VECTOR = Annotated[tuple[StrictFloat, ...], BeforeValidator(as_tuple),
                     Field(min_length=1, max_length=64)]
@@ -174,6 +175,9 @@ class RuntimeRecipe(StrictMappingModel):
     motions: Annotated[tuple[MotionSpec, ...], BeforeValidator(as_tuple),
                        Field(max_length=64)] = ()
     action_source: Annotated[str, Field(pattern=r"^(policy|teacher)$")]
+    # Explicit capability identifier for a scenario Teacher wire extension.
+    # It is required for teacher mode and absent for policy runs.
+    teacher_api: NonEmptyStr | None = None
     follower_config: NonEmptyStr | None = Field(default=None, exclude=True)
     policy: PolicyConfig | None = None
     teacher: TeacherConfig | None = None
@@ -211,6 +215,13 @@ class RuntimeRecipe(StrictMappingModel):
             raise contract_error("policy", "policy section requires a policy block")
         if self.action_source == "teacher" and self.teacher is None:
             raise contract_error("teacher", "teacher section requires a teacher block")
+        if self.action_source == "teacher" and self.teacher_api is None:
+            raise contract_error(
+                "teacher_api",
+                "teacher action_source requires an explicit extension capability identifier",
+            )
+        if self.action_source != "teacher" and self.teacher_api is not None:
+            raise contract_error("teacher_api", "teacher_api requires action_source=teacher")
         if self.action_source != "policy" and self.policy is not None:
             raise contract_error("policy", "policy section requires action_source=policy")
         if self.action_source != "teacher" and self.teacher is not None:
@@ -248,7 +259,13 @@ class RuntimeConfiguration(StrictMappingModel):
     snapshot_json: str = Field(exclude=True, repr=False)
 
     snapshot = property(lambda self: json.loads(self.snapshot_json))
-    required_capabilities = property(lambda self: REQUIRED_CAPABILITIES)
+
+    @property
+    def required_capabilities(self) -> tuple[str, ...]:
+        capabilities = list(REQUIRED_CAPABILITIES)
+        if self.recipe.action_source == "teacher":
+            capabilities.append(self.recipe.teacher_api)  # type: ignore[arg-type]
+        return tuple(capabilities)
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -309,7 +326,7 @@ def load_runtime_configuration(config_path: Path, project_root: Path) -> Runtime
     observation_path = _referenced(document, "observation_schema", path)
     action_path = _referenced(document, "action_schema", path)
     control_path = _referenced(document, "control_constraints", path)
-    schema_root = project_root / "contracts/schemas"
+    schema_root = project_root / "shared/common/interfaces/schemas"
     profile = load_profile(profile_path, schema_root)
     observation_document = _load(observation_path)
     action_document = _load(action_path)
@@ -344,7 +361,11 @@ def load_runtime_configuration(config_path: Path, project_root: Path) -> Runtime
     if follower_document is not None:
         effective["follower_document"] = follower_document
     effective["follower"] = None if follower is None else follower.model_dump(mode="json")
-    effective["required_capabilities"] = list(REQUIRED_CAPABILITIES)
+    required_capabilities = list(REQUIRED_CAPABILITIES)
+    if recipe.action_source == "teacher":
+        assert recipe.teacher_api is not None
+        required_capabilities.append(recipe.teacher_api)
+    effective["required_capabilities"] = required_capabilities
     effective["logging"] = dict(vars(recipe.logging))
     effective["recording"] = dict(vars(recipe.recording))
     snapshot = {"profile": _load(profile_path), "profile_hash": profile.digest,

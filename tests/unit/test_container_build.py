@@ -8,12 +8,17 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def _declaration(relative: str) -> dict:
+    return yaml.safe_load((ROOT / relative).read_text())
+
+
 def _load_tool(name: str):
-    path = ROOT / "infrastructure/scripts" / f"{name}.py"
+    path = ROOT / "shared/common/tools/scripts" / f"{name}.py"
     specification = importlib.util.spec_from_file_location(f"dsh052_{name}", path)
     assert specification is not None and specification.loader is not None
     module = importlib.util.module_from_spec(specification)
@@ -27,7 +32,7 @@ policy_sdk = _load_tool("policy_sdk")
 
 def sdk_fixture(tmp_path):
     project = tmp_path / "project"
-    proto = project / "contracts/policy/v1/policy.proto"
+    proto = project / "shared/common/interfaces/policy/v1/policy.proto"
     proto.parent.mkdir(parents=True)
     proto.write_text('syntax = "proto3";\n')
     sdk = tmp_path / "sdk"
@@ -187,7 +192,7 @@ def test_repository_dockerfile_and_compose_boundaries_pass():
     import subprocess
 
     result = subprocess.run(
-        [sys.executable, str(ROOT / "infrastructure/scripts/check_dockerfiles.py")],
+        [sys.executable, str(ROOT / "shared/common/tools/scripts/check_dockerfiles.py")],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -289,9 +294,13 @@ def test_learning_compose_must_not_mount_ros_or_host_venv():
             }
         }
     }
-    issues = check_dockerfiles.check_compose_document(document, name="test")
-    assert any("must not mount /opt/ros-dev" in item for item in issues)
-    assert any("must not define ROS_DOMAIN_ID" in item for item in issues)
+    issues = check_dockerfiles.check_compose_document(
+        document,
+        name="test",
+        requirements=_declaration("learning/lerobot/docker/deployment.yaml"),
+    )
+    assert any("undeclared mount /opt/ros-dev" in item for item in issues)
+    assert any("must move ROS_DOMAIN_ID" in item for item in issues)
     assert any("must not define LEARNING_VENV" in item for item in issues)
     assert any("must not mount a host virtualenv" in item for item in issues)
 
@@ -343,12 +352,16 @@ def test_compose_checker_rejects_variable_binds_and_requires_nested_writable_mou
         },
     }
     joined = "\n".join(
-        check_dockerfiles.check_compose_document(document, name="test")
+        check_dockerfiles.check_compose_document(
+            document,
+            name="test",
+            requirements=_declaration("runtime/ros2/docker/deployment.yaml"),
+        )
     )
     assert "direct path" in joined
     assert "/workspace/var writable" in joined
     assert "/workspace/.build writable" in joined
-    assert "must not require GPUs" in joined
+    assert "must not request GPUs" in joined
 
 
 def test_compose_checker_rejects_old_environment_entrypoint():
@@ -363,7 +376,7 @@ def test_compose_checker_rejects_old_environment_entrypoint():
                 "command": ["idle"],
                 "entrypoint": [
                     "bash",
-                    "/workspace/infrastructure/docker/entrypoints/environment.sh",
+                    "/workspace/shared/common/tools/docker/entrypoints/environment.sh",
                 ],
                 "environment": {
                     "PROJECT_CONTAINER": "1",
@@ -394,38 +407,75 @@ def test_compose_checker_rejects_old_environment_entrypoint():
 
 
 def test_compose_checker_requires_simulation_scoped_mounts_init_and_dds():
-    import yaml
-
     document = yaml.safe_load(
         (ROOT / "simulation/mujoco/docker/docker-compose.yml").read_text()
     )
-    assert check_dockerfiles.check_compose_document(document, name="test") == []
+    declaration = _declaration("simulation/mujoco/docker/deployment.yaml")
+    issues = check_dockerfiles.check_compose_document(
+        document, name="test", requirements=declaration
+    )
+    assert issues == []
     service = document["services"]["simulation"]
     service["entrypoint"] = ["bash", "/app/scripts/run.sh"]
-    issues = check_dockerfiles.check_compose_document(document, name="test")
+    issues = check_dockerfiles.check_compose_document(
+        document, name="test", requirements=declaration
+    )
     assert any("inherit the image's idle CMD" in item for item in issues)
     service.pop("entrypoint")
     service["command"] = ["backend"]
-    issues = check_dockerfiles.check_compose_document(document, name="test")
+    issues = check_dockerfiles.check_compose_document(
+        document, name="test", requirements=declaration
+    )
     assert any("inherit the image's idle CMD" in item for item in issues)
     service.pop("command")
     service.pop("gpus")
-    issues = check_dockerfiles.check_compose_document(document, name="test")
+    issues = check_dockerfiles.check_compose_document(
+        document, name="test", requirements=declaration
+    )
     assert any("runtime: nvidia and gpus: all" in item for item in issues)
     service["gpus"] = "all"
     service["runtime"] = "runc"
-    issues = check_dockerfiles.check_compose_document(document, name="test")
+    issues = check_dockerfiles.check_compose_document(
+        document, name="test", requirements=declaration
+    )
     assert any("runtime: nvidia and gpus: all" in item for item in issues)
     service["runtime"] = "nvidia"
     service["init"] = False
-    issues = check_dockerfiles.check_compose_document(document, name="test")
+    issues = check_dockerfiles.check_compose_document(
+        document, name="test", requirements=declaration
+    )
     assert any("init: true" in item for item in issues)
     service["init"] = True
-    service["volumes"].append(
-        {"type": "bind", "source": "/third_party", "target": "/third_party", "read_only": True}
+    service["volumes"].remove("../../../.build/ros-dev:/opt/ros-dev:ro")
+    issues = check_dockerfiles.check_compose_document(
+        document, name="test", requirements=declaration
     )
-    issues = check_dockerfiles.check_compose_document(document, name="test")
-    assert any("must mount only" in item for item in issues)
+    assert any(
+        "must mount /opt/ros-dev read-only as declared" in item for item in issues
+    )
+    service["volumes"].append("../../../.build/ros-dev:/opt/ros-dev:ro")
+    service["volumes"].append("../../../third_party:/third_party:ro")
+    issues = check_dockerfiles.check_compose_document(
+        document, name="test", requirements=declaration
+    )
+    assert any("undeclared mount /third_party" in item for item in issues)
+
+
+def test_declaration_allows_cpu_simulation_without_gpu():
+    document = yaml.safe_load(
+        (ROOT / "simulation/mujoco/docker/docker-compose.yml").read_text()
+    )
+    service = document["services"]["simulation"]
+    service.pop("gpus")
+    service.pop("runtime")
+    declaration = _declaration("simulation/mujoco/docker/deployment.yaml")
+    declaration["gpu"] = False
+    assert (
+        check_dockerfiles.check_compose_document(
+            document, name="test", requirements=declaration
+        )
+        == []
+    )
 
 
 def test_compose_checker_rejects_local_context_with_root_style_dockerfile():

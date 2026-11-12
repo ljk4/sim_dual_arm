@@ -382,16 +382,19 @@ def _dataset_record(
     sample_filter: Any,
     files: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
+    train_episodes = len(audit.train_episodes)
+    validation_episodes = len(audit.validation_episodes)
     record: dict[str, Any] = {
         "manifest": "metadata/dataset_manifest.json",
         "manifest_sha256": files["metadata/dataset_manifest.json"]["sha256"],
-        "train_episodes": 45 if not audit.synthetic else len(audit.train_episodes),
-        "validation_episodes": 5 if not audit.synthetic else len(audit.validation_episodes),
+        "train_episodes": train_episodes,
+        "validation_episodes": validation_episodes,
         "training_global_indices": list(audit.training_global_indices),
         "validation_global_indices": list(audit.validation_global_indices),
         "synthetic": bool(audit.synthetic),
+        "diagnostic": bool(config.dataset.diagnostic),
         "seed": config.seed,
-        "split": "45train/5validation",
+        "split": f"{train_episodes}train/{validation_episodes}validation",
         "stats_source": "processors/train_stats_summary.json",
     }
     if sample_filter is not None:
@@ -473,6 +476,8 @@ def export_bundle(
     output_dir: Path,
     checkpoint_name: str = "best.pt",
     allow_synthetic: bool = False,
+    selection: dict[str, Any] | None = None,
+    overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Export the trained policy plus processors/stats/references as a bundle."""
     configure_local_caches(config.cache_root, data_root=config.data_root)
@@ -500,6 +505,10 @@ def export_bundle(
         action,
         processor_digest,
     )
+    if selection is not None:
+        manifest["selection"] = selection
+    if overrides is not None:
+        manifest["overrides"] = overrides
     manifest["bundle_digest"] = hashlib.sha256(
         json.dumps(manifest, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
     ).hexdigest()
@@ -619,6 +628,7 @@ def deployment_summary(config: Any) -> dict[str, Any]:
         dataset_seed=dataset.get("seed", 0),
         train_episodes=dataset.get("train_episodes", 0),
         validation_episodes=dataset.get("validation_episodes", 0),
+        diagnostic=bool(dataset.get("diagnostic")),
         synthetic=bool(manifest.get("synthetic") or dataset.get("synthetic")),
         lerobot_revision=source.get("lerobot_revision", ""),
         lerobot_archive_sha256=source.get("lerobot_archive_sha256", ""),

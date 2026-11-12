@@ -20,9 +20,9 @@ from lerobot.processor import make_default_pre_post_processors
 from safetensors.torch import save_file
 
 ROOT = Path(__file__).resolve().parents[2]
-PROFILE = ROOT / "profiles/robots/panda_stack_learning_v1/profile.json"
-OBSERVATION = ROOT / "profiles/observations/panda_rgb_joint_v1.json"
-ACTION = ROOT / "profiles/actions/panda_joint_position_v1.json"
+PROFILE = ROOT / "shared/scenarios/panda_stack/profiles/robots/panda_stack_learning_v1/profile.json"
+OBSERVATION = ROOT / "shared/scenarios/panda_stack/profiles/observations/panda_rgb_joint_v1.json"
+ACTION = ROOT / "shared/scenarios/panda_stack/profiles/actions/panda_joint_position_v1.json"
 CAMERAS = ("global", "left_wrist", "right_wrist")
 LEARNING_REVISION = "7e241bd630a3719a56157a497ce5d08f244784f1"
 ARCHIVE_SHA = "710397ad753090743c1aadf04b2bd40584fbca8448b1409131138172913c8a0c"

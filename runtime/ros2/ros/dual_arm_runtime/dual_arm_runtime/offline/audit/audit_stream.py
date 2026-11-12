@@ -37,6 +37,9 @@ class StreamAudit:
             "control_events",
             "follower_reference",
             "bounded_target_follower_v1",
+            # Recordings made with the fixed two-gripper/two-finger container
+            # are not audited as if they used the bounded named set.
+            "execution_feedback.gripper_set.v1",
         }
     )
 

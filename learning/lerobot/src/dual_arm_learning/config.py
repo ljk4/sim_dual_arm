@@ -59,7 +59,9 @@ Episodes = Annotated[tuple[Annotated[int, Field(strict=True, ge=0, le=9999)], ..
 Names3 = Annotated[tuple[NonEmptyStr, ...], BeforeValidator(as_tuple),
                    Field(min_length=3, max_length=3)]
 VectorN = Annotated[tuple[NonNegativeInt, ...], BeforeValidator(as_tuple),
-                    Field(min_length=5, max_length=5)]
+                    Field(min_length=1, max_length=50)]
+FORMAL_SPLIT = (50, 45, 5)
+FORMAL_VALIDATION_POSITIONS = (9, 19, 29, 39, 49)
 
 
 class RGBEncoderSpec(StrictMappingModel):
@@ -168,11 +170,12 @@ class DatasetConfig(StrictMappingModel):
     attempt_export_glob: NonEmptyStr
     verify_png_pixels: bool
     require_quality: bool
-    expected_formal_episodes: Annotated[int, Field(strict=True, ge=50, le=50)] = Field(
+    diagnostic: bool = False
+    expected_formal_episodes: Annotated[int, Field(strict=True, ge=1, le=9999)] = Field(
         validation_alias=AliasPath("expected", "formal_episodes"))
-    expected_training_episodes: Annotated[int, Field(strict=True, ge=45, le=45)] = Field(
+    expected_training_episodes: Annotated[int, Field(strict=True, ge=1, le=9999)] = Field(
         validation_alias=AliasPath("expected", "training_episodes"))
-    expected_validation_episodes: Annotated[int, Field(strict=True, ge=5, le=5)] = Field(
+    expected_validation_episodes: Annotated[int, Field(strict=True, ge=1, le=9999)] = Field(
         validation_alias=AliasPath("expected", "validation_episodes"))
     validation_positions: VectorN = Field(
         validation_alias=AliasPath("expected", "validation_positions"))
@@ -309,9 +312,28 @@ def dataset_before(data: object) -> object:
 def dataset_after(config) -> None:
     if config.camera_names != ("global", "left_wrist", "right_wrist"):
         raise contract_error("camera_names", "must be global/left_wrist/right_wrist")
-    if config.validation_positions != (9, 19, 29, 39, 49):
-        raise contract_error("validation_positions",
-                             "must be the 10th/20th/30th/40th/50th")
+    if len(set(config.validation_positions)) != len(config.validation_positions):
+        raise contract_error("validation_positions", "must be unique")
+    if config.diagnostic:
+        if config.expected_formal_episodes != (
+            config.expected_training_episodes + config.expected_validation_episodes
+        ):
+            raise contract_error("expected.formal_episodes",
+                                 "must equal the training and validation episode counts")
+        if len(config.validation_positions) != config.expected_validation_episodes:
+            raise contract_error("validation_positions",
+                                 "must name every validation episode")
+        if any(position >= config.expected_formal_episodes
+               for position in config.validation_positions):
+            raise contract_error("validation_positions",
+                                 "must stay inside the configured episode range")
+    else:
+        if (config.expected_formal_episodes, config.expected_training_episodes,
+                config.expected_validation_episodes) != FORMAL_SPLIT:
+            raise contract_error("expected", "formal data must be exactly 50/45/5")
+        if config.validation_positions != FORMAL_VALIDATION_POSITIONS:
+            raise contract_error("validation_positions",
+                                 "must be the 10th/20th/30th/40th/50th")
     if config.lerobot_source_revision != PINNED_REVISION:
         raise contract_error("lerobot.source_revision", "must be the pinned revision")
     if config.lerobot_source_archive_sha256:
@@ -374,10 +396,11 @@ def training_after(config) -> None:
         raise contract_error("mode", "must be one of the configured modes")
     full = config.modes["full"]
     if full.episodes is not None:
-        raise contract_error("modes.full.episodes", "must use all 45 training episodes")
+        raise contract_error("modes.full.episodes",
+                             "must use every configured training episode")
     if not full.validation or full.split != "train":
         raise contract_error("modes.full",
-                             "must validate on the independent 5-episode split")
+                             "must validate on the independent validation split")
     if config.budget.limit_seconds > 14400.0:
         raise contract_error("budget.limit_seconds",
                              "task training budget is capped at 14400 s")

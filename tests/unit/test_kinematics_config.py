@@ -9,6 +9,7 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
+SCENARIO = ROOT / "shared/scenarios/panda_stack"
 SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
@@ -21,9 +22,9 @@ from robot_backend_sim.config.scene_config import load_scene_config  # noqa: E40
 from robot_backend_sim.kinematics import kinematics  # noqa: E402
 from robot_backend_sim.render import visibility  # noqa: E402
 
-SCENE_PATH = ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml"
-CHECK_PATH = ROOT / "simulation/mujoco/configs/checks/scene_check.yaml"
-KINEMATICS_PATH = ROOT / "simulation/mujoco/configs/checks/kinematics_check.yaml"
+SCENE_PATH = SCENARIO / "configs/simulation/scene/panda_stack.yaml"
+CHECK_PATH = SCENARIO / "configs/simulation/checks/scene_check.yaml"
+KINEMATICS_PATH = SCENARIO / "configs/simulation/checks/kinematics_check.yaml"
 
 
 @pytest.fixture(scope="module")

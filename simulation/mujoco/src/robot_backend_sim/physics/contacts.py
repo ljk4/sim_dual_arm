@@ -26,6 +26,7 @@ __all__ = [
     "empty_contact_evidence",
     "measure_contact_evidence",
     "resolve_contact_binding",
+    "validated_panda_completions",
 ]
 
 # Attached Menagerie Panda bodies: the prefix is applied before the vendor body
@@ -360,3 +361,34 @@ def evaluate_gripper_completion(
         final_reference_m=final_reference_m,
         fingers=contact.fingers,
     )
+
+
+def validated_panda_completions(
+    completions: tuple[GripperCompletion, ...],
+) -> tuple[GripperCompletion, ...]:
+    """Keep the Panda scene's two-sided, two-finger evidence rules explicit.
+
+    The shared feedback container accepts any bounded, named gripper/finger
+    set.  This backend still requires exactly the left then right Panda
+    grippers, each with finger indices 1 and 2, because its completion and
+    same-object contact rules are defined for those named bodies.
+    """
+    sides = tuple(completion.side for completion in completions)
+    if sides != ("left", "right"):
+        raise ContractError(
+            "INVALID_GRIPPER_FEEDBACK",
+            "Panda requires exactly left then right gripper completions",
+        )
+    for completion in completions:
+        indices = tuple(finger.finger_index for finger in completion.fingers)
+        if indices != (1, 2):
+            raise ContractError(
+                "INVALID_GRIPPER_FEEDBACK",
+                f"Panda {completion.side} gripper requires finger indices 1 then 2",
+            )
+        if any(finger.side != completion.side for finger in completion.fingers):
+            raise ContractError(
+                "INVALID_GRIPPER_FEEDBACK",
+                f"Panda {completion.side} finger evidence side does not match",
+            )
+    return completions

@@ -19,6 +19,7 @@ from robot_backend_sim.physics.contacts import (
     empty_contact_evidence,
     evaluate_gripper_completion,
     measure_contact_evidence,
+    validated_panda_completions,
 )
 from robot_backend_sim.physics.panda_io import Measurement
 from robot_backend_sim.physics.scene import Scene
@@ -155,7 +156,7 @@ class GripperContactTracker:
         initial_positions: tuple[float, ...],
         final_positions: tuple[float, ...],
     ) -> tuple[GripperCompletion, ...]:
-        return tuple(
+        return validated_panda_completions(tuple(
             self._completion(
                 side,
                 measurement,
@@ -164,7 +165,7 @@ class GripperContactTracker:
                 final_positions[_GRIPPER_INDEX[side]],
             )
             for side in _SIDES
-        )
+        ))
 
     def completion_bounds(
         self,
@@ -227,7 +228,7 @@ class GripperContactTracker:
         contacts: tuple[GripperContactEvidence, ...],
         hold_positions: tuple[float, ...],
     ) -> tuple[GripperCompletion, ...]:
-        return tuple(
+        return validated_panda_completions(tuple(
             self._completion(
                 side,
                 measurement,
@@ -236,7 +237,7 @@ class GripperContactTracker:
                 hold_positions[_GRIPPER_INDEX[side]],
             )
             for side in _SIDES
-        )
+        ))
 
     def constrained_axes(
         self,

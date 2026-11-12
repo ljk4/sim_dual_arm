@@ -165,9 +165,6 @@ class RuntimeNode(Node):
                 start_timeout_s=self._recipe.teacher.start_timeout_s
                 if self._recipe.teacher is not None
                 else self._recipe.call_timeout_s,
-                chunk_timeout_s=self._recipe.teacher.chunk_deadline_s
-                if self._recipe.teacher is not None
-                else self._recipe.call_timeout_s,
                 poll_interval_s=self._recipe.teacher.poll_interval_s
                 if self._recipe.teacher is not None
                 else 0.02,
@@ -177,6 +174,20 @@ class RuntimeNode(Node):
             if task_enabled(configuration)
             else None
         )
+        if self._recipe.action_source == "teacher" and self._task_client is not None:
+            from dual_arm_runtime.teacher_client import TeacherTaskClient
+
+            self._task_client = TeacherTaskClient(
+                self._task_client,
+                self,
+                self._root,
+                capability=self._recipe.teacher_api,
+                chunk_timeout_s=self._recipe.teacher.chunk_deadline_s,
+                call_timeout_s=self._recipe.call_timeout_s,
+                poll_interval_s=self._recipe.teacher.poll_interval_s,
+                log=log,
+                stop_requested=self._control.stop_requested,
+            )
         self._cameras = {camera.name: camera for camera in configuration.profile.cameras}
 
     def _setup_ros(self, auto_start: bool) -> None:

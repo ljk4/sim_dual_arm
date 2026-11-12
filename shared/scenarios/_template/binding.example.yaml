@@ -1,0 +1,69 @@
+# 方案 binding 示例（v1）。本文件不是可运行方案。
+#
+# 使用方式：复制到 shared/scenarios/<scenario-id>/binding.yaml，替换所有
+# REPLACE_ME / replace_me 占位值。入口只读取 binding.yaml；本文件名为
+# binding.example.yaml，不会被 --scenario 选中，也不会回退到任何已有方案。
+#
+# 路径规则：
+#   - 本文件内的所有路径相对本文件所在目录解析，与调用者 cwd 无关。
+#   - source_roots 必须写成相对本文件目录的路径；profiles、recipes 与
+#     extension_ros 必须位于本文件目录或某个 source_root 之内。
+#   - artifact_roots 可写绝对路径（容器内通常是 /data），也可写相对路径。
+#   - models.bundle 可以是 null（collection 阶段不需要模型），推理准备时
+#     必须用 models.bundle 或 --bundle 提供 learning 已验证的 bundle 目录。
+#   - 数值配方不写进 binding；这里只记录被选中文件的路径。
+schema_version: 1
+scenario_id: replace_me
+description: "REPLACE_ME: one-line task description"
+
+backend:
+  # 当前只实现了 simulation/mujoco；hardware 没有已验证的真实驱动。
+  kind: simulation
+  implementation: REPLACE_ME
+  task_type: REPLACE_ME
+
+runtime:
+  # 当前只实现了 ros2。
+  implementation: REPLACE_ME
+
+learning:
+  # 当前只实现了 lerobot 与 act。
+  implementation: REPLACE_ME
+  adapter: REPLACE_ME
+
+profiles:
+  # 公共档案的唯一权威来源。可引用本方案目录内的文件，也可通过
+  # source_roots 引用另一个方案目录中的既有档案；不要复制数值。
+  robot: profiles/REPLACE_ME/profile.json
+  observation: profiles/REPLACE_ME/observation.json
+  action: profiles/REPLACE_ME/action.json
+
+recipes:
+  # 各端拥有的数值配方。角色需要哪一份就显式选择哪一份；同一方案保留
+  # 两组配方时新增第二个文件并在这里分别引用，不使用继承或 defaults。
+  simulation_teacher: configs/REPLACE_ME/backend_teacher.yaml
+  simulation_policy: configs/REPLACE_ME/backend_policy.yaml
+  runtime_teacher: configs/REPLACE_ME/runtime_teacher.yaml
+  runtime_policy: configs/REPLACE_ME/runtime_policy.yaml
+  campaign: configs/REPLACE_ME/campaign.yaml
+  dataset: configs/REPLACE_ME/dataset.yaml
+  training: configs/REPLACE_ME/training.yaml
+  policy_service: configs/REPLACE_ME/policy_service.yaml
+
+interfaces:
+  # 公共 ROS 包只需列出实际使用的；teacher_api / policy_api 必须与已实现
+  # 的适配侧能力标识一致。留空表示不声明。
+  common_ros: []
+  extension_ros: []
+  # teacher_api: REPLACE_ME.teacher_chunk.v1
+  # policy_api: REPLACE_ME.policy.v1
+
+models:
+  bundle: null
+
+# 复用其他方案的档案或配方时声明相对根，例如 [".."]；不使用 references
+# 做继承，references 只加载并记录独立依赖，不会合并字段。
+source_roots: []
+artifact_roots: []
+
+references: []

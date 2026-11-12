@@ -10,11 +10,12 @@ from robot_backend_sim.config.backend_config import load_backend_config
 from robot_backend_sim.config.follower_config import load_follower_config
 
 ROOT = Path(__file__).resolve().parents[2]
-FOLLOWER = ROOT / "profiles/control/panda_follower_v1.yaml"
-BACKEND = ROOT / "simulation/mujoco/configs/backend/backend_stack_inference.yaml"
-BACKEND_CHUNKED = ROOT / "simulation/mujoco/configs/backend/backend_stack_act_chunked.yaml"
-RUNTIME_CHUNKED = ROOT / "runtime/ros2/configs/policy_rollout.yaml"
-RUNTIME_TEACHER = ROOT / "runtime/ros2/configs/teacher_collect.yaml"
+SCENARIO = ROOT / "shared/scenarios/panda_stack"
+FOLLOWER = SCENARIO / "profiles/control/panda_follower_v1.yaml"
+BACKEND = SCENARIO / "configs/simulation/backend/backend_stack_inference.yaml"
+BACKEND_CHUNKED = SCENARIO / "configs/simulation/backend/backend_stack_act_chunked.yaml"
+RUNTIME_CHUNKED = SCENARIO / "configs/runtime/policy_rollout.yaml"
+RUNTIME_TEACHER = SCENARIO / "configs/runtime/teacher_collect.yaml"
 
 _REFERENCED_FILES = (
     "robot_profile",

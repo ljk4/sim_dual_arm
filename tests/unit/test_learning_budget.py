@@ -162,8 +162,8 @@ time.sleep(20)
     env["PYTHONPATH"] = os.pathsep.join(
         [
             str(root / "learning/lerobot/src"),
-            str(root / "contracts/python/src"),
-            str(root / "libraries/run_logging/src"),
+            str(root / "shared/common/python/contracts/src"),
+            str(root / "shared/common/python/run_logging/src"),
             env.get("PYTHONPATH", ""),
         ]
     )

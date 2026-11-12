@@ -23,15 +23,35 @@ REFERENCES = (
 )
 
 
-def check_ros_sdk(project_root: Path = ROOT) -> int:
-    return subprocess.run(
-        [
-            sys.executable, str(project_root / "infrastructure/scripts/dev_workspace.py"),
-            "check", "--project-root", str(project_root),
-            "--build-root", os.environ.get("ROS_SDK_ROOT", "/build/ros-dev"),
-        ],
-        check=False,
-    ).returncode
+def sdk_check_command(
+    project_root: Path = ROOT,
+    *,
+    scenario: str | None = None,
+    shared_root: Path | None = None,
+) -> list[str]:
+    command = [
+        sys.executable,
+        str(project_root / "shared/common/tools/scripts/dev_workspace.py"),
+        "check", "--project-root", str(project_root),
+        "--build-root", os.environ.get("ROS_SDK_ROOT", "/build/ros-dev"),
+    ]
+    if scenario is not None:
+        command += ["--scenario", scenario]
+        if shared_root is not None:
+            command += ["--shared-root", str(shared_root)]
+    return command
+
+
+def check_ros_sdk(
+    project_root: Path = ROOT,
+    *,
+    scenario: str | None = None,
+    shared_root: Path | None = None,
+) -> int:
+    command = sdk_check_command(
+        project_root, scenario=scenario, shared_root=shared_root
+    )
+    return subprocess.run(command, check=False).returncode
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -39,7 +59,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--backend-log", type=Path, default=Path("/data/runs/backend/teacher-backend/log")
     )
+    parser.add_argument(
+        "--campaign-config",
+        type=Path,
+        default=Path(
+            "shared/scenarios/panda_stack/configs/runtime/experiments/stack_campaign.yaml"
+        ),
+        help="campaign recipe used for export quality rules",
+    )
     parser.add_argument("--no-previews", action="store_true")
+    parser.add_argument("--scenario")
+    parser.add_argument("--shared-root", type=Path)
     args = parser.parse_args(argv)
     attempt = Path(os.environ["CAMPAIGN_ATTEMPT_DIR"]).resolve()
     seed = int(os.environ["CAMPAIGN_SEED"])
@@ -49,7 +79,11 @@ def main(argv: list[str] | None = None) -> int:
     backend_log = args.backend_log.resolve()
     if not backend_log.is_dir():
         raise FileNotFoundError(f"teacher backend log is missing: {backend_log}")
-    code = check_ros_sdk()
+    scenario = args.scenario or os.environ.get("CAMPAIGN_SCENARIO_ID") or None
+    shared_root = args.shared_root
+    if shared_root is None and os.environ.get("SHARED_ROOT"):
+        shared_root = Path(os.environ["SHARED_ROOT"])
+    code = check_ros_sdk(ROOT, scenario=scenario, shared_root=shared_root)
     if code:
         return code
 
@@ -89,6 +123,7 @@ def main(argv: list[str] | None = None) -> int:
             sys.executable, "-m", "dual_arm_runtime.offline.export_episode",
             "--episode-dir", str(episode),
             "--out", str(stack / "export"),
+            "--campaign-config", str(args.campaign_config),
             "--runtime-log", str(stack / "runs" / run_id / "logs" / "runtime"),
             "--backend-log", str(backend_log),
             *(["--no-previews"] if args.no_previews else []),

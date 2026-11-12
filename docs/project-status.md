@@ -1,6 +1,6 @@
 # 项目状态与里程碑
 
-更新日期：2026-11-10。本文件记录项目总体目标、核心技术约束、已完成阶段、关键产物路径与下一步计划。操作指南见[根 README](../README.md)，工程准则见[项目规范](standards.md)。
+更新日期：2026-11-12。本文件记录项目总体目标、核心技术约束、已完成阶段、关键产物路径与下一步计划。操作指南见[根 README](../README.md)，工程准则见[项目规范](standards.md)。
 
 ---
 
@@ -52,7 +52,10 @@
    - 当前工作区保留用于快速验证链路的 5K 步模型包；5K 模型可跑通完整推理闭环，但在部分种子下仍会出现跟随偏差超限（`FOLLOWER_DEVIATION_EXCEEDED`）或夹持阶段跟踪超时（`TRACKING_TIMEOUT`）。
    - 2026-11-11 复核最近 8 局并修复制动前缀导出、夹持接触误判和停止原因掩盖。初次两局完整回归均录制完整、未复现这些工程错误，但均因方块掉落失败。证据与边界见[本次排查记录](experiments/2026-11-11-inference-execution-failures.md)。
    - 后续同种子 `20001` 的用户运行出现一次真实 `TRACKING_TIMEOUT` 和一次任务成功（成功条件持续 2 s；未做导出图像质量门禁）。数据逐行检查未发现标签转换错误；新增诊断发现融合关闭延迟、跟随参考桌面净空不足及模型过渡误差，仍需分开验证，不能视为稳定成功。
+   - 2026-11-12 阶段 12 有界回归使用现有真实 bundle 完成 Policy 软件链路（45 次 `Predict`、44 个动作块、审计通过）；本局任务结果为 `TASK_FAILED: DROPPED`，导出质量因既有遮挡不合格。结果按实际记录，未调整模型、物理参数或质量门禁。
 2. **代码与工程架构状态**：
+   - 公共层与方案绑定迁移已完成：公共协议、Python 包与工具在 `shared/common/`；当前 Panda/MuJoCo/ROS 2/ACT 实例的档案、配方和专用接口由 `shared/scenarios/panda_stack/binding.yaml` 选择；四端持有实现与容器入口。替换步骤见 [方案模板](../shared/scenarios/_template/README.md)，诊断复现见 `shared/scenarios/panda_stack_diag/`。
+   - 阶段 12 有界回归同时验证了双 worker Teacher（各一次、domain 210/211）、新 episode 导出/审计、并行入口中断收尾，以及已选历史 episode 的只读导出/审计；历史导出与既有结果在 summary/labels/raw_predictions/frame_index 上逐字节一致，quality 样本计数差异来自日志覆盖范围，判定未变。
    - 六阶段全量重构已完成：废弃的 S1 Mock 后端、非受限 SciPy 样条接口、旧版 Schema（v2～v4）及 `Native*` 命名前缀已彻底清理。
    - 训练端已默认切换为 `PyAV` 视频解码、`default_collate` 批张量直出、多进程 `num_workers`/`pin_memory` 与 CUDA `torch.amp`（bfloat16）混合精度训练。
    - 运行端支持 `interactive` 交互式单局评估，仿真端支持独立进程只读 `viewer` 实时可视化。

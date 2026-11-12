@@ -70,12 +70,13 @@ def _gripper_feedback(completion: object) -> GripperFeedback:
 
 
 def _execution_grippers(snapshot: object) -> tuple[GripperFeedback, ...]:
-    grippers = tuple(_gripper_feedback(completion) for completion in snapshot.grippers)  # type: ignore[attr-defined]
-    if len(grippers) != 2:
-        raise _invalid(
-            "INVALID_EXECUTION_FEEDBACK", "snapshot must carry exactly two gripper decisions"
-        )
-    return grippers
+    # The shared container accepts any bounded named gripper set.  Panda's
+    # two-sided/two-finger evidence rule is enforced by GripperContactTracker;
+    # this adapter only copies the frozen snapshot without adding a new rule.
+    return tuple(
+        _gripper_feedback(completion)
+        for completion in snapshot.grippers  # type: ignore[attr-defined]
+    )
 
 
 def execution_feedback(status: ControlStatus) -> ExecutionFeedback:

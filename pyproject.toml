@@ -10,9 +10,9 @@ select = ["E", "F", "I", "B", "UP"]
 [tool.pytest.ini_options]
 testpaths = ["tests/unit"]
 pythonpath = [
-  "contracts/python/src",
-  "libraries/run_logging/src",
-  "libraries/trajectory/src",
+  "shared/common/python/contracts/src",
+  "shared/common/python/run_logging/src",
+  "shared/common/python/trajectory/src",
   "simulation/mujoco/src",
   "runtime/ros2/ros/dual_arm_runtime",
   "learning/lerobot/src",

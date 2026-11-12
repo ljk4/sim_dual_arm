@@ -14,7 +14,7 @@ from robot_contracts.models import ContractError
 from robot_run_logging import LogFailure, LogSettings
 
 ROOT = Path(__file__).resolve().parents[2]
-BASE_CONFIG = ROOT / "runtime/ros2/configs/teacher_collect.yaml"
+BASE_CONFIG = ROOT / "shared/scenarios/panda_stack/configs/runtime/teacher_collect.yaml"
 DEFAULTS = asdict(LogSettings())
 
 

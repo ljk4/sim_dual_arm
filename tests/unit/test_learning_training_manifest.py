@@ -4,12 +4,14 @@ import json
 from pathlib import Path
 
 import pytest
+import yaml
 from dual_arm_learning.config import load_training_config
 from dual_arm_learning.dataset import canonical_hash
 from dual_arm_learning.training import TrainingError, masked_l1, verify_dataset_manifest
 from model_helpers import replace
 
 ROOT = Path(__file__).resolve().parents[2]
+SCENARIO = ROOT / "shared/scenarios/panda_stack"
 
 
 def _write(path: Path, value: object) -> None:
@@ -47,7 +49,9 @@ def _manifest(config, root: Path) -> dict:
         }
 
     training_episodes = [
-        episode(index) for index in range(50) if index not in config.dataset.validation_positions
+        episode(index)
+        for index in range(config.dataset.expected_formal_episodes)
+        if index not in config.dataset.validation_positions
     ]
     validation_episodes = [episode(index) for index in config.dataset.validation_positions]
     for split, episodes in (("train", training_episodes), ("validation", validation_episodes)):
@@ -84,15 +88,15 @@ def _manifest(config, root: Path) -> dict:
         "splits": {
             "training": {
                 "root": "train",
-                "episode_count": 45,
-                "frame_count": 2700,
+                "episode_count": len(training_episodes),
+                "frame_count": len(training_episodes) * 60,
                 "episodes": training_episodes,
                 "files": {"meta/info.json": {}, "meta/stats.json": {}},
             },
             "validation": {
                 "root": "validation",
-                "episode_count": 5,
-                "frame_count": 300,
+                "episode_count": len(validation_episodes),
+                "frame_count": len(validation_episodes) * 60,
                 "episodes": validation_episodes,
                 "files": {"meta/info.json": {}, "meta/stats.json": {}},
             },
@@ -101,7 +105,7 @@ def _manifest(config, root: Path) -> dict:
 
 
 def test_manifest_partitions_45_5_and_rejects_overlap(tmp_path):
-    config = load_training_config(ROOT / "learning/lerobot/configs/act_training.yaml", ROOT)
+    config = load_training_config(SCENARIO / "configs/learning/act_training.yaml", ROOT)
     config = replace(config, data_root=tmp_path, verify_hashes=False, mode="full")
     manifest = _manifest(config, tmp_path)
     _write(tmp_path / "manifest.json", manifest)
@@ -123,7 +127,7 @@ def test_manifest_partitions_45_5_and_rejects_overlap(tmp_path):
 
 
 def test_full_refuses_short_episode_and_synthetic_data(tmp_path):
-    config = load_training_config(ROOT / "learning/lerobot/configs/act_training.yaml", ROOT)
+    config = load_training_config(SCENARIO / "configs/learning/act_training.yaml", ROOT)
     config = replace(config, data_root=tmp_path, verify_hashes=False, mode="full")
     manifest = _manifest(config, tmp_path)
     manifest["splits"]["training"]["episodes"][0]["frame_count"] = 1
@@ -136,6 +140,45 @@ def test_full_refuses_short_episode_and_synthetic_data(tmp_path):
     _write(tmp_path / "manifest.json", manifest)
     with pytest.raises(TrainingError, match="synthetic"):
         verify_dataset_manifest(config, allow_synthetic=True, require_full=True)
+
+
+def test_diagnostic_manifest_uses_configured_small_split(tmp_path):
+    dataset_document = yaml.safe_load(
+        (SCENARIO / "configs/learning/act_dataset.yaml").read_text()
+    )
+    dataset_document["diagnostic"] = True
+    dataset_document["expected"] = {
+        "formal_episodes": 2,
+        "training_episodes": 1,
+        "validation_episodes": 1,
+        "validation_positions": [1],
+    }
+    dataset_path = tmp_path / "diagnostic_dataset.yaml"
+    dataset_path.write_text(yaml.safe_dump(dataset_document))
+
+    training_document = yaml.safe_load(
+        (SCENARIO / "configs/learning/act_training.yaml").read_text()
+    )
+    training_document["data"]["config"] = str(dataset_path)
+    training_document["mode"] = "smoke"
+    training_path = tmp_path / "diagnostic_training.yaml"
+    training_path.write_text(yaml.safe_dump(training_document))
+
+    config = load_training_config(training_path, ROOT)
+    config = replace(config, data_root=tmp_path, verify_hashes=False)
+    _write(tmp_path / "manifest.json", _manifest(config, tmp_path))
+    audit = verify_dataset_manifest(config, allow_synthetic=False, require_full=False)
+    assert audit.training_global_indices == (0,)
+    assert audit.validation_global_indices == (1,)
+    assert audit.train_frames == 60
+    assert audit.validation_frames == 60
+
+    manifest = _manifest(config, tmp_path)
+    manifest["splits"]["validation"]["episodes"] = []
+    manifest["splits"]["validation"]["episode_count"] = 0
+    _write(tmp_path / "manifest.json", manifest)
+    with pytest.raises(TrainingError, match="validation split"):
+        verify_dataset_manifest(config, allow_synthetic=False, require_full=False)
 
 
 def test_masked_l1_ignores_padded_future_actions():

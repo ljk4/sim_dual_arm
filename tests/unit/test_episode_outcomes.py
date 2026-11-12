@@ -41,7 +41,7 @@ def test_runtime_result_rejects_ambiguous_completed_and_missing_reason():
 
 
 def test_v1_schema_separates_dimensions_and_rejects_legacy_alias():
-    schema = ROOT / "contracts/schemas/v1/episode_manifest.schema.json"
+    schema = ROOT / "shared/common/interfaces/schemas/v1/episode_manifest.schema.json"
     manifest = {
         "schema_version": 1,
         "episode_id": "episode-test",

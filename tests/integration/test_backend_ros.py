@@ -50,6 +50,8 @@ except ImportError as error:  # pragma: no cover - host without ROS
     pytest.skip(f"ROS unavailable: {error}", allow_module_level=True)
 
 ROOT = Path(__file__).resolve().parents[2]
+SCENARIO = ROOT / "shared/scenarios/panda_stack"
+PROFILES = SCENARIO / "profiles"
 SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
@@ -59,9 +61,9 @@ from robot_backend_sim.ros.node import BackendNode  # noqa: E402
 from robot_backend_sim.ros.ros_bridge import RosFutureBridge  # noqa: E402
 from robot_backend_sim.runtime.worker import Worker  # noqa: E402
 
-CONFIG = ROOT / "simulation/mujoco/configs/backend/backend.yaml"
-PROFILE_PATH = ROOT / "profiles/robots/panda_stack_v1/profile.json"
-SCHEMAS = ROOT / "contracts/schemas"
+CONFIG = SCENARIO / "configs/simulation/backend/backend.yaml"
+PROFILE_PATH = PROFILES / "robots/panda_stack_v1/profile.json"
+SCHEMAS = ROOT / "shared/common/interfaces/schemas"
 
 
 def _config_for(
@@ -77,9 +79,9 @@ def _config_for(
             "namespace": namespace,
             "profile": str(PROFILE_PATH),
             "schemas": str(SCHEMAS),
-            "scene": str(ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml"),
-            "control": str(ROOT / "profiles/control/panda_control_v1.yaml"),
-            "stream": str(ROOT / "profiles/control/panda_stream_v1.yaml"),
+            "scene": str(SCENARIO / "configs/simulation/scene/panda_stack.yaml"),
+            "control": str(PROFILES / "control/panda_control_v1.yaml"),
+            "stream": str(PROFILES / "control/panda_stream_v1.yaml"),
         }
     )
     follower = document["robot"].get("follower")
@@ -110,9 +112,9 @@ class Stack:
         child_env["PYTHONPATH"] = os.pathsep.join(
             [
                 str(ROOT / "simulation/mujoco/src"),
-                str(ROOT / "contracts/python/src"),
-                str(ROOT / "libraries/ros_support/src"),
-                str(ROOT / "libraries/run_logging/src"),
+                str(ROOT / "shared/common/python/contracts/src"),
+                str(ROOT / "shared/common/python/ros_support/src"),
+                str(ROOT / "shared/common/python/run_logging/src"),
                 child_env.get("PYTHONPATH", ""),
             ]
         )
@@ -282,6 +284,7 @@ def test_node_sigterm_is_clean(tmp_path):
     stack = Stack(tmp_path, speed=5.0)
     try:
         stack.wait_ready()
+        assert "execution_feedback.gripper_set.v1" in stack.info.capabilities
     finally:
         code = stack.close(signal_number=signal.SIGTERM)
     assert code == 0

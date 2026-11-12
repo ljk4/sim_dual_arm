@@ -52,10 +52,18 @@ def train(
     resume_run: Path | None = None,
     max_steps: int | None = None,
     progress: ConsoleProgress | None = None,
+    selection: dict[str, Any] | None = None,
+    overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run one mode with a stable run id and one unique budget segment."""
     context: _TrainingContext = _create_context(
-        config, allow_synthetic, resume_run, max_steps, progress=progress
+        config,
+        allow_synthetic,
+        resume_run,
+        max_steps,
+        progress=progress,
+        selection=selection,
+        overrides=overrides,
     )
     try:
         _prepare_training_context(context)

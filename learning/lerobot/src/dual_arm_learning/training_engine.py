@@ -78,6 +78,8 @@ class _TrainingContext:
     steps_total: int
     resume: dict[str, Any] | None
     progress: ConsoleProgress | None = None
+    selection: dict[str, Any] | None = None
+    overrides: dict[str, Any] | None = None
     stop_signal: int | None = None
     final_reason: str = "completed"
     interrupted: TrainingInterrupted | None = None
@@ -127,6 +129,8 @@ def _resume_state(
 def _create_context(
     config: TrainingConfig, allow_synthetic: bool, resume_run: Path | None, max_steps: int | None,
     *, progress: ConsoleProgress | None = None,
+    selection: dict[str, Any] | None = None,
+    overrides: dict[str, Any] | None = None,
 ) -> _TrainingContext:
     if config.mode == "full" and allow_synthetic:
         raise TrainingError("full mode never accepts synthetic source data")
@@ -159,6 +163,8 @@ def _create_context(
         ),
         resume=checkpoint,
         progress=progress,
+        selection=selection,
+        overrides=overrides,
     )
     context.previous_sigint = signal.signal(signal.SIGINT, _request_stop(context))
     context.previous_sigterm = signal.signal(signal.SIGTERM, _request_stop(context))
@@ -581,6 +587,8 @@ def _report_payload(context: _TrainingContext) -> dict[str, Any]:
         peak_reserved=peak_reserved,
         sample_filter=context.sample_filter,
         weights_sha256=context.weights_sha256,
+        selection=context.selection,
+        overrides=context.overrides,
     )
 
 

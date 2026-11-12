@@ -9,7 +9,7 @@
 
 ## 执行方式
 
-所有测试通过各端容器内的 `scripts/run.sh test`（底层调用 [`infrastructure/scripts/test.sh`](../infrastructure/scripts/test.sh)，固定设置 `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`）执行：
+所有测试通过各端容器内的 `scripts/run.sh test`（底层调用 [`shared/common/tools/scripts/test.sh`](../shared/common/tools/scripts/test.sh)，固定设置 `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`）执行：
 
 ```bash
 # 在 runtime 容器内运行单元测试与 ROS 集成测试：

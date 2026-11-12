@@ -1,0 +1,39 @@
+# Bounded pre-commit smoke: real phase-12 teacher export -> independent
+# train/validation LeRobot datasets.  This recipe is diagnostic only: it keeps
+# the real profile, camera, action and quality contracts, records the small
+# counts explicitly and never claims the formal 50/45/5 split.
+schema_version: 1
+fps: 20
+chunk_size: 60
+action_lead_ns: 50000000
+state_dim: 16
+camera_names: [global, left_wrist, right_wrist]
+camera_width: 320
+camera_height: 240
+task_text: "Pick up the red source cube and place it on the blue target cube."
+profile: /workspace/shared/scenarios/panda_stack/profiles/robots/panda_stack_learning_v1/profile.json
+select: /data/diagnostics/precommit-smoke-20261112/select.json
+output_root: /data/diagnostics/precommit-smoke-20261112/dataset
+cache_root: /data/diagnostics/precommit-smoke-20261112/cache
+attempt_export_glob: "stack/*/export"
+verify_png_pixels: true
+require_quality: true
+diagnostic: true
+expected:
+  formal_episodes: 2
+  training_episodes: 1
+  validation_episodes: 1
+  # Zero-based position of the single validation episode.
+  validation_positions: [1]
+lerobot:
+  source_revision: 7e241bd630a3719a56157a497ce5d08f244784f1
+  rgb_encoder:
+    vcodec: h264
+    g: 2
+    crf: 18
+    preset: veryfast
+  video_backend: pyav
+  video_files_size_mb: 256
+  data_files_size_mb: 256
+  encoder_threads: 1
+  image_writer_threads: 0

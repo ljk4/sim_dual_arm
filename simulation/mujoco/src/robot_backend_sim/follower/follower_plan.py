@@ -30,6 +30,10 @@ from robot_backend_sim.motion.ruckig_export import export_ruckig_reference
 
 __all__ = ["prepare_follower_plan"]
 
+# The producer identity travels with every accepted record.  Public consumers
+# retain it as recorded; they do not require this value.
+RUCKIG_ALGORITHM_VERSION = "bounded-target-follower/ruckig-0.15.3/v1"
+
 _NS_PER_S = 1_000_000_000
 _VELOCITY_ATOL = 1e-12
 
@@ -396,6 +400,7 @@ def prepare_follower_plan(
         restricted_terminal_velocities=restricted_terminal_velocities,
         is_final=is_final,
         requested_window_ns=end_time_ns,
-        ruckig_duration_ns=profile_duration_ns,
+        curve_duration_ns=profile_duration_ns,
         duration_grid_ns=grid_ns,
+        algorithm_version=RUCKIG_ALGORITHM_VERSION,
     )

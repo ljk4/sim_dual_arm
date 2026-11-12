@@ -5,12 +5,12 @@
 # file.  SI time units are seconds unless a field says otherwise.
 robot:
   namespace: /robot
-  profile: ../../../profiles/robots/panda_stack_v1/profile.json
-  schemas: ../../../contracts/schemas
-  scene: ../../../simulation/mujoco/configs/scene/panda_stack.yaml
-  control: ../../../profiles/control/panda_control_v1.yaml
-  stream: ../../../profiles/control/panda_stream_v1.yaml
-  follower: ../../../profiles/control/panda_follower_v1.yaml
+  profile: ../../../shared/scenarios/panda_stack/profiles/robots/panda_stack_v1/profile.json
+  schemas: ../../../shared/common/interfaces/schemas
+  scene: ../../../shared/scenarios/panda_stack/configs/simulation/scene/panda_stack.yaml
+  control: ../../../shared/scenarios/panda_stack/profiles/control/panda_control_v1.yaml
+  stream: ../../../shared/scenarios/panda_stack/profiles/control/panda_stream_v1.yaml
+  follower: ../../../shared/scenarios/panda_stack/profiles/control/panda_follower_v1.yaml
 
 run:
   seed: 0

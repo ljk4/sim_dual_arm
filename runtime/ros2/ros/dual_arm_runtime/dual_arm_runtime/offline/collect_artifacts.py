@@ -19,11 +19,8 @@ _SOURCE_DIRECTORIES = (
     "simulation",
     "runtime",
     "learning",
-    "infrastructure",
+    "shared",
     "hardware",
-    "libraries",
-    "contracts",
-    "profiles",
     "scripts",
 )
 _SOURCE_FILES = ("pyproject.toml",)
@@ -141,7 +138,7 @@ def source_manifest(root: Path) -> dict[str, Any]:
             relative = path.relative_to(root)
             if any(part in _EXCLUDED_PARTS for part in relative.parts):
                 continue
-            if relative.parts[:2] == ("infrastructure", "local"):
+            if relative.parts[:4] == ("shared", "common", "tools", "local"):
                 continue
             if path.suffix.lower() in _EXCLUDED_SUFFIXES:
                 continue
@@ -166,7 +163,7 @@ def contracts_digest(manifest: dict[str, Any]) -> str | None:
     lines = "".join(
         f"{name}\0{digest}\n"
         for name, digest in sorted(files.items())
-        if str(name).startswith("contracts/")
+        if str(name).startswith(("contracts/", "shared/common/interfaces/"))
     )
     if not lines:
         return None

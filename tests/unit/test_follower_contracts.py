@@ -21,7 +21,8 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-CONFIG_PATH = ROOT / "profiles/control/panda_follower_v1.yaml"
+CONFIG_PATH = ROOT / "shared/scenarios/panda_stack/profiles/control/panda_follower_v1.yaml"
+PRODUCER = "fixture-producer/v1"
 
 
 def joint(name: str, *, minimum: float = -10.0, maximum: float = 10.0, velocity: float = 1.0):
@@ -77,7 +78,8 @@ def make_non_final() -> tuple[PreparedFollowerPlan, tuple[JointSpec, ...]]:
         restricted_terminal_velocities=(0.1, 0.0),
         is_final=False,
         requested_window_ns=window.end_time_ns,
-        ruckig_duration_ns=window.end_time_ns,
+        curve_duration_ns=window.end_time_ns,
+        algorithm_version=PRODUCER,
     )
     return plan, joints
 
@@ -139,7 +141,8 @@ def test_final_plan_extended_tail_reaches_target_at_zero_velocity():
         restricted_terminal_velocities=(0.0, 0.0),
         is_final=True,
         requested_window_ns=window.end_time_ns,
-        ruckig_duration_ns=plan.duration_ns,
+        curve_duration_ns=plan.duration_ns,
+        algorithm_version=PRODUCER,
     )
     assert prepared.duration_ns == 200_000_000
     assert prepared.extension_ns == 50_000_000
@@ -182,7 +185,7 @@ def test_exact_cubic_deviation_is_not_a_tick_sample():
         {"raw_terminal_velocities": (0.1,)},
         {"restricted_terminal_velocities": (2.0, 0.0)},
         {"is_final": True},
-        {"ruckig_duration_ns": 100_000_000},
+        {"curve_duration_ns": 100_000_000},
         {"requested_window_ns": 100_000_000},
     ),
 )
@@ -199,7 +202,8 @@ def test_invalid_or_inconsistent_plan_is_rejected(change):
         "restricted_terminal_velocities": (0.1, 0.0),
         "is_final": False,
         "requested_window_ns": window.end_time_ns,
-        "ruckig_duration_ns": window.end_time_ns,
+        "curve_duration_ns": window.end_time_ns,
+        "algorithm_version": PRODUCER,
     }
     fields.update(change)
     with pytest.raises(ContractError):
@@ -227,7 +231,8 @@ def test_discontinuous_plan_and_exceeded_deviation_are_rejected():
             restricted_terminal_velocities=(0.1, 0.0),
             is_final=False,
             requested_window_ns=window.end_time_ns,
-            ruckig_duration_ns=window.end_time_ns,
+            curve_duration_ns=window.end_time_ns,
+            algorithm_version=PRODUCER,
         )
     with pytest.raises(ContractError) as caught:
         PreparedFollowerPlan(
@@ -241,7 +246,8 @@ def test_discontinuous_plan_and_exceeded_deviation_are_rejected():
             restricted_terminal_velocities=(0.1, 0.0),
             is_final=False,
             requested_window_ns=window.end_time_ns,
-            ruckig_duration_ns=window.end_time_ns,
+            curve_duration_ns=window.end_time_ns,
+            algorithm_version=PRODUCER,
         )
     assert caught.value.reason == "FOLLOWER_DEVIATION_EXCEEDED"
 
@@ -435,6 +441,7 @@ def test_dto_rejects_endpoint_that_cannot_brake_inside_joint_boundary():
             restricted_terminal_velocities=(0.0, 0.0),
             is_final=False,
             requested_window_ns=window.end_time_ns,
-            ruckig_duration_ns=window.end_time_ns,
+            curve_duration_ns=window.end_time_ns,
+            algorithm_version=PRODUCER,
         )
     assert caught.value.reason == "FOLLOWER_BRAKING_INFEASIBLE"

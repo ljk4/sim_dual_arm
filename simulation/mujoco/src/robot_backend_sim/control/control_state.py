@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING
 
 from robot_contracts.control import ControlCommand, RunContext
 from robot_contracts.stream_request import StreamRequest
-from robot_contracts.trajectory.constants import FOLLOWER_ALGORITHM_VERSION
 from robot_trajectory.follower import PreparedFollowerPlan
 
 from robot_backend_sim.control.control_history import (
@@ -55,12 +54,11 @@ def _invalid(reason: str, detail: str) -> Exception:
 
 
 def _fingerprint_payload(prepared: PreparedFollowerPlan) -> dict[str, object]:
-    """Cover algorithm identity plus every excluded terminal/deviation fact."""
+    """Cover the producer's algorithm identity plus every excluded fact."""
     payload = prepared.canonical_dict()
     payload.update(
         {
             "kind": "FOLLOWER",
-            "algorithm": FOLLOWER_ALGORITHM_VERSION,
             "raw_terminal_velocities": list(prepared.raw_terminal_velocities),
             "restricted_terminal_velocities": list(prepared.restricted_terminal_velocities),
             "max_target_deviation_limits": list(prepared.max_target_deviation_limits),

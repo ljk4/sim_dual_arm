@@ -6,12 +6,14 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_source_proto_has_fixed_observation_time_and_policy_metadata():
-    text = (ROOT / "contracts/policy/v1/policy.proto").read_text()
+    text = (ROOT / "shared/common/interfaces/policy/v1/policy.proto").read_text()
     assert "time_from_observation_ns = 1;" in text
     assert "time_from_start_ns" not in text
     assert "uint32 chunk_size = 14;" in text
     assert "bool test_only = 15;" in text
     assert "action_period_ns = 10;" in text
+    # Robot recipes (joint order, camera names, chunk counts) belong to the
+    # scenario documentation, not to the common wire comments.
     for name in (
         "left_joint1",
         "left_joint7",
@@ -20,7 +22,19 @@ def test_source_proto_has_fixed_observation_time_and_policy_metadata():
         "right_joint7",
         "right_gripper_width",
     ):
-        assert name in text
+        assert name not in text
+    scenario = (ROOT / "shared/scenarios/panda_stack/README.md").read_text()
+    for name in (
+        "left_joint1",
+        "left_joint7",
+        "left_gripper_width",
+        "right_joint1",
+        "right_joint7",
+        "right_gripper_width",
+    ):
+        assert name in scenario
+    assert "60 点 × 16 维" in scenario
+    assert "global, left_wrist, right_wrist" in scenario
 
 
 def test_generated_sdk_matches_the_new_contract_when_available():

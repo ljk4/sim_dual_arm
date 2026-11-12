@@ -14,10 +14,11 @@ from robot_contracts.profiles import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
-SCHEMAS = ROOT / "contracts/schemas"
-PANDA_PROFILE = ROOT / "profiles/robots/panda_stack_v1/profile.json"
-PANDA_OBSERVATION = ROOT / "profiles/observations/panda_rgb_joint_v1.json"
-PANDA_ACTION = ROOT / "profiles/actions/panda_joint_position_v1.json"
+PROFILES = ROOT / "shared/scenarios/panda_stack/profiles"
+SCHEMAS = ROOT / "shared/common/interfaces/schemas"
+PANDA_PROFILE = PROFILES / "robots/panda_stack_v1/profile.json"
+PANDA_OBSERVATION = PROFILES / "observations/panda_rgb_joint_v1.json"
+PANDA_ACTION = PROFILES / "actions/panda_joint_position_v1.json"
 
 
 def _panda_document():
@@ -192,7 +193,7 @@ def test_binding_mismatch_is_rejected(change):
 
 
 def test_camera_digest_is_the_scene_description_semantic_hash():
-    scene_path = ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml"
+    scene_path = ROOT / "shared/scenarios/panda_stack/configs/simulation/scene/panda_stack.yaml"
     raw_cameras = load_document(scene_path)["cameras"]
     profile = load_profile(PANDA_PROFILE, SCHEMAS)
     for camera in profile.cameras:

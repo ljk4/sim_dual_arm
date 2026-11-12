@@ -4,7 +4,7 @@
 # user/working_dir/init/restart/stop_grace_period：容器运行身份、目录和生命周期。
 # runtime/gpus/shm_size：GPU 运行时和共享内存大小。
 # env_file：学习端环境变量文件。
-# volumes：工作区、数据、构建目录、Policy SDK、第三方源码和缓存挂载。
+# volumes：工作区、公共 shared、数据、构建目录、Policy SDK、第三方源码和缓存挂载。
 # networks：接入 learning 网络。
 # Run docker compose from this directory.
 name: sim-dual-arm
@@ -25,6 +25,7 @@ services:
     env_file: ../configs/container.env
     volumes:
       - ../../../:/workspace:ro
+      - ../../../shared:/shared:ro
       - ../../../var:/workspace/var
       - ../../../.build:/workspace/.build
       - ../../../.build:/build

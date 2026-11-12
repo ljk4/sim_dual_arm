@@ -4,13 +4,13 @@
 set -euo pipefail
 
 SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-source "$SCRIPT_ROOT/infrastructure/docker/setup.sh"
+source "${PROJECT_SETUP:-${SHARED_ROOT:-$SCRIPT_ROOT/shared}/common/tools/docker/setup.sh}"
 
 ROOT="${PROJECT_ROOT:-$SCRIPT_ROOT}"
 DATA_ROOT="${DATA_ROOT:-/data}"
 ROS_SDK="${ROS_SDK_ROOT:-/build/ros-dev}"
 POLICY_SDK="${POLICY_SDK_ROOT:-/build/generated/policy-sdk}"
-DEFAULT_POLICY_CONFIG="$ROOT/runtime/ros2/configs/policy_rollout.yaml"
+DEFAULT_POLICY_CONFIG="${SHARED_ROOT:-/shared}/scenarios/panda_stack/configs/runtime/policy_rollout.yaml"
 
 has_help=false
 for argument in "$@"; do
@@ -38,7 +38,7 @@ check_ros_sdk() {
   if [[ "$has_help" == "true" ]]; then
     return 0
   fi
-  python3 "$ROOT/infrastructure/scripts/dev_workspace.py" check \
+  python3 "${SHARED_ROOT:-$ROOT/shared}/common/tools/scripts/dev_workspace.py" check \
     --project-root "$ROOT" \
     --build-root "$ROS_SDK" 1>&2
 }
@@ -47,7 +47,7 @@ check_policy_sdk() {
   if [[ "$has_help" == "true" ]]; then
     return 0
   fi
-  python3 "$ROOT/infrastructure/scripts/policy_sdk.py" check \
+  python3 "${SHARED_ROOT:-$ROOT/shared}/common/tools/scripts/policy_sdk.py" check \
     --project-root "$ROOT" \
     --sdk-root "$POLICY_SDK" 1>&2 >/dev/null
 }
@@ -57,9 +57,9 @@ usage() {
 usage: runtime/ros2/scripts/run.sh <command> [arguments...]
 
 commands:
-  build-ros-sdk   build the mounted ROS contract workspace in the container
+  build-ros-sdk   build the mounted ROS contract workspace (core-only unless --scenario)
   build-policy-sdk generate the mounted Policy SDK in the container
-  prepare         bind a generic Policy JSON to runtime.yaml + run_manifest.json
+  prepare         bind a scenario/direct recipe to runtime.yaml + run_manifest.json
   policy          run one policy execution (requires --output)
   interactive     prompt, reset via episode start, run one policy episode, hold until Ctrl-C
   export          export one episode to labels/RGB/quality (export_episode.py)
@@ -68,9 +68,17 @@ commands:
   test            run pytest with plugin autoload disabled
 
 Examples:
-  runtime/ros2/scripts/run.sh build-ros-sdk
+  runtime/ros2/scripts/run.sh build-ros-sdk --scenario panda_stack --shared-root /shared
   runtime/ros2/scripts/run.sh build-policy-sdk
   runtime/ros2/scripts/run.sh prepare --help
+  runtime/ros2/scripts/run.sh prepare --scenario panda_stack --role policy \
+    --policy-binding /data/prepared/policy/policy_binding.json \
+    --bundle /data/learning/bundles/<verified-bundle> \
+    --seed 20001 --run-id policy-1 --output /data/prepared/policy-1
+  runtime/ros2/scripts/run.sh prepare --scenario panda_stack --role teacher \
+    --seed 1000 --run-id teacher-1 --output /data/prepared/teacher-1
+  runtime/ros2/scripts/run.sh policy \
+    --config /data/prepared/policy-1/runtime.yaml --output /data/raw/policy-1
   runtime/ros2/scripts/record.sh --count 10 --max-consecutive-failures 3
   runtime/ros2/scripts/run.sh export --episode-dir /data/raw/e-001 \
     --out /data/exports/e-001
@@ -87,10 +95,10 @@ case "$command" in
     usage
     ;;
   build-ros-sdk)
-    exec bash "$ROOT/infrastructure/scripts/build_ros_sdk.sh" "$@"
+    exec bash "${SHARED_ROOT:-$ROOT/shared}/common/tools/scripts/build_ros_sdk.sh" "$@"
     ;;
   build-policy-sdk)
-    exec bash "$ROOT/infrastructure/scripts/build_policy_sdk.sh" "$@"
+    exec bash "${SHARED_ROOT:-$ROOT/shared}/common/tools/scripts/build_policy_sdk.sh" "$@"
     ;;
   prepare)
     exec python3 -m dual_arm_runtime.offline.prepare_run "$@"
@@ -220,7 +228,7 @@ case "$command" in
     ;;
   test)
     check_ros_sdk
-    exec bash "$ROOT/infrastructure/scripts/test.sh" "$@"
+    exec bash "${SHARED_ROOT:-$ROOT/shared}/common/tools/scripts/test.sh" "$@"
     ;;
   *)
     printf 'runtime run.sh: unknown command %q\n' "$command" >&2

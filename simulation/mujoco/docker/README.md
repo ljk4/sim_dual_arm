@@ -9,7 +9,7 @@
 `simulation` 容器实行最小化权限挂载：
 
 - 本端目录 `simulation/mujoco/` 只读挂载至 `/app:ro`（含 `/app/assets/franka_emika_panda/` 模型资产）。
-- `contracts/`、`profiles/`、`libraries/` 与公共配置文件分别只读挂载至 `/contracts:ro`、`/profiles:ro`、`/deps/*:ro` 与 `/config/*:ro`；共享源码包括 `ros_support`、`run_logging` 和 `trajectory`。
+- 仓库 `shared/` 只读挂载至 `/shared:ro`；`interfaces/` 提供契约，`scenarios/panda_stack/profiles/` 提供机器人档案，`python/` 提供 `ros_support`、`run_logging`、`trajectory` 与 `contracts` 源码，`tools/` 提供 setup、DDS 与检查脚本。
 - ROS 2 SDK 只读挂载至 `/opt/ros-dev:ro`（宿主机 `.build/ros-dev/`）。
 - 运行产物目录可写挂载至 `/data`（宿主机 `var/`）。
 
@@ -35,23 +35,26 @@ scripts/run.sh --help
 scripts/run.sh environment --run-id env-001
 scripts/run.sh scene --run-id scene-001
 scripts/run.sh kinematics --run-id kin-001
-# 仓库单测需额外挂载完整仓库并使用相应 PROJECT_ROOT/PYTHONPATH；标准挂载不含 tests/infrastructure。
+# 仓库单测需临时只读挂载完整仓库并使用相应 PROJECT_ROOT/PYTHONPATH；标准挂载不含 tests/。
 ```
 
 ---
 
 ## 3. 启动 ROS 2 仿真后端
 
-启动 `backend` 前，须先在 `runtime` 容器中执行 `runtime/ros2/scripts/run.sh build-ros-sdk` 生成 `/opt/ros-dev`。
+启动 `backend` 前，须先在 `runtime` 容器中执行 `runtime/ros2/scripts/run.sh build-ros-sdk --scenario panda_stack --shared-root /shared` 生成 `/opt/ros-dev`。无方案选择的核心构建写入 `.build/ros-core`，不会覆盖该完整 SDK。
 
 在 `simulation` 容器内准备后端配置并前台启动服务：
 
 ```bash
 scripts/run.sh prepare \
-  --template /app/configs/backend/backend_stack_act_chunked.yaml \
+  --scenario panda_stack --role policy \
+  --bundle /data/learning/bundles/<verified-bundle> \
   --seed 20001 \
   --run-id sim-001 \
   --output /data/prepared/sim-001
+
+# 直接配置模式仍可用：--template <recipe>
 
 scripts/run.sh backend \
   --config /data/prepared/sim-001/backend.yaml \

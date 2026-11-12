@@ -95,12 +95,12 @@ def test_manifest_schema_is_a_single_v1():
     assert DIAGNOSTIC_EPISODE_SCHEMA_VERSION == 1
     assert POLICY_EPISODE_SCHEMA_VERSION == 1
     assert (
-        manifest_schema_path(ROOT / "contracts/schemas", 1)
+        manifest_schema_path(ROOT / "shared/common/interfaces/schemas", 1)
         .as_posix()
         .endswith("v1/episode_manifest.schema.json")
     )
     with pytest.raises(ContractError) as caught:
-        manifest_schema_path(ROOT / "contracts/schemas", 2)
+        manifest_schema_path(ROOT / "shared/common/interfaces/schemas", 2)
     assert caught.value.reason == "UNSUPPORTED_SCHEMA_VERSION"
 
 

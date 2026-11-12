@@ -40,7 +40,8 @@ from dual_arm_learning.policy_types import (  # noqa: E402
 from dual_arm_learning.temporal_ensemble import PERIOD_NS  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
-CONFIG = ROOT / "learning/lerobot/configs/policy_temporal.yaml"
+PROFILES = ROOT / "shared/scenarios/panda_stack/profiles"
+CONFIG = ROOT / "shared/scenarios/panda_stack/configs/learning/policy_temporal.yaml"
 
 
 @pytest.fixture(scope="module")
@@ -273,7 +274,7 @@ def test_contract_rejects_wrong_profile_and_tampered_hash(bundle):
         load_policy_config(
             CONFIG,
             bundle_dir=bundle,
-            robot_profile_path=ROOT / "profiles/robots/panda_stack_v1/profile.json",
+            robot_profile_path=PROFILES / "robots/panda_stack_v1/profile.json",
             observation_schema_path=OBSERVATION,
             action_schema_path=ACTION,
             require_formal=False,
@@ -508,8 +509,8 @@ def test_act_entry_loads_warms_logs_and_shuts_down_cleanly(bundle, tmp_path):
     environment["PYTHONPATH"] = ":".join(
         [
             str(ROOT / "learning/lerobot/src"),
-            str(ROOT / "libraries/run_logging/src"),
-            str(ROOT / "contracts/python/src"),
+            str(ROOT / "shared/common/python/run_logging/src"),
+            str(ROOT / "shared/common/python/contracts/src"),
             sdk,
             source,
             *([inherited] if inherited else []),

@@ -1,0 +1,56 @@
+# Temporary diagnostic binding for bounded phase-12 integration regression.
+#
+# It references the real panda_stack profiles, robot recipes and interfaces and
+# changes only the campaign recipe: diagnostic attempt root, ledger, seeds and
+# a two-attempt pilot budget.  The real panda_stack binding and its business
+# parameters are untouched.  Not a production scenario.
+schema_version: 1
+scenario_id: panda_stack_diag
+description: >-
+  Bounded diagnostic run over the real dual-Panda stack profile and recipes.
+
+backend:
+  kind: simulation
+  implementation: mujoco
+  task_type: stack
+
+runtime:
+  implementation: ros2
+
+learning:
+  implementation: lerobot
+  adapter: act
+
+profiles:
+  robot: ../panda_stack/profiles/robots/panda_stack_learning_v1/profile.json
+  observation: ../panda_stack/profiles/observations/panda_rgb_joint_v1.json
+  action: ../panda_stack/profiles/actions/panda_joint_position_v1.json
+
+recipes:
+  simulation_teacher: ../panda_stack/configs/simulation/backend/backend_stack_teacher.yaml
+  simulation_policy: ../panda_stack/configs/simulation/backend/backend_stack_act_chunked.yaml
+  runtime_teacher: ../panda_stack/configs/runtime/teacher_collect.yaml
+  runtime_policy: ../panda_stack/configs/runtime/policy_rollout.yaml
+  campaign: configs/stack_campaign_diag.yaml
+  dataset: ../panda_stack/configs/learning/act_dataset.container.yaml
+  training: ../panda_stack/configs/learning/act_training.container.yaml
+  policy_service: ../panda_stack/configs/learning/policy_temporal.yaml
+
+interfaces:
+  common_ros:
+    - robot_api_msgs
+    - sim_api_msgs
+  extension_ros:
+    - ../panda_stack/extensions/ros/panda_stack_api_msgs
+  teacher_api: panda_stack_api_msgs.teacher_chunk.v1
+  policy_api: bimanual.policy.v1
+
+models:
+  bundle: null
+
+source_roots:
+  - ../..
+artifact_roots:
+  - /data
+
+references: []

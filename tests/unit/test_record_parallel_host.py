@@ -92,9 +92,183 @@ def test_target_total_cannot_exceed_formal_campaign_target(tmp_path, monkeypatch
 
 
 def test_already_reached_target_does_not_start_simulation_workers(tmp_path, monkeypatch):
-    docker = SimpleNamespace(resolve_target=Mock(return_value=True), prepare=Mock(), cleanup=Mock())
+    plan = {"selection": {"mode": "direct"}, "campaign_status": {}}
+    docker = SimpleNamespace(
+        preflight=Mock(return_value=plan),
+        resolve_target=Mock(return_value=True),
+        prepare=Mock(),
+        cleanup=Mock(),
+    )
     monkeypatch.setattr(record_parallel, "DockerWorkers", lambda *args: docker)
     assert record_parallel.main(["--project-root", str(tmp_path), "--target-total", "50",
                                  "--workers", "4"]) == 0
+    docker.preflight.assert_called_once()
     docker.prepare.assert_not_called()
     docker.cleanup.assert_called_once()
+
+
+def test_host_container_path_mapping_is_explicit(tmp_path):
+    root = tmp_path
+    assert record_parallel.host_path_to_container("shared/x", root) == "/workspace/shared/x"
+    assert record_parallel.host_path_to_container(root / "var/y", root) == "/workspace/var/y"
+    assert record_parallel.container_path_to_host("/data/y", root) == (root / "var/y").resolve()
+    assert record_parallel.container_path_to_host("/shared/z", root) == (
+        root / "shared/z"
+    ).resolve()
+    assert record_parallel.container_path_to_host("/workspace/w", root) == (
+        root / "w"
+    ).resolve()
+    assert record_parallel.shared_root_to_container(None, root) == "/shared"
+    with pytest.raises(ValueError, match="outside the mounted project root"):
+        record_parallel.host_path_to_container("/etc/passwd", root)
+    with pytest.raises(ValueError, match="not mounted"):
+        record_parallel.container_path_to_host("/opt/ros", root)
+    with pytest.raises(ValueError, match="outside the mounted project root"):
+        record_parallel.shared_root_to_container("/shared", root)
+
+
+def test_scenario_conflicts_with_explicit_recipes_before_docker(tmp_path, monkeypatch):
+    preflight = Mock()
+    prepare = Mock()
+    monkeypatch.setattr(record_parallel.DockerWorkers, "preflight", preflight)
+    monkeypatch.setattr(record_parallel.DockerWorkers, "prepare", prepare)
+    with pytest.raises(SystemExit) as error:
+        record_parallel.main(
+            [
+                "--project-root", str(tmp_path),
+                "--scenario", "synthetic_stack",
+                "--config", "campaign.yaml",
+            ]
+        )
+    assert error.value.code == 2
+    preflight.assert_not_called()
+    prepare.assert_not_called()
+    with pytest.raises(SystemExit) as error:
+        record_parallel.main(
+            ["--project-root", str(tmp_path), "--shared-root", str(tmp_path / "shared")]
+        )
+    assert error.value.code == 2
+
+
+class _FakeDocker:
+    def __init__(self, args, directory, events, failure=None):
+        self.args, self.directory = args, directory
+        self.events, self.failure = events, failure
+
+    def preflight(self):
+        self.events.append("preflight")
+        if self.failure:
+            raise RuntimeError(self.failure)
+        return {"selection": {"mode": "direct"}, "campaign_status": {}}
+
+    def prepare(self, plan):
+        self.events.append("prepare")
+        return [{"id": "worker-01"}]
+
+    def start_backend(self, worker):
+        self.events.append("backend")
+
+    def wait_ready(self, workers):
+        self.events.append("ready")
+
+    def run(self, plan):
+        self.events.append("run")
+        return 0
+
+    def cleanup(self):
+        self.events.append("cleanup")
+
+
+def test_preflight_failure_starts_no_worker_or_pool_directory(tmp_path, monkeypatch):
+    events = []
+    monkeypatch.setattr(
+        record_parallel,
+        "DockerWorkers",
+        lambda args, directory: _FakeDocker(
+            args, directory, events, failure="preflight failed: bad binding"
+        ),
+    )
+    assert record_parallel.main(
+        ["--project-root", str(tmp_path), "--scenario", "synthetic_stack"]
+    ) == 2
+    assert events == ["preflight", "cleanup"]
+    assert not (tmp_path / "var/record-pools").exists()
+
+
+def test_preflight_runs_before_worker_preparation_and_backends(tmp_path, monkeypatch):
+    events = []
+    monkeypatch.setattr(
+        record_parallel,
+        "DockerWorkers",
+        lambda args, directory: _FakeDocker(args, directory, events),
+    )
+    assert record_parallel.main(
+        ["--project-root", str(tmp_path), "--scenario", "synthetic_stack", "--workers", "1"]
+    ) == 0
+    assert events[:2] == ["preflight", "prepare"]
+    assert events.index("backend") > events.index("prepare")
+
+
+def test_worker_preparation_receives_binding_identity(tmp_path, monkeypatch):
+    directory = tmp_path / "var/record-pools/pool-test"
+    directory.mkdir(parents=True)
+    (directory / "workers.json").write_text('{"workers": []}\n')
+    args = SimpleNamespace(
+        project_root=tmp_path,
+        scenario="synthetic_stack",
+        shared_root=tmp_path / "shared",
+        config=None,
+        runtime_config=None,
+        backend_template=None,
+        workers=2,
+        domain_base=170,
+        realtime_speed=1.0,
+    )
+    docker = record_parallel.DockerWorkers(args, directory)
+    docker.runtime = "runtime-id"
+    calls = []
+    monkeypatch.setattr(
+        record_parallel.subprocess,
+        "run",
+        lambda command, **kwargs: calls.append(command)
+        or SimpleNamespace(returncode=0, stdout="", stderr=""),
+    )
+    plan = {
+        "selection": {
+            "mode": "scenario",
+            "scenario_id": "synthetic_stack",
+            "binding": {"sha256": "a" * 64, "path": "/shared/scenarios/x/binding.yaml"},
+        }
+    }
+    docker.prepare(plan)
+    command = calls[-1]
+    assert "--scenario" in command and "synthetic_stack" in command
+    assert "--shared-root" in command and "/shared" in command
+    assert "--binding-sha256" in command and "a" * 64 in command
+    assert "--runtime-config" not in command
+    assert "--backend-template" not in command
+
+
+def test_preflight_command_converts_host_paths(tmp_path):
+    args = SimpleNamespace(
+        project_root=tmp_path,
+        scenario=None,
+        shared_root=None,
+        config="shared/scenarios/x/campaign.yaml",
+        runtime_config="shared/scenarios/x/runtime.yaml",
+        backend_template="shared/scenarios/x/backend.yaml",
+        purpose="formal",
+        target_total=None,
+    )
+    command = record_parallel.DockerWorkers(args, tmp_path / "pool").preflight_command()
+    assert "/workspace/shared/scenarios/x/campaign.yaml" in command
+    assert "/workspace/shared/scenarios/x/runtime.yaml" in command
+    assert "/workspace/shared/scenarios/x/backend.yaml" in command
+    assert "--parallel" in command
+
+    args.scenario = "synthetic_stack"
+    args.shared_root = tmp_path / "shared"
+    command = record_parallel.DockerWorkers(args, tmp_path / "pool").preflight_command()
+    assert "--scenario" in command and "synthetic_stack" in command
+    assert "/shared" in command
+    assert "--config" not in command

@@ -10,8 +10,8 @@ ROOT = Path(__file__).resolve().parents[2]
 @pytest.fixture
 def profile():
     return load_profile(
-        ROOT / "profiles/robots/panda_stack_v1/profile.json",
-        ROOT / "contracts/schemas/v1",
+        ROOT / "shared/scenarios/panda_stack/profiles/robots/panda_stack_v1/profile.json",
+        ROOT / "shared/common/interfaces/schemas/v1",
     )
 
 

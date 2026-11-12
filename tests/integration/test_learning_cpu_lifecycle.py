@@ -13,6 +13,7 @@ pytestmark = pytest.mark.skipif(
     os.environ.get("DSH035_HEAVY") != "1", reason="synthetic ACT integration"
 )
 ROOT = Path(__file__).resolve().parents[2]
+SCENARIO = ROOT / "shared/scenarios/panda_stack"
 sys.path.insert(0, str(ROOT / "tests/unit"))
 from learning_fixtures import make_select  # noqa: E402
 
@@ -23,13 +24,13 @@ def test_public_act_training_resume_and_bundle_use_real_model(tmp_path):
     from dual_arm_learning.dataset import convert
     from torchvision.models import resnet18
 
-    dataset_config = load_dataset_config(ROOT / "learning/lerobot/configs/act_dataset.yaml", ROOT)
+    dataset_config = load_dataset_config(SCENARIO / "configs/learning/act_dataset.yaml", ROOT)
     from model_helpers import replace
 
     dataset_config = replace(dataset_config, output_root=tmp_path / "data")
     select = make_select(tmp_path / "sources", dataset_config)
     convert(select_path=select, config=dataset_config, synthetic=True)
-    document = yaml.safe_load((ROOT / "learning/lerobot/configs/act_training.yaml").read_text())
+    document = yaml.safe_load((SCENARIO / "configs/learning/act_training.yaml").read_text())
     document["device"] = "cpu"
     document["data"]["root"] = str(tmp_path / "data")
     document["cache_root"] = str(tmp_path / "cache")

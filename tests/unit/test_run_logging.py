@@ -14,7 +14,7 @@ from robot_run_logging import EventContext, EventLogger, LogFailure, LogSettings
 
 ROOT = Path(__file__).resolve().parents[2]
 SCHEMA = json.loads(
-    (ROOT / "contracts/schemas/v1/run_event.schema.json").read_text(encoding="utf-8")
+    (ROOT / "shared/common/interfaces/schemas/v1/run_event.schema.json").read_text(encoding="utf-8")
 )
 VALIDATOR = jsonschema.Draft202012Validator(SCHEMA)
 

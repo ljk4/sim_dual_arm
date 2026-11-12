@@ -3,7 +3,7 @@
 set -euo pipefail
 
 SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-source "$SCRIPT_ROOT/infrastructure/docker/setup.sh"
+source "${PROJECT_SETUP:-${SHARED_ROOT:-$SCRIPT_ROOT/shared}/common/tools/docker/setup.sh}"
 
 exec python3 -m dual_arm_runtime.offline.record \
   --project-root "${PROJECT_ROOT:-$SCRIPT_ROOT}" "$@"

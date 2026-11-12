@@ -64,14 +64,22 @@ def fixture(tmp_path: Path, *, run_id: str = "run-42", endpoint: str = "learning
             sort_keys=False,
         )
     )
+    bundle = project / "bundle"
+    bundle.mkdir()
     binding = {
         "schema_version": 1,
         "kind": "policy-binding",
         "run_id": run_id,
         "endpoint": endpoint,
         "model": {
+            "bundle": str(bundle),
             "bundle_digest": "a" * 64,
             "processor_digest": "d" * 64,
+            "model_sha256": "c" * 64,
+            "state_dict_sha256": "c" * 64,
+            "config_sha256": "e" * 64,
+            "checkpoint_step": 1,
+            "synthetic": True,
         },
         "profile": {"path": str(paths["profile.json"]), "sha256": _sha(paths["profile.json"])},
         "observation_schema": {

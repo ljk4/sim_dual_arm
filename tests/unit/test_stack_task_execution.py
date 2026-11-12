@@ -6,8 +6,9 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
+SCENARIO = ROOT / "shared/scenarios/panda_stack"
 SIM_SRC = ROOT / "simulation/mujoco/src"
-CONTRACTS = ROOT / "contracts/python/src"
+CONTRACTS = ROOT / "shared/common/python/contracts/src"
 for source in (SIM_SRC, CONTRACTS):
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
@@ -28,12 +29,12 @@ from robot_contracts.models import RunContext  # noqa: E402
 
 @pytest.fixture(scope="module")
 def scene_fixture():
-    scene_config = load_scene_config(ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml")
+    scene_config = load_scene_config(SCENARIO / "configs/simulation/scene/panda_stack.yaml")
     scene = build_scene(
         scene_config,
     )
     scene.reset(0)
-    task_config = load_task_config(ROOT / "simulation/mujoco/configs/scene/panda_stack_task.yaml")
+    task_config = load_task_config(SCENARIO / "configs/simulation/scene/panda_stack_task.yaml")
     binding = make_task_binding(
         scene.model, task_config, table_top_z_m=scene.config.table.top_z
     )

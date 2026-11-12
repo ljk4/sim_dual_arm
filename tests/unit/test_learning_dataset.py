@@ -8,11 +8,12 @@ from learning_fixtures import make_export, profile_hash
 from model_helpers import replace
 
 ROOT = Path(__file__).resolve().parents[2]
+SCENARIO = ROOT / "shared/scenarios/panda_stack"
 
 
 @pytest.fixture
 def config(tmp_path):
-    value = load_dataset_config(ROOT / "learning/lerobot/configs/act_dataset.yaml", ROOT)
+    value = load_dataset_config(SCENARIO / "configs/learning/act_dataset.yaml", ROOT)
     return replace(value, output_root=tmp_path / "output", cache_root=tmp_path / "cache")
 
 

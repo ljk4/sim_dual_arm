@@ -1,0 +1,56 @@
+# 中文参数说明（维护时优先阅读本段）
+# schema_version：数据集转换配置版本。
+# fps：训练数据采样频率，单位 Hz。
+# chunk_size：每条训练样本的未来动作点数。
+# action_lead_ns：动作标签相对观测的提前量，单位 ns。
+# state_dim：输入/输出状态维数，当前为 16。
+# camera_names：三路相机固定顺序。
+# camera_width/camera_height：图像尺寸，单位像素。
+# task_text：训练任务文本。
+# profile：机器人 profile 路径。
+# select：campaign select 生成的 50 条合格 episode 清单。
+# output_root：LeRobot 数据集输出根目录。
+# cache_root：离线 HuggingFace/数据集缓存目录。
+# attempt_export_glob：从每个 attempt 定位 export 目录的 glob。
+# verify_png_pixels：是否逐帧校验 PNG 内容。
+# require_quality：是否要求 quality.json 合格。
+# expected.*：期望的正式、训练、验证 episode 数和验证集位置。
+# lerobot.*：固定源码版本、视频编码器、容量和线程配置；归档哈希由运行时计算。
+
+# DSH-035: 034 export -> two independent LeRobot datasets.
+# This file is the single conversion/feature contract.  Paths are project-relative.
+schema_version: 1
+fps: 20
+chunk_size: 60
+action_lead_ns: 50000000
+state_dim: 16
+camera_names: [global, left_wrist, right_wrist]
+camera_width: 320
+camera_height: 240
+task_text: "Pick up the red source cube and place it on the blue target cube."
+profile: /workspace/shared/scenarios/panda_stack/profiles/robots/panda_stack_learning_v1/profile.json
+select: /data/campaigns/panda_stack_v1/formal-select.json
+output_root: /data/learning/panda_stack_learning_v1
+cache_root: /data/learning/cache
+# The campaign writes each accepted export at <attempt>/stack/<run>/export.
+attempt_export_glob: "stack/*/export"
+verify_png_pixels: true
+require_quality: true
+expected:
+  formal_episodes: 50
+  training_episodes: 45
+  validation_episodes: 5
+  # Zero-based positions in the first 50 qualified successes.
+  validation_positions: [9, 19, 29, 39, 49]
+lerobot:
+  source_revision: 7e241bd630a3719a56157a497ce5d08f244784f1
+  rgb_encoder:
+    vcodec: h264
+    g: 2
+    crf: 18
+    preset: veryfast
+  video_backend: pyav
+  video_files_size_mb: 256
+  data_files_size_mb: 256
+  encoder_threads: 1
+  image_writer_threads: 0

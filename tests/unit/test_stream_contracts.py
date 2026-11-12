@@ -95,10 +95,10 @@ def stream_request(*, kind=REQUEST_STREAM_FIRST, **changes):
     return StreamRequest(**values)
 
 
-def empty_gripper(side: str) -> GripperFeedback:
+def empty_gripper(side: str, finger_indices=(1, 2)) -> GripperFeedback:
     fingers = tuple(
         FingerFeedback(side, index, f"{side}_finger{index}", 0.0, (), (), ())
-        for index in (1, 2)
+        for index in finger_indices
     )
     return GripperFeedback(
         side=side,
@@ -296,10 +296,63 @@ def test_execution_flags_errors_and_gripper_evidence_are_validated():
             measured_position_m=0.0,
             measured_velocity_m_s=0.0,
             target_error_m=0.0,
-            fingers=(empty_gripper("left").fingers[1], duplicate),
+            fingers=(duplicate, duplicate),
         )
     with pytest.raises(ContractError):
         FingerFeedback("left", 1, "body", -0.1, (), (), ())
+    with pytest.raises(ContractError):
+        FingerFeedback("left", 1, "body", 0.0, ("source",), (math.nan,), (1,))
+    with pytest.raises(ContractError):
+        FingerFeedback("left", 1, "body", 0.0, ("source",), (1.0,), (1, 2))
+
+
+def test_gripper_set_is_optional_bounded_and_named():
+    assert execution(grippers=()).grippers == ()
+    assert execution(grippers=(empty_gripper("tool"),)).grippers[0].side == "tool"
+    accepted = execution(grippers=(empty_gripper("z"), empty_gripper("a")))
+    assert tuple(gripper.side for gripper in accepted.grippers) == ("z", "a")
+    eight = tuple(empty_gripper(f"g{index}") for index in range(8))
+    assert len(execution(grippers=eight).grippers) == 8
+    with pytest.raises(ContractError):
+        execution(grippers=tuple(empty_gripper(f"g{index}") for index in range(9)))
+    with pytest.raises(ContractError):
+        execution(grippers=(empty_gripper("left"), empty_gripper("left")))
+
+
+def test_gripper_fingers_are_bounded_unique_and_not_fixed():
+    assert tuple(
+        finger.finger_index for finger in empty_gripper("tool", (1,)).fingers
+    ) == (1,)
+    assert tuple(
+        finger.finger_index for finger in empty_gripper("tool", (2, 1, 5)).fingers
+    ) == (2, 1, 5)
+    assert len(empty_gripper("tool", tuple(range(1, 9))).fingers) == 8
+    with pytest.raises(ContractError):
+        empty_gripper("tool", ())
+    with pytest.raises(ContractError):
+        empty_gripper("tool", (1, 1))
+    with pytest.raises(ContractError):
+        empty_gripper("tool", tuple(range(1, 10)))
+    with pytest.raises(ContractError):
+        FingerFeedback("tool", 0, "body", 0.0, (), (), ())
+    with pytest.raises(ContractError):
+        FingerFeedback("tool", 9, "body", 0.0, (), (), ())
+    with pytest.raises(ContractError):
+        GripperFeedback(
+            side="tool",
+            mode="NONE",
+            position_ok=False,
+            contact_ok=False,
+            contact_object=None,
+            ambiguous=False,
+            target_position_m=0.0,
+            initial_reference_m=0.0,
+            final_reference_m=0.0,
+            measured_position_m=0.0,
+            measured_velocity_m_s=0.0,
+            target_error_m=0.0,
+            fingers=(FingerFeedback("other", 1, "body", 0.0, (), (), ()),),
+        )
 
 
 def test_chunk_and_event_keep_real_phases_and_identity():

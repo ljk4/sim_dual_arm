@@ -10,12 +10,12 @@ from model_helpers import replace
 from robot_contracts.action_chunks import ActionWindow, ChunkAnchor
 from robot_contracts.control import ControlCommand
 from robot_contracts.models import ContractError, JointSpec, RunContext, Target
-from robot_contracts.trajectory.constants import FOLLOWER_ALGORITHM_VERSION
 from robot_contracts.trajectory.spline import ReferenceSample
 from robot_trajectory.follower import PreparedFollowerPlan, normalize_follower_positions
 
 ROOT = Path(__file__).resolve().parents[2]
-for source in (ROOT / "simulation/mujoco/src", ROOT / "contracts/python/src"):
+PROFILES = ROOT / "shared/scenarios/panda_stack/profiles"
+for source in (ROOT / "simulation/mujoco/src", ROOT / "shared/common/python/contracts/src"):
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
 
@@ -23,17 +23,20 @@ import robot_backend_sim.control.control_state as control_state_module  # noqa: 
 from robot_backend_sim.config.follower_config import load_follower_config  # noqa: E402
 from robot_backend_sim.config.motion_config import load_control_config  # noqa: E402
 from robot_backend_sim.control.control_state import PreparedControlCommand  # noqa: E402
-from robot_backend_sim.follower.follower_plan import prepare_follower_plan  # noqa: E402
+from robot_backend_sim.follower.follower_plan import (  # noqa: E402
+    RUCKIG_ALGORITHM_VERSION,
+    prepare_follower_plan,
+)
 from robot_contracts.profiles import load_profile  # noqa: E402
 
 ruckig = pytest.importorskip("ruckig")
 
 PROFILE = load_profile(
-    ROOT / "profiles/robots/panda_stack_v1/profile.json",
-    ROOT / "contracts/schemas/v1",
+    PROFILES / "robots/panda_stack_v1/profile.json",
+    ROOT / "shared/common/interfaces/schemas/v1",
 )
-CONTROL = load_control_config(ROOT / "profiles/control/panda_control_v1.yaml")
-FOLLOWER = load_follower_config(ROOT / "profiles/control/panda_follower_v1.yaml")
+CONTROL = load_control_config(PROFILES / "control/panda_control_v1.yaml")
+FOLLOWER = load_follower_config(PROFILES / "control/panda_follower_v1.yaml")
 BASE = PROFILE.initial_positions
 JOINT_COUNT = len(BASE)
 GRID_NS = 2_000_000
@@ -181,12 +184,12 @@ def test_follower_fingerprint_covers_coefficients_anchor_and_extension() -> None
     assert final.prepared.duration_grid_ns == GRID_NS
 
 
-def test_follower_fingerprint_covers_algorithm_version(monkeypatch) -> None:
+def test_follower_fingerprint_covers_algorithm_version() -> None:
     prepared = follower_plan()
     original = packet(prepared).fingerprint
-    monkeypatch.setattr(control_state_module, "FOLLOWER_ALGORITHM_VERSION", "other-version")
-    assert packet(prepared).fingerprint != original
-    assert FOLLOWER_ALGORITHM_VERSION == "bounded-target-follower/ruckig-0.15.3/v1"
+    changed = replace(prepared, algorithm_version="other-producer/v1")
+    assert packet(changed).fingerprint != original
+    assert prepared.algorithm_version == RUCKIG_ALGORITHM_VERSION
 
 
 def test_follower_fingerprint_payload_keeps_all_terminal_and_deviation_evidence() -> None:
@@ -205,7 +208,7 @@ def test_follower_fingerprint_payload_keeps_all_terminal_and_deviation_evidence(
     prepared = follower_plan(source=tuple(closing), handoff_ns=0, positions=tuple(start))
     payload = control_state_module._fingerprint_payload(prepared)
     assert payload["kind"] == "FOLLOWER"
-    assert payload["algorithm"] == FOLLOWER_ALGORITHM_VERSION
+    assert payload["algorithm_version"] == RUCKIG_ALGORITHM_VERSION
     assert payload["raw_terminal_velocities"] == list(prepared.raw_terminal_velocities)
     assert payload["restricted_terminal_velocities"] == list(
         prepared.restricted_terminal_velocities

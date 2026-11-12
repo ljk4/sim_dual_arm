@@ -13,8 +13,16 @@ from pathlib import Path
 from dual_arm_runtime.offline import campaign
 from dual_arm_runtime.offline.campaign_ledger import CampaignError, Ledger, attempts, finished, load
 from dual_arm_runtime.offline.collect_attempt import check_ros_sdk
+from dual_arm_runtime.offline.scenario_selection import select_collection
 
 ROOT = Path(os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[6])
+DEFAULT_CAMPAIGN = (
+    "shared/scenarios/panda_stack/configs/runtime/experiments/stack_campaign.yaml"
+)
+DEFAULT_RUNTIME_TEACHER = (
+    "shared/scenarios/panda_stack/configs/runtime/teacher_collect.yaml"
+)
+DEFAULT_BACKEND_LOG = Path("/data/runs/backend/teacher-backend/log")
 
 
 def positive_int(value: str) -> int:
@@ -39,25 +47,67 @@ def parser() -> argparse.ArgumentParser:
         help="stop after this many consecutive unqualified attempts (default: 3)",
     )
     result.add_argument("--purpose", choices=("formal", "pilot"), default="formal")
-    result.add_argument("--config", default="runtime/ros2/configs/experiments/stack_campaign.yaml")
-    result.add_argument("--runtime-config", default="runtime/ros2/configs/teacher_collect.yaml")
+    result.add_argument("--scenario")
+    result.add_argument("--shared-root", type=Path)
+    result.add_argument(
+        "--binding-sha256", help="expected binding digest from the read-only preflight"
+    )
+    result.add_argument("--config", help="direct campaign recipe (conflicts with --scenario)")
+    result.add_argument(
+        "--runtime-config", help="direct runtime teacher recipe (conflicts with --scenario)"
+    )
     result.add_argument("--no-previews", action="store_true", help="skip export preview PNGs/GIFs")
     result.add_argument("--worker-manifest", type=Path, help=argparse.SUPPRESS)
     result.add_argument("--target-total", type=positive_int, help=argparse.SUPPRESS)
     result.add_argument(
-        "--backend-log", type=Path, default=Path("/data/runs/backend/teacher-backend/log"),
+        "--backend-log", type=Path, default=None,
         help="log directory of the running teacher backend",
     )
     return result
 
 
+def _resolve_selection(args: argparse.Namespace, cli: argparse.ArgumentParser) -> None:
+    """Resolve scenario/direct inputs once, before any ledger or backend work."""
+    if args.scenario is not None:
+        if args.config is not None or args.runtime_config is not None:
+            cli.error(
+                "--scenario cannot be combined with --config or --runtime-config"
+            )
+        selection = select_collection(
+            scenario=args.scenario,
+            shared_root=args.shared_root,
+            project_root=args.project_root,
+            binding_sha256=args.binding_sha256,
+            require_parallel=args.worker_manifest is not None,
+        )
+        args.config = selection["recipes"]["campaign"]["path"]
+        args.runtime_config = selection["recipes"]["runtime_teacher"]["path"]
+        args.selection = selection
+    else:
+        if args.shared_root is not None:
+            cli.error("--shared-root requires --scenario")
+        if args.binding_sha256 is not None:
+            cli.error("--binding-sha256 requires --scenario")
+        args.config = args.config or DEFAULT_CAMPAIGN
+        args.runtime_config = args.runtime_config or DEFAULT_RUNTIME_TEACHER
+        args.selection = None
+    if args.backend_log is None:
+        args.backend_log = DEFAULT_BACKEND_LOG
+
+
 def _collector_command(args: argparse.Namespace) -> list[str]:
-    return [
+    command = [
         sys.executable,
         "-m", "dual_arm_runtime.offline.collect_attempt",
+        "--campaign-config", str(args.config),
         "--backend-log", str(args.backend_log),
         *(["--no-previews"] if args.no_previews else []),
     ]
+    if getattr(args, "scenario", None) is not None:
+        command += ["--scenario", args.scenario]
+        if getattr(args, "shared_root", None) is not None:
+            command += ["--shared-root", str(args.shared_root)]
+    return command
 
 
 def _preflight(args: argparse.Namespace) -> int:
@@ -65,7 +115,11 @@ def _preflight(args: argparse.Namespace) -> int:
         raise CampaignError(f"runtime config is missing: {args.runtime_config}")
     if not args.backend_log.is_dir():
         raise CampaignError(f"teacher backend log is missing: {args.backend_log}")
-    return check_ros_sdk(args.project_root)
+    return check_ros_sdk(
+        args.project_root,
+        scenario=getattr(args, "scenario", None),
+        shared_root=getattr(args, "shared_root", None),
+    )
 
 
 def record(args: argparse.Namespace, ledger: Ledger) -> int:
@@ -114,18 +168,19 @@ def record(args: argparse.Namespace, ledger: Ledger) -> int:
                 break
     except KeyboardInterrupt:
         stop_reason, exit_code = "interrupted", 130
-    print(
-        json.dumps(
-            {
-                "event": "recording.finished", "reason": stop_reason,
-                "requested": args.count, "qualified": qualified, "attempted": attempted,
-                "consecutive_failures": consecutive_failures,
-                "max_consecutive_failures": args.max_consecutive_failures,
-            },
-            sort_keys=True,
-        ),
-        flush=True,
-    )
+    summary = {
+        "event": "recording.finished", "reason": stop_reason,
+        "requested": args.count, "qualified": qualified, "attempted": attempted,
+        "consecutive_failures": consecutive_failures,
+        "max_consecutive_failures": args.max_consecutive_failures,
+    }
+    if args.selection is not None:
+        summary["selection"] = {
+            "mode": args.selection["mode"],
+            "scenario_id": args.selection["scenario_id"],
+            "binding": args.selection["binding"],
+        }
+    print(json.dumps(summary, sort_keys=True), flush=True)
     return exit_code
 
 
@@ -135,8 +190,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.target_total is not None and args.worker_manifest is None:
         cli.error("--target-total is supported through record_parallel.sh")
     args.project_root = args.project_root.resolve()
-    args.backend_log = (args.project_root / args.backend_log).resolve()
     try:
+        _resolve_selection(args, cli)
+        args.backend_log = (args.project_root / args.backend_log).resolve()
         config = load(args.project_root / args.config)
         if args.worker_manifest is not None:
             from dual_arm_runtime.offline.record_pool import record_parallel

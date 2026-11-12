@@ -6,16 +6,20 @@ import yaml
 from dual_arm_runtime.offline.campaign_ledger import CampaignError  # noqa: E402
 from dual_arm_runtime.offline.record_workers import prepare_workers  # noqa: E402
 
+PROFILE_REL = "shared/scenarios/panda_stack/profiles/profile.json"
+
 
 @pytest.fixture
 def templates(tmp_path):
     runtime = tmp_path / "runtime.yaml"
-    runtime.write_text(yaml.safe_dump({"action_source": "teacher", "robot_namespace": "/robot",
-                                      "robot_profile": "profiles/profile.json"}))
+    runtime.write_text(yaml.safe_dump({"action_source": "teacher",
+                                      "teacher_api": "panda_stack_api_msgs.teacher_chunk.v1",
+                                      "robot_namespace": "/robot",
+                                      "robot_profile": PROFILE_REL}))
     backend = tmp_path / "backend.yaml"
     backend.write_text(yaml.safe_dump({
         "robot": {"namespace": "/robot", "task_mode": "teacher",
-                  "profile": "profiles/profile.json", "scene": "simulation/mujoco/scene.yaml",
+                  "profile": PROFILE_REL, "scene": "simulation/mujoco/scene.yaml",
                   "render_quality": {"enabled": True}},
         "run": {"realtime_speed": 1.0},
     }))
@@ -37,9 +41,9 @@ def test_prepared_workers_isolate_domains_configs_and_disable_visualization(temp
         assert runtime_config["robot_namespace"] == backend_config["robot"]["namespace"]
         assert backend_config["robot"]["visualization_enabled"] is False
         assert backend_config["robot"]["render_quality"]["enabled"] is True
-        assert backend_config["robot"]["profile"] == "/profiles/profile.json"
+        assert backend_config["robot"]["profile"] == f"/{PROFILE_REL}"
         assert backend_config["robot"]["scene"] == "/app/scene.yaml"
-        assert runtime_config["robot_profile"] == str(root / "profiles/profile.json")
+        assert runtime_config["robot_profile"] == str(root / PROFILE_REL)
 
 
 @pytest.mark.parametrize("workers,domain,speed", [(0, 70, 1.0), (2, 232, 1.0),

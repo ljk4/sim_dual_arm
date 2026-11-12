@@ -10,6 +10,8 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
+SCENARIO = ROOT / "shared/scenarios/panda_stack"
+PROFILES = SCENARIO / "profiles"
 SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
@@ -20,20 +22,20 @@ from robot_backend_sim.config.backend_config import (  # noqa: E402
 )
 from robot_backend_sim.config.follower_config import load_follower_config  # noqa: E402
 
-BASE = ROOT / "simulation/mujoco/configs/backend/backend.yaml"
+BASE = SCENARIO / "configs/simulation/backend/backend.yaml"
 FOLLOWER = ROOT / "tests/fixtures/simulation/backend_follower.yaml"
-FOLLOWER_PARAMS = ROOT / "profiles/control/panda_follower_v1.yaml"
+FOLLOWER_PARAMS = PROFILES / "control/panda_follower_v1.yaml"
 
 
 def write_variant(tmp_path: Path, mutate) -> Path:
     document = copy.deepcopy(yaml.safe_load(FOLLOWER.read_text(encoding="utf-8")))
     document["robot"].update(
         {
-            "profile": str(ROOT / "profiles/robots/panda_stack_v1/profile.json"),
-            "schemas": str(ROOT / "contracts/schemas"),
-            "scene": str(ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml"),
-            "control": str(ROOT / "profiles/control/panda_control_v1.yaml"),
-            "stream": str(ROOT / "profiles/control/panda_stream_v1.yaml"),
+            "profile": str(PROFILES / "robots/panda_stack_v1/profile.json"),
+            "schemas": str(ROOT / "shared/common/interfaces/schemas"),
+            "scene": str(SCENARIO / "configs/simulation/scene/panda_stack.yaml"),
+            "control": str(PROFILES / "control/panda_control_v1.yaml"),
+            "stream": str(PROFILES / "control/panda_stream_v1.yaml"),
             "follower": str(FOLLOWER_PARAMS),
         }
     )
@@ -54,7 +56,7 @@ def test_follower_config_resolves_relative_follower_file_and_queue():
     assert config.follower_path == FOLLOWER_PARAMS.resolve()
     assert config.follower_reference_queue_capacity == 64
     assert load_follower_config(config.follower_path).target_count == 10
-    expected_scene = ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml"
+    expected_scene = SCENARIO / "configs/simulation/scene/panda_stack.yaml"
     assert config.scene_path == expected_scene.resolve()
 
 

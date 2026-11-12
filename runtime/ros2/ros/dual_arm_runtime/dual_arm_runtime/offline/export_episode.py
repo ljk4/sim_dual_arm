@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,7 @@ from dual_arm_runtime.offline.audit.label_export import (  # noqa: E402
     RawPrediction,
     build_labels,
 )
+from dual_arm_runtime.offline.campaign_ledger import CampaignError  # noqa: E402
 from dual_arm_runtime.offline.export_media import write_images  # noqa: E402
 from dual_arm_runtime.offline.export_quality import (  # noqa: E402
     parse_log_events,
@@ -102,10 +104,12 @@ def _consume_command(message: object, metadata: dict[str, Any]) -> None:
     )
 
 
-def _consume_reference(message: object, metadata: dict[str, Any]) -> None:
+def _consume_reference(
+    message: object, metadata: dict[str, Any], *, legacy_digest: bool
+) -> None:
     from robot_ros_support.follower_conversions import follower_reference_from_message
 
-    record = follower_reference_from_message(message)
+    record = follower_reference_from_message(message, legacy_digest=legacy_digest)
     metadata["references"][(record.command_id, record.chunk_seq)] = record
 
 
@@ -125,10 +129,21 @@ def _consume_event(message: object, metadata: dict[str, Any]) -> None:
             phases.setdefault(event.phase, int(event.sim_time_ns))
 
 
-def _consume_feedback(message: object, metadata: dict[str, Any]) -> None:
+def _consume_feedback(
+    message: object, metadata: dict[str, Any], *, legacy: bool = False
+) -> None:
     from robot_ros_support.stream_conversions import execution_feedback_from_message
 
-    execution = execution_feedback_from_message(message)
+    from dual_arm_runtime.offline.legacy_feedback import (
+        decode_legacy_execution_feedback,
+    )
+
+    if legacy:
+        # ``message`` is the raw CDR payload: the legacy fixed-array layout
+        # must never be handed to the current generated type.
+        execution = decode_legacy_execution_feedback(message)  # type: ignore[arg-type]
+    else:
+        execution = execution_feedback_from_message(message)
     if execution.reference_kind != "BRAKE":
         return
     start = (
@@ -145,7 +160,15 @@ def _consume_feedback(message: object, metadata: dict[str, Any]) -> None:
         metadata["brakes"].append(BrakeInterval(start, end))
 
 
-def _consume_message(topic: str, message: object, root: str, metadata: dict[str, Any]) -> None:
+def _consume_message(
+    topic: str,
+    message: object,
+    root: str,
+    metadata: dict[str, Any],
+    *,
+    legacy_reference_digest: bool = False,
+    legacy_feedback: bool = False,
+) -> None:
     if topic == "/runtime/observation_index":
         _consume_index(message, metadata)
     elif topic == f"{root}/state":
@@ -155,11 +178,13 @@ def _consume_message(topic: str, message: object, root: str, metadata: dict[str,
     elif topic == "/runtime/commands":
         _consume_command(message, metadata)
     elif topic == f"{root}/follower_references":
-        _consume_reference(message, metadata)
+        _consume_reference(
+            message, metadata, legacy_digest=legacy_reference_digest
+        )
     elif topic == f"{root}/control_events":
         _consume_event(message, metadata)
     elif topic == f"{root}/execution_feedback":
-        _consume_feedback(message, metadata)
+        _consume_feedback(message, metadata, legacy=legacy_feedback)
 
 
 def _read_metadata(recording: Path, root: str) -> dict[str, Any]:
@@ -167,37 +192,64 @@ def _read_metadata(recording: Path, root: str) -> dict[str, Any]:
     from rclpy.serialization import deserialize_message
     from rosidl_runtime_py.utilities import get_message
 
+    from dual_arm_runtime.offline.feedback_definition import (
+        require_supported_feedback_definition,
+    )
+    from dual_arm_runtime.offline.follower_definition import (
+        require_current_follower_reference_definition,
+    )
+
     reader = rosbag2_py.SequentialReader()
     reader.open(
         rosbag2_py.StorageOptions(uri=str(recording), storage_id="mcap"),
         rosbag2_py.ConverterOptions("", ""),
     )
-    required = {f"{root}/state", f"{root}/follower_references", f"{root}/control_events",
-                f"{root}/execution_feedback", "/runtime/commands", "/runtime/observation_index"}
-    types = {item.name: get_message(item.type) for item in reader.get_all_topics_and_types()
-             if item.name in required or (item.name.startswith(root + "/cameras/")
-                                          and item.name.endswith("/frame"))}
-    metadata: dict[str, Any] = {
-        "states": {},
-        "frames": {},
-        "indices": {},
-        "requests": {},
-        "references": {},
-        "chunk_events": {},
-        "brakes": [],
-        "camera_names": (),
-    }
-    while reader.has_next():
-        topic, payload, _ = reader.read_next()
-        if topic not in types:
-            continue
-        message = deserialize_message(payload, types[topic])
-        _consume_message(topic, message, root, metadata)
-    if not metadata["camera_names"]:
-        from robot_contracts.models import ContractError
+    try:
+        required = {f"{root}/state", f"{root}/follower_references", f"{root}/control_events",
+                    f"{root}/execution_feedback", "/runtime/commands",
+                    "/runtime/observation_index"}
+        topics = reader.get_all_topics_and_types()
+        topic_types = {item.name: item.type for item in topics}
+        legacy_feedback = require_supported_feedback_definition(
+            reader, topic_types, rosbag2_py
+        )
+        legacy_reference_digest = require_current_follower_reference_definition(
+            reader, topic_types, rosbag2_py
+        )
+        types = {item.name: get_message(item.type) for item in topics
+                 if item.name in required or (item.name.startswith(root + "/cameras/")
+                                              and item.name.endswith("/frame"))}
+        metadata: dict[str, Any] = {
+            "states": {},
+            "frames": {},
+            "indices": {},
+            "requests": {},
+            "references": {},
+            "chunk_events": {},
+            "brakes": [],
+            "camera_names": (),
+        }
+        while reader.has_next():
+            topic, payload, _ = reader.read_next()
+            if topic not in types:
+                continue
+            message = (
+                payload
+                if legacy_feedback and topic == f"{root}/execution_feedback"
+                else deserialize_message(payload, types[topic])
+            )
+            _consume_message(
+                topic, message, root, metadata,
+                legacy_reference_digest=legacy_reference_digest,
+                legacy_feedback=legacy_feedback,
+            )
+        if not metadata["camera_names"]:
+            from robot_contracts.models import ContractError
 
-        raise ContractError("LABEL_EXPORT_CAPTURE", "no camera names in observation index")
-    return metadata
+            raise ContractError("LABEL_EXPORT_CAPTURE", "no camera names in observation index")
+        return metadata
+    finally:
+        reader.close()
 
 
 def _observations(
@@ -350,11 +402,15 @@ def _load_episode(
     from robot_contracts.profiles import profile_from_document, validate_document
 
     manifest = json.loads((episode / "manifest.json").read_text(encoding="utf-8"))
-    validate_document(manifest, manifest_schema_path(_PROJECT / "contracts/schemas", 1))
+    validate_document(
+        manifest, manifest_schema_path(_PROJECT / "shared/common/interfaces/schemas", 1)
+    )
     if not manifest["recording"]["complete"]:
         raise ValueError(manifest["recording"]["failure_reason"])
     configuration = manifest.get("configuration", {})
-    profile = profile_from_document(configuration["profile"], _PROJECT / "contracts/schemas")
+    profile = profile_from_document(
+        configuration["profile"], _PROJECT / "shared/common/interfaces/schemas"
+    )
     if profile.digest != manifest["robot_profile_hash"]:
         raise ValueError("recorded profile snapshot does not match the manifest")
     recipe = configuration.get("recipe", {})
@@ -497,13 +553,32 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--campaign-config",
         type=Path,
-        default=_PROJECT / "runtime/ros2/configs/experiments/stack_campaign.yaml",
+        default=None,
+        help="campaign recipe used for quality rules (conflicts with --scenario)",
     )
+    parser.add_argument("--scenario")
+    parser.add_argument("--shared-root", type=Path)
     parser.add_argument("--runtime-log", type=Path, action="append", default=[])
     parser.add_argument("--backend-log", type=Path, action="append", default=[])
     parser.add_argument("--max-labels", type=int, default=700)
     parser.add_argument("--no-previews", action="store_true", help="skip preview PNGs and GIFs")
     args = parser.parse_args(argv)
+    from dual_arm_runtime.offline.scenario_selection import campaign_config_path
+
+    default_campaign = (
+        _PROJECT / "shared/scenarios/panda_stack/configs/runtime/experiments/stack_campaign.yaml"
+    )
+    try:
+        args.campaign_config = campaign_config_path(
+            campaign_config=args.campaign_config,
+            scenario=args.scenario,
+            shared_root=args.shared_root,
+            project_root=_PROJECT,
+            default=default_campaign,
+        )
+    except CampaignError as error:
+        print(json.dumps({"error": str(error)}), file=sys.stderr)
+        return 2
     episode = args.episode_dir.resolve()
     out = args.out.resolve()
     manifest, configuration, profile, recipe, root, context = _load_episode(episode)

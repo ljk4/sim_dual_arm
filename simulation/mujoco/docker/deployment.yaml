@@ -1,0 +1,12 @@
+# Deployment requirements checked by shared/common/tools/scripts/check_dockerfiles.py.
+# Mount sources, build settings and environment stay in docker-compose.yml and container.env.
+service: simulation
+source:
+  mount: /app
+  scope: implementation
+mounts:
+  /data: writable
+  /opt/ros-dev: read-only
+networks: [ros]
+gpu: true
+commands: [backend, environment, scene, kinematics, prepare]

@@ -9,7 +9,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 SIM_SRC = ROOT / "simulation/mujoco/src"
-CONTRACT_SRC = ROOT / "contracts/python/src"
+CONTRACT_SRC = ROOT / "shared/common/python/contracts/src"
 for source in (SIM_SRC, CONTRACT_SRC):
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))

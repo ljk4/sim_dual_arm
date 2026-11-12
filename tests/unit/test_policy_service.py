@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
+PROFILES = ROOT / "shared/scenarios/panda_stack/profiles"
 pytest.importorskip("grpc")
 pb2 = pytest.importorskip("dual_arm_policy.v1.policy_pb2")
 from dual_arm_learning.policy_service import PolicyService  # noqa: E402
@@ -15,9 +16,9 @@ CONFIG = ROOT / "learning/lerobot/configs/fake_policy.yaml"
 
 def documents():
     return (
-        (ROOT / "profiles/robots/panda_stack_v1/profile.json").read_bytes(),
-        (ROOT / "profiles/observations/panda_rgb_joint_v1.json").read_bytes(),
-        (ROOT / "profiles/actions/panda_joint_position_v1.json").read_bytes(),
+        (PROFILES / "robots/panda_stack_v1/profile.json").read_bytes(),
+        (PROFILES / "observations/panda_rgb_joint_v1.json").read_bytes(),
+        (PROFILES / "actions/panda_joint_position_v1.json").read_bytes(),
     )
 
 
@@ -50,7 +51,7 @@ def open_request(config, ctx, open_id="open-1"):
 
 
 def observation(config, reference_ns=1_000_000_000):
-    profile = json.loads((ROOT / "profiles/robots/panda_stack_v1/profile.json").read_text())
+    profile = json.loads((PROFILES / "robots/panda_stack_v1/profile.json").read_text())
     message = pb2.Observation(
         observation_id=1,
         reference_robot_time_ns=reference_ns,

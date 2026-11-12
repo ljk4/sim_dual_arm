@@ -22,9 +22,9 @@ from robot_backend_sim.config.scene_config import (  # noqa: E402
 )
 from robot_contracts.profiles import load_profile, semantic_hash  # noqa: E402
 
-CONFIG_PATH = ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml"
-PROFILE_PATH = ROOT / "profiles/robots/panda_stack_v1/profile.json"
-SCHEMAS = ROOT / "contracts/schemas"
+CONFIG_PATH = ROOT / "shared/scenarios/panda_stack/configs/simulation/scene/panda_stack.yaml"
+PROFILE_PATH = ROOT / "shared/scenarios/panda_stack/profiles/robots/panda_stack_v1/profile.json"
+SCHEMAS = ROOT / "shared/common/interfaces/schemas"
 DEFAULT_DOCUMENT = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
 
 

@@ -7,8 +7,10 @@ import pytest
 from model_helpers import replace
 
 ROOT = Path(__file__).resolve().parents[2]
+SCENARIO = ROOT / "shared/scenarios/panda_stack"
+PROFILES = SCENARIO / "profiles"
 SIM_SRC = ROOT / "simulation/mujoco/src"
-CONTRACTS = ROOT / "contracts/python/src"
+CONTRACTS = ROOT / "shared/common/python/contracts/src"
 for source in (SIM_SRC, CONTRACTS):
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
@@ -36,19 +38,19 @@ from robot_contracts.profiles import load_profile  # noqa: E402
 
 @pytest.fixture(scope="module")
 def fixture():
-    scene_config = load_scene_config(ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml")
+    scene_config = load_scene_config(SCENARIO / "configs/simulation/scene/panda_stack.yaml")
     scene = build_scene(
         scene_config,
     )
     scene.reset(0)
-    task_config = load_task_config(ROOT / "simulation/mujoco/configs/scene/panda_stack_task.yaml")
+    task_config = load_task_config(SCENARIO / "configs/simulation/scene/panda_stack_task.yaml")
     profile = load_profile(
-        ROOT / "profiles/robots/panda_stack_v1/profile.json",
-        ROOT / "contracts/schemas",
+        PROFILES / "robots/panda_stack_v1/profile.json",
+        ROOT / "shared/common/interfaces/schemas",
     )
-    control = load_control_config(ROOT / "profiles/control/panda_control_v1.yaml")
+    control = load_control_config(PROFILES / "control/panda_control_v1.yaml")
     kinematics = load_kinematics_config(
-        ROOT / "simulation/mujoco/configs/checks/kinematics_check.yaml", scene_config
+        SCENARIO / "configs/simulation/checks/kinematics_check.yaml", scene_config
     )
     indices = scene.indices
     qpos = tuple(float(value) for value in scene.data.qpos)

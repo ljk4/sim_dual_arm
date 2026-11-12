@@ -12,9 +12,12 @@ if str(SIM_SRC) not in sys.path:
 
 from robot_backend_sim.physics.contacts import (  # noqa: E402
     FingerContactEvidence,
+    GripperCompletion,
     GripperContactEvidence,
     evaluate_gripper_completion,
+    validated_panda_completions,
 )
+from robot_contracts.models import ContractError  # noqa: E402
 
 
 def _finger(
@@ -54,6 +57,67 @@ def _completion(contact: GripperContactEvidence, **changes):
     }
     values.update(changes)
     return evaluate_gripper_completion(**values)
+
+
+def _panda_completion(side: str, indices: tuple[int, ...] = (1, 2)) -> GripperCompletion:
+    fingers = tuple(
+        FingerContactEvidence(side, index, f"{side}_finger{index}", (), 0.0)
+        for index in indices
+    )
+    return GripperCompletion(
+        side=side,
+        mode="NONE",
+        position_ok=False,
+        contact_ok=False,
+        contact_object=None,
+        ambiguous=False,
+        target_error_m=0.0,
+        measured_position_m=0.0,
+        measured_velocity_m_s=0.0,
+        target_position_m=0.0,
+        initial_reference_m=0.0,
+        final_reference_m=0.0,
+        fingers=fingers,
+    )
+
+
+def test_panda_completion_evidence_keeps_two_sides_and_two_fingers():
+    both = (_panda_completion("left"), _panda_completion("right"))
+    assert validated_panda_completions(both) == both
+    with pytest.raises(ContractError, match="left then right"):
+        validated_panda_completions(
+            (_panda_completion("right"), _panda_completion("left"))
+        )
+    with pytest.raises(ContractError, match="left then right"):
+        validated_panda_completions((_panda_completion("left"),))
+    with pytest.raises(ContractError, match="finger indices 1 then 2"):
+        validated_panda_completions(
+            (_panda_completion("left", (1, 3)), _panda_completion("right"))
+        )
+    with pytest.raises(ContractError, match="side does not match"):
+        validated_panda_completions(
+            (
+                _panda_completion("left"),
+                GripperCompletion(
+                    side="right",
+                    mode="NONE",
+                    position_ok=False,
+                    contact_ok=False,
+                    contact_object=None,
+                    ambiguous=False,
+                    target_error_m=0.0,
+                    measured_position_m=0.0,
+                    measured_velocity_m_s=0.0,
+                    target_position_m=0.0,
+                    initial_reference_m=0.0,
+                    final_reference_m=0.0,
+                    fingers=(
+                        FingerContactEvidence("left", 1, "left_finger1", (), 0.0),
+                        FingerContactEvidence("right", 2, "right_finger2", (), 0.0),
+                    ),
+                ),
+            )
+        )
 
 
 def test_contact_completion_accepts_two_named_fingers_on_one_object():

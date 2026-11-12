@@ -40,7 +40,7 @@ class ActiveRecording:
     started: float
 
 
-def load_workers(path: Path) -> list[dict[str, Any]]:
+def load_worker_plan(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     document = json.loads(path.read_text())
     workers = document.get("workers", [])
     if document.get("schema_version") != 1 or not 1 <= len(workers) <= 16:
@@ -48,6 +48,42 @@ def load_workers(path: Path) -> list[dict[str, Any]]:
     for field in ("id", "domain_id", "namespace", "runtime_config", "backend_log"):
         if len({item[field] for item in workers}) != len(workers):
             raise CampaignError(f"workers must have distinct {field}")
+    selection = document.get("selection")
+    if selection is not None and selection.get("mode") == "scenario":
+        binding = selection.get("binding") or {}
+        if not binding.get("sha256") or not selection.get("scenario_id"):
+            raise CampaignError("scenario worker manifest lacks binding identity")
+        recipes = selection.get("recipes") or {}
+        capability = (selection.get("capabilities") or {}).get("teacher")
+        if not capability:
+            raise CampaignError("scenario worker manifest lacks a Teacher capability")
+        for worker in workers:
+            if worker.get("teacher_api") != capability:
+                raise CampaignError(
+                    "workers must share the selected Teacher capability"
+                )
+            worker_binding = worker.get("binding") or {}
+            if (
+                worker_binding.get("sha256") != binding["sha256"]
+                or worker_binding.get("path") != binding.get("path")
+            ):
+                raise CampaignError("workers must share the selected binding identity")
+            for field in ("runtime_teacher", "simulation_teacher"):
+                worker_recipe = (worker.get("recipes") or {}).get(field) or {}
+                selected_recipe = recipes.get(field) or {}
+                if (
+                    worker_recipe.get("path") != selected_recipe.get("path")
+                    or worker_recipe.get("sha256") != selected_recipe.get("sha256")
+                ):
+                    raise CampaignError(
+                        f"workers must consume the selected {field} recipe"
+                    )
+    if selection is not None:
+        for field in ("run_id_prefix", "output_root"):
+            if any(not worker.get(field) for worker in workers):
+                raise CampaignError(f"workers must declare {field}")
+            if len({worker[field] for worker in workers}) != len(workers):
+                raise CampaignError(f"workers must have distinct {field}")
     for worker in workers:
         domain = worker["domain_id"]
         if isinstance(domain, bool) or not isinstance(domain, int) or not 0 <= domain <= 232:
@@ -56,7 +92,7 @@ def load_workers(path: Path) -> list[dict[str, Any]]:
             raise CampaignError(f"worker runtime config is missing: {worker['runtime_config']}")
         if not Path(worker["backend_log"]).is_dir():
             raise CampaignError(f"worker backend is not ready: {worker['backend_log']}")
-    return workers
+    return document, workers
 
 
 def stop_process(process: subprocess.Popen) -> None:
@@ -84,9 +120,10 @@ def stop_process(process: subprocess.Popen) -> None:
 class RecordingPool:
     def __init__(
         self, args: argparse.Namespace, config: dict[str, Any], ledger: Ledger,
-        workers: list[dict[str, Any]],
+        workers: list[dict[str, Any]], selection: dict[str, Any] | None = None,
     ) -> None:
         self.args, self.config, self.ledger, self.workers = args, config, ledger, workers
+        self.selection = selection
         self.output = args.project_root / config["paths"]["attempts_root"]
         self.active: list[ActiveRecording] = []
         self.qualified = self.attempted = self.consecutive_failures = self.cancelled = 0
@@ -120,9 +157,10 @@ class RecordingPool:
             episode_id=None, runtime_config=worker["runtime_config"],
         )
         check_environment(self.args.project_root, self.config, self.output)
+        run_id_prefix = worker.get("run_id_prefix") or f"record-{worker['id']}"
         attempt = campaign._reserve(
             self.ledger, self.config, run_args, self.output,
-            f"record-{time.time_ns()}-{worker['id']}", self.args.project_root,
+            f"{run_id_prefix}-{time.time_ns()}", self.args.project_root,
         )
         self.attempted += 1
         with self.ledger.locked():
@@ -131,6 +169,12 @@ class RecordingPool:
                     "event": "RUNNING", "attempt_id": attempt.attempt_id,
                     "started_at_ns": time.time_ns(), "worker": worker["id"],
                     "domain_id": worker["domain_id"],
+                    "run_id_prefix": run_id_prefix,
+                    "output_root": worker.get("output_root"),
+                    "binding": worker.get("binding"),
+                    "recipes": worker.get("recipes"),
+                    "teacher_api": worker.get("teacher_api"),
+                    "worker_overrides": worker.get("overrides"),
                 }
             )
         collect_args = argparse.Namespace(
@@ -140,7 +184,18 @@ class RecordingPool:
         environment.update(
             ROS_DOMAIN_ID=str(worker["domain_id"]), MUJOCO_GL="egl",
             OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1",
+            CAMPAIGN_WORKER_ID=worker["id"],
+            CAMPAIGN_WORKER_RUN_ID_PREFIX=run_id_prefix,
         )
+        if worker.get("output_root"):
+            environment["CAMPAIGN_WORKER_OUTPUT_ROOT"] = worker["output_root"]
+        binding = worker.get("binding") or {}
+        if binding:
+            environment["CAMPAIGN_SCENARIO_ID"] = str(binding.get("scenario_id") or "")
+            environment["CAMPAIGN_BINDING_PATH"] = str(binding.get("path") or "")
+            environment["CAMPAIGN_BINDING_SHA256"] = str(binding.get("sha256") or "")
+        if worker.get("teacher_api"):
+            environment["CAMPAIGN_TEACHER_API"] = str(worker["teacher_api"])
         for name in ("DISPLAY", "WAYLAND_DISPLAY"):
             environment.pop(name, None)
         console = (attempt.directory / "console.log").open("w")
@@ -254,6 +309,7 @@ class RecordingPool:
             "error": self.allocation_error or None,
             "target_total": self.args.target_total,
             "campaign_qualified": self.campaign_qualified(),
+            "selection": self.selection,
         }
         self.args.worker_manifest.with_name("summary.json").write_text(
             json.dumps(summary, indent=2) + "\n"
@@ -263,8 +319,22 @@ class RecordingPool:
 
 
 def record_parallel(args: argparse.Namespace, config: dict[str, Any]) -> int:
-    workers = load_workers(args.worker_manifest)
-    code = check_ros_sdk(args.project_root)
+    document, workers = load_worker_plan(args.worker_manifest)
+    selection = document.get("selection")
+    expected = args.selection
+    if expected is not None:
+        if selection is None:
+            raise CampaignError("worker manifest has no selection but --scenario was used")
+        if (
+            expected.get("binding", {}).get("sha256")
+            != selection.get("binding", {}).get("sha256")
+        ):
+            raise CampaignError("worker manifest binding differs from the record selection")
+    code = check_ros_sdk(
+        args.project_root,
+        scenario=args.scenario,
+        shared_root=args.shared_root,
+    )
     if code:
         return code
     paths = config["paths"]
@@ -273,7 +343,7 @@ def record_parallel(args: argparse.Namespace, config: dict[str, Any]) -> int:
     acquire_run_lock(run_lock)
     previous = signal.signal(signal.SIGTERM, handle_sigterm)
     try:
-        pool = RecordingPool(args, config, ledger, workers)
+        pool = RecordingPool(args, config, ledger, workers, selection)
         if args.target_total is not None:
             if args.purpose == "formal" and args.target_total > int(
                 config["budget"]["formal_target_qualified"]

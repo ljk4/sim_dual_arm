@@ -19,13 +19,15 @@ from robot_contracts.models import (
     Target,
 )
 from robot_contracts.stream_request import REQUEST_STREAM_FIRST, StreamRequest, Trajectory
-from robot_contracts.trajectory.constants import FOLLOWER_ALGORITHM_VERSION
 from robot_contracts.trajectory.follower_reference import (
     FOLLOWER_NORMALIZATION_VERSION,
+    FOLLOWER_REFERENCE_DIGEST_VERSION,
+    FOLLOWER_REFERENCE_LEGACY_DIGEST_VERSION,
     FOLLOWER_SAMPLER_VERSION,
     FollowerReference,
     FollowerValidationLimits,
     compute_follower_reference_digest,
+    compute_legacy_follower_reference_digest,
 )
 from robot_contracts.trajectory.spline import CubicSegment, ReferencePlan, ReferenceSample
 from robot_trajectory.follower import PreparedFollowerPlan
@@ -51,6 +53,7 @@ CONTEXT = RunContext(
 TARGET_POSITION = 0.03
 PLAN_NS = 150_000_000
 WINDOW_NS = 250_000_000
+PRODUCER = "fixture-producer/v1"
 
 # Deliberately smaller than the accepted round-off allowance so the
 # raw endpoint is outside the hard range but the shared normalizer legally clips
@@ -125,8 +128,9 @@ def prepared() -> PreparedFollowerPlan:
         restricted_terminal_velocities=(0.0, 0.0),
         is_final=False,
         requested_window_ns=WINDOW_NS - 100_000_000,
-        ruckig_duration_ns=PLAN_NS,
+        curve_duration_ns=PLAN_NS,
         duration_grid_ns=None,
+        algorithm_version=PRODUCER,
     )
 
 
@@ -175,7 +179,7 @@ def constraints() -> FollowerValidationLimits:
 def test_record_is_independent_and_digest_covers_every_field():
     record = reference()
     assert record.reference_digest == compute_follower_reference_digest(record)
-    assert record.algorithm_version == FOLLOWER_ALGORITHM_VERSION
+    assert record.algorithm_version == PRODUCER
     assert record.sampler_version == FOLLOWER_SAMPLER_VERSION
     assert record.normalization_version == FOLLOWER_NORMALIZATION_VERSION
     assert record.chunk_seq == 1 and record.mode == "STREAM_FIRST"
@@ -204,12 +208,11 @@ def test_record_is_independent_and_digest_covers_every_field():
         ("max_target_deviations", (0.0, 0.0)),
         ("is_final", True),
         ("requested_window_ns", 300_000_000),
-        ("ruckig_duration_ns", 160_000_000),
+        ("curve_duration_ns", 160_000_000),
         ("duration_grid_ns", 2_000_000),
         ("velocity_limited", (True, False)),
         ("acceleration_limited", (True, False)),
         ("boundary_preserved", (False, True)),
-        ("algorithm_version", "future-algorithm"),
         ("sampler_version", "future-sampler"),
         ("normalization_version", "future-normalization"),
     ),
@@ -284,12 +287,44 @@ def test_independent_actual_reference_reconstruction_and_corrections():
     assert raw.positions == sample_reference_interval(record.plan, PLAN_NS // 2).positions
 
 
-def test_unknown_versions_are_rejected_not_silently_reinterpreted():
+def test_shared_conventions_are_rejected_when_unknown():
     record = reference()
-    for field in ("algorithm_version", "sampler_version", "normalization_version"):
+    for field in ("sampler_version", "normalization_version"):
         with pytest.raises(ContractError) as caught:
             replace(record, **{field: "unknown-v999"})
         assert caught.value.reason == "INVALID_FOLLOWER_REFERENCE"
+
+
+def test_same_curve_accepts_different_producer_identity():
+    first = reference()
+    second = replace(
+        first, algorithm_version="another-producer/v7", reference_digest=None
+    )
+    assert first.plan == second.plan
+    assert second.algorithm_version == "another-producer/v7"
+    assert second.reference_digest != first.reference_digest
+    rebuilt_first = validate(first, profile(), constraints())
+    rebuilt_second = validate(second, profile(), constraints())
+    assert rebuilt_first.plan == rebuilt_second.plan
+    assert rebuilt_first.actual_terminal_positions == rebuilt_second.actual_terminal_positions
+    assert rebuilt_first.flags == rebuilt_second.flags
+    assert rebuilt_second.algorithm_version == second.algorithm_version
+
+
+def test_producer_identity_must_be_a_non_empty_string():
+    with pytest.raises(ContractError) as caught:
+        replace(reference(), algorithm_version="")
+    assert caught.value.reason == "INVALID_FOLLOWER_REFERENCE"
+
+
+def test_legacy_digest_payload_covers_the_previous_field_name():
+    record = reference()
+    legacy = compute_legacy_follower_reference_digest(record)
+    assert legacy != record.reference_digest
+    assert FOLLOWER_REFERENCE_LEGACY_DIGEST_VERSION != FOLLOWER_REFERENCE_DIGEST_VERSION
+    document = record.to_document()
+    assert "curve_duration_ns" in document
+    assert "ruckig_duration_ns" not in document
 
 
 def test_recomputed_digest_cannot_bypass_final_or_timing_intent():
@@ -350,7 +385,7 @@ assert not loaded, loaded
 assert module.FollowerReference.model_fields
 """
     environment = os.environ.copy()
-    environment["PYTHONPATH"] = str(ROOT / "contracts/python/src")
+    environment["PYTHONPATH"] = str(ROOT / "shared/common/python/contracts/src")
     result = subprocess.run(
         [sys.executable, "-c", script],
         cwd=str(tmp_path),

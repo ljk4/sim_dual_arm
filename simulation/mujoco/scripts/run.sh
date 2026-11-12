@@ -4,7 +4,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-source "${PROJECT_SETUP:-$ROOT/../../infrastructure/docker/setup.sh}"
+source "${PROJECT_SETUP:-$ROOT/../../shared/common/tools/docker/setup.sh}"
 
 REPORT_ROOT="${DATA_ROOT:-/data}/reports/sim-check"
 ROS_SDK="${ROS_SDK_ROOT:-/opt/ros-dev}"
@@ -20,7 +20,7 @@ check_ros_sdk() {
   if [[ "$has_help" == "true" ]]; then
     return 0
   fi
-  python3 /config/check_ros_sdk.py check \
+  python3 "${SHARED_ROOT:-/shared}/common/tools/scripts/dev_workspace.py" check \
     --project-root / \
     --build-root "$ROS_SDK" 1>&2
 }
@@ -38,21 +38,26 @@ commands:
   environment   probe the MuJoCo/EGL/camera environment
   scene         check three-camera scene visibility
   kinematics    check key poses and kinematics clearance
-  prepare       write backend.yaml + run_manifest.json from a template/seed
+  prepare       write backend.yaml + run_manifest.json from a recipe/seed
   test          run pytest with plugin autoload disabled
 
 Examples:
   scripts/run.sh backend --help
   scripts/run.sh environment --run-id env-001
   scripts/run.sh prepare --template \
-    configs/backend/backend_stack_inference.yaml --seed 42 \
-    --run-id prep-001 --output /data/prepared/prep-001
+    /shared/scenarios/panda_stack/configs/simulation/backend/backend_stack_inference.yaml \
+    --seed 42 --run-id prep-001 --output /data/prepared/prep-001
+  scripts/run.sh prepare --scenario panda_stack --role policy \
+    --bundle /data/learning/bundles/<verified-bundle> \
+    --seed 42 --run-id prep-002 --output /data/prepared/prep-002
   scripts/run.sh backend \
     --config /data/prepared/prep-001/backend.yaml --run-id backend-001
   scripts/run.sh viewer \
     --config /data/prepared/prep-001/backend.yaml
 
 `backend` requires an explicit --config and checks the ROS SDK first.
+`prepare --scenario` selects a recipe through the scenario binding; direct
+`--template` mode is unchanged.  Run entries consume prepared configurations.
 EOF
 }
 
@@ -124,16 +129,16 @@ case "$command" in
     ;;
   scene)
     exec python3 -m robot_backend_sim.tools.check_scene \
-      --scene-config "$ROOT/configs/scene/panda_stack.yaml" \
-      --check-config "$ROOT/configs/checks/scene_check.yaml" \
+      --scene-config "${SHARED_ROOT:-/shared}/scenarios/panda_stack/configs/simulation/scene/panda_stack.yaml" \
+      --check-config "${SHARED_ROOT:-/shared}/scenarios/panda_stack/configs/simulation/checks/scene_check.yaml" \
       --report-root "$REPORT_ROOT" \
       "$@"
     ;;
   kinematics)
     exec python3 -m robot_backend_sim.tools.check_kinematics \
-      --scene-config "$ROOT/configs/scene/panda_stack.yaml" \
-      --check-config "$ROOT/configs/checks/scene_check.yaml" \
-      --kinematics-config "$ROOT/configs/checks/kinematics_check.yaml" \
+      --scene-config "${SHARED_ROOT:-/shared}/scenarios/panda_stack/configs/simulation/scene/panda_stack.yaml" \
+      --check-config "${SHARED_ROOT:-/shared}/scenarios/panda_stack/configs/simulation/checks/scene_check.yaml" \
+      --kinematics-config "${SHARED_ROOT:-/shared}/scenarios/panda_stack/configs/simulation/checks/kinematics_check.yaml" \
       --report-root "$REPORT_ROOT" \
       "$@"
     ;;
@@ -141,7 +146,7 @@ case "$command" in
     exec python3 "$ROOT/scripts/prepare_backend.py" "$@"
     ;;
   test)
-    exec bash "$ROOT/../../infrastructure/scripts/test.sh" "$@"
+    exec bash "${SHARED_ROOT:-/shared}/common/tools/scripts/test.sh" "$@"
     ;;
   *)
     printf 'simulation run.sh: unknown command %q\n' "$command" >&2

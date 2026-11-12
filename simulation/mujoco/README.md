@@ -2,6 +2,8 @@
 
 实现双 Panda 机械臂物理步进、三路无窗口 EGL 相机渲染、Ruckig 有界跟随动作执行、实测反馈发布与程序示教（Teacher），通过 ROS 2 Robot API 与运行端通信。
 
+本端持有 MuJoCo 物理、渲染、任务插件与执行映射。公共消息定义在 [`shared/common/interfaces/ros/`](../../shared/common/interfaces/ros/README.md)；当前 Panda 堆叠任务的档案、场景配方、Teacher 扩展与实现选择在 [`shared/scenarios/panda_stack/`](../../shared/scenarios/panda_stack/README.md)，准备入口按 binding 选择配方，不在本端写方案名分支。
+
 ## 目录结构
 
 | 目录 | 职责内容 |

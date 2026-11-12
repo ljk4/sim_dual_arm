@@ -1,0 +1,108 @@
+# Temporary diagnostic campaign for the phase-12 parallel interruption check.
+#
+# Seeds, attempt root and ledger are separate from the formal campaign.  Every
+# business parameter (quality gates, required paths, launch timeout) is copied
+# from shared/scenarios/panda_stack/configs/runtime/experiments/stack_campaign.yaml.
+schema_version: 1
+
+budget:
+  pilot_seed_first: 900100
+  pilot_seed_last: 900100
+  pilot_max_attempts: 1
+  pilot_act_reserved_attempts: 0
+  pilot_teacher_seed_last: 900100
+  pilot_label_replay_max: 0
+
+  formal_seed_first: 10000
+  formal_seed_last: 10099
+  formal_max_attempts: 100
+  formal_target_qualified: 50
+  formal_validation_qualified_indices: [9, 19, 29, 39, 49]
+
+  test_seed_first: 20000
+  test_seed_last: 20019
+  test_max_attempts: 20
+  evaluation_max_attempts: 20
+
+  max_raw_bytes: 2147483648
+  reserve_bytes: 268435456
+  estimated_attempt_bytes: 268435456
+  min_free_bytes: 5368709120
+
+paths:
+  attempts_root: var/diagnostics/phase-12-20261112/interrupt/attempts
+  ledger: var/diagnostics/phase-12-20261112/interrupt/attempts.jsonl
+  lock: var/diagnostics/phase-12-20261112/interrupt/.ledger.lock
+  run_lock: var/diagnostics/phase-12-20261112/interrupt/.run.lock
+  required_paths:
+    - shared/scenarios/panda_stack/configs/runtime/teacher_collect.yaml
+    - shared/scenarios/panda_stack/configs/runtime/policy_rollout.yaml
+    - shared/scenarios/panda_stack/configs/learning/policy_temporal.yaml
+    - learning/lerobot/docker/docker-compose.yml
+    - runtime/ros2/docker/docker-compose.yml
+    - shared/scenarios/panda_stack/configs/simulation/backend/backend_stack_teacher.yaml
+    - shared/scenarios/panda_stack/configs/simulation/scene/panda_stack_task.yaml
+    - shared/scenarios/panda_stack/extensions/ros/panda_stack_api_msgs/srv/GetTeacherChunk.srv
+    - shared/scenarios/panda_stack/extensions/ros/panda_stack_api_msgs/msg/TeacherCapability.msg
+  sdk_marker: .build/ros-dev/contracts.json
+
+launch:
+  command: []
+  cleanup_command: []
+  timeout_s: 180.0
+
+quality:
+  sidecar: quality.json
+  max_blackout_s: 0.35
+  min_qualified_ratio: 0.85
+  rules:
+    - camera: right_wrist
+      object: source
+      phases: [pregrasp, grasp, close, lift]
+      mode: required
+      min_pixels: 64
+    - camera: right_wrist
+      object: source
+      phases: [transport, lower, open, retreat, stable]
+      mode: record_only
+      min_pixels: 64
+    - camera: right_wrist
+      object: target
+      phases: [pregrasp, grasp, close, lift]
+      mode: record_only
+      min_pixels: 64
+    - camera: right_wrist
+      object: target
+      phases: [transport, lower, open, retreat, stable]
+      mode: required
+      min_pixels: 64
+    - camera: global
+      object: target
+      phases: [pregrasp, grasp, close, lift, transport, lower, open, retreat, stable]
+      mode: required
+      min_pixels: 64
+    - camera: global
+      object: source
+      phases: [pregrasp, lift, transport, lower, open, retreat, stable]
+      mode: required
+      min_pixels: 32
+    - camera: global
+      object: source
+      phases: [grasp, close]
+      mode: record_only
+      min_pixels: 32
+    - camera: left_wrist
+      object: table
+      phases: [pregrasp, grasp, close, lift, transport, lower, open, retreat, stable]
+      mode: required
+      min_pixels: 4096
+    - camera: left_wrist
+      object: source
+      phases: [pregrasp, grasp, close, lift, transport, lower, open, retreat, stable]
+      mode: record_only
+      min_pixels: 64
+    - camera: left_wrist
+      object: target
+      phases: [pregrasp, grasp, close, lift, transport, lower, open, retreat, stable]
+      mode: record_only
+      min_pixels: 64

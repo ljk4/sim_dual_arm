@@ -13,7 +13,7 @@ runtime/ros2/scripts/record.sh --count 10 --max-consecutive-failures 3
 
 # 使用 pilot 预算，修改模板或后端日志目录
 runtime/ros2/scripts/record.sh --purpose pilot --count 2 \
-  --runtime-config /workspace/runtime/ros2/configs/teacher_collect.yaml \
+  --runtime-config /workspace/shared/scenarios/panda_stack/configs/runtime/teacher_collect.yaml \
   --backend-log /data/runs/backend/teacher-backend/log
 ```
 
@@ -48,10 +48,10 @@ runtime/ros2/scripts/record_parallel.sh --count 10 --workers 4 \
 
 | 子命令 | 功能说明 |
 | --- | --- |
-| `build-ros-sdk` | 编译 `contracts/ros/robot_api_msgs`、`contracts/ros/sim_api_msgs`至 `/build/ros-dev` |
+| `build-ros-sdk` | 无 `--scenario`/`--package` 时只编译核心 `robot_api_msgs` 至 `/build/ros-core`；带 `--scenario panda_stack` 时按 binding 构建核心、`sim_api_msgs` 与 `panda_stack_api_msgs` 至 `/build/ros-dev` |
 | `build-policy-sdk` | 从 `policy.proto` 生成 Python Protobuf/gRPC SDK 至 `/build/generated/policy-sdk` |
-| `prepare` | 将 `policy_binding.json`、运行端模板与 `seed`/`run-id` 合成为 `runtime.yaml` 与 `run_manifest.json`（`prepare_run.py`） |
-| `policy` | 执行单局非交互式 Policy 推理闭环（须显式指定全新 `--output /data/raw/<run-id>`） |
+| `prepare` | 将 scenario/direct 运行配方、`seed`/`run-id`（Policy 另需真实 `policy_binding.json`）合成为 `runtime.yaml` 与 `run_manifest.json`；`--scenario` 与 `--template` 互斥（`prepare_run.py`） |
+| `policy` | 执行单局非交互式 Policy 推理闭环（须显式指定全新 `--output /data/raw/<run-id>`；使用 `prepare` 产物） |
 | `interactive` | 交互式执行单局 Policy 推理：自动生成唯一 `run-id`，输入 `y` 复位环境并开始，结束后保持 IDLE 直至按 `Ctrl-C` 退出 |
 | `export` | 从录制目录导出逐帧 RGB、动作参考标签与图像质量报告（`export_episode.py`、`export_media.py`、`export_quality.py`） |
 | `campaign` | 查看预算台账、筛选训练/验证集或执行自定义单次尝试（`campaign.py`、`campaign_ledger.py`、`campaign_execution.py`）；示教录制使用 `record.sh` |

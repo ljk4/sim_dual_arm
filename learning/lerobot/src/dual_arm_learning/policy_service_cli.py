@@ -9,6 +9,7 @@ reads task truth and never falls back to a fake or constant provider.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 import time
@@ -20,10 +21,21 @@ from .bundle import BundleError, deployment_summary
 from .policy_config import PolicyConfigError, PolicyServiceConfig, load_policy_config
 from .policy_server import serve_forever
 from .policy_types import PolicyError
+from .scenario import LearningScenario, ScenarioSelectionError, select_scenario
+
+DEFAULT_CONFIG = Path("shared/scenarios/panda_stack/configs/learning/policy_temporal.yaml")
 
 
 def _project_root() -> Path:
     return Path(__file__).resolve().parents[4]
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def _write_startup_failure(
@@ -74,13 +86,16 @@ def _scalar_fields(value: dict[str, object]) -> dict[str, object]:
     }
 
 
-def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
+def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--config",
-        type=Path,
-        default=Path("learning/lerobot/configs/policy_temporal.yaml"),
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument(
+        "--config", type=Path, default=None, help="direct ACT policy recipe path"
     )
+    selection.add_argument(
+        "--scenario", help="scenario id under <shared-root>/scenarios/<id>/binding.yaml"
+    )
+    parser.add_argument("--shared-root", type=Path, help="shared tree containing scenarios/")
     parser.add_argument("--bundle-dir", type=Path)
     parser.add_argument("--robot-profile", type=Path)
     parser.add_argument("--observation-schema", type=Path)
@@ -90,17 +105,30 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--snapshot-name", default="resolved_contract.json")
     parser.add_argument("--debug", action="store_true")
-    return parser.parse_args(argv)
+    return parser
 
 
-def _snapshot(config: PolicyServiceConfig, adapter: object, summary: dict) -> dict:
-    return {
+def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
+    return _parser().parse_args(argv)
+
+
+def _snapshot(
+    config: PolicyServiceConfig,
+    adapter: object,
+    summary: dict,
+    *,
+    config_path: Path,
+    selection: LearningScenario | None = None,
+    overrides: dict[str, object] | None = None,
+) -> dict:
+    record = {
         "schema_version": 1,
         "bundle": summary,
         "service": config.to_document(),
         "provider": adapter.summary(),
         "task_id": config.task_id,
         "task_text": config.task_text,
+        "config": {"path": str(config_path.resolve()), "sha256": _sha256(config_path)},
         "source": {
             "bundle_root": str(config.bundle_dir),
             "profile": str(config.robot_profile_path),
@@ -109,6 +137,17 @@ def _snapshot(config: PolicyServiceConfig, adapter: object, summary: dict) -> di
             "device": config.device,
         },
     }
+    if selection is not None:
+        record["selection"] = selection.summary(include_bundle=True)
+        record["model_source"] = {
+            "source": selection.resolved.bundle.source,
+            "declared": selection.resolved.bundle.declared,
+            "path": str(config.bundle_dir),
+            "bundle_digest": config.model_bundle_digest,
+        }
+        if overrides:
+            record["overrides"] = overrides
+    return record
 
 
 def _serve(
@@ -164,19 +203,67 @@ def _fail(
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parse_arguments(argv)
-    config_path = args.config if args.config.is_absolute() else _project_root() / args.config
+    parser = _parser()
+    args = parser.parse_args(argv)
+    project_root = _project_root()
+    if args.scenario is None and args.shared_root is not None:
+        parser.error("--shared-root requires --scenario")
+    if args.scenario is not None and any(
+        value is not None
+        for value in (args.robot_profile, args.observation_schema, args.action_schema)
+    ):
+        parser.error(
+            "--robot-profile/--observation-schema/--action-schema cannot be combined "
+            "with --scenario; the binding supplies the profile identity"
+        )
+    config_path = (
+        Path(f"scenario:{args.scenario}")
+        if args.scenario is not None
+        else (
+            args.config
+            if args.config is not None and args.config.is_absolute()
+            else project_root / (args.config or DEFAULT_CONFIG)
+        )
+    )
+    selection: LearningScenario | None = None
+    overrides: dict[str, object] = {}
     config: PolicyServiceConfig | None = None
     stage = "config"
     try:
-        config = load_policy_config(
-            config_path,
-            bundle_dir=args.bundle_dir,
-            robot_profile_path=args.robot_profile,
-            observation_schema_path=args.observation_schema,
-            action_schema_path=args.action_schema,
-            device=args.device,
-        )
+        if args.scenario is not None:
+            selection = select_scenario(
+                scenario=args.scenario,
+                recipe_field="policy_service",
+                stage="inference",
+                project_root=project_root,
+                shared_root=args.shared_root,
+                bundle=args.bundle_dir,
+            )
+            config_path = selection.recipe_path
+            config = load_policy_config(
+                config_path,
+                bundle_dir=selection.resolved.bundle.path,
+                robot_profile_path=selection.profile_path("robot"),
+                observation_schema_path=selection.profile_path("observation"),
+                action_schema_path=selection.profile_path("action"),
+                device=args.device,
+            )
+            if args.bundle_dir is not None:
+                overrides["bundle_dir"] = {
+                    "value": str(args.bundle_dir),
+                    "source": "argument",
+                }
+            if args.device is not None:
+                overrides["device"] = {"value": args.device, "source": "argument"}
+        else:
+            config = load_policy_config(
+                config_path,
+                bundle_dir=args.bundle_dir,
+                robot_profile_path=args.robot_profile,
+                observation_schema_path=args.observation_schema,
+                action_schema_path=args.action_schema,
+                device=args.device,
+            )
         stage = "load_warm"
         adapter = load_act_adapter(config)
         summary = deployment_summary(config)
@@ -190,9 +277,23 @@ def main(argv: list[str] | None = None) -> int:
             }
         )
         stage = "serve"
-        snapshot = _snapshot(config, adapter, summary)
+        snapshot = _snapshot(
+            config,
+            adapter,
+            summary,
+            config_path=config_path,
+            selection=selection,
+            overrides=overrides or None,
+        )
         return _serve(config, adapter, startup, snapshot, args, config_path)
-    except (PolicyConfigError, PolicyError, BundleError, OSError, ValueError) as error:
+    except (
+        PolicyConfigError,
+        PolicyError,
+        BundleError,
+        ScenarioSelectionError,
+        OSError,
+        ValueError,
+    ) as error:
         return _fail(args, stage, error, config_path, config)
     except Exception as error:  # noqa: BLE001 - startup must fail visibly
         return _fail(args, stage, error, config_path, config)

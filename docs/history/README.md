@@ -19,7 +19,7 @@ git show <commit>:docs/history/dsh-048.md
 - **S4～S5：示教采集与数据集构建（DSH-033～035）**：实现堆叠任务独立判定器与程序示教（Teacher），完成 50 条合格正式 episode 采集、逐帧 RGB/参考标签导出、45/5 LeRobot 数据集转换、仅训练集统计量计算与 safetensors 模型包导出。
 - **S6～S7：真实 ACT 评估与推理执行修复（DSH-036～051）**：完成 20K 步 ACT 模型训练，排查并解决短执行窗口停滞、跨块切换跳变、复位后非稳态、加权融合浮点舍入、Ruckig 飞秒级制动前缀误拒绝及静止速度容差不一致问题，在种子 `30600` 同场景修复回归中完成真实物理堆叠。
 - **S8：容器化环境与目录收敛（DSH-052～060）**：按 `simulation`、`runtime`、`learning`、`hardware` 四端重组目录，收敛为每端单一 `Dockerfile`、`docker-compose.yml` 与容器内 `scripts/run.sh` 入口，补充 `interactive` 交互式运行与独立 `viewer` 实时可视化。
-- **S9：六阶段全量架构瘦身与性能优化（Phase 1～6）**：清理历史 S1 Mock 后端、非受限 SciPy 样条与 `Native*` 命名残留，全面切换至单层 Pydantic v2 契约模型，将轨迹数学下沉至 `robot_contracts/trajectory/`，解耦 `SimTaskPlugin` 任务插件，将训练切换为 `PyAV` + 张量批处理 + 多进程预取 + `CUDA AMP`，并拆分所有超长模块与函数（详见[重构任务书](../refactoring-tasks/README.md)）。
+- **S9：六阶段全量架构瘦身与性能优化（Phase 1～6）**：清理历史 S1 Mock 后端、非受限 SciPy 样条与 `Native*` 命名残留，全面切换至单层 Pydantic v2 契约模型，将轨迹数学下沉至 `robot_contracts/trajectory/`，解耦 `SimTaskPlugin` 任务插件，将训练切换为 `PyAV` + 张量批处理 + 多进程预取 + `CUDA AMP`，并拆分所有超长模块与函数（任务书原文通过 `git log -- docs/architecture-tasks` 追溯）。
 
 ---
 

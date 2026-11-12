@@ -14,7 +14,7 @@ np = pytest.importorskip("numpy")
 
 ROOT = Path(__file__).resolve().parents[2]
 SIM_SRC = ROOT / "simulation/mujoco/src"
-CONTRACTS_SRC = ROOT / "contracts/python/src"
+CONTRACTS_SRC = ROOT / "shared/common/python/contracts/src"
 for source in (SIM_SRC, CONTRACTS_SRC):
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
@@ -25,9 +25,9 @@ from robot_backend_sim.physics.scene import build_scene  # noqa: E402
 from robot_contracts.models import ContractError  # noqa: E402
 from robot_contracts.profiles import load_profile  # noqa: E402
 
-CONFIG_PATH = ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml"
-PROFILE_PATH = ROOT / "profiles/robots/panda_stack_v1/profile.json"
-SCHEMAS = ROOT / "contracts/schemas"
+CONFIG_PATH = ROOT / "shared/scenarios/panda_stack/configs/simulation/scene/panda_stack.yaml"
+PROFILE_PATH = ROOT / "shared/scenarios/panda_stack/profiles/robots/panda_stack_v1/profile.json"
+SCHEMAS = ROOT / "shared/common/interfaces/schemas"
 
 
 @pytest.fixture(scope="module")

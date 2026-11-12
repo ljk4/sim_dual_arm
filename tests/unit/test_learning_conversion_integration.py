@@ -18,6 +18,7 @@ from learning_fixtures import make_select
 from model_helpers import replace
 
 ROOT = Path(__file__).resolve().parents[2]
+SCENARIO = ROOT / "shared/scenarios/panda_stack"
 pytestmark = pytest.mark.skipif(
     os.environ.get("DSH035_HEAVY") != "1",
     reason="set DSH035_HEAVY=1 for the 50-episode synthetic conversion",
@@ -28,13 +29,13 @@ def test_two_independent_datasets_train_only_processors_and_padding(tmp_path):
     pytest.importorskip("lerobot")
     import torch
 
-    config = load_dataset_config(ROOT / "learning/lerobot/configs/act_dataset.yaml", ROOT)
+    config = load_dataset_config(SCENARIO / "configs/learning/act_dataset.yaml", ROOT)
     config = replace(config, output_root=tmp_path / "data", cache_root=tmp_path / "cache")
     select = make_select(tmp_path, config, first_frames=61)
     log = tmp_path / "convert.log"
     result = subprocess.run(
         ["bash", str(ROOT / "learning/lerobot/scripts/run.sh"), "convert",
-         "--config", str(ROOT / "learning/lerobot/configs/act_dataset.yaml"),
+         "--config", str(SCENARIO / "configs/learning/act_dataset.yaml"),
          "--select", str(select), "--output-root", str(config.output_root),
          "--synthetic", "--log-file", str(log)],
         capture_output=True, text=True, timeout=180,
@@ -95,7 +96,7 @@ def test_two_independent_datasets_train_only_processors_and_padding(tmp_path):
     assert abs(float(train.meta.stats["action"]["mean"][0]) - 0.01) < 1e-6
     assert abs(float(validation.meta.stats["action"]["mean"][0]) - 1.01) < 1e-6
 
-    training = load_training_config(ROOT / "learning/lerobot/configs/act_training.yaml", ROOT)
+    training = load_training_config(SCENARIO / "configs/learning/act_training.yaml", ROOT)
     training = replace(training, data_root=tmp_path / "data", mode="smoke")
     audit = verify_dataset_manifest(training, allow_synthetic=True, require_full=False)
     assert audit.synthetic is True

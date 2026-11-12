@@ -7,7 +7,7 @@
 !/.build/.gitkeep
 
 # Machine-specific deployment bindings and downloaded external checkouts.
-/infrastructure/local/
+/shared/common/tools/local/
 /third_party/src/
 
 # Python environments and caches.

@@ -2,6 +2,8 @@
 
 ROS 2 运行端连接仿真/真机后端（Robot API）与策略服务端（Policy API），负责观测同步、控制租约与流式动作块调度、MCAP 录制、标签导出与离线评估。
 
+本端持有会话、录制、导出、审计与采集 worker。公共消息和 Policy 契约在 [`shared/common/interfaces/`](../../shared/common/interfaces/policy/README.md)；当前 Panda 堆叠任务的运行配方、Teacher 与 campaign 选择在 [`shared/scenarios/panda_stack/`](../../shared/scenarios/panda_stack/README.md)。
+
 ## 目录结构
 
 - **[`ros/dual_arm_runtime/`](ros/dual_arm_runtime/README.md)**：`dual_arm_runtime` 核心 Python 包。

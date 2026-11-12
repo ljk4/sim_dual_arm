@@ -8,6 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 ROOT = Path(__file__).resolve().parents[2]
+PROFILES = ROOT / "shared/scenarios/panda_stack/profiles"
 SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
@@ -65,7 +66,7 @@ def test_snapshot_is_frozen_fresh_and_complete():
 
 
 def test_candidate_file_loads_and_round_trips():
-    config = load_stream_config(ROOT / "profiles/control/panda_stream_v1.yaml")
+    config = load_stream_config(PROFILES / "control/panda_stream_v1.yaml")
     assert config.to_document() == VALID
     assert parse_stream_config(config.to_document()) == config
 

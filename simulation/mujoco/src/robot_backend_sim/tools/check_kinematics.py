@@ -62,9 +62,13 @@ from robot_backend_sim.tools.check_kinematics_report import (
 COMPONENT = "kinematics_check"
 KIND = "kinematics"
 REPORT_SCHEMA_VERSION = 1
-DEFAULT_SCENE_CONFIG = Path("configs/scene/panda_stack.yaml")
-DEFAULT_CHECK_CONFIG = Path("configs/checks/scene_check.yaml")
-DEFAULT_KINEMATICS_CONFIG = Path("configs/checks/kinematics_check.yaml")
+_SHARED_ROOT = Path(os.environ.get("SHARED_ROOT", "/shared"))
+_SHARED_RECIPES = (
+    _SHARED_ROOT / "scenarios/panda_stack/configs/simulation"
+)
+DEFAULT_SCENE_CONFIG = _SHARED_RECIPES / "scene/panda_stack.yaml"
+DEFAULT_CHECK_CONFIG = _SHARED_RECIPES / "checks/scene_check.yaml"
+DEFAULT_KINEMATICS_CONFIG = _SHARED_RECIPES / "checks/kinematics_check.yaml"
 _RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 

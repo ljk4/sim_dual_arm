@@ -27,7 +27,7 @@ def pool(recording, monkeypatch):  # noqa: F811 - imported pytest fixture
                         "backend_log": str(directory / "log")})
     manifest = root / "workers.json"
     manifest.write_text(json.dumps({"schema_version": 1, "workers": workers}))
-    monkeypatch.setattr(record_pool, "check_ros_sdk", lambda *args: 0)
+    monkeypatch.setattr(record_pool, "check_ros_sdk", lambda *args, **kwargs: 0)
     script = root / "parallel_fake.py"
     script.write_text('''import json
 import os
@@ -167,7 +167,7 @@ def test_duplicate_worker_domains_are_rejected_before_reservation(pool):
     document["workers"][1]["domain_id"] = document["workers"][0]["domain_id"]
     manifest.write_text(json.dumps(document))
     with pytest.raises(CampaignError, match="distinct domain_id"):
-        record_pool.load_workers(manifest)
+        record_pool.load_worker_plan(manifest)
     assert run([["qualified", 0.1]] * 2) == 2
     assert not (root / "out/attempts.jsonl").exists()
 

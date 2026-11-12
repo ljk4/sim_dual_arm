@@ -39,8 +39,9 @@ def _project(tmp_path):
         "quality": {"sidecar": "quality.json", "max_blackout_s": 0.35},
     }
     root = tmp_path / "project"
-    (root / "runtime/ros2/configs/experiments").mkdir(parents=True)
-    (root / "runtime/ros2/configs/experiments/stack_campaign.yaml").write_text(
+    experiments = root / "shared/scenarios/panda_stack/configs/runtime/experiments"
+    experiments.mkdir(parents=True)
+    (experiments / "stack_campaign.yaml").write_text(
         yaml.safe_dump(config), encoding="utf-8"
     )
     return root
@@ -57,7 +58,7 @@ def _run(root, run_id):
             "--run-id",
             run_id,
             "--runtime-config",
-            "runtime/ros2/configs/teacher_collect.yaml",
+            "shared/scenarios/panda_stack/configs/runtime/teacher_collect.yaml",
             "--",
             sys.executable,
             "-c",
@@ -128,7 +129,7 @@ def test_label_replay_consumes_a_pilot_attempt_and_needs_used_seed(tmp_path):
                 "--run-id",
                 "replay",
                 "--runtime-config",
-                "runtime/ros2/configs/teacher_collect.yaml",
+                "shared/scenarios/panda_stack/configs/runtime/teacher_collect.yaml",
                 "--",
                 sys.executable,
                 "-c",
@@ -158,7 +159,7 @@ def test_formal_is_teacher_only_and_test_is_act_only(tmp_path):
         "--run-id",
         "guard",
         "--runtime-config",
-        "runtime/ros2/configs/teacher_collect.yaml",
+        "shared/scenarios/panda_stack/configs/runtime/teacher_collect.yaml",
     ]
     assert (
         campaign.main(
@@ -219,7 +220,7 @@ def test_formal_stops_after_fifty_qualified(tmp_path):
                 "--run-id",
                 "after-target",
                 "--runtime-config",
-                "runtime/ros2/configs/teacher_collect.yaml",
+                "shared/scenarios/panda_stack/configs/runtime/teacher_collect.yaml",
                 "--",
                 sys.executable,
                 "-c",
@@ -243,9 +244,11 @@ def test_teacher_and_replay_cannot_consume_reserved_act_attempts(tmp_path):
     import pytest
 
     root = _project(tmp_path)
-    config = yaml.safe_load(
-        (root / "runtime/ros2/configs/experiments/stack_campaign.yaml").read_text()
+    campaign_path = (
+        root
+        / "shared/scenarios/panda_stack/configs/runtime/experiments/stack_campaign.yaml"
     )
+    config = yaml.safe_load(campaign_path.read_text())
     config["budget"].update(pilot_max_attempts=10, pilot_act_reserved_attempts=2)
     records = [
         {

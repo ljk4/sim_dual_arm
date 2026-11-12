@@ -2,10 +2,12 @@
 
 提供无 ROS 依赖（ROS-free）的 LeRobot 数据集转换、起点筛选、ACT 混合精度训练、模型包（Bundle）导出与 gRPC Policy 推理服务。
 
+本端持有数据转换、训练、bundle 校验与 Policy 服务实现。公共 Policy 协议与契约在 [`shared/common/interfaces/policy/`](../../shared/common/interfaces/policy/README.md) 与 [`shared/common/python/`](../../shared/common/python/README.md)；当前 Panda 堆叠任务的数据集、训练与服务配方由 [`shared/scenarios/panda_stack/`](../../shared/scenarios/panda_stack/README.md) 选择。
+
 ## 目录结构
 
 - **[`src/dual_arm_learning/`](src/dual_arm_learning/README.md)**：`dual_arm_learning` 核心 Python 包。
-- **[`configs/`](configs/README.md)**：容器环境配置（`container.env`）、数据集转换（`act_dataset*.yaml`）、训练超参（`act_training*.yaml`）、起点筛选（`act_sample_filter.yaml`）与 Policy 服务模板（`policy_temporal.yaml`）。
+- **[`configs/`](configs/README.md)**：容器环境配置（`container.env`）与测试替身（`fake_policy.yaml`）；真实 Panda 数据集转换、训练、起点筛选与 Policy 服务配方位于 [`shared/scenarios/panda_stack/configs/learning/`](../../shared/scenarios/panda_stack/configs/learning/)。
 - **[`docker/`](docker/README.md)**：学习端 `Dockerfile`、`docker-compose.yml` 与固定源码来源声明（`learning-source.json`）。
 - **[`scripts/`](scripts/README.md)**：容器内统一入口 `run.sh` 与策略配置生成脚本 `prepare_policy.py`。
 

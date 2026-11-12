@@ -22,7 +22,7 @@ from dual_arm_learning.policy_config import (
 from fake_provider import load_fake_config
 
 ROOT = Path(__file__).resolve().parents[2]
-CONFIG = ROOT / "learning/lerobot/configs/policy_temporal.yaml"
+CONFIG = ROOT / "shared/scenarios/panda_stack/configs/learning/policy_temporal.yaml"
 FAKE = ROOT / "learning/lerobot/configs/fake_policy.yaml"
 
 
@@ -92,7 +92,7 @@ def test_contract_rejects_tampered_dataset_split_and_temporal_ensemble(tmp_path)
         )
 
     reseal_bundle(bundle, mutate_dataset)
-    with pytest.raises(PolicyConfigError, match="45/5"):
+    with pytest.raises(PolicyConfigError, match="counts disagree"):
         resolve(bundle)
 
     bundle = tmp_path / "bundle-temporal"
@@ -122,6 +122,48 @@ def test_contract_rejects_tampered_dataset_split_and_temporal_ensemble(tmp_path)
             action_schema_path=ACTION,
             require_formal=False,
         )
+
+
+def test_formal_contract_rejects_small_or_diagnostic_bundles(tmp_path):
+    bundle = tmp_path / "bundle-small"
+    make_act_bundle(bundle, synthetic=False)
+
+    def resize(root: Path) -> None:
+        document = json.loads((root / "metadata/dataset_manifest.json").read_text())
+        document["splits"]["training"]["episode_count"] = 1
+        document["splits"]["validation"]["episode_count"] = 1
+        (root / "metadata/dataset_manifest.json").write_text(
+            json.dumps(document) + "\n", encoding="utf-8"
+        )
+        manifest = json.loads((root / "manifest.json").read_text())
+        manifest["dataset"]["train_episodes"] = 1
+        manifest["dataset"]["validation_episodes"] = 1
+        manifest["dataset"]["split"] = "1train/1validation"
+        (root / "manifest.json").write_text(json.dumps(manifest) + "\n", encoding="utf-8")
+
+    reseal_bundle(bundle, resize)
+    with pytest.raises(PolicyConfigError, match="45/5"):
+        resolve(bundle, require_formal=True)
+    # A non-formal diagnosis may deploy the same real, small bundle.
+    assert resolve(bundle).model_bundle_digest
+
+    diagnostic = tmp_path / "bundle-diagnostic"
+    make_act_bundle(diagnostic, synthetic=False)
+
+    def mark_diagnostic(root: Path) -> None:
+        document = json.loads((root / "metadata/dataset_manifest.json").read_text())
+        document["diagnostic"] = True
+        (root / "metadata/dataset_manifest.json").write_text(
+            json.dumps(document) + "\n", encoding="utf-8"
+        )
+        manifest = json.loads((root / "manifest.json").read_text())
+        manifest["dataset"]["diagnostic"] = True
+        (root / "manifest.json").write_text(json.dumps(manifest) + "\n", encoding="utf-8")
+
+    reseal_bundle(diagnostic, mark_diagnostic)
+    with pytest.raises(PolicyConfigError, match="diagnostic"):
+        resolve(diagnostic, require_formal=True)
+    assert resolve(diagnostic).model_bundle_digest
 
 
 def test_temporal_ensemble_setting_is_optional_and_strictly_bounded(tmp_path):

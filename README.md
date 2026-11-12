@@ -4,12 +4,16 @@
 
 ## 架构概览
 
-仓库按职能划分为三个容器化运行端与公共契约层：
+仓库按职能划分为三个容器化运行端、真机边界与公共/方案层：
 
 - **`simulation/mujoco/`**：MuJoCo 物理仿真后端，负责双 Panda 动力学步进、三路 EGL 相机渲染、Ruckig 轨迹规划、接触判定与程序示教，通过 ROS 2 接口对外提供服务。
 - **`runtime/ros2/`**：ROS 2 运行端，负责多路观测同步组装、控制租约与流式动作块调度、MCAP 录制、离线审计与评估。
 - **`learning/lerobot/`**：ROS-free 学习与策略服务端，负责数据集转换、ACT 混合精度训练、模型包（Bundle）导出与 gRPC Policy 推理服务。
-- **`contracts/` & `profiles/` & `libraries/`**：跨端共享的 Protobuf/ROS 2 IDL、JSON Schema、Pydantic 契约模型、机器人配置档案与基础库。
+- **`hardware/`**：真机 Robot API 边界说明；当前没有可验证的真实驱动。
+- **`shared/common/`**：公共层，只放跨端接口约束（Policy Protobuf、ROS 2 IDL、JSON Schema）、共享 Python 包与通用工具，不选择具体任务、机器人或算法。
+- **`shared/scenarios/<id>/`**：方案绑定层，用 `binding.yaml` 选择档案、配方与方案专用接口。当前实例为 [`panda_stack`](shared/scenarios/panda_stack/README.md)（MuJoCo + ROS 2 + LeRobot ACT）；[`_template`](shared/scenarios/_template/README.md) 说明替换步骤，[`panda_stack_diag`](shared/scenarios/panda_stack_diag/README.md) 仅用于诊断复现。
+
+四端（simulation/runtime/learning/hardware）持有实际实现、依赖、容器和入口脚本；公共协议与当前 Panda/ACT/MuJoCo 实例数值分开维护，方案选择只发生在 `prepare`/`build-ros-sdk` 等准备入口。
 
 ---
 
@@ -42,7 +46,7 @@ docker compose -f runtime/ros2/docker/docker-compose.yml exec runtime bash
 
 ```bash
 cd /workspace
-runtime/ros2/scripts/run.sh build-ros-sdk
+runtime/ros2/scripts/run.sh build-ros-sdk --scenario panda_stack --shared-root /shared
 runtime/ros2/scripts/run.sh build-policy-sdk
 ```
 
@@ -61,7 +65,7 @@ docker compose -f simulation/mujoco/docker/docker-compose.yml exec simulation ba
 ```bash
 cd /app
 scripts/run.sh prepare \
-  --template /app/configs/backend/backend_stack_teacher.yaml \
+  --scenario panda_stack --role teacher \
   --seed 0 \
   --run-id teacher-backend \
   --output /data/prepared/teacher-backend
@@ -96,7 +100,7 @@ runtime/ros2/scripts/run.sh campaign status
 
 # 只试一次：合格即结束，失败也立即结束
 runtime/ros2/scripts/record.sh \
-  --purpose pilot --count 1 --max-consecutive-failures 1
+  --scenario panda_stack --purpose pilot --count 1 --max-consecutive-failures 1
 ```
 
 确认试采命令退出码为 0，末尾 `recording.finished` 的 `reason` 为 `target_reached`、`qualified` 为 1；本局应同时满足任务成功、录制完整、导出质量合格。若失败，先检查日志并修复，再重新执行本节的试采命令。
@@ -113,7 +117,7 @@ runtime/ros2/scripts/record.sh \
 
 ```bash
 runtime/ros2/scripts/record_parallel.sh \
-  --purpose formal --target-total 50 \
+  --scenario panda_stack --purpose formal --target-total 50 \
   --workers auto --max-consecutive-failures 3
 ```
 
@@ -160,7 +164,7 @@ docker compose -f learning/lerobot/docker/docker-compose.yml exec learning bash
 
 ```bash
 cd /workspace
-learning/lerobot/scripts/run.sh convert
+learning/lerobot/scripts/run.sh convert --scenario panda_stack
 ```
 
 转换时终端只显示配置、日志路径和原地刷新的进度，包括已完成条数、百分比、用时和预计剩余时间；编码器等详细输出写入日志。训练使用同样的显示方式，额外显示 step、loss 和验证状态。重定向输出时仅保留阶段摘要，避免生成大量进度行。可用 `--log-file /data/logs/<文件名>.log` 指定详细日志；需要原始输出和 JSON 结果时添加 `--no-progress`。
@@ -168,7 +172,7 @@ learning/lerobot/scripts/run.sh convert
 启动完整模式训练（默认启用 PyAV 视频解码、张量批处理、多进程预取与 CUDA bfloat16 混合精度）：
 
 ```bash
-learning/lerobot/scripts/run.sh train --mode full
+learning/lerobot/scripts/run.sh train --scenario panda_stack --mode full
 ```
 
 训练完成后，记录终端输出的 `run_dir` 并导出可部署的 safetensors 模型包（Bundle）：
@@ -176,22 +180,24 @@ learning/lerobot/scripts/run.sh train --mode full
 ```bash
 TRAIN_RUN="/data/learning/runs/<实际生成的-run-目录名>"
 learning/lerobot/scripts/run.sh bundle \
-  --mode full \
+  --scenario panda_stack --mode full \
   --run "$TRAIN_RUN" \
   --output /data/learning/bundles/stack-act
 ```
 
 ### 3.3 生成 Policy 服务配置与绑定清单
 
-在 `learning` 容器内校验模型包，生成 `policy.yaml`、`policy_binding.json`、`act_contract.json` 与 `run_manifest.json`：
+在 `learning` 容器内按方案绑定校验模型包，生成 `policy.yaml`、`policy_binding.json`、`act_contract.json` 与 `run_manifest.json`：
 
 ```bash
 learning/lerobot/scripts/run.sh prepare-policy \
-  --template /workspace/learning/lerobot/configs/policy_temporal.yaml \
+  --scenario panda_stack --shared-root /shared \
   --bundle /data/learning/bundles/stack-act \
   --run-id infer-5k-server \
   --output /data/prepared/infer-5k-server/policy
 ```
+
+直接配置模式继续可用：把 `--scenario panda_stack --shared-root /shared` 换成 `--template /workspace/shared/scenarios/panda_stack/configs/learning/policy_temporal.yaml`，两者互斥。
 
 ### 3.4 准备并启动推理仿真后端
 
@@ -200,7 +206,8 @@ learning/lerobot/scripts/run.sh prepare-policy \
 ```bash
 cd /app
 scripts/run.sh prepare \
-  --template /app/configs/backend/backend_stack_act_chunked.yaml \
+  --scenario panda_stack --role policy \
+  --bundle /data/learning/bundles/stack-act \
   --seed 20001 \
   --run-id infer-5k-server \
   --output /data/prepared/infer-5k-server/simulation
@@ -228,8 +235,9 @@ learning/lerobot/scripts/run.sh policy \
 
 ```bash
 runtime/ros2/scripts/run.sh prepare \
-  --template /workspace/runtime/ros2/configs/policy_rollout.yaml \
+  --scenario panda_stack --role policy \
   --policy-binding /data/prepared/infer-5k-server/policy/policy_binding.json \
+  --bundle /data/learning/bundles/stack-act \
   --seed 20001 \
   --run-id infer-5k-server \
   --output /data/prepared/infer-5k-server/runtime
@@ -257,20 +265,22 @@ runtime/ros2/scripts/run.sh interactive \
 
 `/data/prepared/...` 下的生成文件是带哈希校验的运行快照，**切勿直接手动修改**。需要调整参数时，请修改仓库中的源配置文件，并使用新的 `--run-id` 或输出目录重新执行准备命令。
 
+各命令中的 `--scenario panda_stack` 通过 [`binding.yaml`](shared/scenarios/panda_stack/binding.yaml) 选择下列档案与配方；`--scenario` 与直接配置的 `--template`/`--config` 互斥。档案、配方与方案专用接口的归属和替换步骤见 [panda_stack 方案说明](shared/scenarios/panda_stack/README.md) 与 [方案模板](shared/scenarios/_template/README.md)。
+
 ### 4.1 配置依赖链
 
 ```text
 模型包 (/data/learning/bundles/<bundle>)
-  + learning/lerobot/configs/policy_temporal.yaml
+  + shared/scenarios/panda_stack/configs/learning/policy_temporal.yaml
   ──[learning: prepare-policy]──> /data/prepared/<run-id>/policy/{policy.yaml, policy_binding.json}
 
 policy_binding.json
-  + runtime/ros2/configs/policy_rollout.yaml
+  + shared/scenarios/panda_stack/configs/runtime/policy_rollout.yaml
   ──[runtime: prepare]──────────> /data/prepared/<run-id>/runtime/runtime.yaml
 
-仿真后端模板 (simulation/mujoco/configs/backend/*)
-  + simulation/mujoco/configs/scene/*
-  + profiles/control/*
+仿真后端模板 (shared/scenarios/panda_stack/configs/simulation/backend/*)
+  + shared/scenarios/panda_stack/configs/simulation/scene/*
+  + shared/scenarios/panda_stack/profiles/control/*
   ──[simulation: prepare]───────> /data/prepared/<run-id>/simulation/backend.yaml
 ```
 
@@ -278,21 +288,21 @@ policy_binding.json
 
 | 配置项 | 源文件路径 | 修改后的更新步骤 |
 | --- | --- | --- |
-| 示教后端模板 | `simulation/mujoco/configs/backend/backend_stack_teacher.yaml` | 重新执行 simulation `prepare`，重启 `backend` |
-| 推理后端模板 | `simulation/mujoco/configs/backend/backend_stack_act_chunked.yaml` | 重新执行 simulation `prepare`，重启 `backend` 与 `viewer` |
-| 物理场景、物体、相机 | `simulation/mujoco/configs/scene/panda_stack_learning.yaml` | 重新执行 simulation `prepare`，重启 `backend` 与 `viewer`；新旧场景数据不可混训 |
-| 堆叠成功判定与示教参数 | `simulation/mujoco/configs/scene/panda_stack_task.yaml` | 重新执行 simulation `prepare`，重启 `backend` |
-| 物理控制限值与静止/接触容差 | `profiles/control/panda_control_v1.yaml` | 同时重新执行 simulation `prepare` 与 runtime `prepare`，重启 `backend` 与 `runtime` |
-| 流式动作块超时与卸载过渡 | `profiles/control/panda_stream_v1.yaml` | 重新执行 simulation `prepare`，重启 `backend` |
-| 跟随窗口 `target_count` 与偏差预算 | `profiles/control/panda_follower_v1.yaml` | 同时重新执行 simulation `prepare` 与 runtime `prepare`，重启 `backend` 与 `runtime` |
-| 策略运行端模板 | `runtime/ros2/configs/policy_rollout.yaml` | 重新执行 runtime `prepare`，重新运行 `interactive` |
-| 示教运行端模板 | `runtime/ros2/configs/teacher_collect.yaml` | 下一次 `record.sh` 自动生成新配置，无需手动 `prepare` |
-| Policy 服务与时间融合模板 | `learning/lerobot/configs/policy_temporal.yaml` | 重新执行 `prepare-policy` 与 runtime `prepare`，重启 `policy` 服务 |
-| 数据集转换规则 | `learning/lerobot/configs/act_dataset.container.yaml` | 使用新输出目录重新执行 `convert` |
-| 训练超参数与 DataLoader/AMP | `learning/lerobot/configs/act_training.container.yaml` | 重新执行 `train` → `bundle` → `prepare-policy` → runtime `prepare` |
-| ROS 2 消息或服务定义 | `contracts/ros/robot_api_msgs/` | 重新执行 `build-ros-sdk`，重启 `simulation` 与 `runtime` |
-| Policy Protobuf 协议 | `contracts/policy/v1/policy.proto` | 重新执行 `build-policy-sdk`，重启 `learning` 与 `runtime` |
-| 机器人 Profile 与观测/动作 Schema | `profiles/`、`contracts/schemas/v1/` | 重建 SDK，重新校验数据集、模型包与三端运行配置 |
+| 示教后端模板 | `shared/scenarios/panda_stack/configs/simulation/backend/backend_stack_teacher.yaml` | 重新执行 simulation `prepare`，重启 `backend` |
+| 推理后端模板 | `shared/scenarios/panda_stack/configs/simulation/backend/backend_stack_act_chunked.yaml` | 重新执行 simulation `prepare`，重启 `backend` 与 `viewer` |
+| 物理场景、物体、相机 | `shared/scenarios/panda_stack/configs/simulation/scene/panda_stack_learning.yaml` | 重新执行 simulation `prepare`，重启 `backend` 与 `viewer`；新旧场景数据不可混训 |
+| 堆叠成功判定与示教参数 | `shared/scenarios/panda_stack/configs/simulation/scene/panda_stack_task.yaml` | 重新执行 simulation `prepare`，重启 `backend` |
+| 物理控制限值与静止/接触容差 | `shared/scenarios/panda_stack/profiles/control/panda_control_v1.yaml` | 同时重新执行 simulation `prepare` 与 runtime `prepare`，重启 `backend` 与 `runtime` |
+| 流式动作块超时与卸载过渡 | `shared/scenarios/panda_stack/profiles/control/panda_stream_v1.yaml` | 重新执行 simulation `prepare`，重启 `backend` |
+| 跟随窗口 `target_count` 与偏差预算 | `shared/scenarios/panda_stack/profiles/control/panda_follower_v1.yaml` | 同时重新执行 simulation `prepare` 与 runtime `prepare`，重启 `backend` 与 `runtime` |
+| 策略运行端模板 | `shared/scenarios/panda_stack/configs/runtime/policy_rollout.yaml` | 重新执行 runtime `prepare`，重新运行 `interactive` |
+| 示教运行端模板 | `shared/scenarios/panda_stack/configs/runtime/teacher_collect.yaml` | 下一次 `record.sh` 自动生成新配置，无需手动 `prepare` |
+| Policy 服务与时间融合模板 | `shared/scenarios/panda_stack/configs/learning/policy_temporal.yaml` | 重新执行 `prepare-policy` 与 runtime `prepare`，重启 `policy` 服务 |
+| 数据集转换规则 | `shared/scenarios/panda_stack/configs/learning/act_dataset.container.yaml` | 使用新输出目录重新执行 `convert` |
+| 训练超参数与 DataLoader/AMP | `shared/scenarios/panda_stack/configs/learning/act_training.container.yaml` | 重新执行 `train` → `bundle` → `prepare-policy` → runtime `prepare` |
+| ROS 2 消息或服务定义 | `shared/common/interfaces/ros/robot_api_msgs/` | 重新执行 `build-ros-sdk`，重启 `simulation` 与 `runtime` |
+| Policy Protobuf 协议 | `shared/common/interfaces/policy/v1/policy.proto` | 重新执行 `build-policy-sdk`，重启 `learning` 与 `runtime` |
+| 机器人 Profile 与观测/动作 Schema | `shared/scenarios/panda_stack/profiles/`、`shared/common/interfaces/schemas/v1/` | 重建 SDK，重新校验数据集、模型包与三端运行配置 |
 
 ---
 
@@ -305,4 +315,4 @@ policy_binding.json
 
 更多文档请参阅 [文档索引](docs/README.md)、[项目状态](docs/project-status.md) 与 [项目规范](docs/standards.md)。
 
-架构目录与 A1～A7 迁移说明见 [架构执行记录](docs/architecture-tasks/implementation-2026-11-10.md)。ROS 接口调整后请在空闲时重建 SDK，并重建使用新源码挂载与环境变量的 simulation/runtime 容器。
+公共层与方案绑定的当前进度、阶段任务和交接见 [架构任务](docs/architecture-tasks/README.md)。ROS 接口调整后请在空闲时重建 SDK，并重建使用新源码挂载与环境变量的 simulation/runtime 容器。

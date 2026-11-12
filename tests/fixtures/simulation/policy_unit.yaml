@@ -66,11 +66,11 @@
 # seconds.  Three RGB cameras and the full 16-joint order are fixed by the
 # referenced profile and the Policy service configuration.
 schema_version: 1
-robot_profile: ../../../profiles/robots/panda_stack_v1/profile.json
-observation_schema: ../../../profiles/observations/panda_rgb_joint_v1.json
-action_schema: ../../../profiles/actions/panda_joint_position_v1.json
-control_constraints: ../../../profiles/control/panda_control_v1.yaml
-follower_config: ../../../profiles/control/panda_follower_v1.yaml
+robot_profile: ../../../shared/scenarios/panda_stack/profiles/robots/panda_stack_v1/profile.json
+observation_schema: ../../../shared/scenarios/panda_stack/profiles/observations/panda_rgb_joint_v1.json
+action_schema: ../../../shared/scenarios/panda_stack/profiles/actions/panda_joint_position_v1.json
+control_constraints: ../../../shared/scenarios/panda_stack/profiles/control/panda_control_v1.yaml
+follower_config: ../../../shared/scenarios/panda_stack/profiles/control/panda_follower_v1.yaml
 robot_namespace: /robot
 
 action_source: policy

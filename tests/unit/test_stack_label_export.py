@@ -15,9 +15,10 @@ from dual_arm_runtime.offline.audit.label_export import (
 )
 from robot_contracts.profiles import load_profile
 
+ROOT = Path(__file__).resolve().parents[2]
 PROFILE = load_profile(
-    Path(__file__).resolve().parents[2] / "profiles/robots/panda_stack_v1/profile.json",
-    Path(__file__).resolve().parents[2] / "contracts/schemas",
+    ROOT / "shared/scenarios/panda_stack/profiles/robots/panda_stack_v1/profile.json",
+    ROOT / "shared/common/interfaces/schemas",
 )
 
 build_labels = partial(_build_labels, profile=PROFILE)

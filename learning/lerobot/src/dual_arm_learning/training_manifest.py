@@ -60,20 +60,30 @@ def _manifest_splits(
     validation = splits.get("validation")
     if not isinstance(training, dict) or not isinstance(validation, dict):
         raise TrainingError("manifest.splits must contain training and validation")
-    if training.get("episode_count") != config.dataset.expected_training_episodes:
-        raise TrainingError("training split does not contain exactly 45 episodes")
-    if validation.get("episode_count") != config.dataset.expected_validation_episodes:
-        raise TrainingError("validation split does not contain exactly 5 episodes")
+    expected_training = config.dataset.expected_training_episodes
+    expected_validation = config.dataset.expected_validation_episodes
+    if training.get("episode_count") != expected_training:
+        raise TrainingError(
+            f"training split does not contain exactly {expected_training} episodes"
+        )
+    if validation.get("episode_count") != expected_validation:
+        raise TrainingError(
+            f"validation split does not contain exactly {expected_validation} episodes"
+        )
     train_indices = _episode_indices(training)
     validation_indices = _episode_indices(validation)
     if set(train_indices) & set(validation_indices):
         raise TrainingError("training and validation splits overlap")
     if set(validation_indices) != set(config.dataset.validation_positions):
-        raise TrainingError("validation split is not at success positions 9/19/29/39/49")
-    if set(train_indices) | set(validation_indices) != set(range(50)):
-        raise TrainingError("splits do not partition the first 50 successes")
-    if len(train_indices) != 45 or len(validation_indices) != 5:
-        raise TrainingError("split cardinality is not 45/5")
+        raise TrainingError("validation split is not at the configured success positions")
+    if set(train_indices) | set(validation_indices) != set(
+        range(config.dataset.expected_formal_episodes)
+    ):
+        raise TrainingError("splits do not partition the configured success range")
+    if len(train_indices) != expected_training or len(validation_indices) != expected_validation:
+        raise TrainingError(
+            f"split cardinality is not {expected_training}/{expected_validation}"
+        )
     return training, validation, train_indices, validation_indices
 
 
@@ -252,7 +262,7 @@ def verify_dataset_manifest(
     allow_synthetic: bool = False,
     require_full: bool | None = None,
 ) -> DatasetAudit:
-    """Check 45/5 disjointness, fixed validation slots and every declared hash."""
+    """Check configured split disjointness, validation slots and every declared hash."""
     manifest_path, manifest, synthetic = _load_manifest(config, allow_synthetic, require_full)
     training, validation, train_indices, validation_indices = _manifest_splits(config, manifest)
     _verify_profile(config, manifest)

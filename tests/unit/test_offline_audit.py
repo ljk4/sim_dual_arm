@@ -30,8 +30,8 @@ FORBIDDEN = {
 
 
 def _audit():
-    path = ROOT / "profiles/robots/panda_stack_v1/profile.json"
-    profile = load_profile(path, ROOT / "contracts/schemas")
+    path = ROOT / "shared/scenarios/panda_stack/profiles/robots/panda_stack_v1/profile.json"
+    profile = load_profile(path, ROOT / "shared/common/interfaces/schemas")
     context = RunContext(profile.robot_id, profile.digest, "backend", "time", 0, "episode", 1)
     configuration = {
         "profile": json.loads(path.read_text()), "profile_hash": profile.digest,
@@ -94,7 +94,9 @@ for name in sys.argv[2:]:
     importlib.import_module(name)
 '''
     environment = {**os.environ, "PYTHONPATH": ":".join(str(ROOT / path) for path in (
-        "contracts/python/src", "libraries/trajectory/src", "libraries/run_logging/src",
+        "shared/common/python/contracts/src",
+        "shared/common/python/trajectory/src",
+        "shared/common/python/run_logging/src",
         "runtime/ros2/ros/dual_arm_runtime"))}
     result = subprocess.run([sys.executable, "-c", script, ",".join(FORBIDDEN), *modules],
                             env=environment, capture_output=True, text=True, timeout=20)
@@ -102,7 +104,7 @@ for name in sys.argv[2:]:
 
 
 def test_contract_data_cannot_import_trajectory_algorithms():
-    for path in (ROOT / "contracts/python/src").rglob("*.py"):
+    for path in (ROOT / "shared/common/python/contracts/src").rglob("*.py"):
         assert "robot_trajectory" not in path.read_text(), path
     assert not hasattr(ReferencePlan, "sample")
     assert importlib.import_module("robot_contracts.trajectory")

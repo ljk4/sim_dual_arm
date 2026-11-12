@@ -23,8 +23,8 @@ import yaml
 ROOT = Path(__file__).resolve().parents[3]
 for _path in (
     ROOT / "learning/lerobot/src",
-    ROOT / "libraries/run_logging/src",
-    ROOT / "contracts/python/src",
+    ROOT / "shared/common/python/run_logging/src",
+    ROOT / "shared/common/python/contracts/src",
 ):
     if str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
@@ -35,8 +35,13 @@ from dual_arm_learning.policy_config import (  # noqa: E402
     PolicyServiceConfig,
     load_policy_config,
 )
+from dual_arm_learning.scenario import (  # noqa: E402
+    ScenarioSelectionError,
+    select_scenario,
+)
 
 RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+DEFAULT_TEMPLATE = Path("shared/scenarios/panda_stack/configs/learning/policy_temporal.yaml")
 
 
 class PrepareError(ValueError):
@@ -109,8 +114,10 @@ def _load(
 
 def prepare_policy(
     *,
-    template: Path,
-    bundle: Path,
+    template: Path | None = None,
+    bundle: Path | None = None,
+    scenario: str | None = None,
+    shared_root: Path | None = None,
     run_id: str,
     output: Path,
     endpoint: str = "learning:50051",
@@ -121,13 +128,59 @@ def prepare_policy(
     require_formal: bool | None = None,
     project_root: Path = ROOT,
 ) -> dict[str, Any]:
-    """Write policy_binding.json, policy.yaml and run_manifest.json."""
+    """Write policy_binding.json, policy.yaml and run_manifest.json.
+
+    A scenario selects ``recipes.policy_service`` and the profile identity from
+    the binding; ``--bundle`` overrides its model source.  The bundle is always
+    verified for real before any output is created, so a binding alone or an
+    empty directory is never a deployable model.
+    """
     if RUN_ID.fullmatch(run_id) is None or ".." in run_id:
         raise PrepareError("run_id must be a safe 1..128 character path segment")
+    if template is not None and scenario is not None:
+        raise PrepareError("--template and --scenario are mutually exclusive")
+    selection = None
+    bundle_source = "argument"
+    if scenario is not None:
+        if any(
+            value is not None
+            for value in (profile, observation_schema, action_schema)
+        ):
+            raise PrepareError(
+                "--profile/--observation-schema/--action-schema cannot be combined "
+                "with --scenario; the binding supplies the profile identity"
+            )
+        try:
+            selection = select_scenario(
+                scenario=scenario,
+                recipe_field="policy_service",
+                stage="inference",
+                project_root=project_root,
+                shared_root=shared_root,
+                bundle=bundle,
+            )
+        except ScenarioSelectionError as error:
+            raise PrepareError(str(error)) from error
+        template = selection.recipe_path
+        bundle = selection.resolved.bundle.path
+        bundle_source = selection.resolved.bundle.source
+        profile = selection.profile_path("robot")
+        observation_schema = selection.profile_path("observation")
+        action_schema = selection.profile_path("action")
+    elif template is None:
+        template = Path(project_root) / DEFAULT_TEMPLATE
+    if bundle is None:
+        raise PrepareError("--bundle is required unless --scenario supplies a model source")
     template_path = Path(template).resolve()
+    template_sha256 = (
+        selection.recipe_reference(selection.recipe_field).sha256
+        if selection is not None
+        else _sha256(template_path)
+    )
+    effective_bundle = Path(bundle).resolve()
     config = _load(
         template_path,
-        bundle=bundle,
+        bundle=effective_bundle,
         profile=profile,
         observation_schema=observation_schema,
         action_schema=action_schema,
@@ -163,6 +216,7 @@ def prepare_policy(
     destination.mkdir(parents=True)
     policy_path = destination / "policy.yaml"
     policy_path.write_text(yaml.safe_dump(source, sort_keys=False), encoding="utf-8")
+    policy_sha256 = _sha256(policy_path)
     summary = deployment_summary(config)
     binding = {
         "schema_version": 1,
@@ -231,8 +285,8 @@ def prepare_policy(
             {
                 "schema_version": 1,
                 "contract": summary,
-                "template": {"path": str(template_path), "sha256": _sha256(template_path)},
-                "generated": {"path": str(policy_path), "sha256": _sha256(policy_path)},
+                "template": {"path": str(template_path), "sha256": template_sha256},
+                "generated": {"path": str(policy_path), "sha256": policy_sha256},
             },
             indent=2,
             sort_keys=True,
@@ -249,19 +303,44 @@ def prepare_policy(
         "endpoint": endpoint,
         "inputs": {
             "template": str(template_path),
-            "template_sha256": _sha256(template_path),
+            "template_sha256": template_sha256,
             "bundle": str(config.bundle_dir),
             "bundle_digest": config.model_bundle_digest,
         },
         "outputs": {
             "policy": str(policy_path),
-            "policy_sha256": _sha256(policy_path),
+            "policy_sha256": policy_sha256,
             "policy_binding": str(binding_path),
             "policy_binding_sha256": _sha256(binding_path),
             "act_contract": str(contract_path),
             "act_contract_sha256": _sha256(contract_path),
         },
+        "model_source": {
+            "source": bundle_source,
+            "declared": (
+                None if selection is None else selection.resolved.bundle.declared
+            ),
+            "path": str(config.bundle_dir),
+            "bundle_digest": config.model_bundle_digest,
+        },
     }
+    if selection is not None:
+        manifest["selection"] = selection.summary(include_bundle=True)
+        overrides: dict[str, object] = {}
+        if bundle_source == "override":
+            overrides["bundle"] = {
+                "source": "argument",
+                "path": str(config.bundle_dir),
+            }
+        if device is not None:
+            overrides["device"] = {"value": device, "source": "argument"}
+        if require_formal is not None:
+            overrides["require_formal"] = {
+                "value": require_formal,
+                "source": "argument",
+            }
+        if overrides:
+            manifest["overrides"] = overrides
     (destination / "run_manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False) + "\n",
         encoding="utf-8",
@@ -272,29 +351,44 @@ def prepare_policy(
 def main(argv: list[str] | None = None) -> int:
     _require_container()
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--template",
-        type=Path,
-        default=ROOT / "learning/lerobot/configs/policy_temporal.yaml",
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument(
+        "--template", type=Path, default=None, help="direct ACT policy recipe path"
     )
-    parser.add_argument("--bundle", type=Path, required=True)
+    selection.add_argument(
+        "--scenario", help="scenario id under <shared-root>/scenarios/<id>/binding.yaml"
+    )
+    parser.add_argument("--shared-root", type=Path, help="shared tree containing scenarios/")
+    parser.add_argument(
+        "--bundle",
+        type=Path,
+        help="verified model bundle; required unless the scenario binds one",
+    )
     parser.add_argument("--profile", type=Path)
     parser.add_argument("--observation-schema", type=Path)
     parser.add_argument("--action-schema", type=Path)
     parser.add_argument("--device", choices=("cpu", "cuda", "cuda:0"))
     parser.add_argument("--require-formal", action=argparse.BooleanOptionalAction, default=None)
-    parser.add_argument("--endpoint", default="learning:50051")
+    parser.add_argument("--endpoint", default=None)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--project-root", type=Path, default=ROOT)
     arguments = parser.parse_args(argv)
+    if arguments.shared_root is not None and arguments.scenario is None:
+        parser.error("--shared-root requires --scenario")
+    if arguments.scenario is None and arguments.bundle is None:
+        parser.error("--bundle is required unless --scenario binds a model source")
     try:
         manifest = prepare_policy(
             template=arguments.template,
             bundle=arguments.bundle,
+            scenario=arguments.scenario,
+            shared_root=arguments.shared_root,
             run_id=arguments.run_id,
             output=arguments.output,
-            endpoint=arguments.endpoint,
+            endpoint=(
+                "learning:50051" if arguments.endpoint is None else arguments.endpoint
+            ),
             profile=arguments.profile,
             observation_schema=arguments.observation_schema,
             action_schema=arguments.action_schema,
@@ -302,7 +396,7 @@ def main(argv: list[str] | None = None) -> int:
             require_formal=arguments.require_formal,
             project_root=arguments.project_root,
         )
-    except (PrepareError, PolicyConfigError, OSError, ValueError) as error:
+    except (PrepareError, PolicyConfigError, ScenarioSelectionError, OSError, ValueError) as error:
         print(f"prepare_policy: {error}", file=sys.stderr)
         return 1
     print(json.dumps(manifest, sort_keys=True))

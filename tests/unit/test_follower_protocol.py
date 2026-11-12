@@ -20,13 +20,15 @@ from robot_contracts.trajectory.spline import ReferenceSample
 from robot_trajectory.follower_reference import validate
 
 ROOT = Path(__file__).resolve().parents[2]
-for source in (ROOT / "simulation/mujoco/src", ROOT / "contracts/python/src"):
+PROFILES = ROOT / "shared/scenarios/panda_stack/profiles"
+for source in (ROOT / "simulation/mujoco/src", ROOT / "shared/common/python/contracts/src"):
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
 
 from robot_backend_sim.config.follower_config import load_follower_config  # noqa: E402
 from robot_backend_sim.config.motion_config import load_control_config  # noqa: E402
 from robot_backend_sim.control.control_state import ChunkStatus, ControlStatus  # noqa: E402
+from robot_backend_sim.follower.follower_plan import RUCKIG_ALGORITHM_VERSION  # noqa: E402
 from robot_backend_sim.follower.follower_protocol import (  # noqa: E402
     follower_reference,
     follower_reference_from_chunk_status,
@@ -38,11 +40,11 @@ from robot_backend_sim.follower.follower_protocol import (  # noqa: E402
 ruckig = pytest.importorskip("ruckig")
 
 PROFILE = load_profile(
-    ROOT / "profiles/robots/panda_stack_v1/profile.json",
-    ROOT / "contracts/schemas/v1",
+    PROFILES / "robots/panda_stack_v1/profile.json",
+    ROOT / "shared/common/interfaces/schemas/v1",
 )
-CONTROL = load_control_config(ROOT / "profiles/control/panda_control_v1.yaml")
-FOLLOWER = load_follower_config(ROOT / "profiles/control/panda_follower_v1.yaml")
+CONTROL = load_control_config(PROFILES / "control/panda_control_v1.yaml")
+FOLLOWER = load_follower_config(PROFILES / "control/panda_follower_v1.yaml")
 BASE = PROFILE.initial_positions
 COUNT = len(BASE)
 GRID_NS = 2_000_000
@@ -124,6 +126,45 @@ def test_follower_protocol_compiles_a_distinct_packet():
     assert packet.prepared.is_final is False
     assert packet.prepared.duration_grid_ns == GRID_NS
     assert packet.command == raw.command
+    assert packet.prepared.algorithm_version == RUCKIG_ALGORITHM_VERSION
+
+
+def test_ruckig_curve_duration_and_sampling_semantics_are_preserved():
+    raw = request()
+    packet = prepare_follower_request(
+        raw, PROFILE, CONTROL, FOLLOWER, duration_grid_ns=GRID_NS
+    )
+    prepared = packet.prepared
+    assert prepared.curve_duration_ns >= prepared.plan.duration_ns
+    assert prepared.curve_duration_ns % GRID_NS == 0
+    assert prepared.plan.duration_ns == prepared.requested_window_ns
+
+    chunk = ChunkStatus(
+        context=raw.command.context,
+        command_id=raw.command.command_id,
+        command_seq=raw.command.command_seq,
+        chunk_seq=1,
+        observation_id=raw.command.observation_id,
+        phase="ACCEPTED",
+        reason="PENDING",
+        accepted_sim_ns=100_000_000,
+        started_sim_ns=None,
+        finished_sim_ns=None,
+        accepted_wall_ns=1_900_000_000,
+        started_wall_ns=None,
+        finished_wall_ns=None,
+        snapshot=None,
+    )
+    record = follower_reference_from_chunk_status(raw, packet, chunk, motion_seq=3)
+    assert record.curve_duration_ns == prepared.curve_duration_ns
+    rebuilt = validate(
+        record,
+        PROFILE,
+        validation_limits(CONTROL, FOLLOWER, duration_grid_ns=GRID_NS),
+    )
+    assert rebuilt.plan == record.plan
+    assert rebuilt.actual_terminal_positions == record.actual_terminal_positions
+    assert rebuilt.flags == record.flags
 
 
 def test_retry_returns_the_original_acceptance_times_and_digest():

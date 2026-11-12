@@ -195,8 +195,14 @@ def resolve_policy_contract(values: dict[str, Any]) -> dict[str, Any]:
     _check(not (formal and document.get("synthetic")),
            "synthetic dataset evidence cannot deploy a formal ACT model")
     splits = document.get("splits", {})
-    _check((splits.get("training", {}).get("episode_count"),
-            splits.get("validation", {}).get("episode_count")) == (45, 5),
+    train_episodes = splits.get("training", {}).get("episode_count")
+    validation_episodes = splits.get("validation", {}).get("episode_count")
+    _check(dataset.get("train_episodes") == train_episodes
+           and dataset.get("validation_episodes") == validation_episodes,
+           "bundle dataset counts disagree with dataset_manifest")
+    _check(not (formal and document.get("diagnostic")),
+           "diagnostic dataset evidence cannot deploy a formal ACT model")
+    _check(not formal or (train_episodes, validation_episodes) == (45, 5),
            "dataset_manifest: formal split must be exactly 45/5")
     _check(document.get("processors", {}).get("training_stats_only") is True,
            "dataset_manifest: processors must use training-only statistics")

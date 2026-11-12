@@ -353,10 +353,24 @@ def command_select(args: argparse.Namespace) -> int:
     return 0
 
 
+DEFAULT_CAMPAIGN = (
+    "shared/scenarios/panda_stack/configs/runtime/experiments/stack_campaign.yaml"
+)
+DEFAULT_RUNTIME_TEACHER = (
+    "shared/scenarios/panda_stack/configs/runtime/teacher_collect.yaml"
+)
+
+
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     result.add_argument("--project-root", type=Path, default=Path.cwd())
-    result.add_argument("--config", default="runtime/ros2/configs/experiments/stack_campaign.yaml")
+    result.add_argument("--scenario")
+    result.add_argument("--shared-root", type=Path)
+    result.add_argument(
+        "--config",
+        default=None,
+        help="direct campaign recipe (conflicts with --scenario)",
+    )
     result.add_argument("--attempts-root", default=None)
     sub = result.add_subparsers(dest="action", required=True)
     run = sub.add_parser("run", help="reserve one attempt, run it, and record the result")
@@ -366,7 +380,11 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("--seed", type=int, default=None)
     run.add_argument("--run-id", default=None)
     run.add_argument("--episode-id", default=None)
-    run.add_argument("--runtime-config", default="runtime/ros2/configs/teacher_collect.yaml")
+    run.add_argument(
+        "--runtime-config",
+        default=None,
+        help="direct runtime teacher recipe (conflicts with --scenario)",
+    )
     run.add_argument("launch_command", nargs=argparse.REMAINDER)
     status = sub.add_parser("status", help="show budgets and consumed raw bytes")
     status.set_defaults()
@@ -375,9 +393,36 @@ def parser() -> argparse.ArgumentParser:
     return result
 
 
+def _resolve_selection(args: argparse.Namespace, cli: argparse.ArgumentParser) -> None:
+    if args.scenario is not None:
+        if args.config is not None:
+            cli.error("--scenario cannot be combined with --config")
+        if args.action == "run" and args.runtime_config is not None:
+            cli.error("--scenario cannot be combined with --runtime-config")
+        from dual_arm_runtime.offline.scenario_selection import select_collection
+
+        selection = select_collection(
+            scenario=args.scenario,
+            shared_root=args.shared_root,
+            project_root=args.project_root.resolve(),
+            require_parallel=False,
+        )
+        args.config = selection["recipes"]["campaign"]["path"]
+        if args.action == "run":
+            args.runtime_config = selection["recipes"]["runtime_teacher"]["path"]
+    else:
+        if args.shared_root is not None:
+            cli.error("--shared-root requires --scenario")
+        args.config = args.config or DEFAULT_CAMPAIGN
+        if args.action == "run":
+            args.runtime_config = args.runtime_config or DEFAULT_RUNTIME_TEACHER
+
+
 def main(argv: list[str] | None = None) -> int:
-    args = parser().parse_args(argv)
+    cli = parser()
+    args = cli.parse_args(argv)
     try:
+        _resolve_selection(args, cli)
         if args.action == "run":
             return command_run(args)
         if args.action == "status":

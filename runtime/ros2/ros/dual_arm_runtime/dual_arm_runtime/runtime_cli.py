@@ -73,7 +73,10 @@ def _parse_arguments() -> tuple[argparse.Namespace, list[str]]:
     parser.add_argument(
         "--config",
         type=Path,
-        default=Path("/workspace/runtime/ros2/configs/policy_rollout.yaml"),
+        default=Path(
+            os.environ.get("SHARED_ROOT", "/shared")
+        )
+        / "scenarios/panda_stack/configs/runtime/policy_rollout.yaml",
     )
     parser.add_argument("--output", type=Path, default=Path("/data/raw"))
     parser.add_argument("--run-id", default=None)

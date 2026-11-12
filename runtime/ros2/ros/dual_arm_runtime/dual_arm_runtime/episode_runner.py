@@ -477,8 +477,6 @@ class EpisodeRunner:
         stream = recipe.policy if recipe.action_source == "policy" else recipe.teacher
         if stream is not None and stream.termination_mode == "task":
             required.extend(("task_plugin", "task_state"))
-        if recipe.action_source == "teacher":
-            required.append("teacher_chunk")
         missing = [capability for capability in required if capability not in info.capabilities]
         if missing:
             raise ContractError(

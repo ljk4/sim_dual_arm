@@ -46,7 +46,7 @@ from robot_ros_support.stream_conversions import (
 from robot_run_logging import EventContext, EventLogger, LogFailure
 from sensor_msgs.msg import CameraInfo, Image, JointState
 from sim_api_msgs.msg import TaskState as TaskStateMessage
-from sim_api_msgs.srv import GetTaskState, GetTeacherChunk, PrepareTask, ResetSimulation, StartTask
+from sim_api_msgs.srv import GetTaskState, PrepareTask, ResetSimulation, StartTask
 from std_msgs.msg import Float64MultiArray, Header
 
 from robot_backend_sim.config.backend_config import BackendConfig
@@ -70,9 +70,9 @@ _CAPABILITIES = (
     "command_query",
     "control_events",
     "follower_reference",
+    "execution_feedback.gripper_set.v1",
 )
 _TASK_CAPABILITIES = ("task_plugin", "task_state")
-_TEACHER_CAPABILITY = "teacher_chunk"
 _FOLLOWER_CAPABILITY = "bounded_target_follower_v1"
 _EXIT_OK = 0
 _EXIT_FAILURE = 1
@@ -163,6 +163,7 @@ class BackendNode(Node):
         self._quality_lost_since_ns: dict[tuple[str, str], int] = {}
         self._quality_max_blackout_ns: dict[tuple[str, str], int] = {}
         self._service_adapter = ServiceAdapter(self, self._worker, self.config)
+        self._teacher_capability = ""
         for service_type, name, callback in (
             (AcquireControl, "acquire_control", self._service_adapter.acquire),
             (RenewControl, "renew_control", self._service_adapter.renew),
@@ -174,7 +175,6 @@ class BackendNode(Node):
             (ResetSimulation, "reset_simulation", self._service_adapter.reset),
             (PrepareTask, "prepare_task", self._service_adapter.prepare_task),
             (StartTask, "start_task", self._service_adapter.start_task),
-            (GetTeacherChunk, "get_task_chunk", self._service_adapter.get_task_chunk),
             (GetTaskState, "get_task_state", self._service_adapter.get_task_state),
         ):
             self.create_service(
@@ -183,6 +183,22 @@ class BackendNode(Node):
                 callback,
                 callback_group=self._group,
             )
+        if self._worker.teacher_enabled:
+            from robot_backend_sim.ros.teacher_extension import register_teacher_service
+
+            try:
+                self._teacher_capability = register_teacher_service(
+                    self,
+                    root=self._root,
+                    callback=self._service_adapter.get_task_chunk,
+                    callback_group=self._group,
+                )
+            except ImportError as error:
+                raise ContractError(
+                    "TEACHER_EXTENSION_MISSING",
+                    "teacher mode requires the built panda_stack_api_msgs extension "
+                    f"(build with --scenario panda_stack): {error}",
+                ) from error
         self.create_timer(0.02, self._publish_pending, callback_group=self._group)
         self.create_timer(0.5, self._publish_info, callback_group=self._group)
         self._publish_info()
@@ -287,7 +303,7 @@ class BackendNode(Node):
         if self._worker.task_enabled:
             capabilities.extend(_TASK_CAPABILITIES)
         if self._worker.teacher_enabled:
-            capabilities.append(_TEACHER_CAPABILITY)
+            capabilities.append(self._teacher_capability)
         return tuple(capabilities)
 
     def _publish_pending(self) -> None:

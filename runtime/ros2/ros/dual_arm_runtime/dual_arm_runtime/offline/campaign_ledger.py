@@ -21,6 +21,12 @@ PURPOSES = {"pilot", "formal", "test", "evaluation"}
 MODES = {"teacher", "act"}
 KINDS = {"rollout", "label_replay"}
 TERMINAL_EVENTS = {"FINISHED", "FAILED", "INTERRUPTED"}
+_CAMPAIGN_RECIPE = (
+    "shared/scenarios/panda_stack/configs/runtime/experiments/stack_campaign.yaml"
+)
+_SCENE_TASK_RECIPE = (
+    "shared/scenarios/panda_stack/configs/simulation/scene/panda_stack_task.yaml"
+)
 
 
 class CampaignError(RuntimeError):
@@ -60,12 +66,9 @@ def tree_sha256(project_root: Path) -> str:
         "simulation",
         "runtime",
         "learning",
-        "infrastructure",
         "hardware",
-        "contracts",
-        "libraries",
-        "profiles",
         "scripts",
+        "shared",
     )
     for root_name in roots:
         root = project_root / root_name
@@ -112,8 +115,8 @@ def code_fingerprint(project_root: Path, config_path: Path) -> dict[str, str]:
     files: dict[str, str] = {}
     for name in (
         config_path,
-        project_root / "runtime/ros2/configs/experiments/stack_campaign.yaml",
-        project_root / "simulation/mujoco/configs/scene/panda_stack_task.yaml",
+        project_root / _CAMPAIGN_RECIPE,
+        project_root / _SCENE_TASK_RECIPE,
     ):
         try:
             files[str(name)] = hashlib.sha256(name.read_bytes()).hexdigest()
@@ -125,6 +128,26 @@ def code_fingerprint(project_root: Path, config_path: Path) -> dict[str, str]:
         "files": files,
         "source_tree_sha256": tree_sha256(project_root),
     }
+
+
+def read_records(path: Path) -> list[dict[str, Any]]:
+    """Read a ledger without creating files or directories (preflight-safe)."""
+    if not path.exists():
+        return []
+    result = []
+    with path.open("r", encoding="utf-8") as stream:
+        for number, line in enumerate(stream, start=1):
+            text = line.strip()
+            if not text:
+                continue
+            try:
+                record = json.loads(text)
+            except json.JSONDecodeError as error:
+                raise CampaignError(f"ledger line {number} is corrupt: {error}") from error
+            if not isinstance(record, dict) or "event" not in record:
+                raise CampaignError(f"ledger line {number} has no event")
+            result.append(record)
+    return result
 
 
 class Ledger:
@@ -147,22 +170,7 @@ class Ledger:
             os.close(descriptor)
 
     def records(self) -> list[dict[str, Any]]:
-        if not self.path.exists():
-            return []
-        result = []
-        with self.path.open("r", encoding="utf-8") as stream:
-            for number, line in enumerate(stream, start=1):
-                text = line.strip()
-                if not text:
-                    continue
-                try:
-                    record = json.loads(text)
-                except json.JSONDecodeError as error:
-                    raise CampaignError(f"ledger line {number} is corrupt: {error}") from error
-                if not isinstance(record, dict) or "event" not in record:
-                    raise CampaignError(f"ledger line {number} has no event")
-                result.append(record)
-        return result
+        return read_records(self.path)
 
     def append(self, record: dict[str, Any]) -> None:
         payload = json.dumps(record, sort_keys=True, separators=(",", ":"), allow_nan=False)
@@ -400,6 +408,7 @@ __all__ = [
     "measure",
     "now_ns",
     "raw_consumed",
+    "read_records",
     "safe_component",
     "seed_range",
     "summarize",

@@ -21,7 +21,7 @@ from robot_backend_sim.tasks.stack.evaluator import (  # noqa: E402
 )
 from robot_contracts.models import ContractError, RunContext  # noqa: E402
 
-CONFIG_PATH = ROOT / "simulation/mujoco/configs/scene/panda_stack_task.yaml"
+CONFIG_PATH = ROOT / "shared/scenarios/panda_stack/configs/simulation/scene/panda_stack_task.yaml"
 TABLE_TOP = 0.75
 TARGET_Z = TABLE_TOP + 0.03
 SOURCE_Z = TARGET_Z + 0.03 + 0.02

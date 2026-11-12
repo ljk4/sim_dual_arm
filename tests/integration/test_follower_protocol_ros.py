@@ -18,13 +18,16 @@ try:
     from robot_api_msgs.msg import FollowerReference as FollowerReferenceMessage
     from robot_api_msgs.srv import GetStreamAnchor, QueryStreamCommand, SubmitFollower
     from robot_contracts.action_chunks import ChunkAnchor
-    from robot_contracts.models import RunContext, Target
+    from robot_contracts.models import ContractError, RunContext, Target
     from robot_contracts.profiles import load_profile
     from robot_contracts.stream_request import (
         REQUEST_STREAM_FIRST,
         REQUEST_STREAM_NEXT,
         StreamRequest,
         Trajectory,
+    )
+    from robot_contracts.trajectory.follower_reference import (
+        compute_legacy_follower_reference_digest,
     )
     from robot_contracts.trajectory.spline import ReferenceSample
     from robot_ros_support.conversions import context_message, time_ns
@@ -38,10 +41,11 @@ except ImportError as error:  # pragma: no cover - host without ROS
     pytest.skip(f"ROS unavailable: {error}", allow_module_level=True)
 
 ROOT = Path(__file__).resolve().parents[2]
+PROFILES = ROOT / "shared/scenarios/panda_stack/profiles"
 for source in (
     ROOT / "simulation/mujoco/src",
-    ROOT / "contracts/python/src",
-    ROOT / "libraries/ros_support/src",
+    ROOT / "shared/common/python/contracts/src",
+    ROOT / "shared/common/python/ros_support/src",
 ):
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
@@ -56,11 +60,11 @@ from robot_backend_sim.follower.follower_protocol import (  # noqa: E402
 )
 from test_backend_ros import Stack, _profile_context, acquire  # noqa: E402
 
-PROFILE_PATH = ROOT / "profiles/robots/panda_stack_v1/profile.json"
-SCHEMAS = ROOT / "contracts/schemas"
+PROFILE_PATH = PROFILES / "robots/panda_stack_v1/profile.json"
+SCHEMAS = ROOT / "shared/common/interfaces/schemas"
 FOLLOWER_CONFIG = ROOT / "tests/fixtures/simulation/backend_follower.yaml"
-CONTROL = load_control_config(ROOT / "profiles/control/panda_control_v1.yaml")
-FOLLOWER = load_follower_config(ROOT / "profiles/control/panda_follower_v1.yaml")
+CONTROL = load_control_config(PROFILES / "control/panda_control_v1.yaml")
+FOLLOWER = load_follower_config(PROFILES / "control/panda_follower_v1.yaml")
 PROFILE = load_profile(PROFILE_PATH, SCHEMAS)
 BASE = PROFILE.initial_positions
 COUNT = len(BASE)
@@ -206,6 +210,21 @@ def test_follower_reference_really_serializes_and_roundtrips():
         validation_limits(CONTROL, FOLLOWER, duration_grid_ns=GRID_NS),
     )
 
+    legacy = follower_reference_message(record)
+    legacy.reference_digest = compute_legacy_follower_reference_digest(record)
+    decoded_legacy = deserialize_message(
+        serialize_message(legacy), FollowerReferenceMessage
+    )
+    reused = follower_reference_from_message(decoded_legacy, legacy_digest=True)
+    assert reused == record
+    with pytest.raises(ContractError, match="FOLLOWER_DIGEST_MISMATCH"):
+        follower_reference_from_message(decoded_legacy)
+    tampered_legacy = follower_reference_message(record)
+    tampered_legacy.reference_digest = "0" * 64
+    with pytest.raises(ContractError) as caught:
+        follower_reference_from_message(tampered_legacy, legacy_digest=True)
+    assert caught.value.reason == "INVALID_FOLLOWER_REFERENCE"
+
     submit = SubmitFollower.Request(request=stream_command_message(raw))
     assert deserialize_message(serialize_message(submit), SubmitFollower.Request).request.kind == 2
     response = SubmitFollower.Response(
@@ -225,7 +244,6 @@ def test_follower_reference_really_serializes_and_roundtrips():
 
     tampered = follower_reference_message(record)
     tampered.reference_digest = "0" * 64
-    from robot_contracts.models import ContractError
 
     with pytest.raises(ContractError) as caught:
         follower_reference_from_message(tampered)

@@ -29,7 +29,7 @@ from dual_arm_runtime.target_source import (
     TaskTerminal,
     task_terminal_fact,
 )
-from dual_arm_runtime.task_client import TaskClient
+from dual_arm_runtime.teacher_client import TeacherTaskClient
 
 __all__ = ["TeacherStreamRunner", "TeacherTargetSource"]
 
@@ -39,7 +39,7 @@ class TeacherTargetSource:
 
     def __init__(
         self,
-        client: TaskClient,
+        client: TeacherTaskClient,
         teacher: TeacherConfig,
         profile: RobotProfile,
         *,

@@ -279,11 +279,14 @@ def _manifest_body(
     started: int,
     synthetic: bool,
     processor_files: dict[str, Any],
+    selection: dict[str, Any] | None = None,
+    overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    manifest = {
         "schema_version": 1,
         "status": "complete",
         "synthetic": bool(synthetic),
+        "diagnostic": bool(config.diagnostic),
         "created_wall_time_ns": time.time_ns(),
         "conversion_seconds": (time.time_ns() - started) / 1e9,
         "project_root": str(config.project_root),
@@ -293,6 +296,12 @@ def _manifest_body(
             "status": select.get("status"),
             "qualified": select.get("qualified"),
             "rule": select.get("rule", ""),
+        },
+        "expected": {
+            "formal_episodes": config.expected_formal_episodes,
+            "training_episodes": config.expected_training_episodes,
+            "validation_episodes": config.expected_validation_episodes,
+            "validation_positions": list(config.validation_positions),
         },
         "config": {
             "path": str(config_path.resolve()) if config_path else "",
@@ -334,6 +343,11 @@ def _manifest_body(
         "source_facts_sha256": _source_facts_sha256(parsed),
         "source_code_sha256": _code_hashes(config.project_root),
     }
+    if selection is not None:
+        manifest["selection"] = selection
+    if overrides is not None:
+        manifest["overrides"] = overrides
+    return manifest
 
 
 def build_manifest(
@@ -353,6 +367,8 @@ def build_manifest(
     profile_id: str,
     started: int,
     synthetic: bool,
+    selection: dict[str, Any] | None = None,
+    overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     del output_name
     train_section = _split_manifest(temp / "train", train_eps, config)
@@ -376,6 +392,8 @@ def build_manifest(
         started=started,
         synthetic=synthetic,
         processor_files=processor_files,
+        selection=selection,
+        overrides=overrides,
     )
     (temp / "manifest.json").write_text(
         json.dumps(manifest, indent=2, allow_nan=False) + "\n", encoding="utf-8"

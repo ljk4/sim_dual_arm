@@ -22,7 +22,7 @@ pytest.importorskip("scipy")
 np = pytest.importorskip("numpy")
 
 ROOT = Path(__file__).resolve().parents[2]
-for source in (ROOT / "simulation/mujoco/src", ROOT / "contracts/python/src"):
+for source in (ROOT / "simulation/mujoco/src", ROOT / "shared/common/python/contracts/src"):
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
 
@@ -54,11 +54,11 @@ def replace(value, **changes):
     return _dataclass_replace(value, **changes)
 
 
-SCENE_PATH = ROOT / "simulation/mujoco/configs/scene/panda_stack.yaml"
-CONTROL_PATH = ROOT / "profiles/control/panda_control_v1.yaml"
-FOLLOWER_PATH = ROOT / "profiles/control/panda_follower_v1.yaml"
-PROFILE_PATH = ROOT / "profiles/robots/panda_stack_v1/profile.json"
-SCHEMAS = ROOT / "contracts/schemas"
+SCENE_PATH = ROOT / "shared/scenarios/panda_stack/configs/simulation/scene/panda_stack.yaml"
+CONTROL_PATH = ROOT / "shared/scenarios/panda_stack/profiles/control/panda_control_v1.yaml"
+FOLLOWER_PATH = ROOT / "shared/scenarios/panda_stack/profiles/control/panda_follower_v1.yaml"
+PROFILE_PATH = ROOT / "shared/scenarios/panda_stack/profiles/robots/panda_stack_v1/profile.json"
+SCHEMAS = ROOT / "shared/common/interfaces/schemas"
 DT_NS = 2_000_000
 LEASE_NS = 10_000_000_000
 FIRST_START_NS = 250_000_000

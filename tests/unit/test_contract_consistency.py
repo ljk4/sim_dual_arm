@@ -19,6 +19,10 @@ import pytest
 from jsonschema import Draft202012Validator
 from robot_contracts.episodes import RecordingResult, RuntimeResult, TaskResult
 from robot_contracts.execution_feedback import (
+    MAX_FINGER_INDEX,
+    MAX_FINGER_OBJECTS,
+    MAX_GRIPPER_FEEDBACK,
+    MAX_GRIPPER_FINGERS,
     ControlEvent,
     ExecutionFeedback,
     FingerFeedback,
@@ -31,7 +35,7 @@ from robot_contracts.task_state import TaskState
 from robot_run_logging import EventContext, EventLogger, LogSettings
 
 ROOT = Path(__file__).resolve().parents[2]
-SCHEMAS = ROOT / "contracts/schemas/v1"
+SCHEMAS = ROOT / "shared/common/interfaces/schemas/v1"
 
 
 def _document(name):
@@ -70,7 +74,9 @@ def _same_fields(expected, actual):
 @pytest.mark.parametrize("model", [RunContext, ControlEvent, ExecutionFeedback,
                                     FingerFeedback, GripperFeedback, StreamChunkStatus])
 def test_ros_message_fields_match_models(model):
-    text = (ROOT / f"contracts/ros/robot_api_msgs/msg/{model.__name__}.msg").read_text()
+    text = (
+        ROOT / f"shared/common/interfaces/ros/robot_api_msgs/msg/{model.__name__}.msg"
+    ).read_text()
     actual = _ros_fields(text)
     _same_fields(model.model_fields, actual)
     schema = model.model_json_schema()
@@ -90,12 +96,30 @@ def test_ros_message_fields_match_models(model):
             assert ros_type == "float64"
 
 
+def test_ros_bounded_feedback_bounds_match_the_contract():
+    base = ROOT / "shared/common/interfaces/ros/robot_api_msgs/msg"
+    execution = _ros_fields((base / "ExecutionFeedback.msg").read_text())
+    gripper = _ros_fields((base / "GripperFeedback.msg").read_text())
+    finger = _ros_fields((base / "FingerFeedback.msg").read_text())
+    assert execution["grippers"] == (
+        f"robot_api_msgs/GripperFeedback[<={MAX_GRIPPER_FEEDBACK}]"
+    )
+    assert gripper["fingers"] == (
+        f"robot_api_msgs/FingerFeedback[<={MAX_GRIPPER_FINGERS}]"
+    )
+    assert gripper["side"] == "string"
+    assert finger["side"] == "string"
+    assert finger["finger_index"] == "uint8"
+    assert MAX_FINGER_INDEX == MAX_GRIPPER_FINGERS
+    assert finger["object_names"] == f"string[<={MAX_FINGER_OBJECTS}]"
+
+
 @pytest.mark.parametrize(("model", "message", "rename"), [
     (RunContext, "RunContext", {}),
     (Target, "JointTarget", {"time_ns": "time_from_observation_ns"}),
 ])
 def test_proto_fields_match_models(model, message, rename):
-    text = (ROOT / "contracts/policy/v1/policy.proto").read_text()
+    text = (ROOT / "shared/common/interfaces/policy/v1/policy.proto").read_text()
     fields = _proto_fields(text, message)
     _same_fields({rename.get(name, name) for name in model.model_fields}, fields)
     for name, field in model.model_json_schema()["properties"].items():
@@ -156,7 +180,7 @@ def test_profile_schema_matches_models():
 
 
 def test_all_profile_documents_validate():
-    documents = sorted((ROOT / "profiles").rglob("*.json"))
+    documents = sorted((ROOT / "shared/scenarios/panda_stack/profiles").rglob("*.json"))
     assert documents
     for path in documents:
         document = json.loads(path.read_text())
@@ -200,12 +224,12 @@ def test_rendered_run_event_matches_schema(tmp_path):
 def test_pair_check_detects_a_deleted_field(format):
     # Mutation check runs in memory: production contracts are never edited for validation.
     if format == "ros":
-        text = (ROOT / "contracts/ros/robot_api_msgs/msg/RunContext.msg").read_text()
+        text = (ROOT / "shared/common/interfaces/ros/robot_api_msgs/msg/RunContext.msg").read_text()
         changed = re.sub(r"^string robot_id\n", "", text, flags=re.M)
         with pytest.raises(AssertionError):
             _same_fields(RunContext.model_fields, _ros_fields(changed))
     elif format == "proto":
-        text = (ROOT / "contracts/policy/v1/policy.proto").read_text()
+        text = (ROOT / "shared/common/interfaces/policy/v1/policy.proto").read_text()
         changed = text.replace("string robot_id = 1;", "")
         with pytest.raises(AssertionError):
             _same_fields(RunContext.model_fields, _proto_fields(changed, "RunContext"))
@@ -217,8 +241,22 @@ def test_pair_check_detects_a_deleted_field(format):
 
 
 def test_task_state_uses_the_simulation_contract():
-    text = (ROOT / "contracts/ros/sim_api_msgs/msg/TaskState.msg").read_text()
+    text = (ROOT / "shared/common/interfaces/ros/sim_api_msgs/msg/TaskState.msg").read_text()
     rename = {"sample_time_ns": "sample_time", "metrics": "metrics_json"}
     _same_fields({rename.get(name, name) for name in TaskState.model_fields}, _ros_fields(text))
     assert _ros_fields(text)["sample_time"] == "builtin_interfaces/Time"
     assert _ros_fields(text)["metrics_json"] == "string"
+
+
+def test_teacher_service_is_a_scenario_extension_not_a_common_package():
+    common = ROOT / "shared/common/interfaces/ros/sim_api_msgs"
+    extension = (
+        ROOT
+        / "shared/scenarios/panda_stack/extensions/ros/panda_stack_api_msgs"
+    )
+    assert not (common / "srv/GetTeacherChunk.srv").exists()
+    assert "GetTeacherChunk" not in (common / "CMakeLists.txt").read_text()
+    assert (extension / "srv/GetTeacherChunk.srv").is_file()
+    assert "srv/GetTeacherChunk.srv" in (extension / "CMakeLists.txt").read_text()
+    capability = (extension / "msg/TeacherCapability.msg").read_text()
+    assert "panda_stack_api_msgs.teacher_chunk.v1" in capability

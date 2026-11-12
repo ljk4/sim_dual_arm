@@ -18,6 +18,7 @@ from robot_trajectory.sampling import sample_reference_interval
 from robot_trajectory.spline_math import check_continuous_limits, compute_reference_extremes
 
 ROOT = Path(__file__).resolve().parents[2]
+PROFILES = ROOT / "shared/scenarios/panda_stack/profiles"
 SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
@@ -30,11 +31,11 @@ from robot_backend_sim.motion.ruckig_export import export_ruckig_reference  # no
 ruckig = pytest.importorskip("ruckig")
 
 PROFILE = load_profile(
-    ROOT / "profiles/robots/panda_stack_v1/profile.json",
-    ROOT / "contracts/schemas/v1",
+    PROFILES / "robots/panda_stack_v1/profile.json",
+    ROOT / "shared/common/interfaces/schemas/v1",
 )
-CONTROL = load_control_config(ROOT / "profiles/control/panda_control_v1.yaml")
-FOLLOWER = load_follower_config(ROOT / "profiles/control/panda_follower_v1.yaml")
+CONTROL = load_control_config(PROFILES / "control/panda_control_v1.yaml")
+FOLLOWER = load_follower_config(PROFILES / "control/panda_follower_v1.yaml")
 BASE = PROFILE.initial_positions
 JOINT_COUNT = len(BASE)
 
