@@ -11,8 +11,8 @@ DATA_ROOT="${DATA_ROOT:-/data}"
 POLICY_SDK="${POLICY_SDK_ROOT:-/build/generated/policy-sdk}"
 POLICY_CONFIG="${POLICY_SERVICE_CONFIG:-${ACT_POLICY_CONFIG:-$ROOT/shared/scenarios/panda_stack/configs/learning/policy_temporal.yaml}}"
 ACT_LOG_DIRECTORY="${ACT_LOG_DIRECTORY:-$DATA_ROOT/logs/act-policy}"
-DATASET_CONFIG="${ACT_DATASET_CONFIG:-$ROOT/shared/scenarios/panda_stack/configs/learning/act_dataset.container.yaml}"
-TRAINING_CONFIG="${ACT_TRAINING_CONFIG:-$ROOT/shared/scenarios/panda_stack/configs/learning/act_training.container.yaml}"
+DATASET_CONFIG="${ACT_DATASET_CONFIG:-$ROOT/shared/scenarios/panda_stack/configs/learning/act_dataset.yaml}"
+TRAINING_CONFIG="${ACT_TRAINING_CONFIG:-$ROOT/shared/scenarios/panda_stack/configs/learning/act_training.yaml}"
 
 has_help=false
 for argument in "$@"; do

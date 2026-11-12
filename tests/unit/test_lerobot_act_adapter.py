@@ -503,7 +503,7 @@ def test_act_entry_loads_warms_logs_and_shuts_down_cleanly(bundle, tmp_path):
         "LEARNING_SOURCE", str(Path(lerobot.__file__).resolve().parents[1])
     )
     environment["PROJECT_CONTAINER"] = "1"
-    environment["POLICY_SDK_ROOT"] = str(ROOT / ".build/generated/policy-sdk")
+    environment["POLICY_SDK_ROOT"] = str(ROOT / "build/generated/policy-sdk")
     environment["PATH"] = str(Path(sys.executable).parent) + ":" + environment["PATH"]
     inherited = environment.get("PYTHONPATH", "")
     environment["PYTHONPATH"] = ":".join(

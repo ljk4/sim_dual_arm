@@ -5,6 +5,8 @@
 
 ## 常用操作
 
+首次启动前，在仓库根目录按[环境准备](../../../README.md#1-环境准备)创建输出目录。
+
 ```bash
 cd runtime/ros2/docker
 docker compose build
@@ -12,9 +14,11 @@ docker compose up -d
 docker compose exec runtime bash
 
 # 在容器内构建 SDK 或运行测试：
-runtime/ros2/scripts/run.sh build-ros-sdk
+runtime/ros2/scripts/run.sh build-ros-sdk --scenario panda_stack --shared-root /shared
 runtime/ros2/scripts/run.sh build-policy-sdk
 runtime/ros2/scripts/run.sh test -q tests/unit
 ```
+
+`build-ros-sdk` 不指定方案时只构建核心接口至 `build/ros-core`；Panda Teacher 使用上例选择的完整包集，输出至 `build/ros-dev`。
 
 目录导航：[上级目录](../README.md)

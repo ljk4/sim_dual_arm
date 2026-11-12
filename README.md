@@ -11,7 +11,7 @@
 - **`learning/lerobot/`**：ROS-free 学习与策略服务端，负责数据集转换、ACT 混合精度训练、模型包（Bundle）导出与 gRPC Policy 推理服务。
 - **`hardware/`**：真机 Robot API 边界说明；当前没有可验证的真实驱动。
 - **`shared/common/`**：公共层，只放跨端接口约束（Policy Protobuf、ROS 2 IDL、JSON Schema）、共享 Python 包与通用工具，不选择具体任务、机器人或算法。
-- **`shared/scenarios/<id>/`**：方案绑定层，用 `binding.yaml` 选择档案、配方与方案专用接口。当前实例为 [`panda_stack`](shared/scenarios/panda_stack/README.md)（MuJoCo + ROS 2 + LeRobot ACT）；[`_template`](shared/scenarios/_template/README.md) 说明替换步骤，[`panda_stack_diag`](shared/scenarios/panda_stack_diag/README.md) 仅用于诊断复现。
+- **`shared/scenarios/<id>/`**：方案绑定层，用 `binding.yaml` 选择档案、配方与方案专用接口。当前实例为 [`panda_stack`](shared/scenarios/panda_stack/README.md)（MuJoCo + ROS 2 + LeRobot ACT）；[`_template`](shared/scenarios/_template/README.md) 说明替换步骤。Marvin 接入目标见[任务文档](docs/marvin-handover/README.md)。
 
 四端（simulation/runtime/learning/hardware）持有实际实现、依赖、容器和入口脚本；公共协议与当前 Panda/ACT/MuJoCo 实例数值分开维护，方案选择只发生在 `prepare`/`build-ros-sdk` 等准备入口。
 
@@ -24,7 +24,18 @@
 ```bash
 git clone https://github.com/ljk4/sim_dual_arm.git
 cd sim_dual_arm
+
+# 首次启动容器前，以当前宿主机用户创建输出根目录
+mkdir -p build var
 ```
+
+`build/` 存放生成的 SDK、构建结果和缓存，`var/` 存放运行日志、录制、数据集、模型与台账。两者整体由 Git 忽略，不提交空目录或 `.gitkeep`；各构建和运行命令按需创建子目录。首次启动前由宿主机用户创建这两个根目录，避免 Docker 自动创建后归 root 所有；UID/GID 应与 Compose 中的运行用户一致。
+
+runtime/learning 容器内 `/build` 与 `/workspace/build` 指向宿主机同一个 `build/`；`/data` 与 `/workspace/var` 指向同一个 `var/`。前者供容器工具使用，后者供项目相对路径使用。simulation 仅挂载所需的 SDK 与 `/data`。更新挂载配置后，重新执行对应服务的 `docker compose up -d` 使配置生效。
+
+仓库不附带已生成的 SDK、采集数据、训练权重或模型包。下文的输出路径用于生成和使用本机产物；历史实验记录不代表当前机器已有这些文件。
+
+学习端另外使用固定版本的 LeRobot 源码，首次使用须按[第三方源码说明](third_party/README.md)准备；容器镜像不会代为恢复宿主机已清理的源码目录。
 
 ---
 
@@ -169,6 +180,8 @@ learning/lerobot/scripts/run.sh convert --scenario panda_stack
 
 转换时终端只显示配置、日志路径和原地刷新的进度，包括已完成条数、百分比、用时和预计剩余时间；编码器等详细输出写入日志。训练使用同样的显示方式，额外显示 step、loss 和验证状态。重定向输出时仅保留阶段摘要，避免生成大量进度行。可用 `--log-file /data/logs/<文件名>.log` 指定详细日志；需要原始输出和 JSON 结果时添加 `--no-progress`。
 
+训练前将官方 ResNet18 权重文件 `resnet18-f37072fd.pth` 放到宿主机 `build/cache/torch/hub/checkpoints/`；也可在 learning 容器内用 `RESNET18_WEIGHTS` 指定现有权重文件。训练按离线方式运行，缺少权重时会报错，不会自动下载。
+
 启动完整模式训练（默认启用 PyAV 视频解码、张量批处理、多进程预取与 CUDA bfloat16 混合精度）：
 
 ```bash
@@ -260,59 +273,3 @@ runtime/ros2/scripts/run.sh interactive \
 ```
 
 ---
-
-## 4. 配置管理与联动规则
-
-`/data/prepared/...` 下的生成文件是带哈希校验的运行快照，**切勿直接手动修改**。需要调整参数时，请修改仓库中的源配置文件，并使用新的 `--run-id` 或输出目录重新执行准备命令。
-
-各命令中的 `--scenario panda_stack` 通过 [`binding.yaml`](shared/scenarios/panda_stack/binding.yaml) 选择下列档案与配方；`--scenario` 与直接配置的 `--template`/`--config` 互斥。档案、配方与方案专用接口的归属和替换步骤见 [panda_stack 方案说明](shared/scenarios/panda_stack/README.md) 与 [方案模板](shared/scenarios/_template/README.md)。
-
-### 4.1 配置依赖链
-
-```text
-模型包 (/data/learning/bundles/<bundle>)
-  + shared/scenarios/panda_stack/configs/learning/policy_temporal.yaml
-  ──[learning: prepare-policy]──> /data/prepared/<run-id>/policy/{policy.yaml, policy_binding.json}
-
-policy_binding.json
-  + shared/scenarios/panda_stack/configs/runtime/policy_rollout.yaml
-  ──[runtime: prepare]──────────> /data/prepared/<run-id>/runtime/runtime.yaml
-
-仿真后端模板 (shared/scenarios/panda_stack/configs/simulation/backend/*)
-  + shared/scenarios/panda_stack/configs/simulation/scene/*
-  + shared/scenarios/panda_stack/profiles/control/*
-  ──[simulation: prepare]───────> /data/prepared/<run-id>/simulation/backend.yaml
-```
-
-### 4.2 源配置索引与更新操作
-
-| 配置项 | 源文件路径 | 修改后的更新步骤 |
-| --- | --- | --- |
-| 示教后端模板 | `shared/scenarios/panda_stack/configs/simulation/backend/backend_stack_teacher.yaml` | 重新执行 simulation `prepare`，重启 `backend` |
-| 推理后端模板 | `shared/scenarios/panda_stack/configs/simulation/backend/backend_stack_act_chunked.yaml` | 重新执行 simulation `prepare`，重启 `backend` 与 `viewer` |
-| 物理场景、物体、相机 | `shared/scenarios/panda_stack/configs/simulation/scene/panda_stack_learning.yaml` | 重新执行 simulation `prepare`，重启 `backend` 与 `viewer`；新旧场景数据不可混训 |
-| 堆叠成功判定与示教参数 | `shared/scenarios/panda_stack/configs/simulation/scene/panda_stack_task.yaml` | 重新执行 simulation `prepare`，重启 `backend` |
-| 物理控制限值与静止/接触容差 | `shared/scenarios/panda_stack/profiles/control/panda_control_v1.yaml` | 同时重新执行 simulation `prepare` 与 runtime `prepare`，重启 `backend` 与 `runtime` |
-| 流式动作块超时与卸载过渡 | `shared/scenarios/panda_stack/profiles/control/panda_stream_v1.yaml` | 重新执行 simulation `prepare`，重启 `backend` |
-| 跟随窗口 `target_count` 与偏差预算 | `shared/scenarios/panda_stack/profiles/control/panda_follower_v1.yaml` | 同时重新执行 simulation `prepare` 与 runtime `prepare`，重启 `backend` 与 `runtime` |
-| 策略运行端模板 | `shared/scenarios/panda_stack/configs/runtime/policy_rollout.yaml` | 重新执行 runtime `prepare`，重新运行 `interactive` |
-| 示教运行端模板 | `shared/scenarios/panda_stack/configs/runtime/teacher_collect.yaml` | 下一次 `record.sh` 自动生成新配置，无需手动 `prepare` |
-| Policy 服务与时间融合模板 | `shared/scenarios/panda_stack/configs/learning/policy_temporal.yaml` | 重新执行 `prepare-policy` 与 runtime `prepare`，重启 `policy` 服务 |
-| 数据集转换规则 | `shared/scenarios/panda_stack/configs/learning/act_dataset.container.yaml` | 使用新输出目录重新执行 `convert` |
-| 训练超参数与 DataLoader/AMP | `shared/scenarios/panda_stack/configs/learning/act_training.container.yaml` | 重新执行 `train` → `bundle` → `prepare-policy` → runtime `prepare` |
-| ROS 2 消息或服务定义 | `shared/common/interfaces/ros/robot_api_msgs/` | 重新执行 `build-ros-sdk`，重启 `simulation` 与 `runtime` |
-| Policy Protobuf 协议 | `shared/common/interfaces/policy/v1/policy.proto` | 重新执行 `build-policy-sdk`，重启 `learning` 与 `runtime` |
-| 机器人 Profile 与观测/动作 Schema | `shared/scenarios/panda_stack/profiles/`、`shared/common/interfaces/schemas/v1/` | 重建 SDK，重新校验数据集、模型包与三端运行配置 |
-
----
-
-## 5. 常见问题排查
-
-- **`policy.yaml: No such file or directory`**：尚未执行 `prepare-policy` 或路径有误。检查 `/data/prepared/<run-id>/policy/` 是否包含 `policy.yaml` 与 `policy_binding.json`。
-- **`FileExistsError` / `REQUEST_ID_CONFLICT`**：准备目录、日志目录或录制目录禁止覆盖复用。每次重启 Policy 服务请使用新的 `--log-directory`，每次重新准备配置请使用新的 `--run-id`，单局策略测试优先使用 `interactive` 自动生成唯一身份。
-- **`Failed to add port to server: ... 0.0.0.0:50051`**：旧的 Policy 服务进程未退出。在 `learning` 容器内执行 `ps -eo pid,cmd | grep '[d]ual_arm_learning.policy_service_cli'` 查找 PID 并通过 `kill -TERM <PID>` 终止，确认 `ss -ltnp | grep 50051` 无输出后使用新日志目录重启。
-- **`viewer` 无法打开窗口**：确认已通过 `docker compose run` 显式挂载 `/tmp/.X11-unix` 与 `.Xauthority` 并传递 `DISPLAY` 环境变量，且宿主机已执行 `xhost +SI:localuser:$(id -un)`。无图形界面的服务器可正常运行 `backend`、采集与推理。
-
-更多文档请参阅 [文档索引](docs/README.md)、[项目状态](docs/project-status.md) 与 [项目规范](docs/standards.md)。
-
-公共层与方案绑定的当前进度、阶段任务和交接见 [架构任务](docs/architecture-tasks/README.md)。ROS 接口调整后请在空闲时重建 SDK，并重建使用新源码挂载与环境变量的 simulation/runtime 容器。

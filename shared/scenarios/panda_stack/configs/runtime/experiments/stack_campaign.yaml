@@ -1,37 +1,4 @@
-# 中文参数说明（维护时优先阅读本段）
-# schema_version：采集台账配置版本。
-# budget.pilot_seed_first/last：pilot 可用种子范围。
-# budget.pilot_max_attempts：pilot 最大尝试次数。
-# budget.pilot_act_reserved_attempts：pilot 中预留给 ACT 冒烟测试的次数。
-# budget.pilot_teacher_seed_last/pilot_label_replay_max：pilot 教师种子上限和 label replay 次数上限。
-# budget.formal_seed_first/last：正式采集种子范围。
-# budget.formal_max_attempts：正式采集最大尝试次数。
-# budget.formal_target_qualified：目标合格 episode 数。
-# budget.formal_validation_qualified_indices：从合格列表中选作验证集的位置。
-# budget.test_seed_first/last/test_max_attempts：测试/评估种子范围和上限。
-# budget.evaluation_max_attempts：evaluation 目的的最大尝试次数。
-# budget.max_raw_bytes：原始数据总字节上限。
-# budget.reserve_bytes：预留磁盘字节。
-# budget.estimated_attempt_bytes：单次尝试的保守数据量估计。
-# budget.min_free_bytes：允许启动前的最小剩余磁盘空间。
-# paths.attempts_root：每次 attempt 的输出根目录。
-# paths.ledger：追加式 JSONL 台账文件。
-# paths.lock/run_lock：预算锁和运行锁文件。
-# paths.required_paths：启动前必须存在的文件和目录。
-# paths.sdk_marker：ROS SDK 生成完成的标记文件。
-# launch.command：实际启动业务的命令；为空时由命令行 `--` 后参数提供。
-# launch.cleanup_command：超时或中断后的清理命令。
-# launch.timeout_s：单次 attempt 墙钟超时，单位 s。
-# quality.sidecar：质量结果文件名。
-# quality.max_blackout_s：允许的最长连续遮挡时间，单位 s。
-# quality.min_qualified_ratio：阶段内合格采样比例下限。
-# quality.rules：各相机/物体/阶段的像素可见性规则；required 门禁，record_only 仅记录。
-
-# Bounded stack-collection campaign.
-#
-# Seeds are allocated in order and every full rollout needs a ledger record
-# BEFORE the runtime is started.  RESERVED/RUNNING attempts count even if the
-# process crashes; the ledger is append-only and never reset by this tool.
+# Panda 堆叠采集预算、种子与正式筛选规则。
 schema_version: 1
 
 budget:
@@ -84,7 +51,7 @@ paths:
     - shared/scenarios/panda_stack/configs/simulation/scene/panda_stack_task.yaml
     - shared/scenarios/panda_stack/extensions/ros/panda_stack_api_msgs/srv/GetTeacherChunk.srv
     - shared/scenarios/panda_stack/extensions/ros/panda_stack_api_msgs/msg/TeacherCapability.msg
-  sdk_marker: .build/ros-dev/contracts.json
+  sdk_marker: build/ros-dev/contracts.json
 
 launch:
   # The supervisor supplies the actual ROS/container command.  Placeholders:

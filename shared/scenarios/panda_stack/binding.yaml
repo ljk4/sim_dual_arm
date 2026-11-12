@@ -35,8 +35,8 @@ recipes:
   runtime_teacher: configs/runtime/teacher_collect.yaml
   runtime_policy: configs/runtime/policy_rollout.yaml
   campaign: configs/runtime/experiments/stack_campaign.yaml
-  dataset: configs/learning/act_dataset.container.yaml
-  training: configs/learning/act_training.container.yaml
+  dataset: configs/learning/act_dataset.yaml
+  training: configs/learning/act_training.yaml
   policy_service: configs/learning/policy_temporal.yaml
 
 interfaces:

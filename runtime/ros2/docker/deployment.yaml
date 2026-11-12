@@ -6,7 +6,7 @@ source:
   scope: repository
 mounts:
   /workspace/var: writable
-  /workspace/.build: writable
+  /workspace/build: writable
   /build: writable
   /data: writable
 networks: [ros, learning]

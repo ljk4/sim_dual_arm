@@ -1,26 +1,9 @@
-# 中文参数说明（维护时优先阅读本段）
-# schema_version：训练配置版本。
-# mode：默认训练模式；命令行 --mode 可覆盖。
-# seed：训练随机种子。
-# device：训练设备，cuda 或 cpu。
-# cache_root：模型/数据集缓存目录。
-# data.config：数据集转换配置路径。
-# data.root/manifest/train_dir/validation_dir：数据集根、清单和训练/验证子目录。
-# data.verify_hashes：是否启动前校验数据集文件哈希。
-# model.*：视觉骨干、Transformer 维度/层数、VAE、dropout、KL 权重和预训练权重；权重哈希由运行时计算。
-# training.*：batch、worker、锁页内存、预取、混合精度、学习率、权重衰减、梯度裁剪、日志/验证/保存间隔、验证 batch 和确定性。
-# modes.*：smoke/overfit/full 的步数、数据划分、episode 范围、是否验证及预算预留时间。
-# budget.*：总训练预算、追加式台账、锁文件、停止余量和最小磁盘空间。
-# checkpoint.*：检查点根目录、保留策略和最小磁盘空间。
-# logging.*：训练事件日志容量、文件大小和刷新设置。
-
-# DSH-035 first short round: smoke -> single-episode overfit -> 45/5 full.
-# The 5000-step full mode still uses all 45 train and all 5 validation episodes.
+# ACT 的 smoke/overfit/full 训练共用模型和预算；路径相对项目根。
 schema_version: 1
 mode: smoke
 seed: 20261102
 device: cuda
-cache_root: .build/cache/huggingface-learning
+cache_root: var/learning/cache
 data:
   config: shared/scenarios/panda_stack/configs/learning/act_dataset.yaml
   root: var/learning/panda_stack_learning_v1
@@ -44,7 +27,7 @@ model:
   # strictly, so model construction can never trigger an implicit download.
   pretrained_backbone_weights: null
   weights:
-    path: .build/cache/torch/hub/checkpoints/resnet18-f37072fd.pth
+    path: build/cache/torch/hub/checkpoints/resnet18-f37072fd.pth
 training:
   batch_size: 32
   num_workers: 4

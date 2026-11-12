@@ -25,7 +25,7 @@
 | 策略模型 | LeRobot ACT（batch 16、20,000 步训练；本次修复新增训练 0 步） |
 | 观测与动作 | 三路 320×240 RGB + 16 维实测关节/夹爪位置 → 60×16 动作块（步长 50 ms，共 3.0 s） |
 | 最终执行配方 | 10 点（0.5 s）执行窗口、绝对仿真时间指数融合（系数 0.01）、任务前 2.0 s 稳定等待 |
-| 源配置文件 | [policy_rollout.yaml](../../runtime/ros2/configs/policy_rollout.yaml)、[backend_stack_act_chunked.yaml](../../simulation/mujoco/configs/backend/backend_stack_act_chunked.yaml)、[panda_follower_v1.yaml](../../profiles/control/panda_follower_v1.yaml)、[policy_temporal.yaml](../../learning/lerobot/configs/policy_temporal.yaml) |
+| 源配置文件 | [policy_rollout.yaml](../../shared/scenarios/panda_stack/configs/runtime/policy_rollout.yaml)、[backend_stack_act_chunked.yaml](../../shared/scenarios/panda_stack/configs/simulation/backend/backend_stack_act_chunked.yaml)、[panda_follower_v1.yaml](../../shared/scenarios/panda_stack/profiles/control/panda_follower_v1.yaml)、[policy_temporal.yaml](../../shared/scenarios/panda_stack/configs/learning/policy_temporal.yaml) |
 | 模型包路径 | `var/learning/experiments/act-static-b16-20k-20261103/bundle-best-20k`（摘要 `c1ed8e8f...278e6`） |
 
 ### 2.2 回归结果对照
@@ -67,7 +67,7 @@
 ### 3.4 策略目标与平滑参考的偏差预算设定
 
 - **现象与根因**：Ruckig 生成的平滑参考受限于最大速度与最大加速度，无法瞬时跳变到策略目标。原 `0.15 rad / 0.02 m` 的目标-参考偏差预算在正常加速与抓取闭合阶段频繁触发拒绝（如夹爪偏差达 `0.0285 m`）。
-- **修复方法**：将仿真实验的目标-参考允许偏差预算调整为 **关节 `0.30 rad` / 夹爪 `0.04 m`**（[`panda_follower_v1.yaml`](../../profiles/control/panda_follower_v1.yaml)），同时保持机器人物理硬限位、速度/加速度上限与实测跟踪容差不变。
+- **修复方法**：将仿真实验的目标-参考允许偏差预算调整为 **关节 `0.30 rad` / 夹爪 `0.04 m`**（[`panda_follower_v1.yaml`](../../shared/scenarios/panda_stack/profiles/control/panda_follower_v1.yaml)），同时保持机器人物理硬限位、速度/加速度上限与实测跟踪容差不变。
 - **经验总结**：严格区分**动作准入修正上限**（夹爪 `0.03 m`）、**策略目标相对平滑参考的允许偏差**（`0.30 rad / 0.04 m`）与**平滑参考相对实测反馈的跟踪容差**，三者物理意义不同，不可混用。
 
 ### 3.5 时间融合加权平均的浮点舍入越界
@@ -78,12 +78,12 @@
 ### 3.6 Ruckig 飞秒级制动前缀误拒绝
 
 - **现象与根因**：种子 `30502` 夹持方块后触发 `INVALID_RUCKIG_EXPORT`。回放发现起始夹爪速度为 `0.04000000000000001 m/s`（比上限 `0.04 m/s` 多出 `1e-17` 浮点误差），导致 Ruckig 生成了时长约 $2.20 \times 10^{-14}\text{ s}$（22 飞秒）的微制动前缀，被旧版导出器当作非零制动段拒绝。
-- **修复方法**：在 [`ruckig_export.py`](../../simulation/mujoco/src/robot_backend_sim/ruckig_export.py) 中，仅当制动前缀在纳秒量化下为 **`0 ns`** 且状态跳变在既有连续性容差内时将其安全折叠；任何可表示为非零纳秒的真实制动段仍严格拒绝。
+- **修复方法**：在 [`ruckig_export.py`](../../simulation/mujoco/src/robot_backend_sim/motion/ruckig_export.py) 中，仅当制动前缀在纳秒量化下为 **`0 ns`** 且状态跳变在既有连续性容差内时将其安全折叠；任何可表示为非零纳秒的真实制动段仍严格拒绝。
 
 ### 3.7 静止速度容差不一致导致正常夹持被判为跟踪超时
 
 - **现象与根因**：种子 `30600` 在成功夹持源方块（双指接触力各约 `1 N`、指速接近 0）后触发 `TRACKING_TIMEOUT`。原因是闭合参考速度为 $+5.339 \times 10^{-14}\text{ m/s}$：闭合接触判定要求参考速度严格 `<= 0`，而接触卸载逻辑将 `<= 1e-9 m/s` 视为“未张开”，导致该数值静止状态落入两不管地带，跟踪误差累计满 2.0 s 后超时停车。
-- **修复方法**：在 [`gripper_contact.py`](../../simulation/mujoco/src/robot_backend_sim/gripper_contact.py) 与 [`motion_controller.py`](../../simulation/mujoco/src/robot_backend_sim/motion_controller.py) 中统一复用 `REFERENCE_VELOCITY_ATOL_M_S = 1e-9` 作为零速度分类容差（单测见 [`test_contact_unload.py`](../../tests/unit/test_contact_unload.py)）。
+- **修复方法**：在 [`gripper_contact.py`](../../simulation/mujoco/src/robot_backend_sim/physics/gripper_contact.py) 与 [`motion_controller.py`](../../simulation/mujoco/src/robot_backend_sim/motion/motion_controller.py) 中统一复用 `REFERENCE_VELOCITY_ATOL_M_S = 1e-9` 作为零速度分类容差（单测见 [`test_contact_unload.py`](../../tests/unit/test_contact_unload.py)）。
 
 ---
 
@@ -96,4 +96,4 @@
 3. **逐层比对动作数据**：在同一观测时间戳下依次核对 `raw_act`（原始预测）→ `admitted`（准入值）→ `execution_targets`（时间融合目标）→ `FollowerReference`（Ruckig 样条参考）→ `ExecutionFeedback`（实测反馈）。
 4. **最小化离线复现**：从 MCAP 提取故障时刻的 16 维请求与 Anchor 状态进行单元测试重建，修复后再通过容器公共入口执行完整物理闭环回归。
 
-目录导航：[实践索引](README.md) · [项目规范](../standards.md) · [项目状态](../project-status.md)
+目录导航：[实践索引](README.md) · [实施规则](../../RULES.md) · [项目说明](../../README.md)

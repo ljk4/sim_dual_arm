@@ -29,7 +29,7 @@ CONTAINER_MOUNTS = (
     ("/workspace", Path(".")),
     ("/shared", Path("shared")),
     ("/data", Path("var")),
-    ("/build", Path(".build")),
+    ("/build", Path("build")),
 )
 
 

@@ -377,7 +377,7 @@ def training_before(data: object) -> object:
             model["weights"] = {**weights, "path": absolute(weights["path"], root)}
         data["model"] = model
     data["cache_root"] = absolute(
-        data.get("cache_root", ".build/cache/huggingface-learning"), root)
+        data.get("cache_root", "build/cache/huggingface-learning"), root)
     for section, keys in (("budget", ("ledger", "lock")),
                           ("checkpoint", ("root",)), ("logging", ("root",))):
         block = data.get(section)

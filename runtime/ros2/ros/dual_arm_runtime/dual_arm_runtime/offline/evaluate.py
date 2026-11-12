@@ -244,7 +244,7 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--purpose", choices=("all", "test", "evaluation"), default="all")
     parser.add_argument(
-        "--output", type=Path, default=Path(".build/reports/dsh-036/evaluation")
+        "--output", type=Path, default=Path("build/reports/dsh-036/evaluation")
     )
     parser.add_argument("--no-media", action="store_true")
     return parser.parse_args(argv)

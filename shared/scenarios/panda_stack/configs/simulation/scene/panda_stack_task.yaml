@@ -1,27 +1,4 @@
-# 中文参数说明（维护时优先阅读本段）
-# objects.source/target：任务使用的两个物体名称。
-# objects.*_half_extents_m：物体半尺寸，单位 m。
-# success.support_xy_margin_m：源块中心在目标块顶面内所需的边缘余量，单位 m。
-# success.support_height_tolerance_m：堆叠高度误差容差，单位 m。
-# success.max_tilt_rad：物体允许最大倾斜角，单位 rad。
-# success.max_linear_speed_m_s：成功稳定窗口内最大线速度，单位 m/s。
-# success.max_angular_speed_rad_s：最大角速度，单位 rad/s。
-# success.min_support_normal_force_n：源块与目标块之间最小竖直支撑力，单位 N。
-# success.min_table_normal_force_n：目标块与桌面之间最小竖直支撑力，单位 N。
-# success.min_vertical_normal_component：判定为支撑接触所需的最小法向 Z 分量。
-# success.min_gripper_opening_m：成功后夹爪必须达到的最小开度，单位 m。
-# success.min_tcp_clearance_m：成功后 TCP 必须离开源块中心的最小距离，单位 m。
-# success.stable_duration_s：所有成功条件连续满足的时间，单位 s。
-# success.max_task_sim_duration_s：任务仿真时间上限，单位 s。
-# success.max_task_wall_duration_s：任务墙钟时间上限，单位 s。
-# teacher.*：程序示教参数，包括运动学配置、动作块、超时、速度/加速度比例、阶段最小时长和测量门限。
-# capacity.*：单局动作块、参考、事件、教师请求和历史缓存容量上限。
-
-# DSH-033 independent stack-task and optional program-teacher configuration.
-# SI units: metres, radians, seconds, newton.  This file is the single source
-# for success thresholds, teacher timing and bounded episode capacity.  The
-# 4 cm source / 6 cm target half extents are cross-checked against
-# panda_stack.yaml; they are not re-read from a live object.
+# 堆叠成功判定与程序示教阶段参数。
 schema_version: 1
 
 objects:

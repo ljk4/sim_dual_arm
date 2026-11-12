@@ -28,10 +28,10 @@ def _project(tmp_path):
             "min_free_bytes": 0,
         },
         "paths": {
-            "attempts_root": ".build/campaign",
-            "ledger": ".build/campaign/attempts.jsonl",
-            "lock": ".build/campaign/.lock",
-            "run_lock": ".build/campaign/.run.lock",
+            "attempts_root": "build/campaign",
+            "ledger": "build/campaign/attempts.jsonl",
+            "lock": "build/campaign/.lock",
+            "run_lock": "build/campaign/.run.lock",
             "required_paths": [],
             "sdk_marker": "",
         },
@@ -73,7 +73,7 @@ def test_campaign_reserves_sequential_seeds_and_counts_failures(tmp_path):
     assert _run(root, "two") == 0
     records = [
         json.loads(line)
-        for line in (root / ".build/campaign/attempts.jsonl").read_text().splitlines()
+        for line in (root / "build/campaign/attempts.jsonl").read_text().splitlines()
     ]
     seeds = [item["seed"] for item in records if item["event"] == "RESERVED"]
     assert seeds == [1000, 1001]
@@ -89,7 +89,7 @@ def test_campaign_status_exposes_formal_target(tmp_path, capsys):
 
 def test_reserved_without_finish_still_consumes_budget(tmp_path):
     root = _project(tmp_path)
-    ledger = root / ".build/campaign/attempts.jsonl"
+    ledger = root / "build/campaign/attempts.jsonl"
     ledger.parent.mkdir(parents=True)
     ledger.write_text(
         json.dumps(
@@ -141,7 +141,7 @@ def test_label_replay_consumes_a_pilot_attempt_and_needs_used_seed(tmp_path):
     )
     records = [
         json.loads(line)
-        for line in (root / ".build/campaign/attempts.jsonl").read_text().splitlines()
+        for line in (root / "build/campaign/attempts.jsonl").read_text().splitlines()
     ]
     reserved = [item for item in records if item["event"] == "RESERVED"]
     assert [item["kind"] for item in reserved] == ["rollout", "label_replay"]
@@ -177,7 +177,7 @@ def test_formal_is_teacher_only_and_test_is_act_only(tmp_path):
 
 def test_formal_stops_after_fifty_qualified(tmp_path):
     root = _project(tmp_path)
-    ledger = root / ".build/campaign/attempts.jsonl"
+    ledger = root / "build/campaign/attempts.jsonl"
     ledger.parent.mkdir(parents=True)
     lines = []
     for index in range(50):
@@ -233,7 +233,7 @@ def test_formal_stops_after_fifty_qualified(tmp_path):
 
 def test_stale_run_lock_is_recovered_without_resetting_reserved_attempt(tmp_path):
     root = _project(tmp_path)
-    lock = root / ".build/campaign/.run.lock"
+    lock = root / "build/campaign/.run.lock"
     lock.parent.mkdir(parents=True)
     lock.write_text("99999999", encoding="utf-8")
     assert _run(root, "recovered") == 0

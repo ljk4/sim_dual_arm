@@ -147,15 +147,18 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("check", "build"))
     parser.add_argument("--project-root", type=Path, default=ROOT)
-    parser.add_argument("--sdk-root", type=Path, default=Path("/opt/policy-sdk"))
+    parser.add_argument(
+        "--sdk-root", type=Path, help="default: <project-root>/build/generated/policy-sdk"
+    )
     arguments = parser.parse_args()
+    sdk_root = arguments.sdk_root or arguments.project_root / "build/generated/policy-sdk"
     try:
         if arguments.command == "check":
             print(
-                json.dumps(verify_sdk(arguments.project_root, arguments.sdk_root), sort_keys=True)
+                json.dumps(verify_sdk(arguments.project_root, sdk_root), sort_keys=True)
             )
         else:
-            build_sdk(arguments.project_root, arguments.sdk_root)
+            build_sdk(arguments.project_root, sdk_root)
     except (SDKError, OSError, ValueError, subprocess.CalledProcessError) as error:
         print(f"Policy SDK: {error}", file=sys.stderr)
         return 1

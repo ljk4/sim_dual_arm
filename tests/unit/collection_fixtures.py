@@ -58,7 +58,7 @@ def campaign_document(repo: Path, recipe_paths: list[Path]) -> dict[str, Any]:
             "lock": "var/campaigns/synthetic/.ledger.lock",
             "run_lock": "var/campaigns/synthetic/.run.lock",
             "required_paths": [str(path.relative_to(repo)) for path in recipe_paths],
-            "sdk_marker": ".build/ros-dev/contracts.json",
+            "sdk_marker": "build/ros-dev/contracts.json",
         },
         "launch": {"command": [], "timeout_s": 10.0},
         "quality": {"sidecar": "quality.json"},
@@ -127,8 +127,8 @@ def build_collection_tree(tmp_path: Path) -> CollectionTree:
     ros = shared / "common/interfaces/ros"
     (ros / "robot_api_msgs/srv").mkdir(parents=True, exist_ok=True)
     (ros / "sim_api_msgs/srv").mkdir(parents=True, exist_ok=True)
-    (repo / ".build/ros-dev").mkdir(parents=True, exist_ok=True)
-    (repo / ".build/ros-dev/contracts.json").write_text("{}\n", encoding="utf-8")
+    (repo / "build/ros-dev").mkdir(parents=True, exist_ok=True)
+    (repo / "build/ros-dev/contracts.json").write_text("{}\n", encoding="utf-8")
     return CollectionTree(
         repo, shared, scenario, campaign_recipe, runtime_recipe, backend_recipe, campaign
     )

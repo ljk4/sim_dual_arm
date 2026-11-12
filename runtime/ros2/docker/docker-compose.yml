@@ -1,15 +1,4 @@
-# 中文参数说明（维护时优先阅读本段）
-# name：Compose 项目名；三端共用，保证 ROS 网络互通。
-# services.runtime.image/build：运行端镜像和构建上下文。
-# user：容器内 UID/GID，必须与宿主写权限匹配。
-# working_dir：容器默认工作目录。
-# init：启用 PID 1 init，正确处理信号。
-# restart：不自动重启。
-# stop_grace_period：停止容器前等待业务清理的时间。
-# env_file：运行端环境变量文件。
-# volumes：工作区、公共 shared、数据、构建目录、ROS SDK 和 Policy SDK 挂载。
-# networks：接入 ros 和 learning 网络。
-# Run docker compose from this directory.
+# ROS 2 运行端：源码只读，构建与数据目录可写。
 name: sim-dual-arm
 
 services:
@@ -27,8 +16,8 @@ services:
       - ../../../:/workspace:ro
       - ../../../shared:/shared:ro
       - ../../../var:/workspace/var
-      - ../../../.build:/workspace/.build
-      - ../../../.build:/build
+      - ../../../build:/workspace/build
+      - ../../../build:/build
       - ../../../var:/data
     networks: [ros, learning]
 

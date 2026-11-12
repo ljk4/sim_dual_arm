@@ -137,4 +137,4 @@ learning/lerobot/scripts/run.sh train --scenario <scenario-id> --mode smoke
 方案专用能力只在确实需要时新增 `extensions/`，公共协议按实际消费者演进；模板不预建
 未来算法、机器人、驱动或后端的占位实现。
 
-目录导航：[方案目录](../) · [panda_stack 方案](../panda_stack/README.md) · [架构任务索引](../../../docs/architecture-tasks/README.md)
+目录导航：[方案目录](../) · [panda_stack 方案](../panda_stack/README.md) · [文档索引](../../../docs/README.md)

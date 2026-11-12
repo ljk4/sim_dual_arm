@@ -40,7 +40,7 @@ python3 shared/common/tools/scenario.py validate \
 
 ## 操作入口
 
-以下命令均在对应容器内执行；完整的容器启动、数据筛选与常见问题见[根 README](../../../README.md)。所有准备入口通过 `--scenario panda_stack` 读取本目录 `binding.yaml`，`--scenario` 与直接配置的 `--template`/`--config` 互斥。
+以下命令均在对应容器内执行；完整的容器启动、数据筛选与操作步骤见[根 README](../../../README.md)。所有准备入口通过 `--scenario panda_stack` 读取本目录 `binding.yaml`，`--scenario` 与直接配置的 `--template`/`--config` 互斥。
 
 ### SDK
 
@@ -79,7 +79,7 @@ learning/lerobot/scripts/run.sh bundle --scenario panda_stack --shared-root /sha
   --output /data/learning/bundles/stack-act
 ```
 
-binding 的 `recipes.dataset` 与 `recipes.training` 选择容器部署变体（`.container.yaml`）；直接配置模式仍可用 `--config` 指定项目相对变体。
+binding 与直接 `--config` 入口共用 `act_dataset.yaml`、`act_training.yaml`。源文件和产物路径按项目根解析，构建缓存位于 `build/`，数据、训练预算与模型位于 `var/`；容器挂载使这些项目相对路径可写，无需维护第二份容器配置。
 
 ### 模型准备
 
@@ -120,8 +120,7 @@ runtime/ros2/scripts/run.sh interactive \
 
 ## 已知边界
 
-- `backend_stack_inference.yaml` 是直接配置模式的推理变体；binding 的 `simulation_policy` 选择 `backend_stack_act_chunked.yaml`。
-- binding 的 `dataset`/`training` 选择容器部署变体（`.container.yaml`）；项目相对变体保留给直接配置与测试。
+- 方案与直接配置入口共用 `backend_stack_act_chunked.yaml`，该配方的运行速度和容量以文件内设置为准。
 - `learning/lerobot/configs/fake_policy.yaml` 是测试夹具，不属于本方案。
 - 当前已实现并被入口接受的组合只有 MuJoCo 仿真后端、ROS 2 运行端与 LeRobot ACT；第二仿真后端、第二学习算法、第二机器人和真实驱动均未实现。
-- 诊断复现使用 [`panda_stack_diag`](../panda_stack_diag/README.md)，它复用本方案的档案与配方，只替换诊断台账、输出根、种子和预算，不是正式默认流程。
+- 小样本诊断可显式使用数据配置的 `diagnostic: true` 与非正式模型准入；输出、台账和模型应放在新的诊断目录，正式配方与默认准入不变。

@@ -24,6 +24,6 @@ scripts/run.sh scene --run-id scene-001
 scripts/run.sh kinematics --run-id kin-001
 ```
 
-测试产生的临时文件与缓存输出至 `.build/` 或 `var/`，不写入源码目录。
+测试产生的临时文件与缓存输出至 `build/` 或 `var/`，不写入源码目录。
 
 目录导航：[上级目录](../README.md)

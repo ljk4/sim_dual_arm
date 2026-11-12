@@ -313,7 +313,7 @@ def test_run_sh_does_not_inject_panda_defaults_for_scenario(tmp_path):
     arguments = _run_dispatcher(tmp_path, "convert")
     assert "--config" in arguments
     index = arguments.index("--config")
-    assert arguments[index + 1].endswith("act_dataset.container.yaml")
+    assert arguments[index + 1].endswith("act_dataset.yaml")
 
     arguments = _run_dispatcher(
         tmp_path,

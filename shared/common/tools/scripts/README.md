@@ -7,6 +7,6 @@
 - **`test.sh`**：三端共用的容器内 `pytest` 入口，固定设置 `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`，防止 ROS `launch_testing` 插件提前导入无关测试模块。
 - **`check_dockerfiles.py`**：静态检查三端 `Dockerfile`、`docker-compose.yml`、`docker/deployment.yaml` 与 `scripts/run.sh` 是否满足单入口、空闲启动、无业务源码 `COPY`、无内嵌脚本及只读源码/产物隔离规范。GPU、源挂载位置、网络、必需挂载与 `run.sh` 命令由各端 `docker/deployment.yaml` 声明，公共检查器只验证共同规则与声明一致性。
 
-所有构建产物均输出至 `.build/`，不污染源码树。
+所有构建产物均输出至 `build/`，不污染源码树。
 
 目录导航：[上级目录](../README.md)

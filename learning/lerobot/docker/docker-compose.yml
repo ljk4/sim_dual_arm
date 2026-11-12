@@ -1,12 +1,4 @@
-# 中文参数说明（维护时优先阅读本段）
-# name：Compose 项目名；与 runtime/simulation 共用。
-# services.learning.image/build：学习端镜像和构建上下文。
-# user/working_dir/init/restart/stop_grace_period：容器运行身份、目录和生命周期。
-# runtime/gpus/shm_size：GPU 运行时和共享内存大小。
-# env_file：学习端环境变量文件。
-# volumes：工作区、公共 shared、数据、构建目录、Policy SDK、第三方源码和缓存挂载。
-# networks：接入 learning 网络。
-# Run docker compose from this directory.
+# ACT 学习端：ROS-free，使用 GPU 与可写输出目录。
 name: sim-dual-arm
 
 services:
@@ -27,8 +19,8 @@ services:
       - ../../../:/workspace:ro
       - ../../../shared:/shared:ro
       - ../../../var:/workspace/var
-      - ../../../.build:/workspace/.build
-      - ../../../.build:/build
+      - ../../../build:/workspace/build
+      - ../../../build:/build
       - ../../../var:/data
       - ../../../third_party:/third_party:ro
     networks: [learning]

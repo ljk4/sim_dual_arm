@@ -45,7 +45,7 @@ Examples:
   scripts/run.sh backend --help
   scripts/run.sh environment --run-id env-001
   scripts/run.sh prepare --template \
-    /shared/scenarios/panda_stack/configs/simulation/backend/backend_stack_inference.yaml \
+    /shared/scenarios/panda_stack/configs/simulation/backend/backend_stack_act_chunked.yaml \
     --seed 42 --run-id prep-001 --output /data/prepared/prep-001
   scripts/run.sh prepare --scenario panda_stack --role policy \
     --bundle /data/learning/bundles/<verified-bundle> \

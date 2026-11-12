@@ -27,7 +27,7 @@ _SOURCE_FILES = ("pyproject.toml",)
 _EXCLUDED_PARTS = frozenset(
     {
         ".git",
-        ".build",
+        "build",
         "var",
         "__pycache__",
         ".pytest_cache",
@@ -126,7 +126,7 @@ def read_json_file(path: Path, *, limit: int = MAX_MANIFEST_BYTES) -> dict[str, 
 
 
 def source_manifest(root: Path) -> dict[str, Any]:
-    """Hash an explicit source/config/profile/deploy whitelist, never var/.build/.git."""
+    """Hash an explicit source/config/profile/deploy whitelist, never var/build/.git."""
     files: dict[str, str] = {}
     for directory in _SOURCE_DIRECTORIES:
         base = root / directory

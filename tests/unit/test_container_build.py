@@ -221,17 +221,17 @@ def test_compose_checker_rejects_task_startup_healthcheck_and_socket():
                 },
                 "volumes": [
                     {"type": "bind", "source": ".", "target": "/workspace", "read_only": True},
-                    {"type": "bind", "source": ".build", "target": "/build"},
+                    {"type": "bind", "source": "build", "target": "/build"},
                     {"type": "bind", "source": "var", "target": "/data"},
                     {
                         "type": "bind",
-                        "source": ".build/ros-dev",
+                        "source": "build/ros-dev",
                         "target": "/opt/ros-dev",
                         "read_only": True,
                     },
                     {
                         "type": "bind",
-                        "source": ".build/sdk",
+                        "source": "build/sdk",
                         "target": "/opt/policy-sdk",
                         "read_only": True,
                     },
@@ -270,17 +270,17 @@ def test_learning_compose_must_not_mount_ros_or_host_venv():
                 },
                 "volumes": [
                     {"type": "bind", "source": ".", "target": "/workspace", "read_only": True},
-                    {"type": "bind", "source": ".build", "target": "/build"},
+                    {"type": "bind", "source": "build", "target": "/build"},
                     {"type": "bind", "source": "var", "target": "/data"},
                     {
                         "type": "bind",
-                        "source": ".build/ros-dev",
+                        "source": "build/ros-dev",
                         "target": "/opt/ros-dev",
                         "read_only": True,
                     },
                     {
                         "type": "bind",
-                        "source": ".build/sdk",
+                        "source": "build/sdk",
                         "target": "/opt/policy-sdk",
                         "read_only": True,
                     },
@@ -329,7 +329,7 @@ def test_compose_checker_rejects_variable_binds_and_requires_nested_writable_mou
                         "target": "/workspace",
                         "read_only": True,
                     },
-                    {"type": "bind", "source": ".build", "target": "/build"},
+                    {"type": "bind", "source": "build", "target": "/build"},
                     {"type": "bind", "source": "var", "target": "/data"},
                     {
                         "type": "bind",
@@ -360,7 +360,7 @@ def test_compose_checker_rejects_variable_binds_and_requires_nested_writable_mou
     )
     assert "direct path" in joined
     assert "/workspace/var writable" in joined
-    assert "/workspace/.build writable" in joined
+    assert "/workspace/build writable" in joined
     assert "must not request GPUs" in joined
 
 
@@ -446,14 +446,14 @@ def test_compose_checker_requires_simulation_scoped_mounts_init_and_dds():
     )
     assert any("init: true" in item for item in issues)
     service["init"] = True
-    service["volumes"].remove("../../../.build/ros-dev:/opt/ros-dev:ro")
+    service["volumes"].remove("../../../build/ros-dev:/opt/ros-dev:ro")
     issues = check_dockerfiles.check_compose_document(
         document, name="test", requirements=declaration
     )
     assert any(
         "must mount /opt/ros-dev read-only as declared" in item for item in issues
     )
-    service["volumes"].append("../../../.build/ros-dev:/opt/ros-dev:ro")
+    service["volumes"].append("../../../build/ros-dev:/opt/ros-dev:ro")
     service["volumes"].append("../../../third_party:/third_party:ro")
     issues = check_dockerfiles.check_compose_document(
         document, name="test", requirements=declaration

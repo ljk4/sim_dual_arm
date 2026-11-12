@@ -1,33 +1,4 @@
-# 中文参数说明（维护时优先阅读本段）
-# physics.timestep：MuJoCo 物理步长，单位 s。
-# physics.gravity：世界坐标系重力加速度，单位 m/s^2。
-# physics.integrator：MuJoCo 积分器类型。
-# physics.object_friction：物体摩擦参数 [滑动, 扭转, 滚动]。
-# column.radius/height：中央立柱半径和高度，单位 m。
-# column.rgba：立柱颜色 RGBA。
-# mounts.*：两臂安装基座位置、朝向、支架尺寸、TCP 偏置和颜色。
-# table.center_xy：桌面中心 XY，单位 m。
-# table.size_xy：桌面长宽，单位 m。
-# table.top_z/thickness：桌面上表面高度和厚度，单位 m。
-# objects[].name：物体名称，必须与任务配置一致。
-# objects[].half_extents：长方体半尺寸，单位 m。
-# objects[].nominal_xy：物体名义中心 XY，单位 m。
-# objects[].mass：物体质量，单位 kg。
-# objects[].rgba：物体颜色。
-# objects[].randomization.xy_m：每轴位置随机幅度，单位 m。
-# objects[].randomization.yaw_deg：绕 Z 轴角度随机幅度，单位 deg。
-# cameras.*：相机名称；parent 为安装刚体。
-# cameras.*.position：相机局部位置，单位 m。
-# cameras.*.quaternion_wxyz：相机局部姿态四元数。
-# cameras.*.fovy：垂直视场角，单位 deg。
-# cameras.*.width/height：输出图像尺寸，单位像素。
-# reset.home_joint_positions：每臂 7 个 home 关节角，单位 rad。
-# reset.gripper_total_opening：夹爪总开度，单位 m。
-
-# Learning optics: right wrist FOV 68 deg. All mechanics match panda_stack.yaml.
-# Dual-Panda stack scene.  SI units: metres, radians, seconds, kilograms.
-# World axes: +X right, +Y toward the table, +Z up.
-# This file is the only hand-editable scene parameter source.
+# 学习场景；右腕相机视场角 68°，匹配 panda_stack_learning_v1 档案。
 physics:
   timestep: 0.002
   gravity: [0.0, 0.0, -9.81]

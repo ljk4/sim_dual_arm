@@ -46,7 +46,7 @@ from sdk_packages import (
 )
 
 ROOT = Path(__file__).resolve().parents[4]
-DEFAULT_BUILD_ROOT = Path(".build/ros-dev")
+DEFAULT_BUILD_ROOT = Path("build/ros-dev")
 OWNERSHIP_NAME = "workspace.json"
 OWNERSHIP_KIND = "sim-dual-arm-dev-ros-workspace"
 OWNERSHIP_SCHEMA_VERSION = 1

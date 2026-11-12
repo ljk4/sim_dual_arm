@@ -1,13 +1,4 @@
-# 中文参数说明（维护时优先阅读本段）
-# ik.*：逆运动学求解步长、迭代次数、位置/姿态容差、代价权重、阻尼和求解器。
-# clearance.*：最小净空、碰撞检测距离、关节采样步长、单段/总采样上限。
-# targets.*：抓取、抬升、放置、退开等关键位姿高度和放置净空。
-# visibility.rules：每个相机/物体/阶段的最小可见像素规则；required 会门禁，record_only 仅记录。
-# budgets.*：布局数量、PNG 证据总字节数和报告大小上限。
-
-# DSH-017 kinematic key-pose and clearance check parameters.
-# SI units.  Unknown keys, duplicate keys, booleans as numbers, NaN/Inf and
-# values above the explicit hard limits are rejected before MuJoCo/EGL runs.
+# IK、碰撞净空与关键路点检查预算。
 schema_version: 1
 
 ik:

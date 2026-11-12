@@ -1,12 +1,4 @@
-# 中文参数说明（维护时优先阅读本段）
-# name：Compose 项目名；与 runtime/learning 共用。
-# services.simulation.image/build：仿真镜像和构建上下文。
-# user/working_dir/init/restart/stop_grace_period：容器运行身份、目录和生命周期。
-# runtime/gpus：NVIDIA 容器运行时和 GPU 请求。
-# env_file：仿真环境变量文件。
-# volumes：本端源码、公共 shared、数据和 ROS SDK 挂载。
-# networks：接入 ros 网络。
-# Run docker compose from this directory.
+# MuJoCo 仿真端：源码与 SDK 只读，数据输出可写。
 name: sim-dual-arm
 
 services:
@@ -26,7 +18,7 @@ services:
       - ../:/app:ro
       - ../../../shared:/shared:ro
       - ../../../var:/data
-      - ../../../.build/ros-dev:/opt/ros-dev:ro
+      - ../../../build/ros-dev:/opt/ros-dev:ro
     networks: [ros]
 
 networks:

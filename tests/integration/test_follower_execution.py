@@ -64,7 +64,7 @@ LEASE_NS = 10_000_000_000
 FIRST_START_NS = 250_000_000
 FINAL_CHUNK_SEQ = 11
 TERMINAL = frozenset({"COMPLETED", "CANCELED", "FAILED"})
-REPORT_DIR = Path(os.environ.get("FOLLOWER_REPORT_DIR", ROOT / ".build/reports/dsh-030"))
+REPORT_DIR = Path(os.environ.get("FOLLOWER_REPORT_DIR", ROOT / "build/reports/dsh-030"))
 BASE_POSITIONS = load_profile(PROFILE_PATH, SCHEMAS).initial_positions
 
 

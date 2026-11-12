@@ -12,7 +12,6 @@ from robot_backend_sim.config.follower_config import load_follower_config
 ROOT = Path(__file__).resolve().parents[2]
 SCENARIO = ROOT / "shared/scenarios/panda_stack"
 FOLLOWER = SCENARIO / "profiles/control/panda_follower_v1.yaml"
-BACKEND = SCENARIO / "configs/simulation/backend/backend_stack_inference.yaml"
 BACKEND_CHUNKED = SCENARIO / "configs/simulation/backend/backend_stack_act_chunked.yaml"
 RUNTIME_CHUNKED = SCENARIO / "configs/runtime/policy_rollout.yaml"
 RUNTIME_TEACHER = SCENARIO / "configs/runtime/teacher_collect.yaml"
@@ -55,12 +54,10 @@ def test_single_follower_source_owns_target_count_and_deviation_budget():
     assert config.max_terminal_tail_duration_s == 3.0
 
 
-def test_backend_recipes_reference_the_single_follower_source():
-    inference = load_backend_config(BACKEND)
+def test_policy_backend_references_the_single_follower_source():
     chunked = load_backend_config(BACKEND_CHUNKED)
-    assert inference.follower_path == FOLLOWER.resolve()
     assert chunked.follower_path == FOLLOWER.resolve()
-    assert chunked.task_mode == inference.task_mode == "inference"
+    assert chunked.task_mode == "inference"
     assert chunked.realtime_speed == 0.5
     assert chunked.chunk_history_capacity == 512
 
