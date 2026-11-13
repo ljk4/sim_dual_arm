@@ -56,15 +56,32 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
+from robot_backend_sim.config.scenario_config import ROBOT_REFERENCE_FIELDS  # noqa: E402
 from robot_contracts.models import Target  # noqa: E402
 from robot_contracts.profiles import load_profile  # noqa: E402
 
-PREPARED = Path(os.environ.get("MARVIN_BACKEND_CONFIG", "/data/prepared/p02a-marvin/backend.yaml"))
-EVIDENCE_DIR = Path(os.environ.get("P02A_EVIDENCE_DIR", "/data/reports/p02a"))
 SCENARIO = ROOT / "shared/scenarios/marvin_handover"
+RECIPE = Path(
+    os.environ.get(
+        "MARVIN_BACKEND_CONFIG",
+        str(SCENARIO / "configs/simulation/backend/backend_marvin_control.yaml"),
+    )
+)
+EVIDENCE_DIR = Path(os.environ.get("P02A_EVIDENCE_DIR", "/data/marvin_handover/diagnostics/p02a"))
 PROFILE_PATH = SCENARIO / "profiles/robots/marvin_handover_v1/profile.json"
 SCHEMAS = ROOT / "shared/common/interfaces/schemas"
 PROFILE = load_profile(PROFILE_PATH, SCHEMAS)
+
+
+def _direct_document(path: Path) -> dict:
+    """Load the direct recipe and expand robot paths like ``backend --config``."""
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    robot = document["robot"]
+    for field in ROBOT_REFERENCE_FIELDS:
+        value = robot.get(field)
+        if isinstance(value, str):
+            robot[field] = str((path.parent / value).resolve())
+    return document
 
 TARGET_COUNT = 20
 POINT_NS = 50_000_000
@@ -147,7 +164,7 @@ class Stack:
         }
 
     def _config(self, tmp_path: Path) -> Path:
-        document = yaml.safe_load(PREPARED.read_text(encoding="utf-8"))
+        document = _direct_document(RECIPE)
         document["robot"]["namespace"] = self.namespace
         document["run"]["realtime_speed"] = 1.0
         path = tmp_path / "backend.yaml"
@@ -469,7 +486,7 @@ def _write_evidence(status: str, stack: Stack, payload: dict[str, object]) -> No
 
 
 def test_marvin_robot_api_execution(tmp_path):
-    assert PREPARED.is_file(), f"missing prepared backend config: {PREPARED}"
+    assert RECIPE.is_file(), f"missing direct backend recipe: {RECIPE}"
     stack = Stack(tmp_path)
     payload: dict[str, object] = {}
     try:
@@ -678,8 +695,8 @@ def test_marvin_robot_api_execution(tmp_path):
         raise
 
 
-def test_prepared_recipe_selects_marvin_without_task(tmp_path):
-    document = yaml.safe_load(PREPARED.read_text(encoding="utf-8"))
+def test_direct_recipe_selects_marvin_without_task(tmp_path):
+    document = _direct_document(RECIPE)
     assert "task" not in document["robot"]
     assert "task_mode" not in document["robot"]
     scene = yaml.safe_load(Path(document["robot"]["scene"]).read_text(encoding="utf-8"))

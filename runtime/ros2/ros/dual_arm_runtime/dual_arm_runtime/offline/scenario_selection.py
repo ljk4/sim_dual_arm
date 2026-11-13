@@ -462,9 +462,9 @@ def campaign_config_path(
     scenario: str | None,
     shared_root: Path | None,
     project_root: Path,
-    default: Path,
+    default: Path | None = None,
 ) -> Path:
-    """Resolve the campaign recipe for export and campaign-only commands."""
+    """Resolve the campaign recipe for export, evaluation and campaign commands."""
     if scenario is not None:
         if campaign_config is not None:
             raise CampaignError("--scenario cannot be combined with --campaign-config")
@@ -473,6 +473,8 @@ def campaign_config_path(
         )
         return Path(selection["recipes"]["campaign"]["path"])
     if campaign_config is None:
+        if default is None:
+            raise CampaignError("a campaign recipe is required")
         campaign_config = default
     path = (
         campaign_config

@@ -9,10 +9,7 @@ source "${PROJECT_SETUP:-${SHARED_ROOT:-$SCRIPT_ROOT/shared}/common/tools/docker
 ROOT="${PROJECT_ROOT:-$SCRIPT_ROOT}"
 DATA_ROOT="${DATA_ROOT:-/data}"
 POLICY_SDK="${POLICY_SDK_ROOT:-/build/generated/policy-sdk}"
-POLICY_CONFIG="${POLICY_SERVICE_CONFIG:-${ACT_POLICY_CONFIG:-$ROOT/shared/scenarios/panda_stack/configs/learning/policy_temporal.yaml}}"
-ACT_LOG_DIRECTORY="${ACT_LOG_DIRECTORY:-$DATA_ROOT/logs/act-policy}"
-DATASET_CONFIG="${ACT_DATASET_CONFIG:-$ROOT/shared/scenarios/panda_stack/configs/learning/act_dataset.yaml}"
-TRAINING_CONFIG="${ACT_TRAINING_CONFIG:-$ROOT/shared/scenarios/panda_stack/configs/learning/act_training.yaml}"
+ACT_LOG_DIRECTORY="${ACT_LOG_DIRECTORY:-}"
 
 has_help=false
 for argument in "$@"; do
@@ -21,18 +18,19 @@ for argument in "$@"; do
   fi
 done
 
-# A scenario selection must not receive this script's Panda default config.
-# An explicit --config also wins over the script default.
-has_argument() {
-  local option="$1"
-  shift
-  local argument
+scenario_segment() {
+  local previous="" argument
   for argument in "$@"; do
-    if [[ "$argument" == "$option" || "$argument" == "$option="* ]]; then
+    if [[ "$previous" == "--scenario" ]]; then
+      printf '%s\n' "$argument"
       return 0
     fi
+    case "$argument" in
+      --scenario=*) printf '%s\n' "${argument#*=}"; return 0 ;;
+    esac
+    previous="$argument"
   done
-  return 1
+  printf '_direct\n'
 }
 
 check_policy_sdk() {
@@ -49,7 +47,6 @@ usage() {
 usage: learning/lerobot/scripts/run.sh <command> [arguments...]
 
 commands:
-  prepare-policy  verify an ACT bundle and emit Policy binding + service config
   convert         convert accepted exports to a 45/5 LeRobot dataset
   validate        verify dataset split, hashes and source files (verify-data)
   filter          write an auditable static-anchor sampling mask
@@ -63,23 +60,19 @@ commands:
 
 Examples:
   learning/lerobot/scripts/run.sh --help
-  learning/lerobot/scripts/run.sh validate
+  learning/lerobot/scripts/run.sh validate --scenario panda_stack
   learning/lerobot/scripts/run.sh train --scenario panda_stack --mode smoke
   learning/lerobot/scripts/run.sh convert --scenario panda_stack
-  learning/lerobot/scripts/run.sh prepare-policy --scenario panda_stack \
-    --bundle /data/learning/bundles/stack-act --run-id run-30000 \
-    --output /data/prepared/run-30000/policy
   learning/lerobot/scripts/run.sh policy --scenario panda_stack \
-    --bundle-dir /data/learning/bundles/stack-act
-  learning/lerobot/scripts/run.sh prepare-policy --bundle \
-    /data/learning/bundles/stack-act --run-id run-30000 \
-    --output /data/prepared/run-30000/policy
+    --bundle /data/panda_stack/models/bundles/stack-act
   learning/lerobot/scripts/run.sh policy --config \
-    /data/prepared/run-30000/policy/policy.yaml --log-directory /data/logs/run-30000
+    /shared/scenarios/panda_stack/configs/learning/policy_temporal.yaml \
+    --bundle-dir /data/panda_stack/models/bundles/stack-act
 
---scenario selects recipes through <shared-root>/scenarios/<id>/binding.yaml;
-it is mutually exclusive with --config/--template and never receives this
-script's Panda default config.  Direct configuration mode is unchanged.
+Every recipe command requires exactly one of --scenario or --config; there is
+no implicit panda_stack default.  Policy service logs default to
+/data/<scenario-id>/logs/policy-service (`_direct` without a scenario).
+--set dot.path=value overrides existing keys.
 EOF
 }
 
@@ -91,63 +84,35 @@ case "$command" in
   ""|-h|--help|help)
     usage
     ;;
-  prepare-policy)
-    exec python3 "$ROOT/learning/lerobot/scripts/prepare_policy.py" "$@"
-    ;;
   convert)
-    if has_argument --scenario "$@" || has_argument --config "$@"; then
-      exec python3 -m dual_arm_learning.cli --project-root "$ROOT" convert \
-        --progress "$@"
-    fi
-    exec python3 -m dual_arm_learning.cli --project-root "$ROOT" convert \
-      --config "$DATASET_CONFIG" --progress "$@"
+    exec python3 -m dual_arm_learning.cli --project-root "$ROOT" convert --progress "$@"
     ;;
   validate)
-    if has_argument --scenario "$@" || has_argument --config "$@"; then
-      exec python3 -m dual_arm_learning.cli --project-root "$ROOT" verify-data "$@"
-    fi
-    exec python3 -m dual_arm_learning.cli --project-root "$ROOT" verify-data \
-      --config "$TRAINING_CONFIG" "$@"
+    exec python3 -m dual_arm_learning.cli --project-root "$ROOT" verify-data "$@"
     ;;
   filter)
     exec python3 -m dual_arm_learning.cli --project-root "$ROOT" filter-anchors "$@"
     ;;
   train)
-    if has_argument --scenario "$@" || has_argument --config "$@"; then
-      exec python3 -m dual_arm_learning.cli --project-root "$ROOT" train \
-        --progress "$@"
-    fi
-    exec python3 -m dual_arm_learning.cli --project-root "$ROOT" train \
-      --config "$TRAINING_CONFIG" --progress "$@"
+    exec python3 -m dual_arm_learning.cli --project-root "$ROOT" train --progress "$@"
     ;;
   bundle)
-    if has_argument --scenario "$@" || has_argument --config "$@"; then
-      exec python3 -m dual_arm_learning.cli --project-root "$ROOT" bundle "$@"
-    fi
-    exec python3 -m dual_arm_learning.cli --project-root "$ROOT" bundle \
-      --config "$TRAINING_CONFIG" "$@"
+    exec python3 -m dual_arm_learning.cli --project-root "$ROOT" bundle "$@"
     ;;
   verify-bundle)
     exec python3 -m dual_arm_learning.cli --project-root "$ROOT" verify-bundle "$@"
     ;;
   budget)
-    if has_argument --scenario "$@" || has_argument --config "$@"; then
-      exec python3 -m dual_arm_learning.cli --project-root "$ROOT" budget-status "$@"
-    fi
-    exec python3 -m dual_arm_learning.cli --project-root "$ROOT" budget-status \
-      --config "$TRAINING_CONFIG" "$@"
+    exec python3 -m dual_arm_learning.cli --project-root "$ROOT" budget-status "$@"
     ;;
   policy)
     check_policy_sdk
-    if has_argument --scenario "$@" || has_argument --config "$@"; then
-      exec python3 -m dual_arm_learning.policy_service_cli \
-        --log-directory "$ACT_LOG_DIRECTORY" \
-        --run-id "${ACT_RUN_ID:-policy-$(date -u +%Y%m%dT%H%M%SZ)-$$}" \
-        "$@"
+    log_directory="$ACT_LOG_DIRECTORY"
+    if [[ -z "$log_directory" ]]; then
+      log_directory="$DATA_ROOT/$(scenario_segment "$@")/logs/policy-service"
     fi
     exec python3 -m dual_arm_learning.policy_service_cli \
-      --config "$POLICY_CONFIG" \
-      --log-directory "$ACT_LOG_DIRECTORY" \
+      --log-directory "$log_directory" \
       --run-id "${ACT_RUN_ID:-policy-$(date -u +%Y%m%dT%H%M%SZ)-$$}" \
       "$@"
     ;;

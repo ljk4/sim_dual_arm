@@ -28,7 +28,7 @@ docker compose up -d
 docker compose exec simulation bash
 ```
 
-在容器内运行环境、三相机视野与运动学净空检查（无需预先构建 ROS SDK，检查报告写入 `/data/reports/sim-check/<run-id>/`）：
+在容器内运行环境、三相机视野与运动学净空检查（无需预先构建 ROS SDK，检查报告按工具写入 `/data/<scenario-id>/diagnostics/<tool>/<run-id>/`，环境探针写入 `/data/_system/diagnostics/environment/<run-id>/`）：
 
 ```bash
 scripts/run.sh --help
@@ -45,24 +45,22 @@ scripts/run.sh kinematics --run-id kin-001
 
 启动 `backend` 前，须先在 `runtime` 容器中执行 `runtime/ros2/scripts/run.sh build-ros-sdk --scenario panda_stack --shared-root /shared` 生成 `/opt/ros-dev`。无方案选择的核心构建写入 `build/ros-core`，不会覆盖该完整 SDK。
 
-在 `simulation` 容器内准备后端配置并前台启动服务：
+在 `simulation` 容器内直接以方案启动后端；`--scenario` 在内存中解析配方，并把本次实际生效的快照写到 `/data/<scenario-id>/logs/backend/<run-id>/backend.yaml`，日志写到同目录 `log/`：
 
 ```bash
-scripts/run.sh prepare \
-  --scenario panda_stack --role policy \
-  --bundle /data/learning/bundles/<verified-bundle> \
-  --seed 20001 \
-  --run-id sim-001 \
-  --output /data/prepared/sim-001
-
-# 直接配置模式仍可用：--template <recipe>
-
 scripts/run.sh backend \
-  --config /data/prepared/sim-001/backend.yaml \
+  --scenario panda_stack --role policy \
+  --bundle /data/panda_stack/models/bundles/<verified-bundle> \
+  --seed 20001 \
+  --run-id sim-001
+
+# 直接配置模式仍可用：--config <recipe>
+scripts/run.sh backend \
+  --config /shared/scenarios/panda_stack/configs/simulation/backend/backend_stack_teacher.yaml \
   --run-id sim-001
 ```
 
-按 `Ctrl-C` 可安全停止后端并完成日志落盘。
+三端都不再生成 `/data/prepared/` 中间目录；`--scenario` 与 `--config` 互斥，重复 `--set dot.path=value` 可覆盖配方中已存在的键。按 `Ctrl-C` 可安全停止后端并完成日志落盘。
 
 ---
 
@@ -78,7 +76,7 @@ docker compose run --rm \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   -v "${XAUTHORITY:-/dev/null}:/tmp/.Xauthority:ro" \
   simulation scripts/run.sh viewer \
-  --config /data/prepared/sim-001/backend.yaml
+  --scenario panda_stack --role policy
 ```
 
 `viewer` 仅订阅后端的完整物理状态快照进行渲染，不推进物理步，也不介入控制回路。

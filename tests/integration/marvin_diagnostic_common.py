@@ -19,11 +19,9 @@ import time
 import uuid
 from pathlib import Path
 
-import pytest
 import yaml
 
 try:
-    import rclpy
     from rclpy.executors import SingleThreadedExecutor
     from rclpy.node import Node
     from robot_api_msgs.msg import BackendInfo, ExecutionFeedback, RobotState
@@ -64,13 +62,19 @@ if str(SIM_SRC) not in sys.path:
 
 from robot_backend_sim.config.follower_config import load_follower_config  # noqa: E402
 from robot_backend_sim.config.marvin_scene_config import load_marvin_scene_config  # noqa: E402
+from robot_backend_sim.config.scenario_config import ROBOT_REFERENCE_FIELDS  # noqa: E402
 from robot_backend_sim.physics.marvin.scene import build_marvin_scene  # noqa: E402
 from robot_backend_sim.tasks.handover.config import load_handover_plan_config  # noqa: E402
-from robot_backend_sim.tasks.handover.plan import plan_document, plan_handover  # noqa: E402
+from robot_backend_sim.tasks.handover.plan import plan_handover  # noqa: E402
 
-PREPARED = Path(os.environ.get("P02B_BACKEND_CONFIG", "/data/prepared/p02b-marvin/backend.yaml"))
-EVIDENCE_DIR = Path(os.environ.get("P02B_EVIDENCE_DIR", "/data/reports/p02b"))
 SCENARIO = ROOT / "shared/scenarios/marvin_handover"
+RECIPE = Path(
+    os.environ.get(
+        "P02B_BACKEND_CONFIG",
+        str(SCENARIO / "configs/simulation/backend/backend_marvin_control.yaml"),
+    )
+)
+EVIDENCE_DIR = Path(os.environ.get("P02B_EVIDENCE_DIR", "/data/marvin_handover/diagnostics/p02b"))
 SCENE_PATH = SCENARIO / "configs/simulation/scene/marvin_handover.yaml"
 PLANNING_PATH = SCENARIO / "configs/simulation/planning/handover_paths.yaml"
 PROFILE_PATH = SCENARIO / "profiles/robots/marvin_handover_v1/profile.json"
@@ -78,6 +82,17 @@ SCHEMAS = ROOT / "shared/common/interfaces/schemas"
 PROFILE = load_profile(PROFILE_PATH, SCHEMAS)
 _PLANNING = load_handover_plan_config(PLANNING_PATH)
 _FOLLOWER = load_follower_config(SCENARIO / "profiles/control/marvin_follower_v1.yaml")
+
+
+def _direct_document(path: Path) -> dict:
+    """Load the direct recipe and expand robot paths like ``backend --config``."""
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    robot = document["robot"]
+    for field in ROBOT_REFERENCE_FIELDS:
+        value = robot.get(field)
+        if isinstance(value, str):
+            robot[field] = str((path.parent / value).resolve())
+    return document
 
 # The execution window is the follower's fixed target count at the planning
 # recipe's period; the recipe fields are the single source for both values.
@@ -191,7 +206,7 @@ class Stack:
         }
 
     def _config(self, tmp_path: Path) -> Path:
-        document = yaml.safe_load(PREPARED.read_text(encoding="utf-8"))
+        document = _direct_document(RECIPE)
         document["robot"]["namespace"] = self.namespace
         document["run"]["realtime_speed"] = 1.0
         path = tmp_path / "backend.yaml"

@@ -9,7 +9,9 @@ from pathlib import Path
 from typing import Any
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
-_AXIS_NAME = re.compile(r"\b(?:left|right)_(?:joint[1-7]|gripper_width)\b")
+# Fallback when a recording carries no profile snapshot: any profile-like axis
+# token, not only the current scenario's left/right joint names.
+_AXIS_NAME = re.compile(r"\b[A-Za-z][A-Za-z0-9]*_(?:joint\d+|gripper\w*)\b")
 _NUMBER = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?")
 _BACKEND_REJECT_EVENTS = frozenset(
     {"backend.submit.rejected", "backend.submit_follower.rejected"}
@@ -126,15 +128,45 @@ def _controller_rejections(attempt: Path) -> list[dict[str, Any]]:
     return result
 
 
-def _backend_failure_detail(rejections: list[dict[str, Any]]) -> str:
+def _axis_names(manifest: dict[str, Any] | None) -> tuple[str, ...]:
+    """Read the recorded robot's joint names, when the snapshot carries them."""
+    if not isinstance(manifest, dict):
+        return ()
+    configuration = manifest.get("configuration")
+    if not isinstance(configuration, dict):
+        return ()
+    profile = configuration.get("profile")
+    if not isinstance(profile, dict):
+        return ()
+    joints = profile.get("joints")
+    if not isinstance(joints, list):
+        return ()
+    return tuple(
+        str(joint["name"])
+        for joint in joints
+        if isinstance(joint, dict) and joint.get("name")
+    )
+
+
+def _backend_failure_detail(
+    rejections: list[dict[str, Any]], axis_names: tuple[str, ...] = ()
+) -> str:
     """Prefer an axis/numeric backend reason over the generic submit error."""
     if not rejections:
         return ""
 
+    def mentions_axis(detail: str) -> bool:
+        if axis_names:
+            return any(
+                re.search(rf"\b{re.escape(name)}\b", detail) is not None
+                for name in axis_names
+            )
+        return _AXIS_NAME.search(detail) is not None
+
     def score(record: dict[str, Any]) -> int:
         detail = f"{record.get('reason', '')} {record.get('message', '')}"
         value = 0
-        if _AXIS_NAME.search(detail):
+        if mentions_axis(detail):
             value += 4
         if "axis" in detail.lower():
             value += 2
@@ -203,13 +235,9 @@ def _prediction_metrics(directory: Path) -> dict[str, Any]:
     }
 
 
-def _find_export(attempt: Path, launch: dict[str, Any] | None) -> Path | None:
-    if isinstance(launch, dict):
-        value = launch.get("export_directory")
-        if isinstance(value, str) and Path(value).is_dir():
-            return Path(value)
-    candidates = sorted(attempt.glob("stack/*/export"))
-    return candidates[0] if len(candidates) == 1 else None
+def _find_export(attempt: Path) -> Path | None:
+    export = attempt / "export"
+    return export if (export / "labels.json").is_file() else None
 
 
 def _labels(export: Path | None) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
@@ -260,7 +288,6 @@ def _base_metric(
         "command_blocks": 0,
         "raw_prediction_count": 0,
         "prediction_count": 0,
-        "prediction_launch_count": 0,
         "prediction_p50_ms": None,
         "prediction_p95_ms": None,
         "prediction_max_ms": None,
@@ -287,58 +314,34 @@ def _apply_terminal(
     metric["terminal_event"] = str(terminal.get("event", ""))
     metric["wall_seconds"] = terminal.get("wall_s")
     metric["failure_detail"] = str(terminal.get("failure", ""))
+    metric["launch_ok"] = bool(
+        terminal.get("event") == "FINISHED" and terminal.get("exit_code", 0) == 0
+    )
     terminal_mode = terminal.get("mode")
     if terminal_mode is not None and str(terminal_mode) != str(record.get("mode", "")):
         metric["issues"].append("TERMINAL_MODE_MISMATCH")
 
 
-def _apply_launch(metric: dict[str, Any], launch: dict[str, Any] | None) -> dict[str, Any]:
-    launch_act: dict[str, Any] = {}
-    if launch is None:
-        return launch_act
-    value = launch.get("act")
-    if isinstance(value, dict):
-        launch_act = value
-    metric["launch_policy_mode"] = str(launch.get("policy_mode", ""))
-    metric["launch_exit_code"] = launch.get("exit_code")
-    metric["launcher_exit_code"] = launch.get("launcher_exit_code")
-    metric["launch_ok"] = bool(
-        launch.get("exit_code") == 0 and launch.get("launcher_exit_code") == 0
-    )
-    metric["bundle_digest"] = digest(launch_act.get("bundle_digest")) or None
-    metric["processor_digest"] = digest(launch_act.get("processor_digest")) or None
-    metric["profile_semantic_sha256"] = (
-        digest(launch_act.get("profile_semantic_sha256")) or None
-    )
-    metric["observation_schema_hash"] = digest(launch_act.get("observation_schema_hash")) or None
-    metric["action_schema_hash"] = digest(launch_act.get("action_schema_hash")) or None
-    metric["checkpoint_step"] = launch_act.get("checkpoint_step")
-    metrics = launch.get("act_metrics")
-    if isinstance(metrics, dict):
-        latency = metrics.get("latency_ms")
-        if isinstance(latency, dict):
-            metric["prediction_p50_ms"] = latency.get("p50")
-            metric["prediction_p95_ms"] = latency.get("p95")
-            metric["prediction_max_ms"] = latency.get("max")
-        value = metrics.get("predictions")
-        if isinstance(value, int) and value >= 0:
-            metric["prediction_launch_count"] = value
-        metric["vram_peak_mib"] = metrics.get("vram_peak_mib")
-    return launch_act
-
-
 def _apply_policy_log(metric: dict[str, Any], attempt: Path) -> dict[str, Any]:
     policy_log_metrics: dict[str, Any] = {}
-    for candidate in sorted((attempt / "stack").glob("*/act-policy-log")):
+    candidate = attempt / "act-policy-log"
+    if candidate.is_dir():
         policy_log_metrics = _prediction_metrics(candidate)
-        if (
-            policy_log_metrics["predictions"]
-            or policy_log_metrics["rejected"]
-            or policy_log_metrics["ready_fields"]
-        ):
-            break
     if not policy_log_metrics:
         return policy_log_metrics
+    ready_fields = policy_log_metrics.get("ready_fields")
+    if not isinstance(ready_fields, dict):
+        ready_fields = {}
+    metric["bundle_digest"] = digest(ready_fields.get("bundle_digest")) or None
+    metric["processor_digest"] = digest(ready_fields.get("processor_digest")) or None
+    metric["profile_semantic_sha256"] = (
+        digest(ready_fields.get("profile_semantic_sha256")) or None
+    )
+    metric["observation_schema_hash"] = (
+        digest(ready_fields.get("observation_schema_hash")) or None
+    )
+    metric["action_schema_hash"] = digest(ready_fields.get("action_schema_hash")) or None
+    metric["checkpoint_step"] = ready_fields.get("checkpoint_step")
     metric["prediction_count"] = int(policy_log_metrics.get("predictions", 0) or 0)
     metric["prediction_p50_ms"] = policy_log_metrics.get("p50_ms")
     metric["prediction_p95_ms"] = policy_log_metrics.get("p95_ms")
@@ -346,11 +349,6 @@ def _apply_policy_log(metric: dict[str, Any], attempt: Path) -> dict[str, Any]:
     metric["vram_peak_mib"] = policy_log_metrics.get("vram_peak_mib")
     metric["reject_reasons"] = policy_log_metrics.get("reject_reasons", [])
     metric["ready"] = policy_log_metrics.get("ready", False)
-    if (
-        metric["prediction_launch_count"]
-        and metric["prediction_count"] != metric["prediction_launch_count"]
-    ):
-        metric["issues"].append("PREDICTION_COUNT_MISMATCH")
     return policy_log_metrics
 
 
@@ -510,69 +508,40 @@ def _apply_label_times(
 
 
 def _apply_act_evidence(
-    metric: dict[str, Any], launch_act: dict[str, Any], policy_log_metrics: dict[str, Any]
+    metric: dict[str, Any], policy_log_metrics: dict[str, Any]
 ) -> None:
+    ready_fields = policy_log_metrics.get("ready_fields") if policy_log_metrics else {}
+    if not isinstance(ready_fields, dict):
+        ready_fields = {}
+    finished_fields = policy_log_metrics.get("finished_fields") if policy_log_metrics else []
+    if not isinstance(finished_fields, list):
+        finished_fields = []
     evidence = {
         "record_mode_act": metric["record_mode"] == "act",
         "record_kind_rollout": metric["record_kind"] == "rollout",
-        "launch_policy_mode_act": metric.get("launch_policy_mode") == "act",
         "launch_action_source_policy": metric.get("action_source") == "policy",
-        "launch_act_summary": bool(launch_act),
+        "policy_ready": bool(metric.get("ready")),
         "bundle_digest": bool(metric.get("bundle_digest")),
         "processor_digest": bool(metric.get("processor_digest")),
         "profile_semantic_sha256": bool(metric.get("profile_semantic_sha256")),
         "observation_schema_hash": bool(metric.get("observation_schema_hash")),
         "action_schema_hash": bool(metric.get("action_schema_hash")),
-        "bundle_not_synthetic": launch_act.get("synthetic") is False,
-        "checkpoint_full": launch_act.get("checkpoint_mode") == "full",
-        "model_sha256": bool(digest(launch_act.get("model_sha256"))),
-        "policy_ready": bool(metric.get("ready")),
+        "bundle_not_synthetic": ready_fields.get("synthetic") is False,
+        "checkpoint_full": ready_fields.get("checkpoint_mode") == "full",
+        "model_sha256": bool(digest(ready_fields.get("model_sha256"))),
         "successful_predictions": metric["prediction_count"] > 0,
         "raw_predictions": metric["raw_prediction_count"] > 0,
         "applied_blocks": metric["command_blocks"] > 0,
         "started_time": metric["first_started_sim_time_ns"] is not None,
+        "prediction_chunks_60": bool(
+            finished_fields
+            and all(
+                fields.get("chunk_size") == 60
+                for fields in finished_fields
+                if isinstance(fields, dict)
+            )
+        ),
     }
-    ready_fields = policy_log_metrics.get("ready_fields") if policy_log_metrics else {}
-    if not isinstance(ready_fields, dict):
-        ready_fields = {}
-    evidence["log_bundle_digest_matches"] = bool(
-        metric.get("bundle_digest")
-        and digest(ready_fields.get("bundle_digest"))
-        and ready_fields.get("bundle_digest") == metric.get("bundle_digest")
-    )
-    evidence["log_processor_digest_matches"] = bool(
-        metric.get("processor_digest")
-        and digest(ready_fields.get("processor_digest"))
-        and ready_fields.get("processor_digest") == metric.get("processor_digest")
-    )
-    evidence["log_profile_matches"] = bool(
-        metric.get("profile_semantic_sha256")
-        and ready_fields.get("profile_semantic_sha256") == metric.get("profile_semantic_sha256")
-    )
-    evidence["log_model_sha_matches"] = bool(
-        digest(launch_act.get("model_sha256"))
-        and ready_fields.get("model_sha256") == launch_act.get("model_sha256")
-    )
-    evidence["log_synthetic_false"] = ready_fields.get("synthetic") is False
-    evidence["log_checkpoint_full"] = ready_fields.get("checkpoint_mode") == "full"
-    evidence["log_observation_schema_matches"] = bool(
-        metric.get("observation_schema_hash")
-        and ready_fields.get("observation_schema_hash") == metric.get("observation_schema_hash")
-    )
-    evidence["log_action_schema_matches"] = bool(
-        metric.get("action_schema_hash")
-        and ready_fields.get("action_schema_hash") == metric.get("action_schema_hash")
-    )
-    finished_fields = policy_log_metrics.get("finished_fields") if policy_log_metrics else []
-    evidence["prediction_chunks_60"] = bool(
-        isinstance(finished_fields, list)
-        and finished_fields
-        and all(
-            fields.get("chunk_size") == 60
-            for fields in finished_fields
-            if isinstance(fields, dict)
-        )
-    )
     metric["act_evidence"] = evidence
     metric["act_executed"] = bool(all(evidence.values()))
     metric["closed_loop"] = bool(metric["closed_loop"] and metric["act_executed"])
@@ -611,7 +580,9 @@ def _success_flags(metric: dict[str, Any]) -> None:
     )
 
 
-def _failure_flags(metric: dict[str, Any]) -> None:
+def _failure_flags(
+    metric: dict[str, Any], axis_names: tuple[str, ...] = ()
+) -> None:
     if not metric["act_executed"]:
         metric["failure_type"] = "ACT_EVIDENCE_INCOMPLETE"
     elif not metric["closed_loop"]:
@@ -628,7 +599,7 @@ def _failure_flags(metric: dict[str, Any]) -> None:
         metric["failure_type"] = "LAUNCH_FAILED"
     else:
         metric["failure_type"] = ""
-    backend_detail = _backend_failure_detail(metric["controller_rejections"])
+    backend_detail = _backend_failure_detail(metric["controller_rejections"], axis_names)
     if backend_detail and not metric["success"]:
         metric["failure_detail"] = backend_detail
     elif metric["runtime_reason"] and metric["runtime_outcome"] not in {"stopped", "completed"}:
@@ -663,27 +634,26 @@ def metric_for_seed(
         metric["failure_detail"] = str(attempt)
         return metric
     metric["controller_rejections"] = _controller_rejections(attempt)
-    launch = _json(attempt / "launch_result.json")
-    manifest = _json(attempt / "manifest.json")
-    task = _json(attempt / "task_result.json")
-    quality = _json(attempt / "quality.json")
-    export = _find_export(attempt, launch)
+    manifest = _json(attempt / "raw" / "manifest.json")
+    axis_names = _axis_names(manifest)
+    task = _json(attempt / "raw" / "task_result.json")
+    export = _find_export(attempt)
+    quality = _json(export / "quality.json") if export is not None else None
     labels_document, labels = _labels(export)
-    metric["manifest"] = str(attempt / "manifest.json") if manifest else ""
+    metric["manifest"] = str(attempt / "raw" / "manifest.json") if manifest else ""
     metric["export"] = str(export) if export else ""
     metric["recording_path"] = str(attempt)
     if terminal is not None:
         _apply_terminal(metric, record, terminal)
-    launch_act = _apply_launch(metric, launch)
     policy_log_metrics = _apply_policy_log(metric, attempt)
     _apply_manifest(metric, manifest)
     _apply_task(metric, task)
     _apply_quality(metric, quality)
     _apply_export(metric, export, labels_document, labels)
-    _apply_act_evidence(metric, launch_act, policy_log_metrics)
+    _apply_act_evidence(metric, policy_log_metrics)
     _apply_task_issues(metric)
     _success_flags(metric)
-    _failure_flags(metric)
+    _failure_flags(metric, axis_names)
     return metric
 
 

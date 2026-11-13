@@ -9,7 +9,6 @@ scene, starts ROS or executes a motion.
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 import time
@@ -17,9 +16,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from robot_contracts.profiles import load_profile
+
 from robot_backend_sim.config.marvin_scene_config import load_marvin_scene_config
 from robot_backend_sim.physics.marvin.scene import build_marvin_scene
-from robot_backend_sim.runtime.diagnostics import code_provenance, sha256_file, utc_now, write_json_atomic
+from robot_backend_sim.runtime.diagnostics import (
+    code_provenance,
+    sha256_file,
+    utc_now,
+    write_json_atomic,
+)
 from robot_backend_sim.tasks.handover.config import (
     HandoverPlanConfigError,
     load_handover_plan_config,
@@ -34,7 +39,9 @@ DEFAULT_SCENE_CONFIG = _SCENARIO / "configs/simulation/scene/marvin_handover.yam
 DEFAULT_PLANNING_CONFIG = _SCENARIO / "configs/simulation/planning/handover_paths.yaml"
 DEFAULT_PROFILE = _SCENARIO / "profiles/robots/marvin_handover_v1/profile.json"
 DEFAULT_SCHEMAS = _SHARED_ROOT / "common/interfaces/schemas"
-DEFAULT_REPORT_ROOT = Path(os.environ.get("DATA_ROOT", "/data")) / "reports/handover-paths"
+DEFAULT_REPORT_ROOT = (
+    Path(os.environ.get("DATA_ROOT", "/data")) / "marvin_handover/diagnostics/handover"
+)
 
 
 @dataclass(frozen=True, slots=True)

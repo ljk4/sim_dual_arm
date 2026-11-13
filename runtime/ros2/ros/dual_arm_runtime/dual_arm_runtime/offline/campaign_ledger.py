@@ -16,17 +16,12 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from robot_contracts.overrides import OverrideError, apply_overrides
 
 PURPOSES = {"pilot", "formal", "test", "evaluation"}
 MODES = {"teacher", "act"}
 KINDS = {"rollout", "label_replay"}
 TERMINAL_EVENTS = {"FINISHED", "FAILED", "INTERRUPTED"}
-_CAMPAIGN_RECIPE = (
-    "shared/scenarios/panda_stack/configs/runtime/experiments/stack_campaign.yaml"
-)
-_SCENE_TASK_RECIPE = (
-    "shared/scenarios/panda_stack/configs/simulation/scene/panda_stack_task.yaml"
-)
 
 
 class CampaignError(RuntimeError):
@@ -37,13 +32,18 @@ def now_ns() -> int:
     return time.time_ns()
 
 
-def load(path: Path) -> dict[str, Any]:
+def load(path: Path, overrides: tuple[str, ...] | list[str] = ()) -> dict[str, Any]:
     try:
         document = yaml.safe_load(path.read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError) as error:
         raise CampaignError(f"cannot read campaign config {path}: {error}") from error
     if not isinstance(document, dict) or document.get("schema_version") != 1:
         raise CampaignError("campaign config must be an object with schema_version 1")
+    if overrides:
+        try:
+            document = apply_overrides(document, list(overrides))
+        except OverrideError as error:
+            raise CampaignError(str(error)) from error
     return document
 
 
@@ -89,7 +89,12 @@ def tree_sha256(project_root: Path) -> str:
     return digest.hexdigest()
 
 
-def code_fingerprint(project_root: Path, config_path: Path) -> dict[str, str]:
+def code_fingerprint(project_root: Path, *config_paths: Path) -> dict[str, str]:
+    """Identify the working tree and the recipes this attempt actually uses.
+
+    Only the explicitly supplied campaign/runtime recipes are hashed; the
+    fingerprint carries no scenario-specific path.
+    """
     head = ""
     dirty = "unknown"
     try:
@@ -113,11 +118,7 @@ def code_fingerprint(project_root: Path, config_path: Path) -> dict[str, str]:
     except (OSError, subprocess.SubprocessError):
         pass
     files: dict[str, str] = {}
-    for name in (
-        config_path,
-        project_root / _CAMPAIGN_RECIPE,
-        project_root / _SCENE_TASK_RECIPE,
-    ):
+    for name in config_paths:
         try:
             files[str(name)] = hashlib.sha256(name.read_bytes()).hexdigest()
         except OSError:

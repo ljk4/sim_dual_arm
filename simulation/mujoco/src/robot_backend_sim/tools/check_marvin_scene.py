@@ -255,7 +255,6 @@ def _static_check(scene) -> dict[str, object]:
         mujoco.mj_step(model, data)
     if not np.all(np.isfinite(data.qpos)) or not np.all(np.isfinite(data.qvel)):
         raise CheckFailure("static_nonfinite", "resting step produced a non-finite state")
-    robot = scene.indices.robot
     drift: dict[str, float] = {}
     for side, _prefix in SIDES:
         for joint_index, _ in enumerate(home, start=1):
@@ -934,12 +933,10 @@ def run(arguments) -> int:
         "artifacts": None,
         "error": None,
     }
-    renderer = None
     try:
         config = load_marvin_scene_config(arguments.scene_config)
         scene = build_marvin_scene(config)
         semantics = read_urdf_semantics(config.urdf_path)
-        profile = load_profile(arguments.profile, arguments.schemas)
         model = scene.model
         robot = scene.indices.robot
         report["scene"] = {

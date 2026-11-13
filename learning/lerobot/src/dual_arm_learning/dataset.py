@@ -1,4 +1,4 @@
-"""ROS-free conversion from accepted stack exports to two LeRobot datasets.
+"""ROS-free conversion from accepted episode exports to two LeRobot datasets.
 
 The 034 export is the source of truth: JSON, PNG and the original teacher raw
 chunks.  This module never opens MCAP and never imports ``rclpy``.  It verifies
@@ -191,7 +191,9 @@ def convert(
     select = load_json_document(select_path)
     profile_doc, joint_names, camera_names = _profile_document(config)
     profile_hash = canonical_hash(profile_doc)
-    profile_id = str(profile_doc.get("profile_id", "panda_stack_learning_v1"))
+    profile_id = profile_doc.get("profile_id")
+    if not isinstance(profile_id, str) or not profile_id:
+        raise ExportError(f"{config.profile_path}: profile has no profile_id")
     parsed = _resolve_episodes(select, config, profile_hash, progress)
     output = _prepare_output(config, replace, synthetic)
     configure_local_caches(config.cache_root, data_root=config.output_root)

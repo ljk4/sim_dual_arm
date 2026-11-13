@@ -6,6 +6,6 @@
 - **`panda_follower_v1.yaml`**：受限跟随窗口点数（`target_count`，全仓唯一定义处）、目标-参考允许偏差预算与末端延伸上限。
 - **`panda_stream_v1.yaml`**：连续动作块流式超时与夹爪接触卸载过渡时限。
 
-仿真后端配置通过 `control` / `stream` / `follower` 字段引用上述文件；运行端配置通过 `control_constraints` / `follower_config` 字段引用。修改后须同时重新执行 `simulation` 与 `runtime` 的 `prepare` 命令。
+仿真后端配置通过 `control` / `stream` / `follower` 字段引用上述文件；运行端配置通过 `control_constraints` / `follower_config` 字段引用。修改后重新启动对应入口即可生效，无需重新生成准备目录。
 
 目录导航：[上级目录](../README.md)

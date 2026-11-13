@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -103,3 +104,37 @@ def sample_test_reference(monkeypatch):
         "applied_follower_sample",
         lambda reference, stamp, profile: reference.applied_sample_at(stamp, profile),
     )
+
+
+def test_write_documents_emits_three_json_files_and_folds_source_facts(tmp_path):
+    out = tmp_path / "export"
+    manifest = {
+        "episode_id": "episode",
+        "task": {"outcome": "succeeded", "reason": "TASK_SUCCEEDED"},
+        "runtime": {"outcome": "stopped", "reason": "TASK_SUCCEEDED"},
+        "recording": {"complete": True, "failure_reason": ""},
+    }
+    export_episode._write_documents(
+        out,
+        manifest,
+        SimpleNamespace(digest="a" * 64),
+        {"reset_seed": 7},
+        {"action_source": "teacher"},
+        [{"label_sim_time_ns": 50_000_000, "rgb": {}}],
+        [],
+        ("global", "left_wrist", "right_wrist"),
+        {"labels": 1},
+        {"qualified": True},
+    )
+    assert sorted(path.name for path in out.glob("*.json")) == [
+        "labels.json",
+        "quality.json",
+        "raw_predictions.json",
+    ]
+    labels = json.loads((out / "labels.json").read_text())
+    assert labels["camera_order"] == ["global", "left_wrist", "right_wrist"]
+    assert labels["action_source"] == "teacher"
+    assert labels["task"] == manifest["task"]
+    assert labels["runtime"] == manifest["runtime"]
+    assert labels["recording"] == manifest["recording"]
+    assert labels["summary"] == {"labels": 1}

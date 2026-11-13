@@ -27,12 +27,13 @@ def test_validate_export_accepts_034_shape_and_checks_png_pixels(config, tmp_pat
         value=0.01,
         start_ns=1_000_000_000,
     )
-    export = tmp_path / "attempt" / "stack" / "run-synthetic-ok" / "export"
-    rows, raw, frames, quality, summary = _validate_export(export, config, profile_hash(config))
+    export = tmp_path / "attempt" / "export"
+    rows, raw, quality = _validate_export(export, config, profile_hash(config))
     assert len(rows) == 2
     assert len(raw) == 1
     assert quality["qualified"] is True
-    assert summary["action_source"] == "teacher"
+    document = json.loads((export / "labels.json").read_text())
+    assert document["action_source"] == "teacher"
     assert rows[0]["label_sim_time_ns"] - rows[0]["observation_sim_time_ns"] == 50_000_000
 
 
@@ -46,7 +47,7 @@ def test_wrong_label_clock_png_hash_and_raw_times_are_rejected(config, tmp_path)
         value=0.02,
         start_ns=2_000_000_000,
     )
-    export = tmp_path / "attempt" / "stack" / "run-synthetic-bad" / "export"
+    export = tmp_path / "attempt" / "export"
 
     labels = json.loads((export / "labels.json").read_text())
     labels["labels"][1]["label_sim_time_ns"] += 1
@@ -91,22 +92,22 @@ def test_quality_true_but_failed_task_or_runtime_is_rejected(config, tmp_path):
         value=0.03,
         start_ns=3_000_000_000,
     )
-    export = tmp_path / "attempt" / "stack" / "run-synthetic-failed" / "export"
-    summary = json.loads((export / "summary.json").read_text())
-    summary["task"] = {"outcome": "failed", "reason": "TASK_FAILED"}
-    (export / "summary.json").write_text(json.dumps(summary))
+    export = tmp_path / "attempt" / "export"
+    labels = json.loads((export / "labels.json").read_text())
+    labels["task"] = {"outcome": "failed", "reason": "TASK_FAILED"}
+    (export / "labels.json").write_text(json.dumps(labels))
     with pytest.raises(ExportError, match="task outcome"):
         _validate_export(export, config, profile_hash(config))
 
-    summary["task"] = {"outcome": "succeeded", "reason": "TASK_SUCCEEDED"}
-    summary["runtime"] = {"outcome": "failed", "reason": "RUNTIME_FAILED"}
-    (export / "summary.json").write_text(json.dumps(summary))
+    labels["task"] = {"outcome": "succeeded", "reason": "TASK_SUCCEEDED"}
+    labels["runtime"] = {"outcome": "failed", "reason": "RUNTIME_FAILED"}
+    (export / "labels.json").write_text(json.dumps(labels))
     with pytest.raises(ExportError, match="runtime outcome"):
         _validate_export(export, config, profile_hash(config))
 
-    summary["runtime"] = {"outcome": "stopped", "reason": "TASK_SUCCEEDED"}
-    summary["recording"] = {"complete": False, "failure_reason": "missing frame"}
-    (export / "summary.json").write_text(json.dumps(summary))
+    labels["runtime"] = {"outcome": "stopped", "reason": "TASK_SUCCEEDED"}
+    labels["recording"] = {"complete": False, "failure_reason": "missing frame"}
+    (export / "labels.json").write_text(json.dumps(labels))
     with pytest.raises(ExportError, match="recording is not complete"):
         _validate_export(export, config, profile_hash(config))
 

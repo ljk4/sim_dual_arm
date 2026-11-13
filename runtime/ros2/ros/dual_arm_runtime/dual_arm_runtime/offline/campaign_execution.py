@@ -21,34 +21,20 @@ def read_json(path: Path) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
-def _nested_episode_file(directory: Path, name: str) -> Path | None:
-    """Find the one episode artefact an interrupted launch still produced.
-
-    A launch process can die before copying its episode manifest to the attempt
-    root (for example when the whole process group is signalled).  The recorded
-    episode itself remains under ``stack/<run>/raw/<episode>/``; this lookup
-    lets the terminal summary read the real outcome instead of empty fields.
-    """
-    candidates = sorted(
-        path
-        for path in directory.glob(f"stack/*/raw/*/{name}")
-        if path.is_file()
-    )
-    return candidates[0] if len(candidates) == 1 else None
+def _episode_file(directory: Path, name: str) -> Path | None:
+    """Return one recorded episode artefact under the attempt's ``raw/``."""
+    path = directory / "raw" / name
+    return path if path.is_file() else None
 
 
 def episode_manifest(directory: Path) -> dict[str, Any] | None:
-    """Read the attempt-root or recorded-episode manifest, if exactly one exists."""
-    path = directory / "manifest.json"
-    if not path.is_file():
-        path = _nested_episode_file(directory, "manifest.json")
+    """Read the manifest the runtime wrote directly under ``<attempt>/raw``."""
+    path = _episode_file(directory, "manifest.json")
     return None if path is None else read_json(path)
 
 
 def episode_task_result(directory: Path) -> dict[str, Any] | None:
-    path = directory / "task_result.json"
-    if not path.is_file():
-        path = _nested_episode_file(directory, "task_result.json")
+    path = _episode_file(directory, "task_result.json")
     return None if path is None else read_json(path)
 
 

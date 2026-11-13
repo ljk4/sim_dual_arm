@@ -13,7 +13,7 @@ if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
 from robot_backend_sim.config.marvin_scene_config import MarvinSceneConfig  # noqa: E402
-from robot_backend_sim.config.scene_config import SceneConfig  # noqa: E402
+from robot_backend_sim.config.panda_scene_config import SceneConfig  # noqa: E402
 from robot_backend_sim.config.scene_loader import load_scene_config_for  # noqa: E402
 from robot_contracts.validation import StrictMappingError  # noqa: E402
 

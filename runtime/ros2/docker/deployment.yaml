@@ -11,4 +11,4 @@ mounts:
   /data: writable
 networks: [ros, learning]
 gpu: false
-commands: [build-ros-sdk, build-policy-sdk, test]
+commands: [build-ros-sdk, build-policy-sdk, policy, interactive, export, campaign, evaluate, test]

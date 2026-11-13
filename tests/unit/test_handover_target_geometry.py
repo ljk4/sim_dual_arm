@@ -110,7 +110,9 @@ def test_handover_and_place_keep_the_edge_grasp_and_distinct_lift_height():
     expected_offset = _yaw(layout.block_initial_yaw_rad) @ np.array(
         [0.0, config.grasp.right_cohold.along_block_y_m, config.grasp.tcp_above_block_center_m]
     )
-    np.testing.assert_allclose(np.asarray(grasp.position) - context["handover_block_center"], expected_offset)
+    np.testing.assert_allclose(
+        np.asarray(grasp.position) - context["handover_block_center"], expected_offset
+    )
     block_in_tcp = np.linalg.inv(_pose(grasp.position, grasp.rotation)) @ _pose(
         context["handover_block_center"], _yaw(layout.block_initial_yaw_rad)
     )

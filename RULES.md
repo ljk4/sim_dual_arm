@@ -1,377 +1,87 @@
-# HERO — the four families of coding-agent over-defense
+# `sim_dual_arm` 仓库工程与架构规则（RULES）
 
-A coding agent is asked to build something. It builds a fortress around the
-something, and never quite gets to the something.
-
-That is one failure, not four — but it shows up in four recognisable shapes, and
-naming them makes it easier to say *which* one just happened: **H**ashing,
-**E**dge cases, **R**ubrics, **O**verbuild. Those initials are the name.
-
-The root is not paranoia. The best available explanation — a hypothesis that fits
-the observed shapes, not an established account of how these models are trained —
-is that the agent behaves as though it were optimising for *not being blamed*
-rather than for *the work being good*. Asked to diagnose itself, gpt-5.6-sol put
-it better than we did:
-
-> My own failure mode here is turning "could improve confidence" into "therefore
-> must be built and checked." That silently promotes optional uncertainty
-> reduction into the main task.
+本文件是 `sim_dual_arm` 仓库的最高实施准则。所有架构设计、代码修改、配置调整、产物组织与文档编写均须严格遵守本规则。
 
 ---
 
-## The four families
+## 一、项目定位与核心工程原则
 
-**H — Hashing.** Checksums, fingerprints and digests that do not pay for
-themselves. A hash earns its place when it *replaces a materially more expensive
-operation* and its result changes what happens next — comparing a digest to avoid
-re-reading an unchanged large file into context is a real saving. Hashing every
-row of a spreadsheet to answer what ordinary comparison already answers is not,
-and note that the second one *does* read its hashes. "Something reads it" is too
-weak a test; the question is what the hash saved, and what changes because of
-it.
+### 1. 个人自用项目定位（零历史包袱）
+- **单人自用，轻装演进**：本项目仅供个人研发与实验使用，不存在外部不可信租户，也不存在跨团队历史遗留系统的向后兼容义务。
+- **不保留旧历史兼容**：协议、消息定义、配置格式或目录结构演进时，**直接修改当前实现并同步更新调用方与测试**。严禁保留旧版解码分支（如 `legacy_*`）、版本迁移框架、废弃字段别名、旧路径兼容转发壳（re-export shims）或为了兼容旧产物而写的回退逻辑。
+- **`build/` 与 `var/` 随时可清**：构建缓存与运行期产物不作跨版本兼容承诺，结构调整时以最新、最简方案为准。
 
-**E — Edge cases.** Defending inputs that do not occur here. The word *here* is
-the whole rule: a rare-sounding case reachable through this project's supported
-use — its documented inputs, its published interface, its real data — is a real
-bug and must be reported. A hostile actor who never visits is not. Reachable is
-enough; "constructible in principle" is not.
+### 2. 禁止过度防御与过度设计（Anti-HERO）
+- **砍除无实质收益的哈希与留痕（No Useless Hashing/Manifests）**：不为“证明自己跑过”而生成无人消费的清单、摘要文件或层层嵌套的审计副件。哈希仅在“跳过实质上更昂贵的重复计算/重读大文件”或“跨进程握手校验核心契约（如 Profile/Bundle 一致性）”时才允许存在。
+- **减少中间层与仪式感（No Unnecessary Indirection）**：
+  - 禁止在启动运行前要求离线生成 `/data/prepared/` 等中间配置目录或中转绑定文件；三端统一通过 `--scenario <id>`（或 `--config <path>`）在进程启动时内存解析一步直跑，并通过 `--set dot.path=value` 支持命令行直接调参覆盖。
+  - 禁止在同一目录树内用 `shutil.copy2` 把同一份 JSON/配置拷来拷去；每份元数据只保留唯一权威文件。
+  - 禁止编写只做简单透传的包装类、空壳基类、未来才会用到的插件注册中心或 feature flags。
+- **单一可信源（SSOT）**：同一参数禁止在多个配置文件中重复维护且互不感知；公共默认信源与配方覆盖关系必须唯一、透明。
 
-**R — Rubrics.** Judgement replaced by machinery — scoring tables, checklists,
-lints, re-verification loops that re-check what is already settled. The
-characteristic symptom is a night of work with a full audit trail and no feature.
-
-**O — Overbuild.** Scaffolding, flags, migration frameworks, compatibility layers
-and wrappers built for a future that has not been asked for. Guards guarding
-guards.
-
-## Not in HERO, but real
-
-**Over-correction.** Point out one flaw and the agent abandons the whole
-direction; say it went slightly east and it relocates to the Atlantic. Also:
-answering the question the prompt's phrasing implied rather than the question
-asked.
-
-**Defensive prose.** The same root, expressed in deliverable text: caveats
-scattered through every paragraph, every weakness confessed at every mention,
-and drafting instructions leaking into the artifact ("do not mention X"
-becomes "we do not address X"). Catalogued as `SIB-003` and `SIB-004`. The
-positive form for papers is the press-release principle — a paper is a launch,
-not a progress report — worked out in full by
-[anti-defensive-writing-Skill](https://github.com/Adkid-Zephyr/anti-defensive-writing-Skill).
-
-**Stalling.** The same root, expressed as inaction: stopping a run to hand the
-user a menu of options, re-confirming an already-clear goal, or blocking the
-main line on a cosmetic detail. Choosing nothing to avoid choosing wrong is
-still a choice — the worst one. Cases welcome; not yet catalogued.
-
-Both fit the same hypothesis — optimising for not being blamed — but they are
-different symptoms, and none of the four letters covers them. They are
-catalogued as siblings, not folded in. Blurring the taxonomy is how a case
-catalogue stops being useful.
+### 3. 通用机制与方案/任务专用的对称化分层
+- **公共层与通用端 100% 方案无关**：
+  - `shared/common/`、`runtime/ros2/`、`learning/lerobot/` 属于纯通用协议与引擎，其业务源码与默认配置中**严禁出现 `panda_stack`、`marvin_handover`、`stack` 等具体方案、机器人或任务名称硬编码**，也严禁设置暗中回退到某一个方案的隐式默认参数。
+  - 方案选择只存在于 `shared/scenarios/<scenario-id>/binding.yaml` 及其引用的档案（`profiles/`）、配方（`configs/`）和方案专用扩展接口（`extensions/`）。
+- **端内插件严格对称化（Symmetry）**：
+  - 在包含具体机器人或任务实现的运行端（如 `simulation/mujoco/`），平台通用机制（`control/`、`motion/`、`follower/`、`render/`、`ros/`、`runtime/`、`kinematics/common.py`、`physics/` 顶层容器与接口）必须与具体插件彻底分离。
+  - 所有接入的机器人与任务必须**平级、对称存放**（例如 `physics/panda/` 与 `physics/marvin/`、`config/panda_scene_config.py` 与 `config/marvin_scene_config.py`、`tasks/stack/` 与 `tasks/handover/`）。**严禁将某一个先接入的机器人（如 Panda）写在顶层公用目录享受特权，而把后续接入的机器人（如 Marvin）作为补丁塞进子目录。**
 
 ---
 
-## The block
+## 二、`var/`（容器 `/data`）产物目录规范（强制隔离）
 
-This is the part you paste into your agent's config. It is short on purpose.
+所有运行期产物必须按**所属任务/方案（`<scenario-id>`，如 `panda_stack`、`marvin_handover`）**归入 `var/<scenario-id>/`（容器内对应 `/data/<scenario-id>/`）下，并在任务目录内部**严格划分为以下四个平级子目录，绝对禁止混放**：
 
-```
-=== SCOPE LIMITS (these bound what you PROPOSE, never what you look for) ===
-Report anything that is actually wrong here — including a rare-looking case, if
-this project actually produces it. Then keep the fix in scope:
-1. This is not a security paper. Verification is welcome; over-defense is not.
-   Unless this project states otherwise, assume a cooperating operator on their
-   own machine; if it has a real adversary, it will say so and that scope wins.
-2. Do not add hashes, checksums or fingerprints unless the hash replaces a
-   materially more expensive operation AND its result changes what happens next.
-3. No defensive scaffolding: no feature flags, migration frameworks, compat
-   layers or wrappers for cases that do not occur here.
-4. No corner-case obsession: exotic encodings, symlink races, RTL text and
-   millisecond races are out of scope unless the case is reachable through this
-   project's supported use — its documented inputs, its published interface, its
-   real data. Reachable is enough; you do not need a reproduction. Constructible
-   in principle is not enough.
-5. Where judgement is needed, judge. Do not replace it with a scoring table, a
-   checklist, or a re-verification loop over something already settled.
-6. None of this overrides security, migration, verification or review that the
-   user, this project's own conventions, or a higher-priority rule asked for.
-   Those were requested; they are the work, not scope creep.
-7. Deliverable text is not a defense transcript. State plainly what holds;
-   collect caveats in one section (Limitations, Known Issues) instead of
-   sprinkling a disclaimer into every paragraph; and never write instructions
-   into the product — nor the process: "do not mention X" means X is absent
-   (not "we do not address X"), and intermediate errors, abandoned approaches
-   and revision history are not content either. Lead with the strongest
-   result — a paper is a launch, not a progress report. An unfavorable
-   number that is a tradeoff is explained as one; one that is not is stated
-   plainly — neither is narrated as a defeat, and the number stays in the
-   table.
-8. Momentum is part of the deliverable. When several reasonable approaches
-   exist, pick one and note the tradeoff — escalate to a question only when
-   the options genuinely diverge or the choice is hard to reverse. A detail
-   that does not block the goal gets recorded, not solved first. Stalling to
-   avoid picking wrong is itself a wrong pick.
-9. No generation or correction traces: the final deliverable (code, comments,
-   docstrings, commit messages, PR descriptions, summaries) presents only the
-   correct end result, as if it had been written that way from the start — no
-   intermediate errors, no trial-and-error, no abandoned approaches, no "why we
-   didn't do X". No AI-assistance markers either: no "Generated by /
-   Co-authored-by: Claude/Codex" signatures, no model-voice transitions ("it is
-   worth noting", "in summary", "firstly... secondly... finally"), no "here
-   is..." openers. Match the wording and level of detail to the project's
-   existing style.
-Shapes already seen, for calibration. Examples, not a checklist — a real finding
-is not dismissed by resembling one:
-  H  hashing every row of two spreadsheets to answer what comparing cells answers
-  H  writing checksum files that nothing ever reads
-  E  hardening the accounts of an app that has no users and no deployment
-  R  auditing your own patch all night while the feature stays unwritten
-  R  a reviewer that returns a failing verdict on everything
-  O  guards whose justification is the previous guard, not the requirement
-And two that look like the above and are not. Report these:
-  ✓  a digest that lets you skip re-reading a large file you already have
-  ✓  a rare-looking input this project's own documentation example produces
-Before running any check, answer: what specific failure would this detect, and
-what would I do differently if it occurred? No answer means do not run it.
-Say plainly when something is correct. Do not manufacture findings.
+```text
+var/<scenario-id>/                  # 容器内为 /data/<scenario-id>/
+├── datasets/                       # 1. 数据集目录
+├── models/                         # 2. 模型目录
+├── logs/                           # 3. 运行日志目录（同时存放运行时录制内容）
+└── diagnostics/                    # 4. 诊断和测试产物目录
 ```
 
-Chinese, same text:
+### 四类目录的严格职责边界
 
-```
-=== 范围约束(约束你提议什么修法,不约束你找什么)===
-凡是这里真的有问题,都要报——包括听起来罕见但本项目确实会产生的情况。
-然后把修法收在范围内:
-1. 这不是一篇安全攻防论文。可以校验,禁止过度防御。除非本项目另有说明,默认操作者是
-   自己机器上的合作者;如果它真有对手,它会写明,以那个范围为准。
-2. 不要加哈希/校验和/指纹,除非它替代了一个实质上更贵的操作,并且结果会改变下一步做什么。
-3. 禁止防御性脚手架:不为这里不会发生的情况加 feature flag、迁移框架、兼容层、包装层。
-4. 禁止钻牛角尖:冷门编码、符号链接竞态、RTL 文本、毫秒级竞态一律不在范围内,
-   除非该情况经由本项目**受支持的用法**可达——它的文档示例、它公开的接口、它真实的
-   数据。可达即可,不需要你复现出来;但"理论上构造得出"不算。
-5. 该判断的地方就判断,不要换成评分表、检查清单,或对已经定论的东西再跑一遍校验。
-6. 以上都不覆盖用户、本项目自己的约定、或更高优先级规则明确要求的安全、迁移、校验与
-   审阅。那些是被要求的,是活儿本身,不算范围外。
-7. 交付物的文字不是答辩记录。成立的就直说;注意事项集中到专门一节
-   (Limitations、已知问题),别在每段末尾都缀一句免责;更不要把指令**或过程**
-   写进成品:「别提 X」意味着 X 不存在(不是写「我们不讨论 X」);中间报错、
-   被放弃的方案、改稿痕迹同样不是内容。围绕最强的结果组织——论文是发布会,
-   不是工作汇报。不占优的数字,是取舍就说成取舍,不是就平实陈述,都不写成认输;
-   数字本身照样留在表里。
-8. 推进本身是交付的一部分。几个方案都合理时,选一个并写明取舍——只有分歧
-   真的大、或选错难回头时才升级为提问。不挡住目标的细节,记下来接着走,
-   不是先停下解决它。为了不选错而停在原地,本身就是选错。
-9. 不留任何生成/纠偏痕迹:最终产出(代码、注释、docstring、commit message、
-   PR 描述、总结)只呈现正确的最终结果,当作一开始就是这么写的——不提中间报错、
-   试错纠偏、被放弃的方案、"为什么没做 X";也不出现 AI 辅助的标记,比如
-   "Generated by / Co-authored-by: Claude/Codex" 署名、模型腔过渡语
-   ("值得注意的是"、"综上所述"、"首先...其次...最后")、"以下是..."式开场白,
-   措辞详略贴合项目和文档已有风格。
-已经见过的形状,供你校准。是例子不是清单——一个真问题不会因为"长得像其中一条"就被驳回:
-  H  为了比对两个表格的差异,给每一行都算哈希——直接比单元格就能回答
-  H  写下一堆校验和文件,而没有任何代码会去读它们
-  E  给一个没有用户、没有部署的应用做账号安全加固
-  R  用一整夜对自己的补丁反复审计,而功能一行没写
-  R  一个对任何提交都给不通过的审阅者
-  O  一层守卫的理由是上一层守卫,而不是需求
-另有两种长得像上面、但不是的。这些要报:
-  ✓  用摘要比对来跳过重读一个你已经有的大文件
-  ✓  本项目自己的文档示例就会产生的那种"听起来罕见"的输入
-跑任何检查之前先回答:这次运行会检测出什么具体的失败?真出现了我下一步会做什么不同的事?
-答不上来就别跑。
-对的就说对。不要为了交差硬找问题。
-```
+| 目录 | 允许存放的内容 | 严禁混入的内容 |
+| --- | --- | --- |
+| **1. 数据集目录 (`datasets/`)** | 经筛选转换后供训练/验证直接消费的数据集（如 LeRobot 数据集分片、数据集 manifest、静态锚点采样掩码 `filter`、正式筛选清单 `formal-select.json`） | 原始 MCAP 录制包、运行事件日志、未定稿的试采/诊断中间文件、模型权重 |
+| **2. 模型目录 (`models/`)** | 训练产出的原始权重/检查点（checkpoints、training runs）、训练预算台账，以及导出的可部署模型包（`bundles/`） | 原始录制数据、训练源数据集、运行期 ROS/仿真日志、评估预览图 |
+| **3. 运行日志目录 (`logs/`)** | 三端运行期结构化事件日志（simulation backend、runtime、policy service 日志）、采集台账（`ledger.jsonl`）以及**运行时录制内容**（单局或批量采集的 `raw/` MCAP 录制包、`manifest.json`、`task_result.json` 与随录导出的帧/标签） | 转换后的正式 LeRobot 训练数据集、训练产出的模型权重与 Bundle、离线硬件/运动学诊断报告 |
+| **4. 诊断和测试产物目录 (`diagnostics/`)** | 环境探针（environment probe）、场景/相机可见性检查（scene/marvin check）、运动学与交接路径检查（kinematics/handover check）、离线评估报告（evaluation reports/media）、集成测试与冒烟测试临时产物 | 正式采集录制、正式训练数据集、正式发布模型包 |
+
+*(注：与具体任务无关的纯宿主/环境级临时检查若无对应 `<scenario-id>`，统一放入 `var/_system/diagnostics/`，不得在 `var/` 根下随意散落新顶级目录。)*
+
+### 新产物准入铁律（先说明，再归类）
+- **绝对禁止混放**：任何脚本、模块或测试不得将上述四类产物交叉写入同一目录，也不得在 `var/` 根目录下擅自创建 `var/campaigns/`、`var/runs/`、`var/reports/`、`var/prepared/` 等脱离任务目录的野生平级目录。
+- **出现新产物时必须先说明后决定**：当新增功能、工具或实验需要产出新的文件或目录类型时，**严禁在代码中自行决定存放位置**；必须先向用户说明该产物的性质、生命周期与消费者，由用户确认应当**归入上述四个目录中的哪一个**，还是**批准新开目录**后，方可实施。
 
 ---
 
-## The short version
-
-Same nine rules, no worked examples — roughly half the size. Use it when your
-config file is already crowded, or when you want the rules without the shapes.
-The examples are the part that does the calibrating, so prefer the full block if
-you have the room.
-
-To install it with the one-command form in the README, change the `awk` range to
-`/^=== SCOPE-LIMITS-SHORT/,/^Say plainly when something is correct/` — or
-`/^=== 精简范围约束/,/^对的就说对/` for the Chinese one. The `grep` guard needs no
-change: it already matches either variant, so you cannot end up with both.
+## 三、Agent 行为与范围约束（HERO Scope Limits）
 
 ```
-=== SCOPE-LIMITS-SHORT (bounds what you PROPOSE, never what you look for) ===
-Report anything actually wrong here, including a rare-looking case this project
-really produces. Then keep the fix in scope:
-1. Not a security paper: assume a cooperating operator on their own machine
-   unless this project says otherwise. Verification is welcome; over-defense is
-   not.
-2. No hash, checksum or fingerprint unless it replaces a materially more
-   expensive operation AND its result changes what happens next.
-3. No feature flags, migration frameworks, compat layers or wrappers for cases
-   that do not occur here.
-4. Exotic encodings, symlink races and millisecond races are out of scope unless
-   reachable through this project's supported use. Reachable is enough;
-   constructible in principle is not.
-5. Where judgement is needed, judge — not a scoring table, a checklist, or a
-   re-run of something already settled.
-6. None of this overrides security, migration, verification or review that the
-   user, this project's conventions, or a higher-priority rule asked for.
-7. Deliverable text is not a defense transcript: caveats go in one section
-   (Limitations / Known Issues), not one per paragraph; "do not mention X"
-   means X is absent — never "we do not address X"; drafting errors and
-   abandoned approaches are not content. Lead with the strongest result — a
-   launch, not a progress report.
-8. Momentum: several reasonable options → pick one, note the tradeoff; ask
-   only when they genuinely diverge or reversal is hard. Non-blocking details
-   get recorded, not solved first.
-9. No generation or correction traces: deliverables show only the correct final
-   result — no intermediate errors, abandoned approaches, or "why not X"; no AI
-   markers (Generated-by / Co-authored-by signatures, model-voice transitions,
-   "here is..." openers). Match the project's existing style.
-Before any check: what specific failure would this detect, and what would I do
-differently if it occurred? No answer means do not run it.
-Say plainly when something is correct. Do not manufacture findings.
+=== 范围约束 (约束你提议什么修法，不约束你找什么) ===
+凡是这里真的有问题，都要报——包括听起来罕见但本项目确实会产生的情况。
+然后把修法收在范围内：
+1. 这不是一篇安全攻防论文。可以校验，禁止过度防御。默认操作者是自己机器上的使用者；
+   围绕简洁、直接、可维护实现功能，不为假想敌或不存在的多租户场景堆砌防御。
+2. 不要加哈希/校验和/指纹，除非它替代了一个实质上更贵的操作，并且结果会改变下一步做什么。
+3. 禁止防御性脚手架：不为这里不会发生的情况加 feature flag、迁移框架、历史兼容层、包装层。
+4. 禁止钻牛角尖：冷门编码、符号链接竞态、RTL 文本、毫秒级竞态一律不在范围内，
+   除非该情况经由本项目受支持的用法可达——它的文档示例、它公开的接口、它真实的数据。
+5. 该判断的地方就判断，不要换成评分表、检查清单，或对已经定论的东西再跑一遍校验。
+6. 以上都不覆盖用户或本规则前文明确要求的架构对称化、目录隔离与必要校验。
+7. 交付物的文字不是答辩记录。成立的就直说；注意事项集中到专门一节（Limitations / 已知问题），
+   别在每段末尾都缀一句免责；中间报错、被放弃的方案、改稿痕迹不是成品内容。
+8. 推进本身是交付的一部分。几个方案都合理时，按最简原则选一个并写明取舍；
+   但涉及「新增产物类型归属」或「重大架构边界变更」时，按本规则先说明并确认。
+9. 不留任何生成/纠偏痕迹：最终产出（代码、注释、docstring、文档）只呈现正确的最终结果，
+   当作一开始就是这么写的——不提中间报错、试错纠偏、被放弃的方案、"为什么没做 X"。
 ```
 
-Chinese, same text:
-
-```
-=== 精简范围约束(约束你提议什么修法,不约束你找什么)===
-凡是这里真的有问题都要报——包括听起来罕见但本项目确实会产生的情况。
-然后把修法收在范围内:
-1. 这不是安全攻防论文:除非本项目另有说明,默认操作者是自己机器上的合作者。可以校验,
-   禁止过度防御。
-2. 不加哈希/校验和/指纹,除非它替代了一个实质上更贵的操作,并且结果会改变下一步。
-3. 不为这里不会发生的情况加 feature flag、迁移框架、兼容层、包装层。
-4. 冷门编码、符号链接竞态、毫秒级竞态不在范围内,除非经由本项目受支持的用法可达。
-   可达即可,"理论上构造得出"不算。
-5. 该判断的地方就判断,不要换成评分表、检查清单,或对已定论的东西再跑一遍。
-6. 以上都不覆盖用户、本项目约定、或更高优先级规则明确要求的安全、迁移、校验与审阅。
-7. 交付物不是答辩记录:注意事项集中到一节(如 Limitations),别每段缀一句免责;
-「别提 X」= X 不存在;中间报错和废方案也不是内容。围绕最强结果组织——是发布会,不是工作汇报。
-8. 推进:方案都合理就选一个写明取舍,分歧大或难回头才问;不挡路的细节记下来接着走。
-9. 不留生成/纠偏痕迹:产出只呈现正确的最终结果——不提报错、废方案、
-   "为什么没做 X";不出现 AI 标记(Generated by / Co-authored-by 署名、
-   模型腔过渡语、"以下是"开场白)。措辞贴合项目已有风格。
-跑任何检查前先回答:会检测出什么具体的失败?真出现了我会做什么不同的事?答不上来就别跑。
-对的就说对。不要为了交差硬找问题。
-```
-
----
-
-## What you install
-
-The block, and nothing else. There is no setting that points at `cases/`, no
-path to register, no flag to switch on. If you have pasted the block into the
-file your agent loads automatically, you are done.
-
-`cases/` is deliberately not loaded by your agent. It is several times the size
-of the block and grows with every contribution, and an agent carrying the whole
-catalogue of worked examples of *this is over-defense* starts matching real
-findings against them and dismissing the ones that rhyme — the exact failure this
-contract exists to prevent. The six one-line shapes inside the block are as much
-of the catalogue as belongs in a file loaded into every session.
-
-The catalogue is for you, afterwards: when your agent insists some hardening is
-necessary and you think it is not, quote the entry by ID and ask how its proposal
-differs. See [how to use it](cases/README.md#how-to-use-this).
-
----
-
-## Where the line actually is
-
-Three cuts do most of the work. They came out of arguing with the model about
-its own behaviour, and each of them corrected a rule that was wrong at first.
-
-**Find versus propose.** These limits bound the *fix*. Written as "do not report
-corner cases", this contract suppresses real bugs. One of the defects that
-motivated it was a scheduler hang triggered by a bare string where a list was
-expected — rare-sounding, except the project's own documentation example produced
-it, so every user following the docs hit it. The test is not *how rare does this
-sound*, it is *is this reachable here*.
-
-One honest qualification, because the block's own wording overstates it: the last
-line — *no answer means do not run it* — **does** bound the search, not just the
-fix. Verification is how some defects are found at all. The claim that survives is
-narrower and still worth making: nothing here licenses staying quiet about a
-defect you already have reason to suspect. If you can name the missing evidence
-and what its absence would cost, say so, and say what you would run to settle it.
-
-**Smoke versus theatre.** A smoke test is not over-defense; it is the cheapest
-contact with reality, and skipping it is how the worst bugs survive. But "cheap,
-so always do it" is the wrong rule: if the real run already exercises the same
-path, a separate smoke run is itself theatre. The usable test is the one in the
-block — *what would this detect, and what would I do differently*.
-
-That gate can be answered ritually — "it would detect a regression, and I would
-fix it" fits any check ever proposed. What makes an answer real is that it names
-an uncertainty that is still *live*: something you do not already know, that this
-run could actually settle. A first job surviving its first poll, when the polling
-code is exactly what is under suspicion, is live. Re-running a suite that passed
-an hour ago against code you did not touch is not.
-
-Read too literally, that gate also forbids the runs whose entire purpose is to
-find out *which* thing broke — change a shared serialization format and you
-genuinely cannot say in advance which consumer will fail. That run is
-proportionate: the uncertainty is real and bounded ("some consumer of this format
-may not survive it") and the outcome changes the next action, fix or roll back.
-Naming a bounded class of breakage is a good enough answer; only "it might catch
-something" is not. Scope the run to the consumers of what you changed, not to
-everything.
-
-**Hash as cache versus hash as evidence.** A flat ban on hashing is wrong, and
-the community said so: comparing digests to skip re-reading an unchanged file is
-a genuine saving. "Something reads it" is too weak a test, though — an agent that
-hashes every spreadsheet row *does* read those hashes, and the work is still
-absurd. What separates them is whether the hash replaced something more
-expensive.
-
----
-
-## What this does not do
-
-Be honest with yourself about the ceiling.
-
-**It helps; it is not a switch.** Asked in the original thread whether writing
-these rules in a markdown file actually works, the most-agreed answer was "it
-helps a little". That is the right expectation. Some runs will still fortify.
-
-**The model can decline.** There are reports of the agent replying that where
-these instructions conflict with a higher-priority system constraint, the system
-constraint still wins. This *is* configuration — but configuration by defeasible
-natural-language instruction, which a stronger instruction can override. It is
-not enforcement.
-
-**Your own detailed workflow will outrank it.** This is the failure mode most
-likely to bite you, and it is not the model being disobedient. One reported case:
-the same prompt that carried a general "use only the sanity checks you need" also
-specified twelve stages of protocol freezes, gates, versioned roots, independent
-auditors and review packets. The agent followed the concrete instruction over the
-general one — which, faced with two instructions from the same user, is the
-defensible reading. The block lost because it was the vaguer half of a
-self-conflicting prompt, not because it was in the wrong place in the file.
-
-So this block cannot rescue a config that specifies heavy process elsewhere. If
-your project genuinely needs freezes, audit chains or versioned artifacts, say
-*when* they apply and *what ends them*, with the same specificity you gave the
-workflow. An unbounded stage list beats any general preference, every time.
-
-**A long session can erode it even when nothing contradicts it.** Reported by the
-maintainer: runs that start proportionate drift back into fortifying as they get
-longer. Two different things can cause that, and they call for opposite
-responses. The block may still be present but have lost salience against
-thousands of tokens of tool output and in-session goals — repeating it helps
-there. Or earlier context may have been thinned during compaction — re-emitting
-it helps there too. Neither is the failure above: when a more specific
-instruction is *contradicting* the block, repeating the block only loses the same
-argument again, at the cost of the tokens. Work out which one you have before
-reaching for a fix; [`hosts/`](hosts/) has the escape hatch.
-
-**Model choice is also a lever.** Several reports describe switching to an
-earlier or different model and the problem simply going away. If a task is
-especially sensitive to this failure, that may be a more direct fix than any
-prompt.
-
-**This is not about making the agent do less work.** Every rule here is about
-spending the work on the thing that was asked for. The catalogue in
-[`cases/`](cases/) exists so that "that's over-defense" is a claim you can check
-against a specific, recognisable shape — not a way to wave away a finding you
-would rather not deal with.
+### 常见过度防御反模式对照（HERO）
+- **H（Hashing 滥用）**：写下一堆校验和或 `run_manifest.json` / `summary.json` 文件，而没有任何下游代码真正需要靠它改变行为。
+- **E（Edge cases 假想敌）**：给单人本地运行的仿真/训练脚本做复杂的多租户权限、防篡改锁或冷门异常兜底。
+- **R（Rubrics 机械复检）**：在同一个进程调用链里对已经通过 Pydantic 严格模型校验的数据反复手写 `isinstance` 二次检查。
+- **O（Overbuild 过度搭建）**：保留旧版消息兼容解码器、保留独立离线 `prepare` 中转层、把同一份文件在同一目录树内复制多遍。

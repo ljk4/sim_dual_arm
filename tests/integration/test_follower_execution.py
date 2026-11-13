@@ -28,15 +28,15 @@ for source in (ROOT / "simulation/mujoco/src", ROOT / "shared/common/python/cont
 
 from robot_backend_sim.config.follower_config import load_follower_config  # noqa: E402
 from robot_backend_sim.config.motion_config import load_control_config  # noqa: E402
-from robot_backend_sim.config.scene_config import load_scene_config  # noqa: E402
+from robot_backend_sim.config.panda_scene_config import load_scene_config  # noqa: E402
 from robot_backend_sim.config.stream_config import StreamConfig  # noqa: E402
 from robot_backend_sim.control.control import ControlSession  # noqa: E402
 from robot_backend_sim.control.control_state import PreparedControlCommand  # noqa: E402
 from robot_backend_sim.follower.follower_plan import prepare_follower_plan  # noqa: E402
 from robot_backend_sim.motion.motion_controller import MotionController, Phase  # noqa: E402
 from robot_backend_sim.motion.stream_schedule import next_grid_time  # noqa: E402
-from robot_backend_sim.physics.panda_io import PandaIO  # noqa: E402
-from robot_backend_sim.physics.scene import build_scene  # noqa: E402
+from robot_backend_sim.physics.panda.io import PandaIO  # noqa: E402
+from robot_backend_sim.physics.panda.scene import build_scene  # noqa: E402
 from robot_contracts.action_chunks import ActionWindow  # noqa: E402
 from robot_contracts.control import ControlCommand  # noqa: E402
 from robot_contracts.models import ContractError, RunContext, Target  # noqa: E402
@@ -64,7 +64,9 @@ LEASE_NS = 10_000_000_000
 FIRST_START_NS = 250_000_000
 FINAL_CHUNK_SEQ = 11
 TERMINAL = frozenset({"COMPLETED", "CANCELED", "FAILED"})
-REPORT_DIR = Path(os.environ.get("FOLLOWER_REPORT_DIR", ROOT / "build/reports/dsh-030"))
+REPORT_DIR = Path(
+    os.environ.get("FOLLOWER_REPORT_DIR", ROOT / "var/panda_stack/diagnostics/follower-execution")
+)
 BASE_POSITIONS = load_profile(PROFILE_PATH, SCHEMAS).initial_positions
 
 

@@ -54,3 +54,13 @@ def test_sidecar_stays_small_and_has_no_images_or_masks():
     assert document["task"]["state"] == "SUCCEEDED"
     assert document["result"]["outcome"] == "succeeded"
     assert "images" not in document and "segmentation" not in document
+    # Task-specific physics stays inside the opaque metrics dictionary; the
+    # sidecar's own schema is identical for every task.
+    for key in (
+        "source_target_normal_force_n",
+        "target_table_normal_force_n",
+        "right_gripper_opening_m",
+        "right_tcp_distance_m",
+    ):
+        assert key not in document["task"]
+    assert document["task"]["metrics"]["source_target_normal_force_n"] == 1.0

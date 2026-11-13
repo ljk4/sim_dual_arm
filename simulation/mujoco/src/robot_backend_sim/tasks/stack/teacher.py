@@ -21,10 +21,10 @@ from robot_trajectory.spline_math import validate_reference_inputs
 
 from robot_backend_sim.config.kinematics_config import KinematicsCheckConfig
 from robot_backend_sim.config.motion_config import ControlConfig
+from robot_backend_sim.kinematics.common import ObjectPose
 from robot_backend_sim.kinematics.kinematics import (
     CollisionPairSet,
     KeyPoseTarget,
-    ObjectPose,
     PathResult,
     build_collision_pairs,
     build_targets,

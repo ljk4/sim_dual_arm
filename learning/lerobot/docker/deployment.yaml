@@ -12,4 +12,4 @@ mounts:
   /third_party: read-only
 networks: [learning]
 gpu: true
-commands: [prepare-policy, policy, test]
+commands: [convert, validate, filter, train, bundle, verify-bundle, budget, policy, test]

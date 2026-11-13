@@ -9,11 +9,11 @@ camera_width: 320
 camera_height: 240
 task_text: "Pick up the red source cube and place it on the blue target cube."
 profile: shared/scenarios/panda_stack/profiles/robots/panda_stack_learning_v1/profile.json
-select: var/campaigns/panda_stack_v1/formal-select.json
-output_root: var/learning/panda_stack_learning_v1
-cache_root: var/learning/cache
-# The campaign writes each accepted export at <attempt>/stack/<run>/export.
-attempt_export_glob: "stack/*/export"
+select: var/panda_stack/datasets/formal-select.json
+output_root: var/panda_stack/datasets/panda_stack_learning_v1
+cache_root: var/panda_stack/datasets/.cache
+# The campaign writes each accepted export directly at <attempt>/export.
+attempt_export_glob: "export"
 verify_png_pixels: true
 require_quality: true
 expected:

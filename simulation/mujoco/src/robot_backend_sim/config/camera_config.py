@@ -111,7 +111,9 @@ def camera_declared_description(camera: CameraConfig) -> dict[str, object]:
         raise CameraConfigError(source, f"{field}.{error.field}", error.message) from error
     if rebuilt != camera:
         mismatch = next(
-            name for name in CameraConfig.model_fields if getattr(rebuilt, name) != getattr(camera, name)
+            name
+            for name in CameraConfig.model_fields
+            if getattr(rebuilt, name) != getattr(camera, name)
         )
         raise CameraConfigError(
             source, f"{field}.{mismatch}", "declared camera description does not match typed fields"

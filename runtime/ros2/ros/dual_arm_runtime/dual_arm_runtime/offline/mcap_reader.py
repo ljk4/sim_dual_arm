@@ -8,9 +8,6 @@ from robot_contracts.models import ContractError
 from dual_arm_runtime.offline.audit.audit_common import record_error
 from dual_arm_runtime.offline.audit.episode_audit import _Audit
 from dual_arm_runtime.offline.audit.records import BackendInfo, CameraFrame, Observation, State
-from dual_arm_runtime.offline.feedback_definition import (
-    require_supported_feedback_definition,
-)
 from dual_arm_runtime.offline.follower_definition import (
     require_current_follower_reference_definition,
 )
@@ -21,8 +18,6 @@ def decode_message(
     message: object,
     root: str,
     reference_topic: str,
-    *,
-    legacy_reference_digest: bool = False,
 ):
     from robot_ros_support.conversions import context_from_message, time_ns
     from robot_ros_support.follower_conversions import follower_reference_from_message
@@ -34,9 +29,7 @@ def decode_message(
     if topic == "/runtime/commands":
         return stream_command_from_message(message)
     if topic == reference_topic:
-        return follower_reference_from_message(
-            message, legacy_digest=legacy_reference_digest
-        )
+        return follower_reference_from_message(message)
     if topic == f"{root}/control_events":
         return control_event_from_message(message)
     if topic == f"{root}/execution_feedback":
@@ -89,16 +82,7 @@ def _run_audit(audit: _Audit, directory: Path) -> dict:
         missing = required - audit.topics
         if missing:
             raise record_error("recording is missing topics: " + ", ".join(sorted(missing)))
-        legacy_feedback = require_supported_feedback_definition(reader, types, rosbag2_py)
-        if legacy_feedback:
-            # The exact stored fixed-array layout is the compatibility evidence;
-            # the old backend predates the bounded-gripper capability string.
-            audit.required_capabilities = audit.required_capabilities - {
-                "execution_feedback.gripper_set.v1"
-            }
-        legacy_reference_digest = require_current_follower_reference_definition(
-            reader, types, rosbag2_py
-        )
+        require_current_follower_reference_definition(reader, types, rosbag2_py)
         decoded_types = {topic: get_message(types[topic]) for topic in required}
         camera_topics = {f"{audit.root}/cameras/{name}/frame" for name in audit.camera_names}
         while reader.has_next():
@@ -107,17 +91,6 @@ def _run_audit(audit: _Audit, directory: Path) -> dict:
             if topic not in required:
                 continue
             try:
-                if legacy_feedback and topic == f"{audit.root}/execution_feedback":
-                    # The recorded fixed-array bytes are not valid for the
-                    # current generated type; decode them with the legacy reader.
-                    from dual_arm_runtime.offline.legacy_feedback import (
-                        decode_legacy_execution_feedback,
-                    )
-
-                    execution = decode_legacy_execution_feedback(payload)
-                    if audit.context_value(execution.context):
-                        audit.feedback_message(execution)
-                    continue
                 message = deserialize_message(payload, decoded_types[topic])
                 # The original rules skip foreign contexts before decoding event/feedback bodies.
                 if topic in {f"{audit.root}/control_events", f"{audit.root}/execution_feedback"}:
@@ -126,7 +99,6 @@ def _run_audit(audit: _Audit, directory: Path) -> dict:
                         continue
                 message = decode_message(
                     topic, message, audit.root, audit.reference_topic,
-                    legacy_reference_digest=legacy_reference_digest,
                 )
                 if topic == f"{audit.root}/info":
                     audit.info(message)

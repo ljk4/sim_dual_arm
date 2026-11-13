@@ -54,7 +54,7 @@ interfaces:
 
 # Real diagnostic bundle produced from this task's 128-step smoke training.
 models:
-  bundle: /data/learning/marvin_handover_diag/bundles/p05-smoke-128
+  bundle: /data/marvin_handover/models/bundles/p05-smoke-128
 
 source_roots:
   - ../..

@@ -15,16 +15,9 @@ import sys
 import time
 from pathlib import Path
 
+from dual_arm_runtime.artifact_paths import scenario_root
+
 ROOT = Path(os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[6])
-DEFAULT_CAMPAIGN = (
-    "shared/scenarios/panda_stack/configs/runtime/experiments/stack_campaign.yaml"
-)
-DEFAULT_RUNTIME_TEACHER = (
-    "shared/scenarios/panda_stack/configs/runtime/teacher_collect.yaml"
-)
-DEFAULT_BACKEND_TEMPLATE = (
-    "shared/scenarios/panda_stack/configs/simulation/backend/backend_stack_teacher.yaml"
-)
 CONTAINER_MOUNTS = (
     ("/workspace", Path(".")),
     ("/shared", Path("shared")),
@@ -137,6 +130,14 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument(
         "--backend-template", default=None,
         help="direct simulation teacher recipe (conflicts with --scenario)",
+    )
+    result.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        metavar="PATH=VALUE",
+        help="override one existing runtime recipe path (repeatable)",
     )
     result.add_argument("--realtime-speed", type=float, default=1.0)
     result.add_argument("--domain-base", type=int)
@@ -264,15 +265,20 @@ class DockerWorkers:
     def _worker_selection_arguments(self, plan: dict | None) -> list[str]:
         scenario = self._scenario_selection_arguments(plan)
         if scenario is not None:
+            for override in self.args.overrides:
+                scenario += ["--set", override]
             return scenario
         if getattr(self.args, "scenario", None) is not None:
             raise RuntimeError("scenario preflight did not return a scenario selection")
-        return [
+        arguments = [
             "--runtime-config",
             host_path_to_container(self.args.runtime_config, self.args.project_root),
             "--backend-template",
             host_path_to_container(self.args.backend_template, self.args.project_root),
         ]
+        for override in self.args.overrides:
+            arguments += ["--set", override]
+        return arguments
 
     def prepare(self, plan: dict | None = None) -> list[dict]:
         self.ensure_runtime()
@@ -339,6 +345,8 @@ class DockerWorkers:
                 "--max-consecutive-failures", str(self.args.max_consecutive_failures),
                 "--purpose", self.args.purpose,
                 *selection_arguments,
+                *[item for override in self.args.overrides
+                  for item in ("--set", override)],
                 "--worker-manifest", str(relative / "workers.json"),
                 *(["--target-total", str(self.args.target_total)]
                   if self.args.target_total is not None else []),
@@ -408,9 +416,15 @@ def main(argv: list[str] | None = None) -> int:
         else:
             if args.shared_root is not None:
                 cli.error("--shared-root requires --scenario")
-            args.config = args.config or DEFAULT_CAMPAIGN
-            args.runtime_config = args.runtime_config or DEFAULT_RUNTIME_TEACHER
-            args.backend_template = args.backend_template or DEFAULT_BACKEND_TEMPLATE
+            missing = [
+                name for name in ("config", "runtime_config", "backend_template")
+                if getattr(args, name) is None
+            ]
+            if missing:
+                cli.error(
+                    "one of --scenario or all of --config/--runtime-config/"
+                    "--backend-template is required"
+                )
         args.workers = automatic_workers() if args.workers == "auto" else int(args.workers)
         if not 1 <= args.workers <= 16:
             raise ValueError("workers must be 1..16 or auto")
@@ -423,7 +437,12 @@ def main(argv: list[str] | None = None) -> int:
         args.project_root = args.project_root.resolve()
     except ValueError as error:
         cli.error(str(error))
-    directory = args.project_root / "var/record-pools" / f"pool-{time.time_ns()}"
+    directory = (
+        scenario_root(args.project_root / "var", args.scenario)
+        / "logs"
+        / "record-pools"
+        / f"pool-{time.time_ns()}"
+    )
     docker = DockerWorkers(args, directory)
     def interrupted(signum: int, frame: object) -> None:
         raise KeyboardInterrupt

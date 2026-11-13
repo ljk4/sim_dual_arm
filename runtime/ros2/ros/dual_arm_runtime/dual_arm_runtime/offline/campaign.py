@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Budgeted, crash-safe stack-collection ledger.
+"""Budgeted, crash-safe collection ledger.
 
 Every complete rollout must be reserved here before a runtime process starts.
 The ledger is append-only: RESERVED and RUNNING attempts count toward the
@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import signal
 import subprocess
 import sys
@@ -28,7 +29,6 @@ from dual_arm_runtime.offline.campaign_execution import (
     episode_manifest,
     episode_task_result,
     handle_sigterm,
-    read_json,
     reject_docker_command,
     run_command,
 )
@@ -101,7 +101,11 @@ def _reserve(
             episode_id=episode_id,
             directory=directory,
             config=args.runtime_config,
-            code=_code_fingerprint(project_root, project_root / args.runtime_config),
+            code=_code_fingerprint(
+                project_root,
+                project_root / args.config,
+                project_root / args.runtime_config,
+            ),
             budget={
                 "max_raw_bytes": int(config["budget"]["max_raw_bytes"]),
                 "estimated_attempt_bytes": int(config["budget"]["estimated_attempt_bytes"]),
@@ -125,6 +129,7 @@ def _reserve(
                 "config": attempt.config,
                 "code": attempt.code,
                 "budget": attempt.budget,
+                "overrides": list(getattr(args, "overrides", [])),
                 "reserved_at_ns": attempt.reserved_at_ns,
             }
         )
@@ -190,11 +195,6 @@ def _finish_attempt(
     failure: str,
 ) -> tuple[str, dict[str, Any], int]:
     classification = classify(attempt.directory, str(config["quality"]["sidecar"]))
-    launch = read_json(attempt.directory / "launch_result.json") or {}
-    if isinstance(launch.get("act"), dict):
-        classification["act"] = launch["act"]
-    if isinstance(launch.get("act_metrics"), dict):
-        classification["act_metrics"] = launch["act_metrics"]
     classification["launch_ok"] = code == 0
     classification["qualified"] = classification["qualified"] and code == 0
     raw_bytes = _measure(attempt.directory)
@@ -230,7 +230,7 @@ def _measure(directory: Path) -> int:
 
 def command_run(args: argparse.Namespace) -> int:
     project_root = args.project_root.resolve()
-    config = _load(project_root / args.config)
+    config = _load(project_root / args.config, args.overrides)
     paths = config["paths"]
     attempts_root = args.attempts_root or str(config["paths"]["attempts_root"])
     output = (project_root / attempts_root).resolve()
@@ -291,7 +291,7 @@ def command_run(args: argparse.Namespace) -> int:
 
 def command_status(args: argparse.Namespace) -> int:
     project_root = args.project_root.resolve()
-    config = _load(project_root / args.config)
+    config = _load(project_root / args.config, args.overrides)
     paths = config["paths"]
     ledger = Ledger(project_root / paths["ledger"], project_root / paths["lock"])
     output = (project_root / str(config["paths"]["attempts_root"])).resolve()
@@ -301,12 +301,9 @@ def command_status(args: argparse.Namespace) -> int:
     return 0
 
 
-def command_select(args: argparse.Namespace) -> int:
-    project_root = args.project_root.resolve()
-    config = _load(project_root / args.config)
-    paths = config["paths"]
-    ledger = Ledger(project_root / paths["ledger"], project_root / paths["lock"])
-    records = ledger.records()
+def _formal_selection(
+    config: dict[str, Any], records: list[dict[str, Any]], config_name: str
+) -> dict[str, Any]:
     terminal = _finished(records)
     ordered = []
     for record in _attempts(records, "formal"):
@@ -327,7 +324,10 @@ def command_select(args: argparse.Namespace) -> int:
     target = int(config["budget"]["formal_target_qualified"])
     selected = ordered[:target]
     validation_positions = sorted(
-        {int(value) for value in config["budget"]["formal_validation_qualified_indices"]}
+        {
+            int(value)
+            for value in config["budget"].get("formal_validation_qualified_indices", [])
+        }
     )
     rule = str(config.get("formal_split_description") or "").strip() or (
         f"first {target} qualified formal attempts; "
@@ -335,25 +335,21 @@ def command_select(args: argparse.Namespace) -> int:
     )
     document: dict[str, Any] = {
         "schema_version": 1,
-        "campaign": str(args.config),
+        "campaign": config_name,
         "diagnostic": bool(config.get("diagnostic", False)),
         "target": target,
         "validation_positions": validation_positions,
         "rule": rule,
     }
     if len(selected) < target:
-        print(
-            json.dumps(
-                {
-                    **document,
-                    "status": "INSUFFICIENT_QUALIFIED",
-                    "qualified": len(selected),
-                    "selected": selected,
-                },
-                indent=2,
-            )
+        document.update(
+            {
+                "status": "INSUFFICIENT_QUALIFIED",
+                "qualified": len(selected),
+                "selected": selected,
+            }
         )
-        return 1
+        return document
     training = [item for index, item in enumerate(selected) if index not in validation_positions]
     validation = [item for index, item in enumerate(selected) if index in validation_positions]
     document.update(
@@ -364,28 +360,52 @@ def command_select(args: argparse.Namespace) -> int:
             "validation": validation,
         }
     )
-    if args.out is not None:
-        destination = (project_root / args.out).resolve()
-        if destination.exists():
-            raise CampaignError(
-                f"refusing to overwrite an existing selection manifest: {destination}"
-            )
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(
-            json.dumps(document, indent=2, sort_keys=True, allow_nan=False) + "\n",
-            encoding="utf-8",
-        )
+    return document
+
+
+def formal_selection_path(config: dict[str, Any]) -> Path:
+    """The training selection manifest belongs to the dataset directory."""
+    return Path(str(config["paths"]["formal_select"]))
+
+
+def write_selection(document: dict[str, Any], destination: Path) -> None:
+    """Write one selection manifest atomically (``.tmp`` + ``os.replace``)."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(destination.name + ".tmp")
+    temporary.write_text(
+        json.dumps(document, indent=2, sort_keys=True, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
+    os.replace(temporary, destination)
+
+
+def write_formal_selection(
+    project_root: Path,
+    config: dict[str, Any],
+    records: list[dict[str, Any]],
+    config_name: str,
+) -> Path | None:
+    """Atomically publish ``formal-select.json`` once the formal target is met."""
+    document = _formal_selection(config, records, config_name)
+    if document["status"] != "SELECTED":
+        return None
+    destination = (project_root / formal_selection_path(config)).resolve()
+    write_selection(document, destination)
+    return destination
+
+
+def command_select(args: argparse.Namespace) -> int:
+    project_root = args.project_root.resolve()
+    config = _load(project_root / args.config, args.overrides)
+    paths = config["paths"]
+    ledger = Ledger(project_root / paths["ledger"], project_root / paths["lock"])
+    document = _formal_selection(config, ledger.records(), str(args.config))
+    if args.output is not None and document["status"] == "SELECTED":
+        destination = (project_root / args.output).resolve()
+        write_selection(document, destination)
         document["written"] = str(destination)
     print(json.dumps(document, indent=2))
-    return 0
-
-
-DEFAULT_CAMPAIGN = (
-    "shared/scenarios/panda_stack/configs/runtime/experiments/stack_campaign.yaml"
-)
-DEFAULT_RUNTIME_TEACHER = (
-    "shared/scenarios/panda_stack/configs/runtime/teacher_collect.yaml"
-)
+    return 0 if document["status"] == "SELECTED" else 1
 
 
 def command_backfill_terminal(args: argparse.Namespace) -> int:
@@ -397,7 +417,7 @@ def command_backfill_terminal(args: argparse.Namespace) -> int:
     only fills facts that are still empty (or a zero wall time).
     """
     project_root = args.project_root.resolve()
-    config = _load(project_root / args.config)
+    config = _load(project_root / args.config, args.overrides)
     paths = config["paths"]
     ledger = Ledger(project_root / paths["ledger"], project_root / paths["lock"])
     with ledger.locked():
@@ -459,15 +479,11 @@ def command_backfill_terminal(args: argparse.Namespace) -> int:
             "backfilled_from": [
                 str(path)
                 for path in (
-                    directory / "manifest.json",
-                    directory / "task_result.json",
+                    directory / "raw" / "manifest.json",
+                    directory / "raw" / "task_result.json",
                 )
                 if path.is_file()
-            ]
-            or sorted(
-                str(path)
-                for path in directory.glob("stack/*/raw/*/manifest.json")
-            ),
+            ],
             "backfill_reason": "terminal summary re-read from recorded episode artefacts",
         }
         ledger.append(record)
@@ -484,6 +500,14 @@ def parser() -> argparse.ArgumentParser:
         "--config",
         default=None,
         help="direct campaign recipe (conflicts with --scenario)",
+    )
+    result.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        metavar="PATH=VALUE",
+        help="override one existing campaign configuration path (repeatable)",
     )
     result.add_argument("--attempts-root", default=None)
     sub = result.add_subparsers(dest="action", required=True)
@@ -504,9 +528,9 @@ def parser() -> argparse.ArgumentParser:
     status.set_defaults()
     select = sub.add_parser("select", help="select the qualified formal split")
     select.add_argument(
-        "--out",
+        "--output",
         default=None,
-        help="write the generated SELECTED manifest only after a successful split",
+        help="atomically write the generated SELECTED manifest to this path",
     )
     select.set_defaults()
     backfill = sub.add_parser(
@@ -537,9 +561,10 @@ def _resolve_selection(args: argparse.Namespace, cli: argparse.ArgumentParser) -
     else:
         if args.shared_root is not None:
             cli.error("--shared-root requires --scenario")
-        args.config = args.config or DEFAULT_CAMPAIGN
-        if args.action == "run":
-            args.runtime_config = args.runtime_config or DEFAULT_RUNTIME_TEACHER
+        if args.config is None:
+            cli.error("one of --scenario or --config is required")
+        if args.action == "run" and args.runtime_config is None:
+            cli.error("--runtime-config is required for a direct run")
 
 
 def main(argv: list[str] | None = None) -> int:

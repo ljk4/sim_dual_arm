@@ -26,6 +26,12 @@ class CompiledScene:
     def __init__(self, model: mujoco.MjModel, data: mujoco.MjData) -> None:
         self.model = model
         self.data = data
+        # The compiled model is immutable, so resolve the body-name table once
+        # instead of rebuilding it on every 500 Hz contact-snapshot capture.
+        self.body_names: tuple[str, ...] = tuple(
+            str(model.body(index).name) or f"body[{index}]"
+            for index in range(int(model.nbody))
+        )
 
     @property
     def contact_object_names(self) -> tuple[str, ...]:

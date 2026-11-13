@@ -17,7 +17,9 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=Path("/workspace/learning/lerobot/configs/fake_policy.yaml"),
     )
-    parser.add_argument("--log-directory", type=Path, default=Path("var/logs/policy"))
+    parser.add_argument(
+        "--log-directory", type=Path, default=Path("var/_direct/logs/policy-service")
+    )
     parser.add_argument("--run-id")
     args = parser.parse_args(argv)
     config, settings = load_fake_config(args.config)

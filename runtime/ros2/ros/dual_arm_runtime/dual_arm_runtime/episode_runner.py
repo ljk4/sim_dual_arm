@@ -48,9 +48,11 @@ class EpisodeRunner:
         log: object | None = None,
         run_id: str = "",
         initial_episode_id: str | None = None,
+        episode_output: Path | None = None,
     ) -> None:
         self._configuration = configuration
         self._output = output
+        self._episode_output = episode_output
         self._io = io
         self._log = log
         self._run_id = run_id
@@ -88,8 +90,127 @@ class EpisodeRunner:
         return self._control
 
     @property
+    def configuration(self) -> RuntimeConfiguration:
+        return self._configuration
+
+    @property
+    def io(self) -> EpisodeIO:
+        return self._io
+
+    @property
+    def log(self) -> object | None:
+        return self._log
+
+    @property
+    def task_id(self) -> str:
+        return self._task_id
+
+    @property
+    def task_result(self) -> TaskResult:
+        return self._task_result
+
+    @task_result.setter
+    def task_result(self, value: TaskResult) -> None:
+        self._task_result = value
+
+    @property
+    def frozen_task_fact(self) -> object | None:
+        return self._frozen_task_fact
+
+    @frozen_task_fact.setter
+    def frozen_task_fact(self, value: object | None) -> None:
+        self._frozen_task_fact = value
+
+    @property
+    def managed_runtime(self) -> RuntimeResult | None:
+        return self._managed_runtime
+
+    @managed_runtime.setter
+    def managed_runtime(self, value: RuntimeResult | None) -> None:
+        self._managed_runtime = value
+
+    @property
+    def last_stream_command_id(self) -> str:
+        return self._last_stream_command_id
+
+    @last_stream_command_id.setter
+    def last_stream_command_id(self, value: str) -> None:
+        self._last_stream_command_id = value
+
+    @property
+    def sent_command_ids(self) -> tuple[str, ...]:
+        return tuple(self._sent_command_ids)
+
+    @property
+    def end_requested(self) -> bool:
+        with self._start_lock:
+            return self._end_requested
+
+    @property
+    def current_path(self) -> str:
+        return self._current_path()
+
+    @property
+    def current_clock_epoch(self) -> int | None:
+        return self._current_clock_epoch()
+
+    @property
     def stop_requested(self) -> threading.Event:
         return self._stop_requested
+
+    def emit(
+        self,
+        event: str,
+        *,
+        level: str = "INFO",
+        reason: str | None = None,
+        context: EventContext | None = None,
+        fields: dict[str, Scalar] | None = None,
+        exception: BaseException | None = None,
+    ) -> None:
+        self._emit_best_effort(
+            event,
+            level=level,
+            reason=reason,
+            context=context,
+            fields=fields,
+            exception=exception,
+        )
+
+    def append_fault(self, reason: str) -> None:
+        self._faults.append(reason)
+
+    def merge_faults(self, reason: str) -> None:
+        self._faults.merge(reason)
+
+    def register_command(self, command_id: str) -> None:
+        self._sent_command_ids.append(command_id)
+
+    def unregister_command(self, command_id: str) -> None:
+        try:
+            self._sent_command_ids.remove(command_id)
+        except ValueError:
+            pass
+
+    def set_status(self, phase: str, episode_id: str = "", reason: str = "") -> None:
+        self._set_status(phase, episode_id, reason)
+
+    def begin_finishing(self) -> None:
+        self._finishing.set()
+
+    def take_recorder(self) -> Recorder | None:
+        with self._recorder_lock:
+            recorder = self._recorder
+            self._recorder = None
+        return recorder
+
+    def set_record_directory(self, path: Path) -> None:
+        with self._recorder_lock:
+            self._record_directory = str(path)
+
+    def clear_run_context(self) -> None:
+        with self._recorder_lock:
+            self._run_context = None
 
     @property
     def done(self) -> threading.Event:
@@ -533,6 +654,7 @@ class EpisodeRunner:
             format_version=POLICY_EPISODE_SCHEMA_VERSION
             if self._configuration.recipe.action_source in {"policy", "teacher"}
             else DIAGNOSTIC_EPISODE_SCHEMA_VERSION,
+            episode_directory=self._episode_output,
         )
 
 

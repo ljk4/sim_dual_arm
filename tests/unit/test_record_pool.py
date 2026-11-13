@@ -42,10 +42,14 @@ metadata = {"pid": os.getpid(), "domain_id": os.environ["ROS_DOMAIN_ID"],
             "display": os.environ.get("DISPLAY")}
 (directory / "worker.json").write_text(json.dumps(metadata))
 time.sleep(delay)
-(directory / "manifest.json").write_text(json.dumps({
+raw = directory / "raw"
+raw.mkdir()
+export = directory / "export"
+export.mkdir()
+(raw / "manifest.json").write_text(json.dumps({
     "recording": {"complete": True}, "runtime": {"outcome": "stopped", "reason": "TEST"}}))
-(directory / "task_result.json").write_text(json.dumps({"result": {"outcome": "succeeded"}}))
-(directory / "quality.json").write_text(json.dumps({"qualified": state == "qualified"}))
+(raw / "task_result.json").write_text(json.dumps({"result": {"outcome": "succeeded"}}))
+(export / "quality.json").write_text(json.dumps({"qualified": state == "qualified"}))
 metadata["end"] = time.time()
 (directory / "worker.json").write_text(json.dumps(metadata))
 raise SystemExit(130 if state == "interrupted" else 0)
@@ -62,6 +66,8 @@ raise SystemExit(130 if state == "interrupted" else 0)
                 str(root),
                 "--config",
                 "campaign.yaml",
+                "--runtime-config",
+                "runtime.yaml",
                 "--worker-manifest",
                 str(manifest),
                 *arguments,
@@ -180,7 +186,8 @@ def _existing_qualified(root, count):
         attempt_id = f"formal:{10000 + index}:existing"
         records.extend([
             {"event": "RESERVED", "attempt_id": attempt_id, "run_id": f"existing-{index}",
-             "purpose": "formal", "kind": "rollout", "mode": "teacher", "seed": 10000 + index},
+             "purpose": "formal", "kind": "rollout", "mode": "teacher", "seed": 10000 + index,
+             "attempt_dir": str(output / f"existing-{index}")},
             {"event": "FINISHED", "attempt_id": attempt_id, "qualified": True, "raw_bytes": 0},
         ])
     (output / "attempts.jsonl").write_text("".join(json.dumps(item) + "\n" for item in records))

@@ -119,6 +119,7 @@ class EpisodeRecorder:
         source: str,
         test_only: bool,
         format_version: int = EPISODE_SCHEMA_VERSION,
+        episode_directory: Path | None = None,
     ) -> None:
         if not isinstance(run_id, str) or not run_id:
             raise ContractError("EPISODE_ERROR", "manifest run_id must be a non-empty string")
@@ -129,9 +130,16 @@ class EpisodeRecorder:
         if isinstance(format_version, bool) or format_version != 1:
             raise ContractError("EPISODE_ERROR", "manifest format_version must be 1")
         self._format_version = format_version
-        output_root.mkdir(parents=True, exist_ok=True)
-        self._final = output_root / episode_id
-        self.directory = output_root / f".partial-{episode_id}"
+        # An explicit episode directory lets a caller record straight into its
+        # final location (for example ``<attempt>/raw``) without an extra
+        # ``<episode_id>`` nesting level.
+        self._final = (
+            Path(episode_directory)
+            if episode_directory is not None
+            else output_root / episode_id
+        )
+        self._final.parent.mkdir(parents=True, exist_ok=True)
+        self.directory = self._final.parent / f".partial-{self._final.name}"
         self.directory.mkdir()
         self._episode_id, self._configuration, self._schemas = episode_id, configuration, schemas
         self._run_id, self._source, self._test_only = run_id, source, test_only

@@ -16,8 +16,8 @@ from marvin_diagnostic_common import (  # noqa: E402
     Stack,
     _context,
     _gripper,
-    _holding,
     _hold_snapshots,
+    _holding,
     _object,
     _plan_for_execution,
     _public_target,
@@ -32,8 +32,7 @@ if ROS_IMPORT_ERROR is not None:  # pragma: no cover
 
 try:
     import rclpy
-    from robot_api_msgs.srv import Stop, SubmitFollower
-    from robot_ros_support.conversions import context_message
+    from robot_api_msgs.srv import SubmitFollower
     from robot_ros_support.stream_conversions import stream_command_message
 except ImportError as error:  # pragma: no cover
     pytest.skip(f"ROS unavailable: {error}", allow_module_level=True)

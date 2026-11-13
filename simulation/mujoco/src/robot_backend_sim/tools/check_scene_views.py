@@ -7,7 +7,7 @@ import statistics
 import time
 from pathlib import Path
 
-from robot_backend_sim.config.scene_config import SceneConfig
+from robot_backend_sim.config.panda_scene_config import SceneConfig
 from robot_backend_sim.render import visibility
 from robot_backend_sim.render.visibility import LayoutSpec, LayoutVisibility, SceneCheckConfig
 from robot_backend_sim.tools.check_scene_common import SceneCheckFailure

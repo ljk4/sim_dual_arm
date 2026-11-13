@@ -81,7 +81,7 @@ class PolicyTargetSource:
         if self.termination_mode != "task":
             return None
         if self.task is None:
-            raise ContractError("TASK_MONITOR_MISSING", "task mode has no stack task monitor")
+            raise ContractError("TASK_MONITOR_MISSING", "task mode has no task monitor")
         prepared = self.task.prepare(
             context,
             episode_id,

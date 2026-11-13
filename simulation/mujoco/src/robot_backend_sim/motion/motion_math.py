@@ -112,7 +112,9 @@ def validate_controller_inputs(
     if tuple(io.joint_names) != CONTROL_JOINT_NAMES:
         raise invalid("PROFILE_MISMATCH", "robot I/O joint order is not the public 16-joint order")
     if tuple(io.profile.joint_names) != config.joint_names:
-        raise invalid("PROFILE_MISMATCH", "robot profile joint order differs from the control config")
+        raise invalid(
+            "PROFILE_MISMATCH", "robot profile joint order differs from the control config"
+        )
     if not isinstance(io.profile.digest, str) or not io.profile.digest:
         raise invalid("PROFILE_MISMATCH", "robot profile digest is missing")
     if not scene.contact_object_names or any(

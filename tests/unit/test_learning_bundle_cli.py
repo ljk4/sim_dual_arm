@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_bundle_honors_mode_and_data_overrides_and_preserves_absolute_run(monkeypatch, capsys):
-    run = Path("/data/learning/runs/full-20261110T102358Z-10629")
+    run = Path("/data/panda_stack/models/runs/full-20261110T102358Z-10629")
 
     def export(**kwargs):
         config = kwargs["config"]
@@ -24,7 +24,9 @@ def test_bundle_honors_mode_and_data_overrides_and_preserves_absolute_run(monkey
 
     monkeypatch.setattr(cli, "export_bundle", export)
     assert cli.main([
-        "--project-root", str(ROOT), "bundle", "--mode", "full", "--run", str(run),
+        "--project-root", str(ROOT), "bundle", "--config",
+        "shared/scenarios/panda_stack/configs/learning/act_training.yaml",
+        "--mode", "full", "--run", str(run),
         "--output", "test-bundle", "--data-root", "test-data",
     ]) == 0
     assert json.loads(capsys.readouterr().out)["checkpoint_step"] == 5000

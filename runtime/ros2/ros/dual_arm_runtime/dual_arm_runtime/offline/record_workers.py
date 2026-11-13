@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from robot_contracts.overrides import OverrideError, apply_overrides
 
 from dual_arm_runtime.offline.campaign_ledger import CampaignError
 from dual_arm_runtime.offline.collect_attempt import REFERENCES, check_ros_sdk
@@ -84,6 +85,7 @@ def prepare_workers(
     project: Path, directory: Path, workers: int, domain_base: int,
     runtime_template: Path, backend_template: Path, speed: float,
     selection: dict[str, Any] | None = None,
+    overrides: tuple[str, ...] | list[str] = (),
 ) -> Path:
     if not 1 <= workers <= 16 or not 0 <= domain_base <= 232 - workers + 1:
         raise CampaignError("workers must be 1..16 and ROS domain IDs must stay in 0..232")
@@ -99,6 +101,10 @@ def prepare_workers(
         _check_selection_paths(selection, runtime_template, backend_template)
     runtime = yaml.safe_load(runtime_template.read_text())
     backend = yaml.safe_load(backend_template.read_text())
+    try:
+        runtime = apply_overrides(runtime, list(overrides))
+    except OverrideError as error:
+        raise CampaignError(str(error)) from error
     if selection is None:
         if (
             runtime.get("action_source") != "teacher"
@@ -194,6 +200,9 @@ def main() -> int:
     parser.add_argument("--binding-sha256")
     parser.add_argument("--runtime-config", type=Path)
     parser.add_argument("--backend-template", type=Path)
+    parser.add_argument(
+        "--set", dest="overrides", action="append", default=[], metavar="PATH=VALUE"
+    )
     args = parser.parse_args()
     if args.scenario is not None:
         if args.runtime_config is not None or args.backend_template is not None:
@@ -238,6 +247,7 @@ def main() -> int:
         manifest = prepare_workers(
             ROOT, args.directory, args.workers, args.domain_base,
             runtime_config, backend_template, args.realtime_speed, selection,
+            args.overrides,
         )
     except (CampaignError, OSError, ValueError, KeyError, TypeError) as error:
         parser.error(str(error))

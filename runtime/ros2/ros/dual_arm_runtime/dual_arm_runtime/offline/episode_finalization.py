@@ -8,6 +8,7 @@ from pathlib import Path
 from robot_contracts.episodes import RuntimeOutcome, RuntimeResult, TaskOutcome
 from robot_run_logging import EventContext, Scalar
 
+from dual_arm_runtime.episode_runner_io import EpisodeLifecycle
 from dual_arm_runtime.offline.audit.task_result import (
     task_fact_document,
     task_result_from_fact,
@@ -30,53 +31,58 @@ def stat_fields(stats: RecordingStats | None) -> dict[str, Scalar]:
     }
 
 
-def _cleanup(runner: object, episode_id: str, clock_epoch: int | None) -> None:
+def _cleanup(runner: EpisodeLifecycle, episode_id: str, clock_epoch: int | None) -> None:
     try:
-        runner._set_status("ENDING", episode_id)
+        runner.set_status("ENDING", episode_id)
     except Exception as error:
-        runner._faults.append(f"STATUS_ERROR: {error}")
-    if runner._managed_runtime is not None:
-        cleanup_reason = runner._managed_runtime.reason
+        runner.append_fault(f"STATUS_ERROR: {error}")
+    if runner.managed_runtime is not None:
+        cleanup_reason = runner.managed_runtime.reason
     else:
-        cleanup_reason = "EPISODE_END" if runner._end_requested else "RUNTIME_SHUTDOWN"
+        cleanup_reason = "EPISODE_END" if runner.end_requested else "RUNTIME_SHUTDOWN"
     try:
-        runner._control.cleanup(cleanup_reason)
+        runner.control.cleanup(cleanup_reason)
     except Exception as error:
-        runner._faults.append(f"CLEANUP_ERROR: {error}")
-    if not runner._sent_command_ids:
+        runner.append_fault(f"CLEANUP_ERROR: {error}")
+    sent_command_ids = runner.sent_command_ids
+    if not sent_command_ids:
         return
     try:
-        runner._io.wait_stop_settled(
-            tuple(runner._sent_command_ids),
-            runner._configuration.recipe.control.stop_timeout_s,
+        runner.io.wait_stop_settled(
+            sent_command_ids,
+            runner.configuration.recipe.control.stop_timeout_s,
         )
     except Exception as error:
-        runner._faults.append(f"TERMINAL_WAIT_ERROR: {error}")
-        runner._emit_best_effort(
+        runner.append_fault(f"TERMINAL_WAIT_ERROR: {error}")
+        runner.emit(
             "terminal_wait_failed",
             level="ERROR",
             reason="TERMINAL_WAIT_FAILED",
             context=EventContext(episode_id=episode_id, clock_epoch=clock_epoch),
-            fields={"command_count": len(runner._sent_command_ids)},
+            fields={"command_count": len(sent_command_ids)},
             exception=error,
         )
 
 
 def _write_task_fact(
-    runner: object, path: Path, manifest: dict, episode_id: str, clock_epoch: int | None
+    runner: EpisodeLifecycle,
+    path: Path,
+    manifest: dict,
+    episode_id: str,
+    clock_epoch: int | None,
 ) -> None:
     try:
         document = task_fact_document(
-            task_fact_from_message(runner._frozen_task_fact),
-            runner._task_result,
-            action_source=runner._configuration.recipe.action_source,
+            task_fact_from_message(runner.frozen_task_fact),
+            runner.task_result,
+            action_source=runner.configuration.recipe.action_source,
             test_only=bool(manifest.get("test_only", False)),
         )
         temporary = path / "task_result.json.tmp"
         temporary.write_text(json.dumps(document, indent=2, allow_nan=False) + "\n")
         temporary.replace(path / "task_result.json")
     except Exception as error:  # noqa: BLE001 - sidecar must not fake manifest truth
-        runner._emit_best_effort(
+        runner.emit(
             "task.result.write_failed",
             level="ERROR",
             reason="TASK_RESULT_WRITE_FAILED",
@@ -93,28 +99,27 @@ def _recorder_stats(recorder: object) -> RecordingStats | None:
 
 
 def _recorded_completed(
-    runner: object,
+    runner: EpisodeLifecycle,
     recorder: object,
     path: Path,
     episode_id: str,
     clock_epoch: int | None,
 ) -> tuple[bool, str, RecordingStats | None]:
-    with runner._recorder_lock:
-        runner._record_directory = str(path)
+    runner.set_record_directory(path)
     manifest = json.loads((path / "manifest.json").read_text())
     _write_task_fact(runner, path, manifest, episode_id, clock_epoch)
     recording_complete = bool(manifest["recording"]["complete"])
     recording_failure = str(manifest["recording"]["failure_reason"])
     if not recording_complete:
-        runner._faults.merge(recording_failure)
+        runner.merge_faults(recording_failure)
     manifest_runtime = RuntimeResult(
         RuntimeOutcome(manifest["runtime"]["outcome"]),
         manifest["runtime"]["reason"],
     )
     if manifest_runtime.outcome is RuntimeOutcome.FAILED:
-        runner._faults.merge(manifest_runtime.reason)
+        runner.merge_faults(manifest_runtime.reason)
     stats = _recorder_stats(recorder)
-    runner._emit_best_effort(
+    runner.emit(
         "recording.completed" if recording_complete else "recording.failed",
         level="INFO" if recording_complete else "ERROR",
         reason="RECORDING_COMPLETED" if recording_complete else "RECORDING_INCOMPLETE",
@@ -130,11 +135,9 @@ def _recorded_completed(
 
 
 def _finish_recorder(
-    runner: object, episode_id: str, clock_epoch: int | None
+    runner: EpisodeLifecycle, episode_id: str, clock_epoch: int | None
 ) -> tuple[bool | None, str, RecordingStats | None]:
-    with runner._recorder_lock:
-        recorder = runner._recorder
-        runner._recorder = None
+    recorder = runner.take_recorder()
     if recorder is None:
         return None, "", None
     runtime = runner.current_runtime_result()
@@ -142,20 +145,20 @@ def _finish_recorder(
         path = recorder.finish(
             runtime,
             current_runtime=runner.current_runtime_result,
-            task_result=runner._task_result,
+            task_result=runner.task_result,
         )
         return _recorded_completed(runner, recorder, path, episode_id, clock_epoch)
     except Exception as error:
         recording_failure = str(error)
         stats = _recorder_stats(recorder)
-        runner._faults.append(f"RECORDING_ERROR: {error}")
-        runner._emit_best_effort(
+        runner.append_fault(f"RECORDING_ERROR: {error}")
+        runner.emit(
             "recording.failed",
             level="ERROR",
             reason="RECORDING_FAILED",
             context=EventContext(episode_id=episode_id, clock_epoch=clock_epoch),
             fields={
-                "path": runner._current_path() or None,
+                "path": runner.current_path or None,
                 "recording_complete": False,
                 "recording_failure_reason": recording_failure or None,
                 **stat_fields(stats),
@@ -166,7 +169,7 @@ def _finish_recorder(
 
 
 def _emit_finished(
-    runner: object,
+    runner: EpisodeLifecycle,
     episode_id: str,
     clock_epoch: int | None,
     primary: str,
@@ -175,7 +178,7 @@ def _emit_finished(
     recording_stats: RecordingStats | None,
 ) -> RuntimeResult:
     runtime = runner.current_runtime_result()
-    runner._emit_best_effort(
+    runner.emit(
         "episode.finished",
         level="ERROR"
         if runtime.outcome is RuntimeOutcome.FAILED
@@ -185,13 +188,13 @@ def _emit_finished(
         reason=f"EPISODE_{runtime.outcome.value.upper()}",
         context=EventContext(episode_id=episode_id, clock_epoch=clock_epoch),
         fields={
-            "task_id": runner._task_id,
-            "record_directory": runner._current_path() or None,
+            "task_id": runner.task_id,
+            "record_directory": runner.current_path or None,
             "recording_complete": recording_complete,
             "recording_failure_reason": recording_failure or None,
             "runtime_outcome": runtime.outcome.value,
             "runtime_reason": runtime.reason or None,
-            "task_outcome": runner._task_result.outcome.value,
+            "task_outcome": runner.task_result.outcome.value,
             "primary_reason": primary or None,
             **stat_fields(recording_stats),
         },
@@ -199,19 +202,21 @@ def _emit_finished(
     return runtime
 
 
-def _final_status(runner: object, episode_id: str, runtime: RuntimeResult) -> None:
+def _final_status(
+    runner: EpisodeLifecycle, episode_id: str, runtime: RuntimeResult
+) -> None:
     try:
-        runner._set_status(
+        runner.set_status(
             "FAULT" if runtime.outcome is RuntimeOutcome.FAILED else "IDLE",
             episode_id,
             runner.failure_reason if runtime.outcome is RuntimeOutcome.FAILED else "",
         )
     except Exception as error:
-        runner._faults.append(f"STATUS_ERROR: {error}")
+        runner.append_fault(f"STATUS_ERROR: {error}")
 
 
 def _print_summary(
-    runner: object,
+    runner: EpisodeLifecycle,
     episode_id: str,
     recording_complete: bool | None,
     recording_failure: str,
@@ -231,8 +236,8 @@ def _print_summary(
                     "reason": runtime.reason or None,
                 },
                 "task": {
-                    "outcome": runner._task_result.outcome.value,
-                    "reason": runner._task_result.reason or None,
+                    "outcome": runner.task_result.outcome.value,
+                    "reason": runner.task_result.reason or None,
                 },
             }
         ),
@@ -240,17 +245,16 @@ def _print_summary(
     )
 
 
-def finish(runner: object, episode_id: str) -> None:
-    runner._finishing.set()
-    clock_epoch = runner._current_clock_epoch()
+def finish(runner: EpisodeLifecycle, episode_id: str) -> None:
+    runner.begin_finishing()
+    clock_epoch = runner.current_clock_epoch
     primary = runner.failure_reason
     _cleanup(runner, episode_id, clock_epoch)
     freeze_task_fact_after_failure(runner, episode_id, clock_epoch)
     recording_complete, recording_failure, recording_stats = _finish_recorder(
         runner, episode_id, clock_epoch
     )
-    with runner._recorder_lock:
-        runner._run_context = None
+    runner.clear_run_context()
     runtime = _emit_finished(
         runner,
         episode_id,
@@ -265,7 +269,7 @@ def finish(runner: object, episode_id: str) -> None:
 
 
 def freeze_task_fact_after_failure(
-    runner: object, episode_id: str, clock_epoch: int | None
+    runner: EpisodeLifecycle, episode_id: str, clock_epoch: int | None
 ) -> None:
     """Best-effort, bounded task truth for a non-managed runtime failure.
 
@@ -273,20 +277,20 @@ def freeze_task_fact_after_failure(
     unexpected runtime failure after Start, so a failed episode can still
     carry the independent judge dimension instead of silently dropping it.
     """
-    recipe = runner._configuration.recipe
+    recipe = runner.configuration.recipe
     stream = recipe.policy if recipe.action_source == "policy" else recipe.teacher
     if stream is None or stream.termination_mode != "task":
         return
-    if runner._task_result.outcome is not TaskOutcome.NOT_EVALUATED:
+    if runner.task_result.outcome is not TaskOutcome.NOT_EVALUATED:
         return
     context = runner.context
-    client = runner._io.task_client()
+    client = runner.io.task_client()
     if context is None or client is None:
         return
     try:
         fact = client.state(context, 0)
     except Exception as error:  # noqa: BLE001 - preserve the primary runtime failure
-        runner._emit_best_effort(
+        runner.emit(
             "task.state_unavailable",
             level="WARNING",
             reason="TASK_STATE_UNAVAILABLE",
@@ -295,11 +299,11 @@ def freeze_task_fact_after_failure(
         )
         fact = None
     if fact is not None:
-        runner._frozen_task_fact = fact
-        runner._io.record_task_state(fact)
+        runner.frozen_task_fact = fact
+        runner.io.record_task_state(fact)
         judged = task_result_from_fact(task_fact_from_message(fact))
         if judged.outcome is not TaskOutcome.NOT_EVALUATED:
-            runner._task_result = judged
+            runner.task_result = judged
 
 
 __all__ = ["finish", "freeze_task_fact_after_failure", "stat_fields"]

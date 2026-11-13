@@ -243,7 +243,9 @@ def _airborne(time_ns: int, **kwargs) -> HandoverObservation:
 
 def _advance_to_dual_hold(runtime: HandoverTaskRuntime) -> int:
     time_ns = 0
-    approach = lambda time_ns: _observation(time_ns, left_open=OPEN, right_open=OPEN)
+    def approach(time_ns: int) -> HandoverObservation:
+        return _observation(time_ns, left_open=OPEN, right_open=OPEN)
+
 
     def left_hold(time_ns: int, **kwargs) -> HandoverObservation:
         return _airborne(time_ns, left_open=CLOSE, left_holding=True, **kwargs)

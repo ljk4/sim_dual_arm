@@ -13,12 +13,15 @@ from robot_contracts.execution_feedback import ExecutionFeedback
 from robot_contracts.models import RunContext
 from robot_contracts.stream_request import StreamRequest
 from robot_contracts.trajectory.follower_reference import FollowerReference
+from robot_run_logging import EventContext, Scalar
 
 from dual_arm_runtime.observation import ExactObservation
 from dual_arm_runtime.recording_queue import RecordingStats
 
 if TYPE_CHECKING:
     from robot_api_msgs.msg import BackendInfo
+
+    from dual_arm_runtime.runtime_config import RuntimeConfiguration
 
 
 class FailureLog:
@@ -173,4 +176,68 @@ class EpisodeIO(Protocol):
     def notify(self) -> None: ...
 
 
-__all__ = ["ControlPort", "EpisodeIO", "FailureLog", "Recorder"]
+class EpisodeLifecycle(Protocol):
+    """Explicit runner surface shared with stream execution and finalization.
+
+    This replaces ``runner: object`` plus direct ``runner._private`` access
+    across modules.  Mutation of episode-owned state goes through methods so
+    the runner keeps its locks.
+    """
+
+    configuration: RuntimeConfiguration
+    io: EpisodeIO
+    control: ControlPort
+    log: object | None
+    stop_requested: threading.Event
+    task_id: str
+    task_result: TaskResult
+    frozen_task_fact: object | None
+    managed_runtime: RuntimeResult | None
+    last_stream_command_id: str
+    end_requested: bool
+    current_path: str
+    current_clock_epoch: int | None
+    context: RunContext | None
+    failure_reason: str
+    record_directory: str
+    sent_command_ids: tuple[str, ...]
+
+    def emit(
+        self,
+        event: str,
+        *,
+        level: str = "INFO",
+        reason: str | None = None,
+        context: EventContext | None = None,
+        fields: dict[str, Scalar] | None = None,
+        exception: BaseException | None = None,
+    ) -> None: ...
+
+    def append_fault(self, reason: str) -> None: ...
+
+    def merge_faults(self, reason: str) -> None: ...
+
+    def register_command(self, command_id: str) -> None: ...
+
+    def unregister_command(self, command_id: str) -> None: ...
+
+    def set_status(self, phase: str, episode_id: str = "", reason: str = "") -> None: ...
+
+    def current_runtime_result(self) -> RuntimeResult: ...
+
+    def begin_finishing(self) -> None: ...
+
+    def take_recorder(self) -> Recorder | None: ...
+
+    def set_record_directory(self, path: Path) -> None: ...
+
+    def clear_run_context(self) -> None: ...
+
+
+__all__ = [
+    "ControlPort",
+    "EpisodeIO",
+    "EpisodeLifecycle",
+    "FailureLog",
+    "Recorder",
+]

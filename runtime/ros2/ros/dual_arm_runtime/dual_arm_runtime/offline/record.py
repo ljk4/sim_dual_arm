@@ -10,19 +10,13 @@ import sys
 import time
 from pathlib import Path
 
+from dual_arm_runtime.artifact_paths import default_backend_log
 from dual_arm_runtime.offline import campaign
 from dual_arm_runtime.offline.campaign_ledger import CampaignError, Ledger, attempts, finished, load
 from dual_arm_runtime.offline.collect_attempt import check_ros_sdk
 from dual_arm_runtime.offline.scenario_selection import select_collection
 
 ROOT = Path(os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[6])
-DEFAULT_CAMPAIGN = (
-    "shared/scenarios/panda_stack/configs/runtime/experiments/stack_campaign.yaml"
-)
-DEFAULT_RUNTIME_TEACHER = (
-    "shared/scenarios/panda_stack/configs/runtime/teacher_collect.yaml"
-)
-DEFAULT_BACKEND_LOG = Path("/data/runs/backend/teacher-backend/log")
 
 
 def positive_int(value: str) -> int:
@@ -56,6 +50,14 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument(
         "--runtime-config", help="direct runtime teacher recipe (conflicts with --scenario)"
     )
+    result.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        metavar="PATH=VALUE",
+        help="override one existing runtime recipe path for each attempt (repeatable)",
+    )
     result.add_argument("--no-previews", action="store_true", help="skip export preview PNGs/GIFs")
     result.add_argument("--worker-manifest", type=Path, help=argparse.SUPPRESS)
     result.add_argument("--target-total", type=positive_int, help=argparse.SUPPRESS)
@@ -88,11 +90,13 @@ def _resolve_selection(args: argparse.Namespace, cli: argparse.ArgumentParser) -
             cli.error("--shared-root requires --scenario")
         if args.binding_sha256 is not None:
             cli.error("--binding-sha256 requires --scenario")
-        args.config = args.config or DEFAULT_CAMPAIGN
-        args.runtime_config = args.runtime_config or DEFAULT_RUNTIME_TEACHER
+        if args.config is None:
+            cli.error("one of --scenario or --config is required")
+        if args.runtime_config is None:
+            cli.error("--runtime-config is required with --config")
         args.selection = None
     if args.backend_log is None:
-        args.backend_log = DEFAULT_BACKEND_LOG
+        args.backend_log = default_backend_log(getattr(args, "scenario", None))
 
 
 def _collector_command(args: argparse.Namespace) -> list[str]:
@@ -107,6 +111,10 @@ def _collector_command(args: argparse.Namespace) -> list[str]:
         command += ["--scenario", args.scenario]
         if getattr(args, "shared_root", None) is not None:
             command += ["--shared-root", str(args.shared_root)]
+    else:
+        command += ["--runtime-config", str(args.runtime_config)]
+    for override in getattr(args, "overrides", []):
+        command += ["--set", override]
     return command
 
 
@@ -122,7 +130,7 @@ def _preflight(args: argparse.Namespace) -> int:
     )
 
 
-def record(args: argparse.Namespace, ledger: Ledger) -> int:
+def record(args: argparse.Namespace, config: dict, ledger: Ledger) -> int:
     qualified = attempted = consecutive_failures = 0
     stop_reason, exit_code = "target_reached", 0
     try:
@@ -180,6 +188,12 @@ def record(args: argparse.Namespace, ledger: Ledger) -> int:
             "scenario_id": args.selection["scenario_id"],
             "binding": args.selection["binding"],
         }
+    if args.purpose == "formal" and stop_reason == "target_reached":
+        destination = campaign.write_formal_selection(
+            args.project_root, config, ledger.records(), args.config
+        )
+        if destination is not None:
+            summary["formal_select"] = str(destination)
     print(json.dumps(summary, sort_keys=True), flush=True)
     return exit_code
 
@@ -203,7 +217,7 @@ def main(argv: list[str] | None = None) -> int:
             return code
         paths = config["paths"]
         ledger = Ledger(args.project_root / paths["ledger"], args.project_root / paths["lock"])
-        return record(args, ledger)
+        return record(args, config, ledger)
     except (CampaignError, OSError) as error:
         print(json.dumps({"error": str(error)}), file=sys.stderr)
         return 2

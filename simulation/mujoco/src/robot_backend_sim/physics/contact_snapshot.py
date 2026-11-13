@@ -88,7 +88,9 @@ def _finite(value: Any, field: str) -> float:
 def _object_motion(model: Any, data: Any, name: str, qpos_address: int) -> ObjectMotion:
     if len(data.qpos) < qpos_address + 7:
         raise ContractError("INVALID_CONTACT", f"{name} qpos slice is outside the model")
-    values = tuple(_finite(data.qpos[qpos_address + index], f"{name}.qpos[{index}]") for index in range(7))
+    values = tuple(
+        _finite(data.qpos[qpos_address + index], f"{name}.qpos[{index}]") for index in range(7)
+    )
     dof_address = None
     for joint_id in range(int(model.njnt)):
         if int(model.jnt_qposadr[joint_id]) == qpos_address:
@@ -127,7 +129,9 @@ def _tcp_pose(model: Any, data: Any, site_name: str) -> tuple[tuple[float, ...],
         raise ContractError("MODEL_MISMATCH", f"TCP site {site_name!r} is missing") from error
     position = tuple(_finite(value, f"{site_name}.position") for value in data.site_xpos[site_id])
     quaternion = np.zeros(4, dtype=np.float64)
-    mujoco.mju_mat2Quat(quaternion, np.asarray(data.site_xmat[site_id], dtype=np.float64).reshape(9))
+    mujoco.mju_mat2Quat(
+        quaternion, np.asarray(data.site_xmat[site_id], dtype=np.float64).reshape(9)
+    )
     return position, tuple(_finite(value, f"{site_name}.quaternion") for value in quaternion)
 
 
@@ -169,7 +173,7 @@ def build_contact_snapshot(
 
     finger_totals: dict[tuple[str, int, str], list[float | int]] = {}
     support_totals: dict[tuple[str, str], list[float | int]] = {}
-    body_names = [str(model.body(index).name) or f"body[{index}]" for index in range(int(model.nbody))]
+    body_names = scene.body_names
     for contact_index in range(int(data.ncon)):
         contact = data.contact[contact_index]
         body1 = int(model.geom_bodyid[int(contact.geom1)])

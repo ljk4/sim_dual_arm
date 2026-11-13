@@ -1,10 +1,17 @@
-"""Typed key poses, private mink IK and geometric clearance diagnostics.
+"""Panda right-arm key-pose IK and geometric clearance diagnostics.
 
-Pure target and joint-path construction lives at the top of this module so it
-can be validated before MuJoCo or an EGL context exists.  MuJoCo-facing functions use
-a private ``mink.Configuration``/MjData and never write ``Scene.data``.  The
-gripper stays open and both objects stay at their initial poses; lift/place are
-key-pose previews, not object transport.
+This module backs the Panda stack target/key-pose pipeline: the stack teacher
+and the ``tools/check_kinematics.py`` diagnostic both drive it with the Panda
+``right_joint1..7`` chain and ``right_tcp`` site.  Robot-agnostic primitives
+(``ObjectPose``, ``sample_joint_path``, ``rotation_down``) live in
+:mod:`robot_backend_sim.kinematics.common`; the Marvin handover planner uses
+:mod:`robot_backend_sim.kinematics.dual_arm` instead.
+
+Pure target and joint-path construction stays at the top of this module so it
+can be validated before MuJoCo or an EGL context exists.  MuJoCo-facing
+functions use a private ``mink.Configuration``/MjData and never write
+``Scene.data``.  The gripper stays open and both objects stay at their initial
+poses; lift/place are key-pose previews, not object transport.
 """
 
 from __future__ import annotations
@@ -19,7 +26,13 @@ from robot_backend_sim.config.kinematics_config import (
     IKConfig,
     TargetConfig,
 )
-from robot_backend_sim.config.scene_config import PANDA_JOINT_RANGES
+from robot_backend_sim.kinematics.common import (
+    ObjectPose,
+    finite_float,
+    rotation_down,
+    sample_joint_path,
+    vector,
+)
 from robot_backend_sim.kinematics.kinematics_clearance import (
     ClearancePoint,
     CollisionPair,
@@ -39,25 +52,14 @@ __all__ = [
     "IKResult",
     "KeyPoseTarget",
     "KinematicsError",
-    "ObjectPose",
     "PathResult",
     "build_collision_pairs",
     "build_targets",
     "check_initial_pose",
     "check_path",
-    "extract_object_pose",
     "measure_clearance",
-    "rotation_down",
-    "sample_joint_path",
     "solve_key_poses",
 ]
-
-
-@dataclass(frozen=True, slots=True)
-class ObjectPose:
-    name: str
-    center: tuple[float, float, float]
-    yaw_rad: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,59 +85,6 @@ class IKResult:
     message: str | None = None
 
 
-def _finite_float(value: object, field: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        raise KinematicsError("target_invalid", f"{field} must be a finite number")
-    result = float(value)
-    if not math.isfinite(result):
-        raise KinematicsError("target_invalid", f"{field} must be finite")
-    return result
-
-
-def _vector(value: object, length: int, field: str) -> tuple[float, ...]:
-    if not isinstance(value, tuple | list) or len(value) != length:
-        raise KinematicsError("target_invalid", f"{field} must contain {length} values")
-    return tuple(_finite_float(item, f"{field}[{index}]") for index, item in enumerate(value))
-
-
-def rotation_down(yaw_rad: float) -> tuple[tuple[float, float, float], ...]:
-    """Return ``Rz(yaw) @ diag(1, -1, -1)`` as an explicit row-major matrix."""
-    yaw = _finite_float(yaw_rad, "yaw_rad")
-    cosine = math.cos(yaw)
-    sine = math.sin(yaw)
-    return (
-        (cosine, sine, 0.0),
-        (sine, -cosine, 0.0),
-        (0.0, 0.0, -1.0),
-    )
-
-
-def extract_object_pose(qpos: object, address: int, name: str) -> ObjectPose:
-    """Read the initial free-joint centre and yaw from one qpos vector."""
-    if isinstance(address, bool) or not isinstance(address, int) or address < 0:
-        raise KinematicsError("initial_state_invalid", "object qpos address is invalid")
-    try:
-        values = [float(qpos[address + index]) for index in range(7)]  # type: ignore[index]
-    except (IndexError, TypeError, ValueError) as error:
-        raise KinematicsError(
-            "initial_state_invalid", f"object {name!r} qpos slice is not readable"
-        ) from error
-    if not all(math.isfinite(value) for value in values):
-        raise KinematicsError(
-            "initial_state_invalid", f"object {name!r} qpos contains a non-finite value"
-        )
-    w, x, y, z = values[3], values[4], values[5], values[6]
-    norm = math.sqrt(w * w + x * x + y * y + z * z)
-    if norm < 1e-9:
-        raise KinematicsError("initial_state_invalid", f"object {name!r} quaternion has zero norm")
-    if abs(norm - 1.0) > 1e-3:
-        raise KinematicsError(
-            "initial_state_invalid", f"object {name!r} quaternion is not unit length"
-        )
-    yaw = 2.0 * math.atan2(z, w)
-    return ObjectPose(name=name, center=(values[0], values[1], values[2]), yaw_rad=yaw)
-
-
 def build_targets(
     source: ObjectPose,
     target: ObjectPose,
@@ -146,13 +95,13 @@ def build_targets(
     config: TargetConfig,
 ) -> tuple[KeyPoseTarget, ...]:
     """Build the six key poses from the complete initial object snapshot."""
-    table_top = _finite_float(table_top_z, "table_top_z")
-    source_half = _finite_float(source_half_z, "source_half_z")
-    target_half = _finite_float(target_half_z, "target_half_z")
+    table_top = finite_float(table_top_z, "table_top_z")
+    source_half = finite_float(source_half_z, "source_half_z")
+    target_half = finite_float(target_half_z, "target_half_z")
     if source_half <= 0.0 or target_half <= 0.0:
         raise KinematicsError("target_invalid", "object half extents must be positive")
-    source_center = _vector(source.center, 3, "source.center")
-    target_center = _vector(target.center, 3, "target.center")
+    source_center = vector(source.center, 3, "source.center")
+    target_center = vector(target.center, 3, "target.center")
     if not math.isfinite(source.yaw_rad) or not math.isfinite(target.yaw_rad):
         raise KinematicsError("target_invalid", "object yaw must be finite")
     rotation = rotation_down(source.yaw_rad)
@@ -194,45 +143,6 @@ def build_targets(
     if tuple(item.phase for item in targets) != PHASES:
         raise KinematicsError("target_invalid", "key-pose order does not match configured phases")
     return tuple(targets)
-
-
-def sample_joint_path(
-    start: object,
-    end: object,
-    *,
-    max_step_rad: float,
-    max_samples: int,
-) -> tuple[tuple[float, ...], ...]:
-    """Sample a linear joint-space path, including both endpoints."""
-    step = _finite_float(max_step_rad, "max_step_rad")
-    if step <= 0.0:
-        raise KinematicsError("path_sample_invalid", "max_step_rad must be positive")
-    if isinstance(max_samples, bool) or not isinstance(max_samples, int) or max_samples < 2:
-        raise KinematicsError("path_sample_invalid", "max_samples must be an integer >= 2")
-    start_values = _vector(start, len(start), "start")  # type: ignore[arg-type]
-    end_values = _vector(end, len(end), "end")  # type: ignore[arg-type]
-    if len(start_values) != len(end_values) or not start_values:
-        raise KinematicsError(
-            "path_sample_invalid", "start and end must have the same non-zero length"
-        )
-    deltas = [abs(second - first) for first, second in zip(start_values, end_values, strict=True)]
-    maximum = max(deltas)
-    count = max(2, math.ceil(maximum / step - 1e-12) + 1)
-    if count > max_samples:
-        raise KinematicsError(
-            "path_sample_limit_exceeded",
-            f"path needs {count} samples for step {step} rad, limit is {max_samples}",
-        )
-    samples: list[tuple[float, ...]] = []
-    for index in range(count):
-        fraction = index / (count - 1)
-        samples.append(
-            tuple(
-                first + (second - first) * fraction
-                for first, second in zip(start_values, end_values, strict=True)
-            )
-        )
-    return tuple(samples)
 
 
 def _right_joint_ids(model: object) -> tuple[int, ...]:
@@ -656,16 +566,3 @@ def check_initial_pose(
             )
         ),
     )
-
-
-def _panda_range_check(right_qpos: object) -> None:
-    """Pure range check used by target/path tests without a MuJoCo model."""
-    values = tuple(float(value) for value in right_qpos)  # type: ignore[arg-type]
-    if len(values) != len(PANDA_JOINT_RANGES):
-        raise KinematicsError("joint_limit_violation", "right arm must have seven joints")
-    for index, (value, (lower, upper)) in enumerate(zip(values, PANDA_JOINT_RANGES, strict=True)):
-        if not math.isfinite(value) or value < lower or value > upper:
-            raise KinematicsError(
-                "joint_limit_violation",
-                f"right_joint{index + 1}={value!r} outside [{lower}, {upper}]",
-            )

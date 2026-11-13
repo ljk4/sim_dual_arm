@@ -9,4 +9,4 @@ mounts:
   /opt/ros-dev: read-only
 networks: [ros]
 gpu: true
-commands: [backend, environment, scene, kinematics, prepare]
+commands: [backend, viewer, environment, scene, marvin, kinematics, handover, test]

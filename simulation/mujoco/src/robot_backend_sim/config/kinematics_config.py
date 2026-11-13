@@ -20,7 +20,7 @@ from robot_contracts.validation import (
     validate_config_model,
 )
 
-from robot_backend_sim.config.scene_config import PANDA_JOINT_RANGES, SceneConfig
+from robot_backend_sim.config.panda_scene_config import PANDA_JOINT_RANGES, SceneConfig
 
 __all__ = [
     "PHASES", "BudgetConfig", "ClearanceConfig", "IKConfig", "KinematicsCheckConfig",

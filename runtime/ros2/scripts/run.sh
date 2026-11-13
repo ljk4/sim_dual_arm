@@ -10,7 +10,6 @@ ROOT="${PROJECT_ROOT:-$SCRIPT_ROOT}"
 DATA_ROOT="${DATA_ROOT:-/data}"
 ROS_SDK="${ROS_SDK_ROOT:-/build/ros-dev}"
 POLICY_SDK="${POLICY_SDK_ROOT:-/build/generated/policy-sdk}"
-DEFAULT_POLICY_CONFIG="${SHARED_ROOT:-/shared}/scenarios/panda_stack/configs/runtime/policy_rollout.yaml"
 
 has_help=false
 for argument in "$@"; do
@@ -19,19 +18,36 @@ for argument in "$@"; do
   fi
 done
 
-require_output() {
-  if [[ "$has_help" == "true" ]]; then
-    return 0
-  fi
-  local command_name="$1"
-  shift
+scenario_segment() {
+  local previous="" argument
   for argument in "$@"; do
-    if [[ "$argument" == "--output" || "$argument" == --output=* ]]; then
+    if [[ "$previous" == "--scenario" ]]; then
+      printf '%s\n' "$argument"
       return 0
     fi
+    case "$argument" in
+      --scenario=*) printf '%s\n' "${argument#*=}"; return 0 ;;
+    esac
+    previous="$argument"
   done
-  printf '%s: --output /data/raw/<run-id> is required for each run\n' "$command_name" >&2
-  return 2
+  printf '_direct\n'
+}
+
+option_value() {
+  local name="$1"
+  shift
+  local previous="" argument
+  for argument in "$@"; do
+    if [[ "$previous" == "$name" ]]; then
+      printf '%s\n' "$argument"
+      return 0
+    fi
+    case "$argument" in
+      "$name"=*) printf '%s\n' "${argument#*=}"; return 0 ;;
+    esac
+    previous="$argument"
+  done
+  return 1
 }
 
 check_ros_sdk() {
@@ -59,8 +75,7 @@ usage: runtime/ros2/scripts/run.sh <command> [arguments...]
 commands:
   build-ros-sdk   build the mounted ROS contract workspace (core-only unless --scenario)
   build-policy-sdk generate the mounted Policy SDK in the container
-  prepare         bind a scenario/direct recipe to runtime.yaml + run_manifest.json
-  policy          run one policy execution (requires --output)
+  policy          run one policy execution
   interactive     prompt, reset via episode start, run one policy episode, hold until Ctrl-C
   export          export one episode to labels/RGB/quality (export_episode.py)
   campaign        inspect budgets, select data, or run a custom attempt (campaign.py)
@@ -70,19 +85,23 @@ commands:
 Examples:
   runtime/ros2/scripts/run.sh build-ros-sdk --scenario panda_stack --shared-root /shared
   runtime/ros2/scripts/run.sh build-policy-sdk
-  runtime/ros2/scripts/run.sh prepare --help
-  runtime/ros2/scripts/run.sh prepare --scenario panda_stack --role policy \
-    --policy-binding /data/prepared/policy/policy_binding.json \
-    --bundle /data/learning/bundles/<verified-bundle> \
-    --seed 20001 --run-id policy-1 --output /data/prepared/policy-1
-  runtime/ros2/scripts/run.sh prepare --scenario panda_stack --role teacher \
-    --seed 1000 --run-id teacher-1 --output /data/prepared/teacher-1
-  runtime/ros2/scripts/run.sh policy \
-    --config /data/prepared/policy-1/runtime.yaml --output /data/raw/policy-1
-  runtime/ros2/scripts/record.sh --count 10 --max-consecutive-failures 3
-  runtime/ros2/scripts/run.sh export --episode-dir /data/raw/e-001 \
-    --out /data/exports/e-001
+  runtime/ros2/scripts/run.sh policy --scenario panda_stack \
+    --bundle /data/panda_stack/models/bundles/stack-act \
+    --reset-seed 20001 --run-id policy-1
+  runtime/ros2/scripts/run.sh interactive --scenario panda_stack \
+    --bundle /data/panda_stack/models/bundles/stack-act --seed 20002
+  runtime/ros2/scripts/run.sh policy --config /shared/scenarios/panda_stack/configs/runtime/policy_rollout.yaml \
+    --run-id policy-1
+  runtime/ros2/scripts/record.sh --scenario panda_stack --count 10 --max-consecutive-failures 3
+  runtime/ros2/scripts/run.sh export --scenario panda_stack \
+    --episode-dir /data/panda_stack/logs/recordings/e-001 \
+    --out /data/panda_stack/diagnostics/export/e-001
   runtime/ros2/scripts/run.sh test -q tests/unit
+
+`policy` and `interactive` require exactly one of --scenario or --config; there is
+no implicit scenario fallback.  Run logs and recordings default to
+/data/<scenario-id>/logs/{runs,recordings} (`_direct` without a scenario).
+--set dot.path=value overrides existing keys.
 EOF
 }
 
@@ -100,25 +119,36 @@ case "$command" in
   build-policy-sdk)
     exec bash "${SHARED_ROOT:-$ROOT/shared}/common/tools/scripts/build_policy_sdk.sh" "$@"
     ;;
-  prepare)
-    exec python3 -m dual_arm_runtime.offline.prepare_run "$@"
-    ;;
   policy)
-    require_output "policy" "$@" || exit 2
     check_ros_sdk
     check_policy_sdk
+    segment="$(scenario_segment "$@")"
+    run_id="$(option_value --run-id "$@" || true)"
+    if [[ -z "$run_id" ]]; then
+      run_id="policy-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+    fi
+    defaults=()
+    option_value --run-id "$@" >/dev/null || defaults+=(--run-id "$run_id")
+    option_value --episode-id "$@" >/dev/null || defaults+=(--episode-id "$run_id")
+    option_value --output "$@" >/dev/null || \
+      defaults+=(--output "$DATA_ROOT/$segment/logs/recordings")
     exec python3 -m dual_arm_runtime.runtime_node \
       --project-root "$ROOT" \
-      --config "${RUNTIME_CONFIG:-$DEFAULT_POLICY_CONFIG}" \
-      --runs-output "$DATA_ROOT/runs" \
+      --runs-output "$DATA_ROOT/$segment/logs/runs" \
       --once \
+      "${defaults[@]}" \
       "$@"
     ;;
   interactive)
     config=""
+    scenario=""
+    role="policy"
+    shared_root=""
+    bundle=""
     run_id=""
     seed=""
-    output_root="$DATA_ROOT/raw"
+    output_root=""
+    selection_args=()
     while [[ $# -gt 0 ]]; do
       case "$1" in
         --config)
@@ -127,6 +157,46 @@ case "$command" in
           ;;
         --config=*)
           config="${1#*=}"
+          shift
+          ;;
+        --scenario)
+          scenario="${2:-}"
+          shift 2
+          ;;
+        --scenario=*)
+          scenario="${1#*=}"
+          shift
+          ;;
+        --role)
+          role="${2:-}"
+          shift 2
+          ;;
+        --role=*)
+          role="${1#*=}"
+          shift
+          ;;
+        --shared-root)
+          shared_root="${2:-}"
+          shift 2
+          ;;
+        --shared-root=*)
+          shared_root="${1#*=}"
+          shift
+          ;;
+        --bundle)
+          bundle="${2:-}"
+          shift 2
+          ;;
+        --bundle=*)
+          bundle="${1#*=}"
+          shift
+          ;;
+        --set)
+          selection_args+=(--set "${2:-}")
+          shift 2
+          ;;
+        --set=*)
+          selection_args+=(--set "${1#*=}")
           shift
           ;;
         --run-id)
@@ -155,7 +225,7 @@ case "$command" in
           ;;
         -h|--help)
           printf '%s\n' \
-            'usage: runtime/ros2/scripts/run.sh interactive --config <runtime.yaml> [--run-id <id>] [--seed <int>] [--output-root <dir>]'
+            'usage: runtime/ros2/scripts/run.sh interactive (--scenario <id> [--role policy|teacher] [--shared-root <dir>] [--bundle <dir>] | --config <runtime.yaml>) [--run-id <id>] [--seed <int>] [--output-root <dir>] [--set path=value ...]'
           exit 0
           ;;
         *)
@@ -164,9 +234,31 @@ case "$command" in
           ;;
       esac
     done
-    if [[ -z "$config" ]]; then
-      printf 'interactive: --config <runtime.yaml> is required\n' >&2
+    if [[ -n "$config" && -n "$scenario" ]]; then
+      printf 'interactive: --config and --scenario are mutually exclusive\n' >&2
       exit 2
+    fi
+    if [[ -z "$config" && -z "$scenario" ]]; then
+      printf 'interactive: one of --scenario or --config is required\n' >&2
+      exit 2
+    fi
+    if [[ -n "$config" ]]; then
+      selection_args=(--config "$config" "${selection_args[@]}")
+      display="$config"
+      segment="_direct"
+    else
+      selection_args=(--scenario "$scenario" --role "$role" "${selection_args[@]}")
+      if [[ -n "$shared_root" ]]; then
+        selection_args+=(--shared-root "$shared_root")
+      fi
+      if [[ -n "$bundle" ]]; then
+        selection_args+=(--bundle "$bundle")
+      fi
+      display="scenario:$scenario/$role"
+      segment="$scenario"
+    fi
+    if [[ -z "$output_root" ]]; then
+      output_root="$DATA_ROOT/$segment/logs/recordings"
     fi
     if [[ -z "$run_id" ]]; then
       run_id="interactive-$(date -u +%Y%m%dT%H%M%SZ)-$$"
@@ -179,9 +271,9 @@ case "$command" in
       printf 'interactive: output already exists: %s\n' "$output_root/$run_id" >&2
       exit 2
     fi
-    printf '配置: %s\n' "$config"
+    printf '配置: %s\n' "$display"
     printf 'run_id: %s\n' "$run_id"
-    printf 'seed: %s\n' "${seed:-<runtime.yaml reset.seed>}"
+    printf 'seed: %s\n' "${seed:-<runtime reset.seed>}"
     printf '输入 y 复原环境并开始本次任务，其他键取消: '
     if ! read -r answer; then
       printf '\ninteractive: no answer; canceled\n' >&2
@@ -203,13 +295,13 @@ case "$command" in
     fi
     exec python3 -m dual_arm_runtime.runtime_node \
       --project-root "$ROOT" \
-      --config "$config" \
-      --runs-output "$DATA_ROOT/runs" \
+      "${selection_args[@]}" \
+      --runs-output "$DATA_ROOT/$segment/logs/runs" \
       --once \
       --hold-after-episode \
       --run-id "$run_id" \
       --episode-id "$run_id" \
-      --output "$output_root/$run_id" \
+      --output "$output_root" \
       "${seed_args[@]}"
     ;;
   export)

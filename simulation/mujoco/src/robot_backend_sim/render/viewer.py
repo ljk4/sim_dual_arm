@@ -21,7 +21,14 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import Float64MultiArray
 
-from robot_backend_sim.config.backend_config import load_backend_config
+from robot_backend_sim.config.backend_config import (
+    load_backend_config,
+    load_backend_document,
+)
+from robot_backend_sim.config.scenario_config import (
+    ScenarioError,
+    resolve_scenario_backend,
+)
 from robot_backend_sim.config.scene_loader import load_scene_config_for
 from robot_backend_sim.physics.robot_adapters import build_scene_for
 
@@ -35,7 +42,17 @@ _VIEWER_QOS = QoSProfile(
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", type=Path, required=True)
+    selection = parser.add_mutually_exclusive_group(required=True)
+    selection.add_argument("--config", type=Path, help="direct backend recipe path")
+    selection.add_argument(
+        "--scenario", help="scenario id under <shared-root>/scenarios/<id>/binding.yaml"
+    )
+    parser.add_argument("--role", choices=("teacher", "policy"), default="teacher")
+    parser.add_argument("--shared-root", type=Path)
+    parser.add_argument("--bundle", type=Path)
+    parser.add_argument(
+        "--set", dest="overrides", action="append", default=[], metavar="PATH=VALUE"
+    )
     parser.add_argument(
         "--state-topic",
         default="",
@@ -43,6 +60,21 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--poll-hz", type=float, default=60.0)
     return parser
+
+
+def _load_backend(args: argparse.Namespace):
+    if args.scenario is None:
+        if args.role != "teacher" or args.shared_root is not None or args.bundle is not None:
+            raise ScenarioError("--role/--shared-root/--bundle require --scenario")
+        return load_backend_config(args.config)
+    resolved = resolve_scenario_backend(
+        scenario=args.scenario,
+        role=args.role,
+        shared_root=args.shared_root,
+        bundle=args.bundle,
+        overrides=args.overrides,
+    )
+    return load_backend_document(resolved.document, resolved.source)
 
 
 def _state_size(model: mujoco.MjModel) -> int:
@@ -78,7 +110,11 @@ def main() -> int:
         print("viewer: --poll-hz must be within [1, 240]", file=sys.stderr)
         return 2
 
-    backend = load_backend_config(args.config)
+    try:
+        backend = _load_backend(args)
+    except (ScenarioError, OSError, ValueError) as error:
+        print(f"viewer: {error}", file=sys.stderr)
+        return 2
     if not backend.visualization_enabled:
         print("viewer: visualization is disabled for this backend", file=sys.stderr)
         return 2

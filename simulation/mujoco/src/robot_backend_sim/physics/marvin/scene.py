@@ -21,8 +21,8 @@ from robot_backend_sim.config.marvin_scene_config import (
     load_marvin_scene_config,
 )
 from robot_backend_sim.physics.marvin.assembly import (
-    MarvinBinding,
     SIDES,
+    MarvinBinding,
     UrdfSemantics,
     add_marvin_robot,
     bind_marvin_robot,

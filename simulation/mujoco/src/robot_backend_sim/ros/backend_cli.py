@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import importlib.metadata
 import json
+import os
 import re
 import signal
 import sys
@@ -18,11 +19,23 @@ from pathlib import Path
 from typing import Any
 
 import rclpy
+import yaml
 from rclpy.executors import ExternalShutdownException, SingleThreadedExecutor
 from rclpy.signals import SignalHandlerOptions
+from robot_contracts.overrides import OverrideError, apply_overrides
+from robot_contracts.validation import UniqueKeyError, read_unique_yaml
 from robot_run_logging import EventLogger, LogFailure, LogSettings
 
-from robot_backend_sim.config.backend_config import load_backend_config
+from robot_backend_sim.config.backend_config import (
+    BackendConfigError,
+    load_backend_config,
+    load_backend_document,
+)
+from robot_backend_sim.config.scenario_config import (
+    ROBOT_REFERENCE_FIELDS,
+    ScenarioError,
+    resolve_scenario_backend,
+)
 from robot_backend_sim.config.scene_loader import load_scene_config_for
 from robot_backend_sim.physics import assets
 from robot_backend_sim.ros.node import BackendNode
@@ -30,6 +43,7 @@ from robot_backend_sim.runtime.diagnostics import code_provenance
 from robot_backend_sim.runtime.worker import WorkerSummary
 
 _RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_SCENARIO_SEGMENT_PATTERN = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$")
 _EXIT_OK = 0
 _EXIT_FAILURE = 1
 
@@ -88,10 +102,33 @@ def _now_utc() -> str:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", type=Path, required=True)
-    parser.add_argument("--run-root", type=Path, required=True)
-    parser.add_argument("--run-id", required=True)
+    selection = parser.add_mutually_exclusive_group(required=True)
+    selection.add_argument("--config", type=Path, help="direct backend recipe path")
+    selection.add_argument(
+        "--scenario", help="scenario id under <shared-root>/scenarios/<id>/binding.yaml"
+    )
+    parser.add_argument("--role", choices=("teacher", "policy"), default=None)
+    parser.add_argument("--shared-root", type=Path, help="shared tree containing scenarios/")
+    parser.add_argument("--bundle", type=Path, help="verified bundle for a policy scenario")
+    parser.add_argument("--seed", type=int, default=None, help="override run.seed")
+    parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        metavar="PATH=VALUE",
+        help="override one existing configuration path (repeatable)",
+    )
+    parser.add_argument("--run-root", type=Path, default=None)
+    parser.add_argument("--run-id", default=None)
     return parser
+
+
+def _default_run_root(scenario: str | None) -> Path:
+    segment = scenario or "_direct"
+    if not _SCENARIO_SEGMENT_PATTERN.fullmatch(segment) or ".." in segment:
+        raise SystemExit("scenario id is not a safe artifact directory")
+    return Path(os.environ.get("DATA_ROOT", "/data")) / segment / "logs" / "backend"
 
 
 def _configuration_sources(config) -> dict[str, dict[str, str]]:
@@ -114,17 +151,83 @@ def _configuration_sources(config) -> dict[str, dict[str, str]]:
     }
 
 
+def _validate_arguments(parsed: argparse.Namespace) -> str:
+    if parsed.scenario is not None:
+        parsed.role = parsed.role or "teacher"
+        return parsed.run_id or f"{parsed.scenario}-{parsed.role}"
+    if parsed.role is not None:
+        raise SystemExit("--role requires --scenario")
+    if parsed.shared_root is not None:
+        raise SystemExit("--shared-root requires --scenario")
+    if parsed.bundle is not None:
+        raise SystemExit("--bundle requires --scenario")
+    stem = re.sub(r"[^A-Za-z0-9._-]", "-", parsed.config.stem)
+    return parsed.run_id or f"backend-{stem or 'run'}"
+
+
+def _direct_document(parsed: argparse.Namespace) -> dict[str, Any]:
+    path = parsed.config.resolve()
+    try:
+        document = read_unique_yaml(path)
+    except (UniqueKeyError, OSError) as error:
+        raise SystemExit(f"cannot read backend config {path}: {error}") from error
+    if not isinstance(document, dict):
+        raise SystemExit(f"backend config must be one YAML object: {path}")
+    robot = document.get("robot")
+    if isinstance(robot, dict):
+        for field in ROBOT_REFERENCE_FIELDS:
+            value = robot.get(field)
+            if isinstance(value, str):
+                robot[field] = str((path.parent / value).resolve())
+    if parsed.seed is not None:
+        run = document.get("run")
+        if not isinstance(run, dict) or "seed" not in run:
+            raise SystemExit("--seed requires an existing run.seed field")
+        run["seed"] = parsed.seed
+    return document
+
+
+def _write_snapshot(run_dir: Path, document: dict[str, Any]) -> Path:
+    path = run_dir / "backend.yaml"
+    path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+    return path
+
+
 def _prepare_run(parsed: argparse.Namespace):
-    config = load_backend_config(parsed.config)
-    run_id = _validate_run_id(parsed.run_id)
-    run_root = parsed.run_root.resolve()
+    run_id = _validate_run_id(_validate_arguments(parsed))
+    run_root = (parsed.run_root or _default_run_root(parsed.scenario)).resolve()
     run_dir = (run_root / run_id).resolve()
     if not _inside(run_dir, run_root) or run_dir == run_root:
         raise SystemExit("run directory escapes run root")
+    selection: dict[str, Any]
+    try:
+        if parsed.scenario is not None:
+            resolved = resolve_scenario_backend(
+                scenario=parsed.scenario,
+                role=parsed.role or "teacher",
+                shared_root=parsed.shared_root,
+                bundle=parsed.bundle,
+                seed=parsed.seed,
+                overrides=parsed.overrides,
+            )
+            document, selection = resolved.document, resolved.selection
+        else:
+            document = apply_overrides(_direct_document(parsed), parsed.overrides)
+            selection = {"mode": "direct", "scenario_id": None, "role": None}
+        # Validate before creating the run directory so a bad recipe leaves no
+        # orphan directory behind.
+        load_backend_document(document, parsed.config or "scenario:selection")
+    except (ScenarioError, OverrideError, BackendConfigError) as error:
+        raise SystemExit(str(error)) from error
     try:
         run_dir.mkdir(parents=True, exist_ok=False)
     except FileExistsError as error:
         raise SystemExit(f"run directory already exists: {run_dir}") from error
+    snapshot = _write_snapshot(run_dir, document)
+    try:
+        config = load_backend_config(snapshot)
+    except BackendConfigError as error:
+        raise SystemExit(str(error)) from error
     logger = EventLogger(
         run_dir / "log",
         run_id=run_id,
@@ -139,7 +242,7 @@ def _prepare_run(parsed: argparse.Namespace):
             console=config.log.console,
         ),
     )
-    return config, run_id, run_dir, logger
+    return config, run_id, run_dir, logger, selection
 
 
 def _robot_metadata(config) -> dict[str, str]:
@@ -151,13 +254,17 @@ def _robot_metadata(config) -> dict[str, str]:
     }
 
 
-def _write_run_document(run_dir: Path, config, run_id: str) -> None:
+def _write_run_document(
+    run_dir: Path, config, run_id: str, selection: dict[str, Any], overrides: list[str]
+) -> None:
     _write_json(
         run_dir / "run.json",
         {
             "run_id": run_id,
             "created_utc": _now_utc(),
             "config": str(config.source),
+            "selection": selection,
+            "overrides": list(overrides),
             **_robot_metadata(config),
             "effective_configuration": config.canonical_dict(),
             "configuration_sources": _configuration_sources(config),
@@ -303,8 +410,8 @@ def _teardown(executor, node, logger, previous, failure, exit_code) -> tuple[str
 
 def run(argv: list[str] | None = None) -> int:
     parsed = _parser().parse_args(argv)
-    config, run_id, run_dir, logger = _prepare_run(parsed)
-    _write_run_document(run_dir, config, run_id)
+    config, run_id, run_dir, logger, selection = _prepare_run(parsed)
+    _write_run_document(run_dir, config, run_id, selection, parsed.overrides)
     signals = _Signals()
     previous = {signum: signal.getsignal(signum) for signum in (signal.SIGINT, signal.SIGTERM)}
     for signum in previous:

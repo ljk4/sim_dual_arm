@@ -15,12 +15,12 @@ from typing import cast
 from robot_contracts.models import RobotProfile
 
 from robot_backend_sim.config.marvin_scene_config import MarvinSceneConfig
-from robot_backend_sim.config.scene_config import SceneConfig
+from robot_backend_sim.config.panda_scene_config import SceneConfig
 from robot_backend_sim.physics.marvin.io import MarvinIO
 from robot_backend_sim.physics.marvin.scene import build_marvin_scene
-from robot_backend_sim.physics.panda_io import PandaIO
+from robot_backend_sim.physics.panda.io import PandaIO
+from robot_backend_sim.physics.panda.scene import build_scene as build_panda_scene
 from robot_backend_sim.physics.robot_io import RobotIO
-from robot_backend_sim.physics.scene import build_scene as build_panda_scene
 from robot_backend_sim.physics.scene_container import CompiledScene, SceneBuildError
 
 __all__ = [

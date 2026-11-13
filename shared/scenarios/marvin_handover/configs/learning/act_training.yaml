@@ -4,10 +4,10 @@ schema_version: 1
 mode: smoke
 seed: 20261113
 device: cuda
-cache_root: var/learning/cache
+cache_root: var/marvin_handover/datasets/.cache
 data:
   config: shared/scenarios/marvin_handover/configs/learning/act_dataset.yaml
-  root: var/learning/marvin_handover_diag/dataset
+  root: var/marvin_handover/datasets/dataset
   manifest: manifest.json
   train_dir: train
   validation_dir: validation
@@ -67,19 +67,19 @@ modes:
 budget:
   # Independent Marvin task budget; no run may exceed it or enter full mode.
   limit_seconds: 900.0
-  ledger: var/learning/marvin_handover_diag/training-budget.jsonl
-  lock: var/learning/marvin_handover_diag/.training-budget.lock
+  ledger: var/marvin_handover/models/training-budget.jsonl
+  lock: var/marvin_handover/models/.training-budget.lock
   stop_margin_seconds: 30.0
   min_free_bytes: 2147483648
 checkpoint:
-  root: var/learning/marvin_handover_diag/runs
+  root: var/marvin_handover/models/runs
   keep_latest: true
   keep_best: true
   keep_final: true
   min_free_bytes: 2147483648
   save_before_exit: true
 logging:
-  root: var/learning/marvin_handover_diag/runs
+  root: var/marvin_handover/models/runs
   component: act-training
   queue_capacity: 1024
   max_event_bytes: 32768

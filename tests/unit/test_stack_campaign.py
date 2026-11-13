@@ -33,11 +33,12 @@ def _project(tmp_path):
             "ledger": "build/campaign/attempts.jsonl",
             "lock": "build/campaign/.lock",
             "run_lock": "build/campaign/.run.lock",
+            "formal_select": "build/campaign/formal-select.json",
             "required_paths": [],
             "sdk_marker": "",
         },
         "launch": {"command": [], "timeout_s": 30.0},
-        "quality": {"sidecar": "quality.json", "max_blackout_s": 0.35},
+        "quality": {"sidecar": "export/quality.json", "max_blackout_s": 0.35},
     }
     root = tmp_path / "project"
     experiments = root / "shared/scenarios/panda_stack/configs/runtime/experiments"
@@ -48,11 +49,17 @@ def _project(tmp_path):
     return root
 
 
+def _campaign(root):
+    return root / "shared/scenarios/panda_stack/configs/runtime/experiments/stack_campaign.yaml"
+
+
 def _run(root, run_id):
     return campaign.main(
         [
             "--project-root",
             str(root),
+            "--config",
+            str(_campaign(root)),
             "run",
             "--purpose",
             "pilot",
@@ -78,13 +85,17 @@ def test_campaign_reserves_sequential_seeds_and_counts_failures(tmp_path):
     ]
     seeds = [item["seed"] for item in records if item["event"] == "RESERVED"]
     assert seeds == [1000, 1001]
-    assert campaign.main(["--project-root", str(root), "status"]) == 0
+    assert campaign.main(
+            ["--project-root", str(root), "--config", str(_campaign(root)), "status"]
+        ) == 0
     assert _run(root, "three") == 2
 
 
 def test_campaign_status_exposes_formal_target(tmp_path, capsys):
     root = _project(tmp_path)
-    assert campaign.main(["--project-root", str(root), "status"]) == 0
+    assert campaign.main(
+            ["--project-root", str(root), "--config", str(_campaign(root)), "status"]
+        ) == 0
     assert json.loads(capsys.readouterr().out)["formal_target_qualified"] == 50
 
 
@@ -120,6 +131,8 @@ def test_label_replay_consumes_a_pilot_attempt_and_needs_used_seed(tmp_path):
             [
                 "--project-root",
                 str(root),
+                "--config",
+                str(_campaign(root)),
                 "run",
                 "--purpose",
                 "pilot",
@@ -154,6 +167,8 @@ def test_formal_is_teacher_only_and_test_is_act_only(tmp_path):
     base = [
         "--project-root",
         str(root),
+        "--config",
+        str(_campaign(root)),
         "run",
         "--kind",
         "rollout",
@@ -213,6 +228,8 @@ def test_formal_stops_after_fifty_qualified(tmp_path):
             [
                 "--project-root",
                 str(root),
+                "--config",
+                str(_campaign(root)),
                 "run",
                 "--purpose",
                 "formal",
@@ -285,7 +302,15 @@ def test_select_writes_generated_manifest_only_after_success(tmp_path):
 
     # Insufficient qualified attempts leave no manifest behind.
     assert campaign.main(
-        ["--project-root", str(root), "select", "--out", str(out)]
+        [
+            "--project-root",
+            str(root),
+            "--config",
+            str(_campaign(root)),
+            "select",
+            "--output",
+            str(out),
+        ]
     ) == 1
     assert not out.exists()
 
@@ -321,7 +346,15 @@ def test_select_writes_generated_manifest_only_after_success(tmp_path):
     ledger.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     assert campaign.main(
-        ["--project-root", str(root), "select", "--out", str(out)]
+        [
+            "--project-root",
+            str(root),
+            "--config",
+            str(_campaign(root)),
+            "select",
+            "--output",
+            str(out),
+        ]
     ) == 0
     document = json.loads(out.read_text())
     assert document["status"] == "SELECTED"
@@ -329,17 +362,26 @@ def test_select_writes_generated_manifest_only_after_success(tmp_path):
     assert len(document["training"]) == 4
     assert [item["seed"] for item in document["validation"]] == [10004, 10005]
 
-    # A later run never overwrites a usable selection manifest.
+    # A later run atomically refreshes the same selection manifest.
     assert campaign.main(
-        ["--project-root", str(root), "select", "--out", str(out)]
-    ) == 2
+        [
+            "--project-root",
+            str(root),
+            "--config",
+            str(_campaign(root)),
+            "select",
+            "--output",
+            str(out),
+        ]
+    ) == 0
     assert json.loads(out.read_text())["status"] == "SELECTED"
+    assert not list(out.parent.glob("*.tmp"))
 
 
 def _terminal_project(tmp_path):
     root = _project(tmp_path)
     attempt = root / "build/campaign/pilot-03102-record-42"
-    episode = attempt / "stack/record-42/raw/pilot-03102-record-42"
+    episode = attempt / "raw"
     episode.mkdir(parents=True)
     (episode / "manifest.json").write_text(
         json.dumps(
@@ -412,7 +454,7 @@ def _terminal_project(tmp_path):
 def test_classify_reads_recorded_episode_without_root_copies(tmp_path):
     root, _attempt_id, _ledger = _terminal_project(tmp_path)
     classification = campaign.classify(
-        root / "build/campaign/pilot-03102-record-42", "quality.json"
+        root / "build/campaign/pilot-03102-record-42", "export/quality.json"
     )
     assert classification == {
         "recording_complete": True,

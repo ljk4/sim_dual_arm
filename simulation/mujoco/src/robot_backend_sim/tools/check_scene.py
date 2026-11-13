@@ -18,7 +18,11 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from robot_backend_sim.config.scene_config import SceneConfig, SceneConfigError, load_scene_config
+from robot_backend_sim.config.panda_scene_config import (
+    SceneConfig,
+    SceneConfigError,
+    load_scene_config,
+)
 from robot_backend_sim.physics import assets
 from robot_backend_sim.render import visibility
 from robot_backend_sim.render.visibility import (
@@ -173,7 +177,7 @@ def _code_provenance() -> dict[str, object]:
 
 
 def _build_scene(scene_config: SceneConfig) -> object:
-    from robot_backend_sim.physics.scene import SceneBuildError, build_scene
+    from robot_backend_sim.physics.panda.scene import SceneBuildError, build_scene
 
     try:
         return build_scene(scene_config)

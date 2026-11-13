@@ -305,9 +305,9 @@ def build_object_collision_pairs(
                 exclusions["same_object"] = exclusions.get("same_object", 0) + 1
                 continue
             if first_body in object_ids:
-                object_body, other_body = first_body, second_body
+                other_body = second_body
             elif second_body in object_ids:
-                object_body, other_body = second_body, first_body
+                other_body = first_body
             else:
                 continue
             if body_names[other_body] in excluded:

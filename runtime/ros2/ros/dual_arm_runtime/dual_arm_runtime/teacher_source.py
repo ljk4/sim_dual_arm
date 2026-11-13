@@ -1,9 +1,9 @@
 """Program-teacher target source over the 033 ROS services.
 
 This module is deliberately free of MuJoCo and mink: it only reads immutable
-teacher chunks and frozen task facts through :class:`StackTaskClient`.  The
-continuous stream core still owns the fixed anchor, 60x16/50 ms/5-point window,
-SubmitFollower identity and the actual stop.
+teacher chunks and frozen task facts through :class:`TeacherTaskClient`.  The
+continuous stream core still owns the fixed anchor, the configured chunk
+window, SubmitFollower identity and the actual stop.
 """
 
 from __future__ import annotations
@@ -114,6 +114,7 @@ class TeacherTargetSource:
                 observation.stamp_ns,
                 robot_profile_hash=self.profile.digest,
                 chunk_size=self.chunk_size,
+                joint_count=len(self.profile.joints),
                 period_ns=self.teacher.action_period_ns,
                 handoff_time_ns=handoff_time_ns,
             )

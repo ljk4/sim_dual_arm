@@ -100,8 +100,16 @@ def test_already_reached_target_does_not_start_simulation_workers(tmp_path, monk
         cleanup=Mock(),
     )
     monkeypatch.setattr(record_parallel, "DockerWorkers", lambda *args: docker)
-    assert record_parallel.main(["--project-root", str(tmp_path), "--target-total", "50",
-                                 "--workers", "4"]) == 0
+    assert record_parallel.main(
+        [
+            "--project-root", str(tmp_path),
+            "--config", "campaign.yaml",
+            "--runtime-config", "runtime.yaml",
+            "--backend-template", "backend.yaml",
+            "--target-total", "50",
+            "--workers", "4",
+        ]
+    ) == 0
     docker.preflight.assert_called_once()
     docker.prepare.assert_not_called()
     docker.cleanup.assert_called_once()
@@ -192,7 +200,7 @@ def test_preflight_failure_starts_no_worker_or_pool_directory(tmp_path, monkeypa
         ["--project-root", str(tmp_path), "--scenario", "synthetic_stack"]
     ) == 2
     assert events == ["preflight", "cleanup"]
-    assert not (tmp_path / "var/record-pools").exists()
+    assert not (tmp_path / "var/synthetic_stack/logs/record-pools").exists()
 
 
 def test_preflight_runs_before_worker_preparation_and_backends(tmp_path, monkeypatch):
@@ -210,7 +218,7 @@ def test_preflight_runs_before_worker_preparation_and_backends(tmp_path, monkeyp
 
 
 def test_worker_preparation_receives_binding_identity(tmp_path, monkeypatch):
-    directory = tmp_path / "var/record-pools/pool-test"
+    directory = tmp_path / "var/synthetic_stack/logs/record-pools/pool-test"
     directory.mkdir(parents=True)
     (directory / "workers.json").write_text('{"workers": []}\n')
     args = SimpleNamespace(
@@ -223,6 +231,7 @@ def test_worker_preparation_receives_binding_identity(tmp_path, monkeypatch):
         workers=2,
         domain_base=170,
         realtime_speed=1.0,
+        overrides=[],
     )
     docker = record_parallel.DockerWorkers(args, directory)
     docker.runtime = "runtime-id"
@@ -259,6 +268,7 @@ def test_preflight_command_converts_host_paths(tmp_path):
         backend_template="shared/scenarios/x/backend.yaml",
         purpose="formal",
         target_total=None,
+        overrides=[],
     )
     command = record_parallel.DockerWorkers(args, tmp_path / "pool").preflight_command()
     assert "/workspace/shared/scenarios/x/campaign.yaml" in command

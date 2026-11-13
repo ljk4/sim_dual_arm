@@ -12,15 +12,15 @@ from marvin_diagnostic_common import (  # noqa: E402
     ROS_IMPORT_ERROR,
     Driver,
     Stack,
+    _assert_relative_stable,
     _context,
     _finger_contacts,
     _gripper,
-    _holding,
     _hold_snapshots,
+    _holding,
     _object,
     _plan_for_execution,
     _public_target,
-    _assert_relative_stable,
     _snapshot,
     _support_force,
     _write_evidence,
@@ -77,10 +77,13 @@ def test_right_independent_hold(tmp_path):
             ("right_initial_pregrasp", "right_initial_pregrasp_path", "right-pregrasp"),
             ("right_center_initial", "right_initial_grasp_path", "right-grasp"),
         ):
-            window = driver.submit(target(name, right_open=True), label, segments[segment].duration_s)
-            assert window["accepted"] and window.get("terminal", {}).get("phase") == "COMPLETED", (
-                label, window
+            window = driver.submit(
+                target(name, right_open=True), label, segments[segment].duration_s
             )
+            assert (
+                window["accepted"]
+                and window.get("terminal", {}).get("phase") == "COMPLETED"
+            ), (label, window)
         before = _snapshot(stack, driver.context)
         before["label"] = "before_close"
         snapshots.append(before)

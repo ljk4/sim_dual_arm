@@ -16,6 +16,7 @@ from rclpy.executors import SingleThreadedExecutor
 from rclpy.signals import SignalHandlerOptions
 from robot_run_logging import EventContext
 
+from dual_arm_runtime.artifact_paths import recordings_root, runs_root
 from dual_arm_runtime.run_logging import (
     check_health,
     emit_best_effort,
@@ -25,8 +26,12 @@ from dual_arm_runtime.run_logging import (
     runtime_summary,
     validate_run_id,
 )
-from dual_arm_runtime.runtime_config import load_runtime_configuration
+from dual_arm_runtime.runtime_config import (
+    load_runtime_configuration,
+    load_runtime_configuration_document,
+)
 from dual_arm_runtime.runtime_node import RuntimeNode
+from dual_arm_runtime.scenario_runtime import resolve_scenario_runtime
 from dual_arm_runtime.shutdown import (
     EXIT_RUNTIME_FAILURE,
     EXIT_SHUTDOWN_TIMEOUT,
@@ -70,15 +75,30 @@ def _destroy_ros_resources(
 def _parse_arguments() -> tuple[argparse.Namespace, list[str]]:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project-root", type=Path, default=Path("/workspace"))
-    parser.add_argument(
-        "--config",
-        type=Path,
-        default=Path(
-            os.environ.get("SHARED_ROOT", "/shared")
-        )
-        / "scenarios/panda_stack/configs/runtime/policy_rollout.yaml",
+    selection = parser.add_mutually_exclusive_group(required=True)
+    selection.add_argument("--config", type=Path, help="direct runtime recipe path")
+    selection.add_argument(
+        "--scenario", help="scenario id under <shared-root>/scenarios/<id>/binding.yaml"
     )
-    parser.add_argument("--output", type=Path, default=Path("/data/raw"))
+    parser.add_argument("--role", choices=("policy", "teacher"), default="policy")
+    parser.add_argument("--shared-root", type=Path)
+    parser.add_argument("--bundle", type=Path)
+    parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        metavar="PATH=VALUE",
+        help="override one existing configuration path (repeatable)",
+    )
+    parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument(
+        "--episode-dir",
+        type=Path,
+        default=None,
+        help="exact final directory for the recorded episode "
+        "(default: <output>/<episode-id>)",
+    )
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--episode-id", default=os.environ.get("RUNTIME_EPISODE_ID", ""))
     parser.add_argument("--runs-output", type=Path, default=None)
@@ -118,27 +138,38 @@ def _initialization_error(error: BaseException) -> None:
 
 
 def _load_configuration(args: argparse.Namespace, run_id: str):
+    del run_id
     try:
-        configuration = load_runtime_configuration(args.config, args.project_root)
-        if args.reset_seed is not None:
-            recipe = configuration.recipe.model_copy(
-                update={
-                    "reset": configuration.recipe.reset.model_copy(
-                        update={"seed": args.reset_seed}
-                    )
-                }
+        if args.scenario is not None:
+            if args.config is not None:
+                raise ValueError("--scenario and --config are mutually exclusive")
+            if args.bundle is not None and args.role != "policy":
+                raise ValueError("--bundle applies to the policy role only")
+            resolved = resolve_scenario_runtime(
+                scenario=args.scenario,
+                role=args.role,
+                shared_root=args.shared_root,
+                project_root=args.project_root,
+                bundle=args.bundle,
+                seed=args.reset_seed,
+                overrides=args.overrides,
             )
-            snapshot = configuration.snapshot
-            snapshot["recipe"]["reset"]["seed"] = args.reset_seed
-            configuration = configuration.model_copy(
-                update={
-                    "recipe": recipe,
-                    "snapshot_json": json.dumps(
-                        snapshot, sort_keys=True, allow_nan=False
-                    ),
-                }
+            return load_runtime_configuration_document(
+                resolved.document,
+                source=resolved.source,
+                base_dir=resolved.base_dir,
+                project_root=args.project_root,
+                overrides=resolved.overrides,
+                selection=resolved.selection,
             )
-        return configuration
+        if args.shared_root is not None or args.bundle is not None:
+            raise ValueError("--shared-root/--bundle require --scenario")
+        return load_runtime_configuration(
+            args.config,
+            args.project_root,
+            seed=args.reset_seed,
+            overrides=args.overrides,
+        )
     except Exception as error:
         _initialization_error(error)
 
@@ -246,6 +277,7 @@ class _RuntimeProcess:
                 log=self.logger,
                 run_id=self.run_id,
                 initial_episode_id=self.args.episode_id or None,
+                episode_output=self.args.episode_dir,
             )
             self.executor = SingleThreadedExecutor()
             self.executor.add_node(self.node)
@@ -269,7 +301,12 @@ class _RuntimeProcess:
                 reason="STARTUP",
                 message="runtime process starting",
                 fields={
-                    "config_path": str(self.args.config),
+                    "config_path": (
+                        str(self.args.config)
+                        if self.args.config is not None
+                        else f"scenario:{self.args.scenario}/{self.args.role}"
+                    ),
+                    "scenario_id": self.args.scenario,
                     "output_path": str(self.args.output),
                     "runs_output": str(self.runs_output),
                     "run_directory": str(self.session.run_directory),
@@ -546,11 +583,11 @@ def main() -> None:
         run_id = new_run_id() if args.run_id is None else validate_run_id(args.run_id)
         if args.episode_id:
             validate_run_id(args.episode_id)
+        if args.output is None:
+            args.output = recordings_root(args.scenario)
     except ValueError as error:
         raise SystemExit(f"invalid run/episode id: {error}") from error
-    runs_output = (
-        args.runs_output if args.runs_output is not None else args.output.parent / "runs"
-    )
+    runs_output = args.runs_output if args.runs_output is not None else runs_root(args.scenario)
     configuration = _load_configuration(args, run_id)
     try:
         session = initialize_run(

@@ -31,9 +31,6 @@ from .scenario import (
 )
 from .training import TrainingError, train, verify_dataset_manifest
 
-DEFAULT_DATASET_CONFIG = Path("shared/scenarios/panda_stack/configs/learning/act_dataset.yaml")
-DEFAULT_TRAINING_CONFIG = Path("shared/scenarios/panda_stack/configs/learning/act_training.yaml")
-
 
 def _default_root() -> Path:
     return Path(__file__).resolve().parents[4]
@@ -44,8 +41,8 @@ def _print(value: object) -> None:
 
 
 def _add_selection_arguments(parser: argparse.ArgumentParser) -> None:
-    """Direct recipe and scenario selection are mutually exclusive."""
-    selection = parser.add_mutually_exclusive_group()
+    """Every command needs one explicit recipe source; there is no default."""
+    selection = parser.add_mutually_exclusive_group(required=True)
     selection.add_argument(
         "--config", type=Path, default=None, help="direct dataset/training recipe path"
     )
@@ -54,6 +51,14 @@ def _add_selection_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--shared-root", type=Path, default=None, help="shared tree containing scenarios/"
+    )
+    parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        metavar="PATH=VALUE",
+        help="override one existing recipe path (repeatable)",
     )
 
 
@@ -129,7 +134,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _training_config(args: argparse.Namespace, config_path: Path) -> object:
-    config = load_training_config(config_path, args.project_root)
+    config = load_training_config(
+        config_path, args.project_root, overrides=args.overrides
+    )
     if getattr(args, "mode", None):
         config = config.model_copy(update={"mode": args.mode})
     if getattr(args, "data_root", None):
@@ -144,16 +151,12 @@ def _resolve(path: Path, root: Path) -> Path:
     return path if path.is_absolute() else root / path
 
 
-def _direct_config(args: argparse.Namespace, root: Path, default: Path) -> Path:
-    """An explicit --config wins; the default is only a script-level fallback."""
-    if args.config is not None:
-        return _resolve(args.config, root)
-    return _resolve(default, root)
+def _scenario_logs_root(args: argparse.Namespace, root: Path) -> Path:
+    segment = args.scenario or "_direct"
+    return root / "var" / segment / "logs"
 
 
-def _learning_selection(
-    args: argparse.Namespace, root: Path, *, recipe_field: str, default_config: Path
-):
+def _learning_selection(args: argparse.Namespace, root: Path, *, recipe_field: str):
     """Return the real recipe path and the scenario provenance (or None)."""
     if args.scenario is not None:
         selection = select_scenario(
@@ -166,7 +169,7 @@ def _learning_selection(
         return selection.recipe_path, selection
     if args.shared_root is not None:
         raise ScenarioSelectionError("--shared-root requires --scenario")
-    return _direct_config(args, root, default_config), None
+    return _resolve(args.config, root), None
 
 
 def _check_selection(
@@ -208,6 +211,8 @@ def _training_overrides(args: argparse.Namespace, root: Path) -> dict[str, objec
         }
     if getattr(args, "allow_synthetic", False):
         overrides["allow_synthetic"] = {"value": True, "source": "argument"}
+    if getattr(args, "overrides", None):
+        overrides["set"] = {"value": list(args.overrides), "source": "argument"}
     return overrides
 
 
@@ -219,10 +224,8 @@ def _operator_console(args, title, settings, default_log):
 
 
 def _command_convert(args: argparse.Namespace, root: Path) -> int:
-    config_path, selection = _learning_selection(
-        args, root, recipe_field="dataset", default_config=DEFAULT_DATASET_CONFIG
-    )
-    config = load_dataset_config(config_path, root)
+    config_path, selection = _learning_selection(args, root, recipe_field="dataset")
+    config = load_dataset_config(config_path, root, overrides=args.overrides)
     _check_selection(selection, profile_path=config.profile_path)
     changes: dict[str, object] = {}
     overrides: dict[str, object] = {}
@@ -238,6 +241,8 @@ def _command_convert(args: argparse.Namespace, root: Path) -> int:
         overrides["replace"] = {"value": True, "source": "argument"}
     if args.synthetic:
         overrides["synthetic"] = {"value": True, "source": "argument"}
+    if args.overrides:
+        overrides["set"] = {"value": list(args.overrides), "source": "argument"}
     if changes:
         config = config.model_copy(update=changes)
     settings = [
@@ -246,7 +251,7 @@ def _command_convert(args: argparse.Namespace, root: Path) -> int:
         f"{config.expected_validation_episodes} 条验证；{config.fps} Hz；"
         f"{len(config.camera_names)} 路 {config.camera_width}×{config.camera_height} RGB",
     ]
-    default_log = config.output_root.parent / "logs" / f"convert-{time.time_ns()}.log"
+    default_log = _scenario_logs_root(args, root) / "convert" / f"convert-{time.time_ns()}.log"
     with _operator_console(args, "数据转换配置", settings, default_log) as console:
         manifest = convert(
             select_path=config.select_path, config=config, config_path=config_path,
@@ -279,9 +284,7 @@ def _command_convert(args: argparse.Namespace, root: Path) -> int:
 
 
 def _command_train(args: argparse.Namespace, root: Path) -> int:
-    config_path, selection = _learning_selection(
-        args, root, recipe_field="training", default_config=DEFAULT_TRAINING_CONFIG
-    )
+    config_path, selection = _learning_selection(args, root, recipe_field="training")
     config = _training_config(args, config_path)
     _check_selection(
         selection,
@@ -356,9 +359,7 @@ def _command_filter(args: argparse.Namespace, root: Path) -> int:
 
 
 def _command_verify_data(args: argparse.Namespace, root: Path) -> int:
-    config_path, selection = _learning_selection(
-        args, root, recipe_field="training", default_config=DEFAULT_TRAINING_CONFIG
-    )
+    config_path, selection = _learning_selection(args, root, recipe_field="training")
     config = _training_config(args, config_path)
     _check_selection(
         selection,
@@ -375,9 +376,7 @@ def _command_verify_data(args: argparse.Namespace, root: Path) -> int:
 
 
 def _command_budget(args: argparse.Namespace, root: Path) -> int:
-    config_path, selection = _learning_selection(
-        args, root, recipe_field="training", default_config=DEFAULT_TRAINING_CONFIG
-    )
+    config_path, selection = _learning_selection(args, root, recipe_field="training")
     config = _training_config(args, config_path)
     _check_selection(
         selection,
@@ -392,9 +391,7 @@ def _command_budget(args: argparse.Namespace, root: Path) -> int:
 
 
 def _command_bundle(args: argparse.Namespace, root: Path) -> int:
-    config_path, selection = _learning_selection(
-        args, root, recipe_field="training", default_config=DEFAULT_TRAINING_CONFIG
-    )
+    config_path, selection = _learning_selection(args, root, recipe_field="training")
     config = _training_config(args, config_path)
     _check_selection(
         selection,

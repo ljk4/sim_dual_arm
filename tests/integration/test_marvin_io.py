@@ -172,7 +172,6 @@ def test_target_and_reference_rejections_write_nothing(scene, profile):
     valid = list(io.measure().positions)
     high = valid.copy()
     high[8] = 4.0
-    nan_velocity = valid.copy()
     velocities = [0.0] * 16
     velocities[14] = math.nan
     for positions, reference in ((high, (0.0,) * 16), (valid, velocities)):

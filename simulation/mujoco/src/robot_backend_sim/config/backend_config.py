@@ -21,7 +21,12 @@ from robot_contracts.validation import (
 )
 from robot_run_logging import LogSettings
 
-__all__ = ["BackendConfig", "BackendConfigError", "load_backend_config"]
+__all__ = [
+    "BackendConfig",
+    "BackendConfigError",
+    "load_backend_config",
+    "load_backend_document",
+]
 
 BackendConfigError = StrictMappingError
 
@@ -167,6 +172,12 @@ def load_backend_config(path: Path | str) -> BackendConfig:
         document = read_unique_yaml(source_path)
     except UniqueKeyError as error:
         raise BackendConfigError(error.source, error.field, error.message) from error
+    return load_backend_document(document, source_path)
+
+
+def load_backend_document(document: object, source: Path | str) -> BackendConfig:
+    """Validate an in-memory backend document with the same strict model."""
+    source_path = Path(source)
     config = validate_config_model(BackendConfig, document, source_path, BackendConfigError)
     updates: dict[str, object] = {"source": source_path}
     for name, directory in (("profile", False), ("schemas", True), ("scene", False),

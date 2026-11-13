@@ -16,8 +16,7 @@
 # reset.enabled：每局开始前是否复位机器人/仿真环境。
 # reset.seed：复位种子；相同种子生成相同初始布局。
 # observation.reliable：是否使用可靠 QoS 接收观测。
-# observation.max_skew_ns：状态与三路图像允许的最大时间偏差，单位 ns。
-# observation.max_age_ns：完整观测允许的最大年龄，单位 ns。
+# observation.max_skew_ns / max_age_ns：来自 observation_schema 档案，不在配方重复声明。
 # observation.wall_arrival_timeout_s：等待完整观测的墙钟超时，单位 s。
 # observation.capacity：观测缓存容量。
 # control.submit_query_retries：提交结果未知时按 command_id 查询的重试次数。
@@ -90,8 +89,6 @@ reset:
   seed: 0
 
 observation:
-  max_skew_ns: 0
-  max_age_ns: 500000000
   wall_arrival_timeout_s: 1.5
   capacity: 32
 

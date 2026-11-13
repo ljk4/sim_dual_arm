@@ -635,7 +635,8 @@ class HandoverTaskRuntime:
                     observation, _RIGHT, require_hold=True, require_airborne=True
                 )
                 and not observation.left_contacts
-                and observation.left_opening_m >= gates.release_opening_m - gates.gripper_position_tolerance_m
+                and observation.left_opening_m
+                >= gates.release_opening_m - gates.gripper_position_tolerance_m
                 and observation.left_finger_speed_m_s <= gates.release_velocity_max_m_s
             )
         if step.gate in ("right_hold", "right_carry"):
@@ -696,7 +697,7 @@ class HandoverTaskRuntime:
         )
         if not (left_ok and right_ok):
             return False
-        for side, target, measured in (
+        for _side, target, measured in (
             (_LEFT, step.end_positions[7], observation.left_opening_m),
             (_RIGHT, step.end_positions[15], observation.right_opening_m),
         ):
@@ -956,8 +957,12 @@ class HandoverTaskRuntime:
             "right_finger_contacts": 0 if observation is None else len(observation.right_contacts),
             "left_min_force_n": _min_force(observation, _LEFT),
             "right_min_force_n": _min_force(observation, _RIGHT),
-            "left_finger_speed_m_s": 0.0 if observation is None else observation.left_finger_speed_m_s,
-            "right_finger_speed_m_s": 0.0 if observation is None else observation.right_finger_speed_m_s,
+            "left_finger_speed_m_s": (
+                0.0 if observation is None else observation.left_finger_speed_m_s
+            ),
+            "right_finger_speed_m_s": (
+                0.0 if observation is None else observation.right_finger_speed_m_s
+            ),
             "left_opening_m": 0.0 if observation is None else observation.left_opening_m,
             "right_opening_m": 0.0 if observation is None else observation.right_opening_m,
             "left_holding": False

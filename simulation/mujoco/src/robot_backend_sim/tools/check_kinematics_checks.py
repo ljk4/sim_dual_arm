@@ -12,8 +12,9 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from robot_backend_sim.config.kinematics_config import KinematicsCheckConfig, TargetConfig
-from robot_backend_sim.config.scene_config import SceneConfig
-from robot_backend_sim.kinematics import kinematics
+from robot_backend_sim.config.panda_scene_config import SceneConfig
+from robot_backend_sim.kinematics import common, kinematics
+from robot_backend_sim.kinematics.common import extract_object_pose
 from robot_backend_sim.kinematics.kinematics import (
     IKResult,
     KinematicsError,
@@ -22,7 +23,6 @@ from robot_backend_sim.kinematics.kinematics import (
     build_targets,
     check_initial_pose,
     check_path,
-    extract_object_pose,
     solve_key_poses,
 )
 from robot_backend_sim.render import visibility
@@ -34,7 +34,7 @@ from robot_backend_sim.tools.check_kinematics_common import (
 )
 
 if TYPE_CHECKING:
-    from robot_backend_sim.physics.scene import Scene
+    from robot_backend_sim.physics.panda.scene import Scene
     from robot_backend_sim.render.rendering import SceneRenderer, Snapshot
 
 
@@ -356,7 +356,7 @@ def _check_motion(
     paths = []
     for target in solved:
         sample_count = len(
-            kinematics.sample_joint_path(
+            common.sample_joint_path(
                 previous,
                 target.qpos_right,
                 max_step_rad=config.clearance.sample_step_rad,

@@ -18,7 +18,7 @@ from typing import Any
 
 import yaml
 
-from robot_backend_sim.config.scene_config import ObjectConfig, SceneConfig
+from robot_backend_sim.config.panda_scene_config import ObjectConfig, SceneConfig
 
 __all__ = [
     "GEOM_OBJECT_TYPE",

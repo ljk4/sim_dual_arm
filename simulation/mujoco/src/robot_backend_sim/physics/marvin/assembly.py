@@ -324,7 +324,7 @@ def _configure_finger_couplings(spec: mujoco.MjSpec) -> None:
 def _add_actuators(
     spec: mujoco.MjSpec, config: MarvinRobotConfig, semantics: UrdfSemantics
 ) -> None:
-    for public_side, prefix in SIDES:
+    for _public_side, prefix in SIDES:
         for index in range(1, ARM_JOINT_COUNT + 1):
             name = f"Arm_{prefix}{index}_Joint"
             joint = spec.joint(name)

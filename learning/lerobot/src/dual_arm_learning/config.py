@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import AliasPath, BeforeValidator, Field, model_validator
+from robot_contracts.overrides import apply_overrides
 from robot_contracts.validation import (
     NonEmptyStr,
     NonNegativeFloat,
@@ -432,8 +433,16 @@ def parse_dataset_config(document: object, project_root: str | Path) -> DatasetC
                                  "<dataset>", ConfigError)
 
 
-def load_dataset_config(path: str | Path, project_root: str | Path) -> DatasetConfig:
-    return parse_dataset_config(load_yaml(path), project_root)
+def load_dataset_config(
+    path: str | Path,
+    project_root: str | Path,
+    *,
+    overrides: tuple[str, ...] | list[str] = (),
+) -> DatasetConfig:
+    document = load_yaml(path)
+    if overrides:
+        document = apply_overrides(document, list(overrides))
+    return parse_dataset_config(document, project_root)
 
 
 def _dataset_config_path(document: dict) -> object:
@@ -456,5 +465,13 @@ def parse_training_config(
     return validate_config_model(TrainingConfig, value, source, ConfigError)
 
 
-def load_training_config(path: str | Path, project_root: str | Path) -> TrainingConfig:
-    return parse_training_config(load_yaml(path), project_root=project_root, source=path)
+def load_training_config(
+    path: str | Path,
+    project_root: str | Path,
+    *,
+    overrides: tuple[str, ...] | list[str] = (),
+) -> TrainingConfig:
+    document = load_yaml(path)
+    if overrides:
+        document = apply_overrides(document, list(overrides))
+    return parse_training_config(document, project_root=project_root, source=path)

@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from robot_backend_sim.kinematics.common import sample_joint_path
 from robot_backend_sim.kinematics.dual_arm import (
     BlockEnvelope,
     CarriedBlock,
@@ -25,7 +26,7 @@ from robot_backend_sim.kinematics.dual_arm import (
     robot_pair_set,
     solve_targets,
 )
-from robot_backend_sim.kinematics.kinematics import KinematicsError, sample_joint_path
+from robot_backend_sim.kinematics.kinematics_clearance import KinematicsError
 from robot_backend_sim.physics.marvin.scene import MarvinScene
 from robot_backend_sim.tasks.handover.config import HandoverPlanConfig
 from robot_backend_sim.tasks.handover.plan import CoordinationPoint, _coordination_errors
@@ -133,7 +134,11 @@ def plan_cohold_step(
     clearance = ClearanceParameters(**config.clearance.model_dump())
     results = solve_targets(model, seed, targets, geometry.chains, ik, clearance, None)
     if not all(result.converged for result in results):
-        details = [(result.target.name, result.reason) for result in results if not result.converged]
+        details = [
+            (result.target.name, result.reason)
+            for result in results
+            if not result.converged
+        ]
         raise KinematicsError("cohold_ik_failed", f"cohold lift IK failed: {details}")
     qpos = results[-1].qpos
     fingers = tuple(body for chain in geometry.chains

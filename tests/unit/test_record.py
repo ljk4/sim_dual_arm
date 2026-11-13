@@ -22,10 +22,11 @@ def recording(tmp_path, monkeypatch):
         "paths": {
             "attempts_root": "out", "ledger": "out/attempts.jsonl",
             "lock": "out/.lock", "run_lock": "out/.run.lock",
+            "formal_select": "out/formal-select.json",
             "required_paths": [], "sdk_marker": "",
         },
         "launch": {"command": [], "timeout_s": 10.0},
-        "quality": {"sidecar": "quality.json"},
+        "quality": {"sidecar": "export/quality.json"},
     }
     (tmp_path / "campaign.yaml").write_text(yaml.safe_dump(config))
     (tmp_path / "runtime.yaml").write_text("{}\n")
@@ -42,14 +43,18 @@ from pathlib import Path
 states = json.loads(sys.argv[1])
 state = states[int(os.environ["CAMPAIGN_SEED"]) - 10000]
 directory = Path(os.environ["CAMPAIGN_ATTEMPT_DIR"])
+raw = directory / "raw"
+raw.mkdir()
+export = directory / "export"
+export.mkdir()
 runtime = "failed" if state == "runtime_failure" else "stopped"
 task = "failed" if state == "task_failure" else "succeeded"
-(directory / "manifest.json").write_text(json.dumps({
+(raw / "manifest.json").write_text(json.dumps({
     "recording": {"complete": state != "recording_failure"},
     "runtime": {"outcome": runtime, "reason": "TEST"},
 }))
-(directory / "task_result.json").write_text(json.dumps({"result": {"outcome": task}}))
-(directory / "quality.json").write_text(json.dumps({"qualified": state != "quality_failure"}))
+(raw / "task_result.json").write_text(json.dumps({"result": {"outcome": task}}))
+(export / "quality.json").write_text(json.dumps({"qualified": state != "quality_failure"}))
 raise SystemExit(130 if state == "interrupted" else 1 if state == "runtime_failure" else 0)
 '''
     )
@@ -160,6 +165,22 @@ def test_interrupt_does_not_start_next_attempt(recording, capsys):
     assert run(["interrupted", "qualified"], "--count", "2") == 130
     assert _summary(capsys)["reason"] == "interrupted"
     assert _seeds(root) == [10000]
+
+
+def test_formal_target_reached_publishes_formal_select_atomically(recording, capsys):
+    root, config, _, run = recording
+    config["budget"]["formal_target_qualified"] = 2
+    config["budget"]["formal_validation_qualified_indices"] = [1]
+    (root / "campaign.yaml").write_text(yaml.safe_dump(config))
+
+    assert run(["qualified", "qualified"], "--count", "2") == 0
+
+    destination = root / "out" / "formal-select.json"
+    assert _summary(capsys)["formal_select"] == str(destination)
+    document = json.loads(destination.read_text())
+    assert document["status"] == "SELECTED"
+    assert [item["seed"] for item in document["validation"]] == [10001]
+    assert not list(destination.parent.glob("*.tmp"))
 
 
 @pytest.mark.parametrize(

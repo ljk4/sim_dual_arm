@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from dual_arm_runtime.artifact_paths import diagnostics_root
 from dual_arm_runtime.offline import campaign
 from dual_arm_runtime.offline.evaluation_media import (  # noqa: E402
     keyframes,
@@ -240,28 +241,46 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--config",
         type=Path,
-        default=Path("runtime/ros2/configs/experiments/campaign.yaml"),
+        default=None,
+        help="direct campaign recipe (conflicts with --scenario)",
     )
+    parser.add_argument("--scenario")
+    parser.add_argument("--shared-root", type=Path)
     parser.add_argument("--purpose", choices=("all", "test", "evaluation"), default="all")
-    parser.add_argument(
-        "--output", type=Path, default=Path("build/reports/dsh-036/evaluation")
-    )
+    parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--no-media", action="store_true")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.scenario is not None and args.config is not None:
+        parser.error("--scenario cannot be combined with --config")
+    if args.scenario is None and args.config is None:
+        parser.error("one of --scenario or --config is required")
+    if args.shared_root is not None and args.scenario is None:
+        parser.error("--shared-root requires --scenario")
+    if args.output is None:
+        args.output = diagnostics_root(Path("var"), args.scenario) / "evaluation"
+    return args
 
 
 def main(argv: list[str] | None = None) -> int:
+    from dual_arm_runtime.offline.scenario_selection import campaign_config_path
+
     args = parse_arguments(argv)
+    project_root = args.project_root.resolve()
+    output = args.output if args.output.is_absolute() else project_root / args.output
     try:
         document = build_report(
-            project_root=args.project_root.resolve(),
-            config_path=(
-                args.config if args.config.is_absolute() else args.project_root / args.config
+            project_root=project_root,
+            config_path=campaign_config_path(
+                campaign_config=args.config,
+                scenario=args.scenario,
+                shared_root=args.shared_root,
+                project_root=project_root,
+                default=None,
             ),
             purposes=(
                 ("test", "evaluation") if args.purpose == "all" else (args.purpose,)
             ),
-            output=args.output.resolve(),
+            output=output.resolve(),
             generate_media=not args.no_media,
         )
     except Exception as error:  # noqa: BLE001 - report failure must be visible

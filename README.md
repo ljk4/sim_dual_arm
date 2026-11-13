@@ -1,19 +1,30 @@
 # sim_dual_arm
 
-面向双臂机器人的仿真数据采集、ACT 策略训练与流式控制闭环系统。当前已交付双 Panda 堆叠与 Marvin 双臂交接两个方案：从程序示教（Teacher）、LeRobot ACT 训练到有界跟随控制（Ruckig `SubmitFollower`）的闭环，以及 Marvin 的抓取、空中交接、入箱物理任务与诊断学习链路。
+面向双臂机器人的仿真数据采集、ACT 策略训练与流式控制闭环系统。当前提供两个可直接运行的方案：
+
+- [`panda_stack`](shared/scenarios/panda_stack/README.md)：MuJoCo 双 Panda 堆叠；
+- [`marvin_handover`](shared/scenarios/marvin_handover/README.md)：Marvin 抓取—空中交接—入箱。
+
+两个方案共用同一套通用实现：仿真端负责物理步进、三路相机渲染与程序示教（Teacher），运行端负责观测同步、流式动作块调度与 MCAP 录制，学习端负责数据集转换、ACT 训练、Bundle 导出与 gRPC Policy 服务。
 
 ## 架构概览
 
 仓库按职能划分为三个容器化运行端、真机边界与公共/方案层：
 
-- **`simulation/mujoco/`**：MuJoCo 物理仿真后端，负责双 Panda 动力学步进、三路 EGL 相机渲染、Ruckig 轨迹规划、接触判定与程序示教，通过 ROS 2 接口对外提供服务。
-- **`runtime/ros2/`**：ROS 2 运行端，负责多路观测同步组装、控制租约与流式动作块调度、MCAP 录制、离线审计与评估。
+- **`simulation/mujoco/`**：MuJoCo 物理仿真后端，负责机器人动力学、三路 EGL 相机渲染、Ruckig 有界跟随与接触判定，通过 ROS 2 接口对外提供服务。
+- **`runtime/ros2/`**：ROS 2 运行端，负责多路观测同步、控制租约与流式动作块调度、MCAP 录制、离线审计、导出与采集调度。
 - **`learning/lerobot/`**：ROS-free 学习与策略服务端，负责数据集转换、ACT 混合精度训练、模型包（Bundle）导出与 gRPC Policy 推理服务。
 - **`hardware/`**：真机 Robot API 边界说明；当前没有可验证的真实驱动。
 - **`shared/common/`**：公共层，只放跨端接口约束（Policy Protobuf、ROS 2 IDL、JSON Schema）、共享 Python 包与通用工具，不选择具体任务、机器人或算法。
-- **`shared/scenarios/<id>/`**：方案绑定层，用 `binding.yaml` 选择档案、配方与方案专用接口。当前实例为 [`panda_stack`](shared/scenarios/panda_stack/README.md)（MuJoCo 双 Panda 堆叠）与 [`marvin_handover`](shared/scenarios/marvin_handover/README.md)（Marvin 抓取—空中交接—入箱）；[`_template`](shared/scenarios/_template/README.md) 说明替换步骤。Marvin 的完整目标、阶段与验收见[任务文档](docs/marvin-handover/README.md)。
+- **`shared/scenarios/<id>/`**：方案绑定层，用 `binding.yaml` 选择档案、配方与方案专用接口；[`_template`](shared/scenarios/_template/README.md) 说明新增方案的方法。
 
-四端（simulation/runtime/learning/hardware）持有实际实现、依赖、容器和入口脚本；公共协议与当前 Panda/ACT/MuJoCo 实例数值分开维护，方案选择只发生在 `prepare`/`build-ros-sdk` 等准备入口。
+**三端统一的一步式工作流**：任何端启动时只传 `--scenario <id>`，由该方案 `binding.yaml` 在内存中选择并展开配方；不再生成 `/data/prepared/` 中间目录，也不再需要在三端分别执行 `prepare`。所有入口支持重复 `--set dot.path=value` 覆盖配方中已存在的键，用于临时调参。直接配置模式仍可用：把 `--scenario <id> [--role ...] [--bundle ...]` 换成对应端的 `--config <recipe>`（学习端策略服务也接受 `--config`）。
+
+```text
+simulation backend ──ROS 2──▶ runtime ──gRPC──▶ learning policy service
+        ▲                        │
+        └──── 观测 / 执行反馈 ─────┘
+```
 
 ---
 
@@ -33,6 +44,18 @@ mkdir -p build var
 
 runtime/learning 容器内 `/build` 与 `/workspace/build` 指向宿主机同一个 `build/`；`/data` 与 `/workspace/var` 指向同一个 `var/`。前者供容器工具使用，后者供项目相对路径使用。simulation 仅挂载所需的 SDK 与 `/data`。更新挂载配置后，重新执行对应服务的 `docker compose up -d` 使配置生效。
 
+所有运行期产物按方案归入 `var/<scenario-id>/`（容器 `/data/<scenario-id>/`），任务目录内严格分为四个平级目录：
+
+```text
+var/<scenario-id>/
+├── datasets/       # LeRobot 数据集、manifest、filter 掩码、formal-select.json
+├── models/         # 训练 runs/checkpoints、训练预算台账、bundles/<name>
+├── logs/           # 三端事件日志、采集台账、录制内容、record-pools
+└── diagnostics/    # 场景/运动学/交接检查、离线评估与测试产物
+```
+
+直接配置模式没有方案 id，统一使用保留段 `var/_direct/`；与方案无关的环境探针写入 `var/_system/diagnostics/environment/`。
+
 仓库不附带已生成的 SDK、采集数据、训练权重或模型包。下文的输出路径用于生成和使用本机产物；历史实验记录不代表当前机器已有这些文件。
 
 学习端另外使用固定版本的 LeRobot 源码，首次使用须按[第三方源码说明](third_party/README.md)准备；容器镜像不会代为恢复宿主机已清理的源码目录。
@@ -41,7 +64,7 @@ runtime/learning 容器内 `/build` 与 `/workspace/build` 指向宿主机同一
 
 ## 2. 数据采集流程
 
-按顺序完成：**单路试采一次（pilot，可观察可视化）→ 停止手动后端与 viewer → 宿主机并行补足 50 条合格正式数据 → 筛选 45 条训练 / 5 条验证 → 第 3 节转换与训练**。
+按顺序完成：**单路试采一次（pilot，可观察可视化）→ 停止手动后端与 viewer → 宿主机并行补足 50 条合格正式数据 → 自动生成训练/验证清单 → 第 3 节转换与训练**。
 
 ### 2.1 启动 Runtime 容器并构建 SDK
 
@@ -71,24 +94,27 @@ docker compose -f simulation/mujoco/docker/docker-compose.yml up -d
 docker compose -f simulation/mujoco/docker/docker-compose.yml exec simulation bash
 ```
 
-在 `simulation` 容器内生成示教后端配置（每个输出目录仅生成一次，拒绝覆盖）并前台启动后端：
+在 `simulation` 容器内直接以方案启动示教后端：
 
 ```bash
 cd /app
-scripts/run.sh prepare \
-  --scenario panda_stack --role teacher \
-  --seed 0 \
-  --run-id teacher-backend \
-  --output /data/prepared/teacher-backend
-
 scripts/run.sh backend \
-  --config /data/prepared/teacher-backend/backend.yaml \
-  --run-id teacher-backend
+  --scenario panda_stack --role teacher \
+  --seed 0 --run-id teacher-backend
+```
+
+`--scenario` 会在内存中读取 `binding.yaml`、展开配方路径并写入本次实际生效的快照 `/data/panda_stack/logs/backend/teacher-backend/backend.yaml`；运行日志位于 `/data/panda_stack/logs/backend/teacher-backend/log`。`--run-id teacher-backend` 同时是 runtime 端 `record.sh` 的默认后端日志位置，单路试采无需再指定 `--backend-log`。
+
+需要临时调参时追加 `--set`，例如降低仿真速度：
+
+```bash
+scripts/run.sh backend --scenario panda_stack --role teacher \
+  --seed 0 --run-id teacher-backend --set run.realtime_speed=0.4
 ```
 
 ### 2.3 试采时开启实时 MuJoCo 可视化（可选）
 
-`viewer` 独立订阅后端发布的只读物理状态快照，不参与物理步进与控制。在宿主机桌面环境下（若报 X11 权限错误，先在宿主机执行 `xhost +SI:localuser:$(id -un)`）：
+`viewer` 独立订阅后端发布的只读物理状态快照，不参与物理步进与控制。它同样直接接受 `--scenario`（或直接 `--config`）。在宿主机桌面环境下（若报 X11 权限错误，先在宿主机执行 `xhost +SI:localuser:$(id -un)`）：
 
 ```bash
 cd simulation/mujoco/docker
@@ -98,7 +124,7 @@ docker compose run --rm \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   -v "${XAUTHORITY:-/dev/null}:/tmp/.Xauthority:ro" \
   simulation scripts/run.sh viewer \
-  --config /data/prepared/teacher-backend/backend.yaml
+  --scenario panda_stack --role teacher
 ```
 
 ### 2.4 单路试采一次，确认完整链路
@@ -106,8 +132,8 @@ docker compose run --rm \
 回到 `runtime` 容器终端，使用刚启动的手动 teacher backend 试采一次。试采指定 `pilot`，不占用正式 50 条的名额：
 
 ```bash
-mkdir -p /data/campaigns/panda_stack_v1
-runtime/ros2/scripts/run.sh campaign status
+mkdir -p /data/panda_stack/logs/campaign /data/panda_stack/datasets
+runtime/ros2/scripts/run.sh campaign --scenario panda_stack status
 
 # 只试一次：合格即结束，失败也立即结束
 runtime/ros2/scripts/record.sh \
@@ -136,24 +162,27 @@ runtime/ros2/scripts/record_parallel.sh \
 
 入口自动创建独立的 MuJoCo backend，复用 runtime 容器并行录制与导出。每路使用独立的 ROS domain、命名空间和日志目录，共用原 campaign 的种子和预算。自动档按 CPU、可用内存和显存选择至多 4 路；如需固定并发，将 `--workers auto` 改为 `--workers 4`。
 
-并行 worker 禁用 viewer 状态发布、预览 PNG 和 GIF，保留训练 RGB、标签及质量门禁。连续失败按完成顺序计数，合格一次清零；连续 3 次不合格会取消在途任务并提前退出，取消项仍占预算。预算/种子不足也会停止。按 `Ctrl-C` 可中断本批次；命令结束时自动清理本批次后台实例。配置、backend 日志和性能汇总保存到 `var/record-pools/pool-*/`。
+并行 worker 禁用 viewer 状态发布、预览 PNG 和 GIF，保留训练 RGB、标签及质量门禁。连续失败按完成顺序计数，合格一次清零；连续 3 次不合格会取消在途任务并提前退出，取消项仍占预算。预算/种子不足也会停止。按 `Ctrl-C` 可中断本批次；命令结束时自动清理本批次后台实例。配置、backend 日志和性能汇总保存到 `var/panda_stack/logs/record-pools/pool-*/`。
 
-### 2.7 筛选正式数据，生成训练/验证清单
+### 2.7 训练/验证清单
 
-并行采集结束后，回到 **runtime 容器终端**检查正式合格数并生成清单：
+正式台账累计达标并正常结束时（`reason=target_reached`），采集入口会自动原子写出 `var/panda_stack/datasets/formal-select.json`，无需手动重定向。回到 **runtime 容器终端**检查状态：
 
 ```bash
 cd /workspace
-runtime/ros2/scripts/run.sh campaign status
-
-# 仅筛选成功后替换正式清单，避免数量不足时覆盖已有文件
-runtime/ros2/scripts/run.sh campaign select \
-  > /data/campaigns/panda_stack_v1/formal-select.json.tmp &&
-mv /data/campaigns/panda_stack_v1/formal-select.json.tmp \
-  /data/campaigns/panda_stack_v1/formal-select.json
+runtime/ros2/scripts/run.sh campaign --scenario panda_stack status
 ```
 
-确认筛选成功且清单中的 `status` 为 `SELECTED`、`qualified` 为 50，再进入第 3 节。清单只选择合格 formal 数据，自动划分为 45 条训练 / 5 条验证，排除 pilot 试采。
+清单中的 `status` 应为 `SELECTED`、`qualified` 应为 50。它只选择合格的 formal 数据，自动划分为 45 条训练 / 5 条验证，排除 pilot 试采。
+
+如需在手动重新筛选后刷新该文件（例如补齐数据或修改了 campaign 规则），使用：
+
+```bash
+runtime/ros2/scripts/run.sh campaign --scenario panda_stack select \
+  --output /data/panda_stack/datasets/formal-select.json
+```
+
+`select --output` 只在筛选结果为 `SELECTED` 时原子替换目标文件；数据不足时返回非零且不改动已有清单。
 
 ---
 
@@ -171,14 +200,14 @@ docker compose -f learning/lerobot/docker/docker-compose.yml exec learning bash
 
 ### 3.2 转换数据集与训练 ACT 模型
 
-完成第 2.7 节后，在 `learning` 容器内将正式清单中的 50 条合格 episode 转换为 LeRobot 数据集（45 条训练 / 5 条验证，输出至 `/data/learning/panda_stack_learning_v1`）。转换配置直接读取 `/data/campaigns/panda_stack_v1/formal-select.json`，无需移动原始数据：
+在 `learning` 容器内将正式清单中的 50 条合格 episode 转换为 LeRobot 数据集（45 条训练 / 5 条验证，输出至 `/data/panda_stack/datasets/panda_stack_learning_v1`）。转换配方直接读取 `/data/panda_stack/datasets/formal-select.json`，无需移动原始数据：
 
 ```bash
 cd /workspace
 learning/lerobot/scripts/run.sh convert --scenario panda_stack
 ```
 
-转换时终端只显示配置、日志路径和原地刷新的进度，包括已完成条数、百分比、用时和预计剩余时间；编码器等详细输出写入日志。训练使用同样的显示方式，额外显示 step、loss 和验证状态。重定向输出时仅保留阶段摘要，避免生成大量进度行。可用 `--log-file /data/logs/<文件名>.log` 指定详细日志；需要原始输出和 JSON 结果时添加 `--no-progress`。
+转换时终端只显示配置、日志路径和原地刷新的进度，包括已完成条数、百分比、用时和预计剩余时间；编码器等详细输出写入日志。训练使用同样的显示方式，额外显示 step、loss 和验证状态。重定向输出时仅保留阶段摘要，避免生成大量进度行。可用 `--log-file /data/panda_stack/logs/convert/<文件名>.log` 指定详细日志；需要原始输出和 JSON 结果时添加 `--no-progress`。
 
 训练前将官方 ResNet18 权重文件 `resnet18-f37072fd.pth` 放到宿主机 `build/cache/torch/hub/checkpoints/`；也可在 learning 容器内用 `RESNET18_WEIGHTS` 指定现有权重文件。训练按离线方式运行，缺少权重时会报错，不会自动下载。
 
@@ -191,85 +220,156 @@ learning/lerobot/scripts/run.sh train --scenario panda_stack --mode full
 训练完成后，记录终端输出的 `run_dir` 并导出可部署的 safetensors 模型包（Bundle）：
 
 ```bash
-TRAIN_RUN="/data/learning/runs/<实际生成的-run-目录名>"
+TRAIN_RUN="/data/panda_stack/models/runs/<实际生成的-run-目录名>"
 learning/lerobot/scripts/run.sh bundle \
   --scenario panda_stack --mode full \
   --run "$TRAIN_RUN" \
-  --output /data/learning/bundles/stack-act
+  --output /data/panda_stack/models/bundles/stack-act
 ```
 
-### 3.3 生成 Policy 服务配置与绑定清单
+### 3.3 直接启动 Policy 推理服务
 
-在 `learning` 容器内按方案绑定校验模型包，生成 `policy.yaml`、`policy_binding.json`、`act_contract.json` 与 `run_manifest.json`：
+在 `learning` 容器内用 Bundle 直接启动 gRPC Policy 服务；`--scenario` 读取方案绑定的 `policy_service` 配方与机器人档案，`--bundle` 覆盖 `models.bundle`：
 
 ```bash
-learning/lerobot/scripts/run.sh prepare-policy \
-  --scenario panda_stack --shared-root /shared \
-  --bundle /data/learning/bundles/stack-act \
-  --run-id infer-5k-server \
-  --output /data/prepared/infer-5k-server/policy
+learning/lerobot/scripts/run.sh policy \
+  --scenario panda_stack \
+  --bundle /data/panda_stack/models/bundles/stack-act
 ```
 
-直接配置模式继续可用：把 `--scenario panda_stack --shared-root /shared` 换成 `--template /workspace/shared/scenarios/panda_stack/configs/learning/policy_temporal.yaml`，两者互斥。
+服务默认监听 `50051`，日志目录为 `/data/panda_stack/logs/policy-service`（可用 `--log-directory` 或环境变量 `ACT_LOG_DIRECTORY` 修改）。保持该终端运行。若本机尚未生成 Policy SDK，先在 runtime 容器执行 `runtime/ros2/scripts/run.sh build-policy-sdk`。
 
-### 3.4 准备并启动推理仿真后端
+### 3.4 直接启动推理仿真后端
 
-回到 `simulation` 容器，使用分块 ACT 推理模板生成仿真后端配置并启动：
+回到 `simulation` 容器，用同一 Bundle 以 policy 角色启动后端：
 
 ```bash
 cd /app
-scripts/run.sh prepare \
-  --scenario panda_stack --role policy \
-  --bundle /data/learning/bundles/stack-act \
-  --seed 20001 \
-  --run-id infer-5k-server \
-  --output /data/prepared/infer-5k-server/simulation
-
 scripts/run.sh backend \
-  --config /data/prepared/infer-5k-server/simulation/backend.yaml \
-  --run-id infer-5k-server
-```
-
-### 3.5 启动 Policy 推理服务
-
-回到 `learning` 容器，使用全新的日志目录前台启动 gRPC Policy 服务：
-
-```bash
-POLICY_LOG="/data/logs/infer-5k-server-policy-$(date -u +%Y%m%dT%H%M%SZ)"
-learning/lerobot/scripts/run.sh policy \
-  --config /data/prepared/infer-5k-server/policy/policy.yaml \
-  --run-id infer-5k-server \
-  --log-directory "$POLICY_LOG"
-```
-
-### 3.6 准备并交互式运行 Runtime
-
-回到 `runtime` 容器，将 `policy_binding.json` 与运行模板合成为 `runtime.yaml`（`--run-id` 必须与 `prepare-policy` 一致）：
-
-```bash
-runtime/ros2/scripts/run.sh prepare \
   --scenario panda_stack --role policy \
-  --policy-binding /data/prepared/infer-5k-server/policy/policy_binding.json \
-  --bundle /data/learning/bundles/stack-act \
-  --seed 20001 \
-  --run-id infer-5k-server \
-  --output /data/prepared/infer-5k-server/runtime
+  --bundle /data/panda_stack/models/bundles/stack-act \
+  --seed 20000 --run-id policy-backend
 ```
 
-启动交互式闭环评估（自动分配唯一 `run-id` 与 `episode-id`，输入 `y` 复位环境并执行一局，结束后保持 IDLE 直至按 `Ctrl-C` 退出）：
+运行快照与日志分别位于 `/data/panda_stack/logs/backend/policy-backend/backend.yaml` 与 `/data/panda_stack/logs/backend/policy-backend/log`。后端与第 3.3 节的 Policy 服务、第 3.5 节的 runtime 需同时在线。
+
+### 3.5 直接运行推理或交互闭环
+
+回到 `runtime` 容器，直接以方案启动一局交互式闭环（自动生成或使用指定 `run-id`，输入 `y` 复位环境并执行一局，结束后保持 IDLE 直至 `Ctrl-C` 退出）：
 
 ```bash
 runtime/ros2/scripts/run.sh interactive \
-  --config /data/prepared/infer-5k-server/runtime/runtime.yaml \
-  --seed 20001
+  --scenario panda_stack \
+  --bundle /data/panda_stack/models/bundles/stack-act \
+  --seed 20000 --run-id policy-interactive
 ```
 
-后续测试不同随机种子时，直接传入新的 `--seed` 即可，无需重新执行 `prepare`：
+非交互式单局执行使用 `policy`，录制默认落到 `/data/<scenario-id>/logs/recordings/<run-id>`；需要另选位置时再显式传 `--output`：
+
+```bash
+runtime/ros2/scripts/run.sh policy \
+  --scenario panda_stack \
+  --bundle /data/panda_stack/models/bundles/stack-act \
+  --reset-seed 20000 --run-id policy-run
+```
+
+后续测试不同随机种子时，直接传入新的种子即可，无需重新生成任何配置：
 
 ```bash
 runtime/ros2/scripts/run.sh interactive \
-  --config /data/prepared/infer-5k-server/runtime/runtime.yaml \
-  --seed 20002
+  --scenario panda_stack \
+  --bundle /data/panda_stack/models/bundles/stack-act \
+  --seed 20001 --run-id policy-interactive-2
+```
+
+### 3.6 用 `--set` 调参与采集产物
+
+所有 `--scenario` 入口都支持重复 `--set dot.path=value`，只覆盖配方中已存在的点分路径；值按 YAML 解析，未知路径或类型错误会在启动前被严格校验拒绝。常见用法：
+
+```bash
+# simulation：降低仿真速度
+scripts/run.sh backend --scenario panda_stack --role teacher \
+  --run-id teacher-slow --set run.realtime_speed=0.4
+
+# runtime：放宽观测最大年龄（该键由观测档案派生，也可覆盖）
+runtime/ros2/scripts/run.sh interactive --scenario panda_stack \
+  --bundle /data/panda_stack/models/bundles/stack-act \
+  --run-id policy-fast --set observation.max_age_ns=200000000
+
+# learning：只运行 smoke 预算并指定轮次数
+learning/lerobot/scripts/run.sh train --scenario panda_stack \
+  --mode smoke --set modes.smoke.steps=64
+
+# 采集：为每次尝试追加运行时覆盖
+runtime/ros2/scripts/record.sh --scenario panda_stack --purpose pilot --count 1 \
+  --set observation.max_age_ns=250000000
+```
+
+直接配置模式同样支持 `--set`：把 `--scenario ...` 换成 `--config <recipe>` 即可，二者互斥。
+
+正式采集的每次尝试在 `var/<scenario-id>/logs/campaign/` 下拍平保存，不再有 `stack/<run_id>` 层级，也不再复制重复 JSON；正式筛选清单另存到 `datasets/`：
+
+```text
+var/panda_stack/
+├── datasets/
+│   └── formal-select.json         # 目标达标时自动原子写出，供 convert 消费
+├── models/                        # 训练 runs/checkpoints、预算台账、bundles/
+├── logs/
+│   ├── backend/<run-id>/          # 仿真后端快照、run.json 与事件日志
+│   ├── runs/<run-id>/             # runtime 事件日志
+│   ├── recordings/<run-id>/       # 单局/交互录制
+│   ├── record-pools/pool-*/       # 并行采集批次配置、worker 日志与 summary
+│   └── campaign/
+│       ├── attempts.jsonl         # 追加式台账：预算、种子、终态
+│       └── attempts/
+│           └── <purpose>-<seed>-<run_id>/  # attempt 目录（direct 模式另有 runtime.yaml）
+│               ├── raw/                    # 录制最终目录
+│               │   ├── manifest.json
+│               │   ├── task_result.json
+│               │   └── recording/          # rosbag2 MCAP
+│               ├── logs/<run_id>/          # 运行端事件日志
+│               └── export/
+│                   ├── labels.json         # 逐帧标签与来源元数据
+│                   ├── raw_predictions.json
+│                   ├── quality.json        # 质量门禁结果（唯一一份）
+│                   ├── rgb/<frame>/<camera>.png
+│                   ├── preview/<phase>_<camera>.png   # 可选；并行采集时跳过
+│                   └── video/<camera>.gif             # 可选；并行采集时跳过
+└── diagnostics/                   # 场景/运动学/交接检查、离线评估与测试产物
 ```
 
 ---
+
+## 4. 使用 marvin_handover
+
+`marvin_handover` 与 `panda_stack` 使用完全相同的入口，只需替换 `--scenario`：
+
+```bash
+# simulation：示教后端
+scripts/run.sh backend --scenario marvin_handover --role teacher \
+  --seed 0 --run-id teacher-backend
+
+# runtime：试采
+runtime/ros2/scripts/record.sh --scenario marvin_handover \
+  --purpose pilot --count 1 --max-consecutive-failures 1
+
+# learning：转换与训练（诊断配方）
+learning/lerobot/scripts/run.sh convert --scenario marvin_handover
+learning/lerobot/scripts/run.sh train --scenario marvin_handover --mode smoke
+
+# 推理：learning 策略服务、simulation 后端、runtime 交互闭环
+learning/lerobot/scripts/run.sh policy --scenario marvin_handover \
+  --bundle /data/marvin_handover/models/bundles/<bundle>
+scripts/run.sh backend --scenario marvin_handover --role policy \
+  --bundle /data/marvin_handover/models/bundles/<bundle> \
+  --seed 5100 --run-id policy-backend
+runtime/ros2/scripts/run.sh interactive --scenario marvin_handover \
+  --bundle /data/marvin_handover/models/bundles/<bundle> \
+  --seed 5100 --run-id policy-interactive
+```
+
+该方案的 `binding.yaml` 已指向一个真实诊断 Bundle；换成新 Bundle 时只需改 `--bundle`，档案与配方无需改动。方案说明见 [`shared/scenarios/marvin_handover/README.md`](shared/scenarios/marvin_handover/README.md)。
+
+---
+
+目录导航：[文档索引](docs/README.md) · [公共层与方案绑定](shared/README.md) · [架构简化任务](docs/architecture-tasks/simplification/README.md) · [实施规则](RULES.md)

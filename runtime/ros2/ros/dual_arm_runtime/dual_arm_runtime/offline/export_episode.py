@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Auditable, bounded export of one stack episode.
+"""Auditable, bounded export of one recorded episode.
 
 Outputs only JSON, PNG and GIF.  No pickle, framework database or ROS import is
 needed by later learning conversion.  Labels are the actually applied follower
@@ -23,6 +23,7 @@ import yaml
 _PROJECT = Path(os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[6])
 
 from robot_contracts.models import RobotProfile  # noqa: E402
+from robot_contracts.overrides import OverrideError, apply_overrides  # noqa: E402
 
 from dual_arm_runtime.offline.audit.label_export import (  # noqa: E402
     AppliedBlock,
@@ -104,12 +105,10 @@ def _consume_command(message: object, metadata: dict[str, Any]) -> None:
     )
 
 
-def _consume_reference(
-    message: object, metadata: dict[str, Any], *, legacy_digest: bool
-) -> None:
+def _consume_reference(message: object, metadata: dict[str, Any]) -> None:
     from robot_ros_support.follower_conversions import follower_reference_from_message
 
-    record = follower_reference_from_message(message, legacy_digest=legacy_digest)
+    record = follower_reference_from_message(message)
     metadata["references"][(record.command_id, record.chunk_seq)] = record
 
 
@@ -129,21 +128,10 @@ def _consume_event(message: object, metadata: dict[str, Any]) -> None:
             phases.setdefault(event.phase, int(event.sim_time_ns))
 
 
-def _consume_feedback(
-    message: object, metadata: dict[str, Any], *, legacy: bool = False
-) -> None:
+def _consume_feedback(message: object, metadata: dict[str, Any]) -> None:
     from robot_ros_support.stream_conversions import execution_feedback_from_message
 
-    from dual_arm_runtime.offline.legacy_feedback import (
-        decode_legacy_execution_feedback,
-    )
-
-    if legacy:
-        # ``message`` is the raw CDR payload: the legacy fixed-array layout
-        # must never be handed to the current generated type.
-        execution = decode_legacy_execution_feedback(message)  # type: ignore[arg-type]
-    else:
-        execution = execution_feedback_from_message(message)
+    execution = execution_feedback_from_message(message)
     if execution.reference_kind != "BRAKE":
         return
     start = (
@@ -165,9 +153,6 @@ def _consume_message(
     message: object,
     root: str,
     metadata: dict[str, Any],
-    *,
-    legacy_reference_digest: bool = False,
-    legacy_feedback: bool = False,
 ) -> None:
     if topic == "/runtime/observation_index":
         _consume_index(message, metadata)
@@ -178,13 +163,11 @@ def _consume_message(
     elif topic == "/runtime/commands":
         _consume_command(message, metadata)
     elif topic == f"{root}/follower_references":
-        _consume_reference(
-            message, metadata, legacy_digest=legacy_reference_digest
-        )
+        _consume_reference(message, metadata)
     elif topic == f"{root}/control_events":
         _consume_event(message, metadata)
     elif topic == f"{root}/execution_feedback":
-        _consume_feedback(message, metadata, legacy=legacy_feedback)
+        _consume_feedback(message, metadata)
 
 
 def _read_metadata(recording: Path, root: str) -> dict[str, Any]:
@@ -192,9 +175,6 @@ def _read_metadata(recording: Path, root: str) -> dict[str, Any]:
     from rclpy.serialization import deserialize_message
     from rosidl_runtime_py.utilities import get_message
 
-    from dual_arm_runtime.offline.feedback_definition import (
-        require_supported_feedback_definition,
-    )
     from dual_arm_runtime.offline.follower_definition import (
         require_current_follower_reference_definition,
     )
@@ -210,12 +190,7 @@ def _read_metadata(recording: Path, root: str) -> dict[str, Any]:
                     "/runtime/observation_index"}
         topics = reader.get_all_topics_and_types()
         topic_types = {item.name: item.type for item in topics}
-        legacy_feedback = require_supported_feedback_definition(
-            reader, topic_types, rosbag2_py
-        )
-        legacy_reference_digest = require_current_follower_reference_definition(
-            reader, topic_types, rosbag2_py
-        )
+        require_current_follower_reference_definition(reader, topic_types, rosbag2_py)
         types = {item.name: get_message(item.type) for item in topics
                  if item.name in required or (item.name.startswith(root + "/cameras/")
                                               and item.name.endswith("/frame"))}
@@ -233,16 +208,8 @@ def _read_metadata(recording: Path, root: str) -> dict[str, Any]:
             topic, payload, _ = reader.read_next()
             if topic not in types:
                 continue
-            message = (
-                payload
-                if legacy_feedback and topic == f"{root}/execution_feedback"
-                else deserialize_message(payload, types[topic])
-            )
-            _consume_message(
-                topic, message, root, metadata,
-                legacy_reference_digest=legacy_reference_digest,
-                legacy_feedback=legacy_feedback,
-            )
+            message = deserialize_message(payload, types[topic])
+            _consume_message(topic, message, root, metadata)
         if not metadata["camera_names"]:
             from robot_contracts.models import ContractError
 
@@ -490,7 +457,6 @@ def _write_documents(
     recipe: dict[str, Any],
     rows: list[dict[str, Any]],
     raw: list[RawPrediction],
-    rgb_index: dict[int, dict[str, dict[str, Any]]],
     camera_names: tuple[str, ...],
     summary: dict[str, Any],
     quality: dict[str, Any],
@@ -502,6 +468,11 @@ def _write_documents(
             "episode_id": manifest["episode_id"],
             "robot_profile_hash": profile.digest,
             "seed": configuration["reset_seed"],
+            "camera_order": list(camera_names),
+            "action_source": recipe.get("action_source"),
+            "task": manifest.get("task"),
+            "runtime": manifest.get("runtime"),
+            "recording": manifest.get("recording"),
             "summary": summary,
             "labels": rows,
         },
@@ -523,29 +494,7 @@ def _write_documents(
             ],
         },
     )
-    _json(
-        out / "frame_index.json",
-        {
-            "schema_version": 1,
-            "camera_order": list(camera_names),
-            "labels": {str(index): value for index, value in sorted(rgb_index.items())},
-        },
-    )
     _json(out / "quality.json", quality)
-    _json(
-        out / "summary.json",
-        {
-            "schema_version": 1,
-            "episode_id": manifest.get("episode_id"),
-            "action_source": recipe.get("action_source"),
-            "task": manifest.get("task"),
-            "runtime": manifest.get("runtime"),
-            "recording": manifest.get("recording"),
-            "labels": summary,
-            "quality_qualified": quality["qualified"],
-            "raw_predictions": len(raw),
-        },
-    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -569,24 +518,40 @@ def main(argv: list[str] | None = None) -> int:
         help="override the campaign export.max_labels bound",
     )
     parser.add_argument("--no-previews", action="store_true", help="skip preview PNGs and GIFs")
+    parser.add_argument(
+        "--set", dest="overrides", action="append", default=[], metavar="PATH=VALUE"
+    )
     args = parser.parse_args(argv)
     from dual_arm_runtime.offline.scenario_selection import campaign_config_path
 
-    default_campaign = (
-        _PROJECT / "shared/scenarios/panda_stack/configs/runtime/experiments/stack_campaign.yaml"
-    )
+    if args.scenario is not None and args.campaign_config is not None:
+        print(
+            json.dumps({"error": "--scenario cannot be combined with --campaign-config"}),
+            file=sys.stderr,
+        )
+        return 2
+    if args.scenario is None and args.campaign_config is None:
+        print(
+            json.dumps({"error": "one of --scenario or --campaign-config is required"}),
+            file=sys.stderr,
+        )
+        return 2
     try:
         args.campaign_config = campaign_config_path(
             campaign_config=args.campaign_config,
             scenario=args.scenario,
             shared_root=args.shared_root,
             project_root=_PROJECT,
-            default=default_campaign,
         )
     except CampaignError as error:
         print(json.dumps({"error": str(error)}), file=sys.stderr)
         return 2
     campaign = yaml.safe_load(args.campaign_config.read_text(encoding="utf-8"))
+    try:
+        campaign = apply_overrides(campaign, list(args.overrides))
+    except OverrideError as error:
+        print(json.dumps({"error": str(error)}), file=sys.stderr)
+        return 2
     export = campaign.get("export") if isinstance(campaign.get("export"), dict) else {}
     max_labels = args.max_labels
     if max_labels is None:
@@ -629,7 +594,6 @@ def main(argv: list[str] | None = None) -> int:
         recipe,
         rows,
         raw,
-        rgb_index,
         camera_names,
         summary,
         quality,

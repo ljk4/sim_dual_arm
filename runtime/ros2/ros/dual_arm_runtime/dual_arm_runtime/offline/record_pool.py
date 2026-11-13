@@ -154,7 +154,8 @@ class RecordingPool:
 
         run_args = argparse.Namespace(
             purpose=self.args.purpose, kind="rollout", mode="teacher", seed=None,
-            episode_id=None, runtime_config=worker["runtime_config"],
+            episode_id=None, config=self.args.config,
+            runtime_config=worker["runtime_config"],
         )
         check_environment(self.args.project_root, self.config, self.output)
         run_id_prefix = worker.get("run_id_prefix") or f"record-{worker['id']}"
@@ -311,6 +312,14 @@ class RecordingPool:
             "campaign_qualified": self.campaign_qualified(),
             "selection": self.selection,
         }
+        if self.args.purpose == "formal" and self.reason == "target_reached":
+            with self.ledger.locked():
+                records = self.ledger.records()
+            destination = campaign.write_formal_selection(
+                self.args.project_root, self.config, records, self.args.config
+            )
+            if destination is not None:
+                summary["formal_select"] = str(destination)
         self.args.worker_manifest.with_name("summary.json").write_text(
             json.dumps(summary, indent=2) + "\n"
         )

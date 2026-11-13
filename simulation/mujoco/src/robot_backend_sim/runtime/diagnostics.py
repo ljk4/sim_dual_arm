@@ -14,7 +14,7 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
-from robot_backend_sim.config.scene_config import SceneConfig
+from robot_backend_sim.config.panda_scene_config import SceneConfig
 
 __all__ = [
     "code_provenance",

@@ -232,7 +232,7 @@ def serve_forever(
     provider: PolicyProvider | PolicyModelAdapter,
     stop: threading.Event | None = None,
     *,
-    log_directory: Path = Path("var/logs/policy"),
+    log_directory: Path = Path("var/_direct/logs/policy-service"),
     prediction_directory: Path | None = None,
     prediction_max_bytes: int = 268435456,
     run_id: str | None = None,

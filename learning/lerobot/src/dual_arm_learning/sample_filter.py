@@ -150,12 +150,12 @@ def _selected_attempts(
 
 
 def _source_paths(attempt_dir: Path) -> tuple[Path, list[Path]]:
-    labels = sorted(attempt_dir.glob("stack/*/export/labels.json"))
+    labels = sorted(attempt_dir.glob("export/labels.json"))
     if len(labels) != 1:
         raise FilterError(
             f"{attempt_dir}: expected exactly one export labels.json, got {len(labels)}"
         )
-    events = sorted(attempt_dir.glob("stack/*/runs/*/logs/runtime/*/events.*.jsonl"))
+    events = sorted(attempt_dir.glob("logs/*/logs/runtime/*/events.*.jsonl"))
     return labels[0], events
 
 

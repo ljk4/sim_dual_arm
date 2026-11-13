@@ -13,10 +13,6 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from robot_backend_sim.tasks.handover.cohold import (  # noqa: E402
-    CoholdReference,
-    plan_cohold_step,
-)
 from marvin_diagnostic_common import (  # noqa: E402
     PROFILE,
     ROS_IMPORT_ERROR,
@@ -25,8 +21,8 @@ from marvin_diagnostic_common import (  # noqa: E402
     _context,
     _finger_contacts,
     _gripper,
-    _holding,
     _hold_snapshots,
+    _holding,
     _object,
     _plan_for_execution,
     _public_target,
@@ -37,13 +33,17 @@ from marvin_diagnostic_common import (  # noqa: E402
     _support_force,
     _write_evidence,
 )
+from robot_backend_sim.tasks.handover.cohold import (  # noqa: E402
+    CoholdReference,
+    plan_cohold_step,
+)
 
 if ROS_IMPORT_ERROR is not None:  # pragma: no cover
     pytest.skip(f"ROS unavailable: {ROS_IMPORT_ERROR}", allow_module_level=True)
 
 try:
-    import rclpy
     import numpy as np
+    import rclpy
 except ImportError as error:  # pragma: no cover
     pytest.skip(f"ROS unavailable: {error}", allow_module_level=True)
 
@@ -274,10 +274,12 @@ def test_dual_hold_and_coordinated_lift(tmp_path):
                 item["right_orientation_error_rad"] for item in measured_curve
             ),
         }
-        assert process_max["left_position"] <= planning.diagnostics.relative_position_tolerance_m, measured_curve
-        assert process_max["right_position"] <= planning.diagnostics.relative_position_tolerance_m, measured_curve
-        assert process_max["left_orientation"] <= planning.diagnostics.relative_orientation_tolerance_rad, measured_curve
-        assert process_max["right_orientation"] <= planning.diagnostics.relative_orientation_tolerance_rad, measured_curve
+        position_tolerance = planning.diagnostics.relative_position_tolerance_m
+        orientation_tolerance = planning.diagnostics.relative_orientation_tolerance_rad
+        assert process_max["left_position"] <= position_tolerance, measured_curve
+        assert process_max["right_position"] <= position_tolerance, measured_curve
+        assert process_max["left_orientation"] <= orientation_tolerance, measured_curve
+        assert process_max["right_orientation"] <= orientation_tolerance, measured_curve
         for snapshot in snapshots:
             label = snapshot.get("label", "")
             if label.startswith("dual_waypoint") or label == "dual_hold":

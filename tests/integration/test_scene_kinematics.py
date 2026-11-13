@@ -18,9 +18,9 @@ if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
 from robot_backend_sim.config.kinematics_config import load_kinematics_config  # noqa: E402
-from robot_backend_sim.config.scene_config import load_scene_config  # noqa: E402
-from robot_backend_sim.kinematics import kinematics  # noqa: E402
-from robot_backend_sim.physics.scene import build_scene  # noqa: E402
+from robot_backend_sim.config.panda_scene_config import load_scene_config  # noqa: E402
+from robot_backend_sim.kinematics import common, kinematics  # noqa: E402
+from robot_backend_sim.physics.panda.scene import build_scene  # noqa: E402
 from robot_backend_sim.render.rendering import SceneRenderer  # noqa: E402
 from robot_backend_sim.tools import check_kinematics, check_kinematics_report  # noqa: E402
 
@@ -66,7 +66,7 @@ def initial_state(scene, scene_config, seed: int = 11):
         obj.name: scene.indices.object_free_joint_qpos[obj.name] for obj in scene_config.objects
     }
     poses = {
-        name: kinematics.extract_object_pose(qpos, address, name)
+        name: common.extract_object_pose(qpos, address, name)
         for name, address in object_addresses.items()
     }
     return qpos, poses

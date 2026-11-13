@@ -18,10 +18,16 @@ from typing import NamedTuple
 import mujoco
 from robot_contracts.models import ContractError, JointSpec, RobotProfile
 
-from robot_backend_sim.config.scene_config import (
+from robot_backend_sim.config.panda_scene_config import (
     FINGER_JOINT_LIMIT,
     PANDA_JOINT_RANGES,
     SceneConfig,
+)
+from robot_backend_sim.physics.panda.scene import (
+    FINGER_OPENING_RANGE,
+    GRIPPER_CTRL_RANGE,
+    Scene,
+    gripper_ctrl,
 )
 from robot_backend_sim.physics.robot_io import (
     PUBLIC_JOINT_NAMES,
@@ -35,12 +41,6 @@ from robot_backend_sim.physics.robot_io import (
     validate_camera_contract,
     validate_profile_contract,
     validate_targets,
-)
-from robot_backend_sim.physics.scene import (
-    FINGER_OPENING_RANGE,
-    GRIPPER_CTRL_RANGE,
-    Scene,
-    gripper_ctrl,
 )
 
 __all__ = ["JOINT_NAMES", "Measurement", "PandaIO"]

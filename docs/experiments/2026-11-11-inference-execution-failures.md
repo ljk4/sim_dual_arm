@@ -37,7 +37,7 @@
 
 ### 3. 保留第一次物理停止原因
 
-`runtime/worker_owner.py` 在 `STOPPING` 阶段就把物理原因交给任务评估器，Stop/Release 清理也先记录已有控制事实，避免被 `CONTROL_STOPPED:RUNTIME_SHUTDOWN` 掩盖。
+`simulation/mujoco/src/robot_backend_sim/runtime/worker_owner.py` 在 `STOPPING` 阶段就把物理原因交给任务评估器，Stop/Release 清理也先记录已有控制事实，避免被 `CONTROL_STOPPED:RUNTIME_SHUTDOWN` 掩盖。
 
 运行端在请求后继锚点失败时查询原命令；若已停止或失败，记录并报告 `TRACKING_TIMEOUT` 等原始原因，而不是仅报告 `STREAM_ANCHOR_UNAVAILABLE`。查询本身失败时保留原锚点错误。
 

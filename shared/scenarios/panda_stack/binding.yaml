@@ -57,7 +57,7 @@ models:
   bundle: null
 
 # The shared tree is the only source scope this scenario currently uses.
-# Artifacts (verified bundles, prepared runs) are deployment data under /data.
+# Artifacts (verified bundles, run outputs) are deployment data under /data.
 source_roots:
   - ../..
 artifact_roots:

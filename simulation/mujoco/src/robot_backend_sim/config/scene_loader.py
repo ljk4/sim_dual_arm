@@ -15,7 +15,7 @@ from robot_backend_sim.config.marvin_scene_config import (
     MarvinSceneConfig,
     load_marvin_scene_config,
 )
-from robot_backend_sim.config.scene_config import SceneConfig, load_scene_config
+from robot_backend_sim.config.panda_scene_config import SceneConfig, load_scene_config
 
 __all__ = ["SceneConfigLike", "load_scene_config_for"]
 

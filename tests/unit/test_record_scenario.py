@@ -188,8 +188,8 @@ def test_preflight_plan_is_read_only(tmp_path):
     assert plan["runtime_config"] == str(tree.runtime_recipe.resolve())
     assert plan["simulation_template"] == str(tree.backend_recipe.resolve())
     assert plan["campaign_status"]["formal_target_qualified"] == 50
-    assert not (tree.repo / "var/campaigns").exists()
-    assert not (tree.repo / "var/record-pools").exists()
+    assert not (tree.repo / "var/synthetic_stack").exists()
+    assert not (tree.repo / "var/synthetic_stack/logs/record-pools").exists()
 
 
 def test_preflight_rejects_unmounted_or_conflicting_selection(tmp_path):
@@ -205,7 +205,7 @@ def test_preflight_rejects_unmounted_or_conflicting_selection(tmp_path):
     tree.campaign_recipe.write_text(yaml.safe_dump(document, sort_keys=False))
     with pytest.raises(CampaignError, match="required path is missing"):
         record_preflight.build_plan(_preflight_args(tree))
-    assert not (tree.repo / "var/campaigns").exists()
+    assert not (tree.repo / "var/synthetic_stack").exists()
 
 
 def test_preflight_target_cannot_exceed_formal_target(tmp_path):
@@ -237,14 +237,29 @@ def test_record_selection_uses_binding_recipes_for_runner_and_exporter(tmp_path)
     assert command[index + 1] == str(tree.campaign_recipe.resolve())
 
 
-def test_record_direct_mode_keeps_explicit_defaults(tmp_path):
+def test_record_direct_mode_requires_explicit_recipes(tmp_path):
     tree = build_collection_tree(tmp_path)
     parser = record.parser()
-    args = parser.parse_args(["--project-root", str(tree.repo)])
+    with pytest.raises(SystemExit) as error:
+        args = parser.parse_args(["--project-root", str(tree.repo)])
+        args.project_root = args.project_root.resolve()
+        record._resolve_selection(args, parser)
+    assert error.value.code == 2
+
+    args = parser.parse_args(
+        [
+            "--project-root",
+            str(tree.repo),
+            "--config",
+            str(tree.campaign_recipe),
+            "--runtime-config",
+            str(tree.runtime_recipe),
+        ]
+    )
     args.project_root = args.project_root.resolve()
     record._resolve_selection(args, parser)
-    assert args.config == record.DEFAULT_CAMPAIGN
-    assert args.runtime_config == record.DEFAULT_RUNTIME_TEACHER
+    assert args.config == str(tree.campaign_recipe)
+    assert args.runtime_config == str(tree.runtime_recipe)
     assert args.selection is None
 
 
@@ -266,7 +281,7 @@ def test_record_scenario_conflicts_fail_before_any_ledger(tmp_path):
     with pytest.raises(SystemExit) as error:
         record.main(["--project-root", str(tree.repo), "--shared-root", str(tree.shared)])
     assert error.value.code == 2
-    assert not (tree.repo / "var/campaigns").exists()
+    assert not (tree.repo / "var/synthetic_stack").exists()
 
 
 def test_campaign_scenario_uses_binding_and_rejects_conflicts(tmp_path, monkeypatch):
@@ -295,7 +310,7 @@ def test_campaign_scenario_uses_binding_and_rejects_conflicts(tmp_path, monkeypa
             [*base, "run", "--purpose", "pilot", "--runtime-config", "explicit.yaml"]
         )
     assert error.value.code == 2
-    assert not (tree.repo / "var/campaigns/synthetic/attempts.jsonl").exists()
+    assert not (tree.repo / "var/synthetic_stack/logs/campaign/attempts.jsonl").exists()
 
 
 def test_campaign_rejects_unsupported_binding_before_reserving(tmp_path, capsys):
@@ -317,7 +332,7 @@ def test_campaign_rejects_unsupported_binding_before_reserving(tmp_path, capsys)
     )
     assert code == 2
     assert "unsupported Teacher capability" in capsys.readouterr().err
-    assert not (tree.repo / "var/campaigns").exists()
+    assert not (tree.repo / "var/synthetic_stack").exists()
 
 
 def test_export_campaign_config_selection_and_conflict(tmp_path):

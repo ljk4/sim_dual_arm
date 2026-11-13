@@ -12,7 +12,8 @@ shared/
 │   └── tools/           # 容器环境、SDK 构建、测试、binding 校验与部署检查
 └── scenarios/
     ├── _template/       # 新方案说明与不可直接运行的 binding.example.yaml
-    └── panda_stack/     # 当前实例：MuJoCo 双 Panda 堆叠、ROS 2 运行端、LeRobot ACT
+    ├── panda_stack/     # 实例：MuJoCo 双 Panda 堆叠、ROS 2 运行端、LeRobot ACT
+    └── marvin_handover/ # 实例：Marvin 抓取—空中交接—入箱
 ```
 
 | 层 | 回答的问题 | 不承担 |
@@ -32,11 +33,11 @@ shared/
 - ROS 2 接口：[`common/interfaces/ros/robot_api_msgs/README.md`](common/interfaces/ros/robot_api_msgs/README.md)（`robot_api_msgs` 0.3.0、`FollowerReference.curve_duration_ns`、反馈能力）。
 - Policy 协议：[`common/interfaces/policy/README.md`](common/interfaces/policy/README.md)。
 - 结构与 manifest 版本：[`common/interfaces/schemas/README.md`](common/interfaces/schemas/README.md)。
-- 方案选择记录：`ResolvedReference.record()` 统一生成 `field/declared/path/sha256`，有语义摘要时附 `semantic_sha256`；准备清单的 `selection.recipe` 记录实际配方，`inputs.template` 保留输入路径；worker 清单通过顶层 `selection.profiles` 记录档案，不逐 worker 复制。
-- 历史读取：旧固定数组反馈由专用解码器读取；旧轨迹按已知字段改名验证定义，并核对旧摘要。入口与边界见 [Robot API](common/interfaces/ros/robot_api_msgs/README.md)和[离线处理](../runtime/ros2/ros/dual_arm_runtime/dual_arm_runtime/offline/README.md)。
+- 方案选择记录：`ResolvedReference.record()` 统一生成 `field/declared/path/sha256`，有语义摘要时附 `semantic_sha256`；`--scenario` 启动时后端写出的 `run.json` 记录 `selection`（binding、配方与档案路径及摘要）与 `--set` 覆盖项，runtime 快照记录 `selection`/`overrides`；worker 清单通过顶层 `selection.profiles` 记录档案，不逐 worker 复制。
+- 历史读取：旧轨迹按已知字段改名验证定义，并核对旧摘要。入口与边界见 [Robot API](common/interfaces/ros/robot_api_msgs/README.md)和[离线处理](../runtime/ros2/ros/dual_arm_runtime/dual_arm_runtime/offline/README.md)。
 
 历史产物保留原路径与原语义；兼容读取只覆盖真实存在且需要保留的格式，不通过旧根目录软链接或转发包维持源码入口。
 
-`build/` 和 `var/` 是运行时输出目录，由使用者初始化、由命令创建子目录，均不纳入 Git。初始化步骤见[根 README](../README.md)。Marvin 的目标与当前静态模型检查见[任务文档](../docs/marvin-handover/README.md)。
+`build/` 和 `var/` 是运行时输出目录，由使用者初始化、由命令创建子目录，均不纳入 Git。初始化步骤见[根 README](../README.md)。
 
 目录导航：[上级目录](../README.md) · [实施规则](../RULES.md) · [方案模板](scenarios/_template/README.md)

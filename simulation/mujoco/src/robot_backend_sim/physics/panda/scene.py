@@ -17,7 +17,7 @@ from types import MappingProxyType
 
 import mujoco
 
-from robot_backend_sim.config.scene_config import SceneConfig
+from robot_backend_sim.config.panda_scene_config import SceneConfig
 from robot_backend_sim.physics import assets
 from robot_backend_sim.physics.robot_geometry import ArmChain, RobotGeometry
 from robot_backend_sim.physics.scene_container import (

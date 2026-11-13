@@ -1,5 +1,5 @@
 # Marvin 交接 ACT Policy 服务；首轮关闭时间融合与夹爪修正。
-# 模型身份由 prepare-policy 从真实 bundle 生成，此处不写摘要。
+# 模型身份由 --scenario/--bundle 在启动时从真实 bundle 读取，此处不写摘要。
 schema_version: 1
 
 model:
@@ -9,7 +9,7 @@ model:
   action_schema_path: ../../profiles/actions/marvin_joint_position_v1.json
   device: cuda
   # Diagnostic admission is granted only through the explicit
-  # prepare-policy --no-require-formal entry; the recipe keeps the strict default.
+  # test-only entry; the recipe keeps the strict formal default.
   require_formal: true
   # Measured on this model's own outputs: raw total openings overshoot the
   # 0.0814 m upper bound by at most 0.0032 m on training frames and on the

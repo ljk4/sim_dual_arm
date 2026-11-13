@@ -53,15 +53,16 @@ def campaign_document(repo: Path, recipe_paths: list[Path]) -> dict[str, Any]:
             "min_free_bytes": 0,
         },
         "paths": {
-            "attempts_root": "var/campaigns/synthetic/attempts",
-            "ledger": "var/campaigns/synthetic/attempts.jsonl",
-            "lock": "var/campaigns/synthetic/.ledger.lock",
-            "run_lock": "var/campaigns/synthetic/.run.lock",
+            "attempts_root": "var/synthetic_stack/logs/campaign/attempts",
+            "ledger": "var/synthetic_stack/logs/campaign/attempts.jsonl",
+            "lock": "var/synthetic_stack/logs/campaign/.ledger.lock",
+            "run_lock": "var/synthetic_stack/logs/campaign/.run.lock",
+            "formal_select": "var/synthetic_stack/datasets/formal-select.json",
             "required_paths": [str(path.relative_to(repo)) for path in recipe_paths],
             "sdk_marker": "build/ros-dev/contracts.json",
         },
         "launch": {"command": [], "timeout_s": 10.0},
-        "quality": {"sidecar": "quality.json"},
+        "quality": {"sidecar": "export/quality.json"},
     }
 
 

@@ -1,8 +1,8 @@
 """Small 034-format export fixtures for DSH-035 component tests.
 
 The generated files are explicitly synthetic.  They reproduce the accepted
-export shape (labels, raw chunks, frame index, quality and summary) without
-reading or changing the live campaign.
+flat export shape (labels with camera order and source facts, raw chunks and
+quality) without reading or changing the live campaign.
 """
 
 from __future__ import annotations
@@ -45,10 +45,9 @@ def make_export(
     value: float,
     start_ns: int,
 ) -> dict[str, Any]:
-    export = attempt_dir / "stack" / f"run-{episode_id}" / "export"
+    export = attempt_dir / "export"
     export.mkdir(parents=True)
     rows: list[dict[str, Any]] = []
-    frame_index: dict[str, dict[str, Any]] = {}
     for index in range(frames):
         observation_ns = start_ns + index * LEAD_NS
         rgb: dict[str, dict[str, Any]] = {}
@@ -69,7 +68,6 @@ def make_export(
                 "rgb_sha256": sha256_bytes(array.tobytes()),
             }
             rgb[camera] = entry
-            frame_index.setdefault(str(index), {})[camera] = dict(entry)
         rows.append(
             {
                 "observation_id": index + 1,
@@ -101,6 +99,11 @@ def make_export(
             "episode_id": episode_id,
             "robot_profile_hash": profile_hash(config),
             "seed": seed,
+            "camera_order": list(config.camera_names),
+            "action_source": "teacher",
+            "task": {"outcome": "succeeded", "reason": "TASK_SUCCEEDED"},
+            "runtime": {"outcome": "stopped", "reason": "TASK_SUCCEEDED"},
+            "recording": {"complete": True, "failure_reason": ""},
             "summary": {
                 "labels": frames,
                 "observations": frames,
@@ -129,10 +132,6 @@ def make_export(
         },
     )
     write_json(
-        export / "frame_index.json",
-        {"schema_version": 1, "camera_order": list(config.camera_names), "labels": frame_index},
-    )
-    write_json(
         export / "quality.json",
         {
             "schema_version": 1,
@@ -140,19 +139,6 @@ def make_export(
             "visibility_qualified": True,
             "trajectory_qualified": True,
             "failure_reasons": [],
-        },
-    )
-    write_json(
-        export / "summary.json",
-        {
-            "schema_version": 1,
-            "episode_id": episode_id,
-            "action_source": "teacher",
-            "quality_qualified": True,
-            "task": {"outcome": "succeeded", "reason": "TASK_SUCCEEDED"},
-            "runtime": {"outcome": "stopped", "reason": "TASK_SUCCEEDED"},
-            "recording": {"complete": True, "failure_reason": ""},
-            "raw_predictions": 1,
         },
     )
     return {"attempt_id": episode_id, "seed": seed, "attempt_dir": str(attempt_dir)}

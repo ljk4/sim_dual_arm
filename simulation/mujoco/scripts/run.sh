@@ -6,7 +6,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${PROJECT_SETUP:-$ROOT/../../shared/common/tools/docker/setup.sh}"
 
-REPORT_ROOT="${DATA_ROOT:-/data}/reports/sim-check"
+DATA_ROOT="${DATA_ROOT:-/data}"
 ROS_SDK="${ROS_SDK_ROOT:-/opt/ros-dev}"
 
 has_help=false
@@ -15,6 +15,21 @@ for argument in "$@"; do
     has_help=true
   fi
 done
+
+scenario_segment() {
+  local previous="" argument
+  for argument in "$@"; do
+    if [[ "$previous" == "--scenario" ]]; then
+      printf '%s\n' "$argument"
+      return 0
+    fi
+    case "$argument" in
+      --scenario=*) printf '%s\n' "${argument#*=}"; return 0 ;;
+    esac
+    previous="$argument"
+  done
+  printf '_direct\n'
+}
 
 check_ros_sdk() {
   if [[ "$has_help" == "true" ]]; then
@@ -40,26 +55,24 @@ commands:
   marvin        compile, step, measure and render the Marvin handover scene
   kinematics    check key poses and kinematics clearance
   handover      build and check the Marvin handover candidate paths
-  prepare       write backend.yaml + run_manifest.json from a recipe/seed
   test          run pytest with plugin autoload disabled
 
 Examples:
   scripts/run.sh backend --help
   scripts/run.sh environment --run-id env-001
-  scripts/run.sh prepare --template \
-    /shared/scenarios/panda_stack/configs/simulation/backend/backend_stack_act_chunked.yaml \
-    --seed 42 --run-id prep-001 --output /data/prepared/prep-001
-  scripts/run.sh prepare --scenario panda_stack --role policy \
-    --bundle /data/learning/bundles/<verified-bundle> \
-    --seed 42 --run-id prep-002 --output /data/prepared/prep-002
-  scripts/run.sh backend \
-    --config /data/prepared/prep-001/backend.yaml --run-id backend-001
-  scripts/run.sh viewer \
-    --config /data/prepared/prep-001/backend.yaml
+  scripts/run.sh backend --scenario panda_stack --role policy \
+    --bundle /data/panda_stack/models/bundles/<verified-bundle> \
+    --run-id policy-001 --set run.realtime_speed=0.4
+  scripts/run.sh viewer --scenario panda_stack --role policy
+  scripts/run.sh backend --config /shared/scenarios/panda_stack/configs/simulation/backend/backend_stack_teacher.yaml
+  scripts/run.sh viewer --config /shared/scenarios/panda_stack/configs/simulation/backend/backend_stack_teacher.yaml
 
-`backend` requires an explicit --config and checks the ROS SDK first.
-`prepare --scenario` selects a recipe through the scenario binding; direct
-`--template` mode is unchanged.  Run entries consume prepared configurations.
+`backend` accepts exactly one of --scenario or --config.  A scenario is
+resolved in memory, expanded and written as <run-root>/<run-id>/backend.yaml
+before the simulation starts.  Backend runs default to
+/data/<scenario-id>/logs/backend (`_direct` without a scenario); diagnostic
+reports default to /data/<scenario-id>/diagnostics/<tool>.
+`--set dot.path=value` overrides existing keys.
 EOF
 }
 
@@ -74,66 +87,23 @@ case "$command" in
   backend)
     check_ros_sdk
     exec python3 -m robot_backend_sim.ros.node \
-      --run-root "${DATA_ROOT:-/data}/runs/backend" \
+      --run-root "$DATA_ROOT/$(scenario_segment "$@")/logs/backend" \
       "$@"
     ;;
   viewer)
-    config=""
-    viewer_args=()
-    while [[ $# -gt 0 ]]; do
-      case "$1" in
-        --config)
-          config="${2:-}"
-          shift 2
-          ;;
-        --config=*)
-          config="${1#*=}"
-          shift
-          ;;
-        --state-topic)
-          viewer_args+=(--state-topic "${2:-}")
-          shift 2
-          ;;
-        --state-topic=*)
-          viewer_args+=(--state-topic "${1#*=}")
-          shift
-          ;;
-        --poll-hz)
-          viewer_args+=(--poll-hz "${2:-}")
-          shift 2
-          ;;
-        --poll-hz=*)
-          viewer_args+=(--poll-hz "${1#*=}")
-          shift
-          ;;
-        -h|--help)
-          printf '%s\n' \
-            'usage: scripts/run.sh viewer --config <backend.yaml> [--state-topic <topic>] [--poll-hz <hz>]'
-          exit 0
-          ;;
-        *)
-          printf 'viewer: unknown argument %q\n' "$1" >&2
-          exit 2
-          ;;
-      esac
-    done
-    if [[ -z "$config" ]]; then
-      printf 'viewer: --config <backend.yaml> is required\n' >&2
-      exit 2
-    fi
     exec env MUJOCO_GL=glfw PYOPENGL_PLATFORM=glx \
-      python3 -m robot_backend_sim.render.viewer --config "$config" "${viewer_args[@]}"
+      python3 -m robot_backend_sim.render.viewer "$@"
     ;;
   environment)
     exec python3 -m robot_backend_sim.tools.probe_environment \
-      --report-root "$REPORT_ROOT" \
+      --report-root "$DATA_ROOT/_system/diagnostics/environment" \
       "$@"
     ;;
   scene)
     exec python3 -m robot_backend_sim.tools.check_scene \
       --scene-config "${SHARED_ROOT:-/shared}/scenarios/panda_stack/configs/simulation/scene/panda_stack.yaml" \
       --check-config "${SHARED_ROOT:-/shared}/scenarios/panda_stack/configs/simulation/checks/scene_check.yaml" \
-      --report-root "$REPORT_ROOT" \
+      --report-root "$DATA_ROOT/panda_stack/diagnostics/scene" \
       "$@"
     ;;
   marvin)
@@ -141,7 +111,7 @@ case "$command" in
       --scene-config "${SHARED_ROOT:-/shared}/scenarios/marvin_handover/configs/simulation/scene/marvin_handover.yaml" \
       --profile "${SHARED_ROOT:-/shared}/scenarios/marvin_handover/profiles/robots/marvin_handover_v1/profile.json" \
       --schemas "${SHARED_ROOT:-/shared}/common/interfaces/schemas" \
-      --report-root "$REPORT_ROOT" \
+      --report-root "$DATA_ROOT/marvin_handover/diagnostics/marvin" \
       "$@"
     ;;
   kinematics)
@@ -149,7 +119,7 @@ case "$command" in
       --scene-config "${SHARED_ROOT:-/shared}/scenarios/panda_stack/configs/simulation/scene/panda_stack.yaml" \
       --check-config "${SHARED_ROOT:-/shared}/scenarios/panda_stack/configs/simulation/checks/scene_check.yaml" \
       --kinematics-config "${SHARED_ROOT:-/shared}/scenarios/panda_stack/configs/simulation/checks/kinematics_check.yaml" \
-      --report-root "$REPORT_ROOT" \
+      --report-root "$DATA_ROOT/panda_stack/diagnostics/kinematics" \
       "$@"
     ;;
   handover)
@@ -158,11 +128,8 @@ case "$command" in
       --planning-config "${SHARED_ROOT:-/shared}/scenarios/marvin_handover/configs/simulation/planning/handover_paths.yaml" \
       --profile "${SHARED_ROOT:-/shared}/scenarios/marvin_handover/profiles/robots/marvin_handover_v1/profile.json" \
       --schemas "${SHARED_ROOT:-/shared}/common/interfaces/schemas" \
-      --report-root "${DATA_ROOT:-/data}/reports/handover-paths" \
+      --report-root "$DATA_ROOT/marvin_handover/diagnostics/handover" \
       "$@"
-    ;;
-  prepare)
-    exec python3 "$ROOT/scripts/prepare_backend.py" "$@"
     ;;
   test)
     exec bash "${SHARED_ROOT:-/shared}/common/tools/scripts/test.sh" "$@"

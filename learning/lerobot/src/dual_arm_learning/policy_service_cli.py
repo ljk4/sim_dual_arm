@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import sys
 import time
 import uuid
@@ -22,8 +23,6 @@ from .policy_config import PolicyConfigError, PolicyServiceConfig, load_policy_c
 from .policy_server import serve_forever
 from .policy_types import PolicyError
 from .scenario import LearningScenario, ScenarioSelectionError, select_scenario
-
-DEFAULT_CONFIG = Path("shared/scenarios/panda_stack/configs/learning/policy_temporal.yaml")
 
 
 def _project_root() -> Path:
@@ -88,7 +87,7 @@ def _scalar_fields(value: dict[str, object]) -> dict[str, object]:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    selection = parser.add_mutually_exclusive_group()
+    selection = parser.add_mutually_exclusive_group(required=True)
     selection.add_argument(
         "--config", type=Path, default=None, help="direct ACT policy recipe path"
     )
@@ -96,12 +95,26 @@ def _parser() -> argparse.ArgumentParser:
         "--scenario", help="scenario id under <shared-root>/scenarios/<id>/binding.yaml"
     )
     parser.add_argument("--shared-root", type=Path, help="shared tree containing scenarios/")
-    parser.add_argument("--bundle-dir", type=Path)
+    parser.add_argument(
+        "--bundle",
+        "--bundle-dir",
+        dest="bundle_dir",
+        type=Path,
+        help="verified model bundle; overrides models.bundle in the binding",
+    )
+    parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        metavar="PATH=VALUE",
+        help="override one existing policy/service recipe path (repeatable)",
+    )
     parser.add_argument("--robot-profile", type=Path)
     parser.add_argument("--observation-schema", type=Path)
     parser.add_argument("--action-schema", type=Path)
     parser.add_argument("--device", choices=("cpu", "cuda", "cuda:0"))
-    parser.add_argument("--log-directory", type=Path, default=Path("var/logs/act-policy"))
+    parser.add_argument("--log-directory", type=Path, default=None)
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--snapshot-name", default="resolved_contract.json")
     parser.add_argument("--debug", action="store_true")
@@ -145,8 +158,8 @@ def _snapshot(
             "path": str(config.bundle_dir),
             "bundle_digest": config.model_bundle_digest,
         }
-        if overrides:
-            record["overrides"] = overrides
+    if overrides:
+        record["overrides"] = overrides
     return record
 
 
@@ -206,6 +219,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
     project_root = _project_root()
+    if args.log_directory is None:
+        segment = args.scenario or "_direct"
+        args.log_directory = (
+            Path(os.environ.get("DATA_ROOT", "/data")) / segment / "logs" / "policy-service"
+        )
     if args.scenario is None and args.shared_root is not None:
         parser.error("--shared-root requires --scenario")
     if args.scenario is not None and any(
@@ -219,11 +237,7 @@ def main(argv: list[str] | None = None) -> int:
     config_path = (
         Path(f"scenario:{args.scenario}")
         if args.scenario is not None
-        else (
-            args.config
-            if args.config is not None and args.config.is_absolute()
-            else project_root / (args.config or DEFAULT_CONFIG)
-        )
+        else (args.config if args.config.is_absolute() else project_root / args.config)
     )
     selection: LearningScenario | None = None
     overrides: dict[str, object] = {}
@@ -247,6 +261,7 @@ def main(argv: list[str] | None = None) -> int:
                 observation_schema_path=selection.profile_path("observation"),
                 action_schema_path=selection.profile_path("action"),
                 device=args.device,
+                set_overrides=args.overrides,
             )
             if args.bundle_dir is not None:
                 overrides["bundle_dir"] = {
@@ -255,6 +270,8 @@ def main(argv: list[str] | None = None) -> int:
                 }
             if args.device is not None:
                 overrides["device"] = {"value": args.device, "source": "argument"}
+            if args.overrides:
+                overrides["set"] = {"value": list(args.overrides), "source": "argument"}
         else:
             config = load_policy_config(
                 config_path,
@@ -263,7 +280,10 @@ def main(argv: list[str] | None = None) -> int:
                 observation_schema_path=args.observation_schema,
                 action_schema_path=args.action_schema,
                 device=args.device,
+                set_overrides=args.overrides,
             )
+            if args.overrides:
+                overrides["set"] = {"value": list(args.overrides), "source": "argument"}
         stage = "load_warm"
         adapter = load_act_adapter(config)
         summary = deployment_summary(config)

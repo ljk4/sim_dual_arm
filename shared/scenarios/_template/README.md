@@ -22,8 +22,8 @@
 | `learning.implementation` / `learning.adapter` | `lerobot` / `act` | learning 所有 `--scenario` 入口 |
 
 `hardware` 只是 binding 的结构取值；仓库目前没有已验证的真实驱动。
-simulation 的 `prepare` 只按 binding 取配方，不按实现名分支；能力是否可用由实际
-运行的端点决定。
+simulation 的 `backend` / `viewer` 只按 binding 取配方，不按实现名分支；能力是否可用由
+实际运行的端点决定。
 
 ## 目录
 
@@ -63,18 +63,18 @@ shared/scenarios/<scenario-id>/
   所属端新增第二个配方文件，并在 binding 的不同角色字段中分别引用。可用字段只有
   [示例 binding](binding.example.yaml) 中列出的那些，`extends`、`defaults` 等继承
   字段会被拒绝。
-- 被选中的配方必须引用 binding 声明的同一个 robot profile。simulation 的 `prepare`
-  检查 `robot.profile`，runtime 采集选择检查 runtime/simulation 两侧，learning
-  检查训练/服务配方与 bundle 的一致性；不一致时准备失败。
-- `models.bundle: null` 表示采集与学习不绑定模型；推理准备必须显式给
-  `--bundle <verified-bundle-dir>`（或填写 `models.bundle`）。bundle 内容由 learning
-  验证，真实 `policy_binding.json` 也由 learning 生成；binding 只检查目录存在和类型，
-  不生成替代摘要。
+- 被选中的配方必须引用 binding 声明的同一个 robot profile。simulation 的
+  `backend`/`viewer` 启动时检查 `robot.profile`，runtime 采集选择检查 runtime/simulation
+  两侧，learning 检查训练/服务配方与 bundle 的一致性；不一致时启动失败。
+- `models.bundle: null` 表示采集与学习不绑定模型；推理必须显式给
+  `--bundle <verified-bundle-dir>`（或填写 `models.bundle`）。运行端与学习端直接读取
+  bundle 内的 manifest 与 Profile 校验身份，不生成也不消费 `policy_binding.json`；
+  binding 只检查目录存在和类型，不生成替代摘要。
 - 更换 checkpoint：输入输出契约不变时，只把 `models.bundle` 或 `--bundle` 指向新的
   已验证 bundle，方案、档案和配方都不必改。契约改变则属于新实现，需要新的
   learning 适配和档案，不是替换一个路径就能完成。
 
-## 校验与准备
+## 校验与运行
 
 只读校验不需要启动仿真；`inference` 阶段需要真实 bundle：
 
@@ -86,38 +86,41 @@ python3 shared/common/tools/scenario.py validate \
   --binding shared/scenarios/<scenario-id>/binding.yaml --stage collection
 python3 shared/common/tools/scenario.py validate \
   --binding shared/scenarios/<scenario-id>/binding.yaml --stage inference \
-  --bundle /data/learning/bundles/<verified-bundle>
+  --bundle /data/<scenario-id>/models/bundles/<verified-bundle>
 ```
 
-准备入口都消费同一份 binding；`--scenario` 与直接配置的 `--template`/`--config`
-互斥，`--role`、`--shared-root` 只在方案模式下使用：
+所有入口都消费同一份 binding，并在内存中展开配方；`--scenario` 与直接配置的
+`--config` 互斥，`--role`、`--shared-root`、`--bundle` 只在方案模式下使用，
+`--set dot.path=value` 可重复覆盖配方中已存在的键：
 
 ```bash
 # simulation 容器（工作目录 /app）
-scripts/run.sh prepare --scenario <scenario-id> --role teacher \
-  --seed 0 --run-id prep-teacher --output /data/prepared/prep-teacher
-scripts/run.sh prepare --scenario <scenario-id> --role policy \
-  --bundle /data/learning/bundles/<verified-bundle> \
-  --seed 0 --run-id prep-policy --output /data/prepared/prep-policy
+scripts/run.sh backend --scenario <scenario-id> --role teacher \
+  --seed 0 --run-id teacher-backend
+scripts/run.sh viewer --scenario <scenario-id> --role teacher
+scripts/run.sh backend --scenario <scenario-id> --role policy \
+  --bundle /data/<scenario-id>/models/bundles/<verified-bundle> \
+  --seed 0 --run-id policy-backend
 
 # runtime 容器（工作目录 /workspace）
 runtime/ros2/scripts/run.sh build-ros-sdk --scenario <scenario-id> --shared-root /shared
-runtime/ros2/scripts/run.sh prepare --scenario <scenario-id> --role teacher \
-  --seed 0 --run-id teacher-run --output /data/prepared/teacher-run
-runtime/ros2/scripts/run.sh prepare --scenario <scenario-id> --role policy \
-  --policy-binding /data/prepared/<policy-run>/policy/policy_binding.json \
-  --bundle /data/learning/bundles/<verified-bundle> \
-  --seed 0 --run-id policy-run --output /data/prepared/policy-run
+runtime/ros2/scripts/record.sh --scenario <scenario-id> \
+  --purpose pilot --count 1 --max-consecutive-failures 1
+runtime/ros2/scripts/run.sh interactive --scenario <scenario-id> \
+  --bundle /data/<scenario-id>/models/bundles/<verified-bundle> --seed 0 --run-id policy-interactive
+runtime/ros2/scripts/run.sh policy --scenario <scenario-id> \
+  --bundle /data/<scenario-id>/models/bundles/<verified-bundle> \
+  --reset-seed 0 --run-id policy-run
 
 # learning 容器（工作目录 /workspace）
-learning/lerobot/scripts/run.sh prepare-policy --scenario <scenario-id> \
-  --bundle /data/learning/bundles/<verified-bundle> \
-  --run-id <run-id> --output /data/prepared/<run-id>/policy
+learning/lerobot/scripts/run.sh policy --scenario <scenario-id> \
+  --bundle /data/<scenario-id>/models/bundles/<verified-bundle>
 learning/lerobot/scripts/run.sh train --scenario <scenario-id> --mode smoke
 ```
 
-运行入口只消费准备产物（例如 `scripts/run.sh backend --config ...`、`run.sh policy
---config ...`），不绕过准备与身份校验。直接配置模式继续可用，且与方案选择互斥。
+运行入口直接按 binding 解析配方并展开路径，不写 `/data/prepared/` 等中间目录；
+采集产物按 `var/<scenario-id>/logs/campaign/attempts/<purpose>-<seed>-<run_id>/` 拍平保存；所有运行期产物只进入 `var/<scenario-id>/{datasets,models,logs,diagnostics}/`。
+直接配置模式继续可用，且与方案选择互斥。
 
 ## 更换内容时改哪里
 

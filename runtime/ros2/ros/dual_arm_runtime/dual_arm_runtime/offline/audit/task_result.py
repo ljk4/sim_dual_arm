@@ -76,15 +76,7 @@ def task_fact_document(
             "plan_digest": str(getattr(fact, "plan_digest", "")),
             "conditions_passed": bool(metrics.get("conditions_passed", False)),
             "conditions_bitmask": int(metrics.get("conditions_bitmask", 0)),
-            "source_target_normal_force_n": float(
-                metrics.get("source_target_normal_force_n", 0.0)
-            ),
-            "target_table_normal_force_n": float(
-                metrics.get("target_table_normal_force_n", 0.0)
-            ),
             "finger_contact_count": int(metrics.get("finger_contact_count", 0)),
-            "right_gripper_opening_m": float(metrics.get("right_gripper_opening_m", 0.0)),
-            "right_tcp_distance_m": float(metrics.get("right_tcp_distance_m", 0.0)),
             "metrics": metrics,
         },
     }

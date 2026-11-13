@@ -12,11 +12,11 @@ task_text: >-
   Pick up the block with the left arm, hand it to the right arm, and place it
   into the box.
 profile: shared/scenarios/marvin_handover/profiles/robots/marvin_handover_v1/profile.json
-select: var/campaigns/marvin_handover_v1/SELECTED.json
-output_root: var/learning/marvin_handover_diag/dataset
-cache_root: var/learning/cache
-# The campaign writes each accepted export at <attempt>/stack/<run>/export.
-attempt_export_glob: "stack/*/export"
+select: var/marvin_handover/datasets/formal-select.json
+output_root: var/marvin_handover/datasets/dataset
+cache_root: var/marvin_handover/datasets/.cache
+# The campaign writes each accepted export directly at <attempt>/export.
+attempt_export_glob: "export"
 verify_png_pixels: true
 require_quality: true
 diagnostic: true

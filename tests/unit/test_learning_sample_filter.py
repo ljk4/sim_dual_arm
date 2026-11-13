@@ -64,8 +64,8 @@ def _spec(
 def _events(
     attempt_dir: Path, attempt_id: str, sequences: list[int], phase_gate: dict[int, tuple[str, str]]
 ) -> None:
-    runtime = attempt_dir / "stack" / f"run-{attempt_id}" / "runs" / attempt_id
-    path = runtime / "logs" / "runtime" / "instance" / "events.000001.jsonl"
+    runtime = attempt_dir / "logs" / f"run-{attempt_id}" / "logs" / "runtime" / "instance"
+    path = runtime / "events.000001.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = []
     for chunk_seq in sorted(set(sequences)):
@@ -150,7 +150,7 @@ def _write_split(
                 }
             )
         attempt_dir = root / "attempts" / attempt_id
-        export = attempt_dir / "stack" / f"run-{attempt_id}" / "export"
+        export = attempt_dir / "export"
         _write_json(
             export / "labels.json",
             {

@@ -1,7 +1,9 @@
 import json
 from pathlib import Path
 
+import pytest
 import yaml
+from collection_fixtures import SCENARIO_ID, build_collection_tree
 
 ROOT = Path(__file__).resolve().parents[2]
 from dual_arm_runtime.offline import campaign, evaluate  # noqa: E402
@@ -42,6 +44,7 @@ def campaign_config(tmp_path: Path) -> tuple[Path, Path]:
             "ledger": "var/attempts.jsonl",
             "lock": "var/.ledger.lock",
             "run_lock": "var/.run.lock",
+            "formal_select": "var/datasets/formal-select.json",
         },
         "quality": {"sidecar": "quality.json"},
         "launch": {"command": [], "timeout_s": 10.0},
@@ -57,7 +60,7 @@ def campaign_config(tmp_path: Path) -> tuple[Path, Path]:
 
 def make_attempt(root: Path) -> Path:
     attempt = root / "var/attempts/evaluation-20000-run"
-    export = attempt / "stack/run/export"
+    export = attempt / "export"
     _write(
         export / "labels.json",
         {
@@ -88,7 +91,7 @@ def make_attempt(root: Path) -> Path:
         },
     )
     _write(
-        attempt / "manifest.json",
+        attempt / "raw" / "manifest.json",
         {
             "started_at_ns": 1_000_000_000,
             "ended_at_ns": 3_000_000_000,
@@ -113,7 +116,7 @@ def make_attempt(root: Path) -> Path:
         },
     )
     _write(
-        attempt / "task_result.json",
+        attempt / "raw" / "task_result.json",
         {
             "schema_version": 1,
             "evaluated": True,
@@ -133,33 +136,8 @@ def make_attempt(root: Path) -> Path:
             },
         },
     )
-    _write(attempt / "quality.json", {"qualified": True, "failure_reasons": []})
-    _write(
-        attempt / "launch_result.json",
-        {
-            "export_directory": str(export),
-            "policy_mode": "act",
-            "launcher_exit_code": 0,
-            "exit_code": 0,
-            "act": {
-                "bundle_digest": "a" * 64,
-                "processor_digest": "b" * 64,
-                "profile_semantic_sha256": "c" * 64,
-                "observation_schema_hash": "f" * 64,
-                "action_schema_hash": "1" * 64,
-                "model_sha256": "2" * 64,
-                "synthetic": False,
-                "checkpoint_mode": "full",
-                "checkpoint_step": 5000,
-            },
-            "act_metrics": {
-                "predictions": 2,
-                "latency_ms": {"p50": 100.0, "p95": 180.0, "max": 180.0},
-                "vram_peak_mib": 512.0,
-            },
-        },
-    )
-    events = attempt / "stack/run/act-policy-log/events.000001.jsonl"
+    _write(export / "quality.json", {"qualified": True, "failure_reasons": []})
+    events = attempt / "act-policy-log/events.000001.jsonl"
     events.parent.mkdir(parents=True)
     events.write_text(
         "\n".join(
@@ -336,15 +314,10 @@ def _reserve(root: Path, attempt: Path) -> None:
 def test_fake_policy_labels_without_act_evidence_never_count(tmp_path):
     root, config_path = campaign_config(tmp_path)
     attempt = make_attempt(root)
-    launch = json.loads((attempt / "launch_result.json").read_text())
-    launch.pop("act", None)
-    launch.pop("act_metrics", None)
-    launch["policy_mode"] = "fake"
-    (attempt / "launch_result.json").write_text(json.dumps(launch) + "\n", encoding="utf-8")
-    for path in (attempt / "stack").glob("*/act-policy-log"):
-        for child in path.iterdir():
-            child.unlink()
-        path.rmdir()
+    path = attempt / "act-policy-log"
+    for child in path.iterdir():
+        child.unlink()
+    path.rmdir()
     _reserve(root, attempt)
     report = _report(root, config_path, "fake-report")
     row = report["attempts"][0]
@@ -359,7 +332,7 @@ def test_fake_policy_labels_without_act_evidence_never_count(tmp_path):
 def test_quality_failure_is_separate_from_physical_task_success(tmp_path):
     root, config_path = campaign_config(tmp_path)
     attempt = make_attempt(root)
-    (attempt / "quality.json").write_text(
+    (attempt / "export" / "quality.json").write_text(
         json.dumps({"qualified": False, "failure_reasons": ["visibility"]}) + "\n",
         encoding="utf-8",
     )
@@ -378,7 +351,7 @@ def test_quality_failure_is_separate_from_physical_task_success(tmp_path):
 def test_outcome_string_without_physical_task_facts_is_not_success(tmp_path):
     root, config_path = campaign_config(tmp_path)
     attempt = make_attempt(root)
-    (attempt / "task_result.json").write_text(
+    (attempt / "raw" / "task_result.json").write_text(
         json.dumps({"result": {"outcome": "succeeded", "reason": "TASK_SUCCEEDED"}}) + "\n",
         encoding="utf-8",
     )
@@ -396,7 +369,7 @@ def test_outcome_string_without_physical_task_facts_is_not_success(tmp_path):
 def test_time_resolution_separates_started_and_20hz_exported_label(tmp_path):
     root, config_path = campaign_config(tmp_path)
     attempt = make_attempt(root)
-    export = Path(json.loads((attempt / "launch_result.json").read_text())["export_directory"])
+    export = attempt / "export"
     (export / "raw_predictions.json").unlink()
     _reserve(root, attempt)
     report = _report(root, config_path, "time-report")
@@ -436,16 +409,11 @@ def test_replay_record_with_act_like_files_is_never_act_execution(tmp_path):
 def test_later_control_failure_does_not_erase_real_act_execution(tmp_path):
     root, config_path = campaign_config(tmp_path)
     attempt = make_attempt(root)
-    path = attempt / "launch_result.json"
-    launch = json.loads(path.read_text())
-    launch["exit_code"] = 1
-    launch["launcher_exit_code"] = 1
-    _write(path, launch)
-    path = attempt / "manifest.json"
+    path = attempt / "raw" / "manifest.json"
     manifest = json.loads(path.read_text())
     manifest["runtime"] = {"outcome": "failed", "reason": "FOLLOWER_DEVIATION_EXCEEDED"}
     _write(path, manifest)
-    path = attempt / "task_result.json"
+    path = attempt / "raw" / "task_result.json"
     task = json.loads(path.read_text())
     task["result"] = {"outcome": "failed", "reason": "CONTROL_FAILED"}
     _write(path, task)
@@ -458,7 +426,7 @@ def test_later_control_failure_does_not_erase_real_act_execution(tmp_path):
 
 
 def _write_backend_events(attempt: Path, *events: dict) -> Path:
-    path = attempt / "stack/run/run/log/events.000001.jsonl"
+    path = attempt / "logs/run/logs/runtime/instance/events.000001.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         "\n".join(json.dumps(event) for event in events) + "\n", encoding="utf-8"
@@ -467,11 +435,11 @@ def _write_backend_events(attempt: Path, *events: dict) -> Path:
 
 
 def _make_control_failure(attempt: Path) -> None:
-    path = attempt / "manifest.json"
+    path = attempt / "raw" / "manifest.json"
     manifest = json.loads(path.read_text())
     manifest["runtime"] = {"outcome": "failed", "reason": "FOLLOWER_DEVIATION_EXCEEDED"}
     _write(path, manifest)
-    path = attempt / "task_result.json"
+    path = attempt / "raw" / "task_result.json"
     task = json.loads(path.read_text())
     task["result"] = {"outcome": "failed", "reason": "CONTROL_FAILED"}
     _write(path, task)
@@ -550,7 +518,7 @@ def test_missing_or_corrupt_backend_log_keeps_report_semantics(tmp_path):
     assert missing["success"] is False
     assert missing["failure_type"] == "TASK_FAILED"
 
-    path = attempt / "stack/run/run/log/events.000001.jsonl"
+    path = attempt / "logs/run/logs/runtime/instance/events.000001.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text('not json\n{"event": "backend.submit_follower.rejected"\n', encoding="utf-8")
     corrupt = _report(root, config_path, "corrupt-backend-report")["attempts"][0]
@@ -562,16 +530,13 @@ def test_missing_or_corrupt_backend_log_keeps_report_semantics(tmp_path):
     assert corrupt["failure_type"] == "TASK_FAILED"
 
 
-def test_runtime_timing_failure_is_not_hidden_by_launcher_exit(tmp_path):
+def test_runtime_timing_failure_is_reported(tmp_path):
     root, config_path = campaign_config(tmp_path)
     attempt = make_attempt(root)
     _make_control_failure(attempt)
-    manifest = json.loads((attempt / "manifest.json").read_text())
+    manifest = json.loads((attempt / "raw" / "manifest.json").read_text())
     manifest["runtime"]["reason"] = "CHUNK_LATE: follower submit rejected"
-    _write(attempt / "manifest.json", manifest)
-    launch = json.loads((attempt / "launch_result.json").read_text())
-    launch["launcher_exit_code"] = launch["exit_code"] = 1
-    _write(attempt / "launch_result.json", launch)
+    _write(attempt / "raw" / "manifest.json", manifest)
     _reserve(root, attempt)
     row = _report(root, config_path, "late-report")["attempts"][0]
     assert row["failure_detail"] == "CHUNK_LATE: follower submit rejected"
@@ -589,10 +554,48 @@ def test_recorded_task_failure_is_complete_evidence(tmp_path):
     assert row["success"] is False
     assert "TASK_EVIDENCE_MISSING:outcome" not in row["issues"]
 
-    path = attempt / "task_result.json"
+    path = attempt / "raw" / "task_result.json"
     task = json.loads(path.read_text())
     del task["result"]["outcome"]
     _write(path, task)
     missing = _report(root, config_path, "missing-task-outcome-report")["attempts"][0]
     assert missing["success"] is False
     assert "TASK_EVIDENCE_MISSING:outcome" in missing["issues"]
+
+
+def test_evaluate_arguments_require_exactly_one_config_source():
+    with pytest.raises(SystemExit):
+        evaluate.parse_arguments([])
+    with pytest.raises(SystemExit):
+        evaluate.parse_arguments(["--config", "a.yaml", "--scenario", "panda_stack"])
+    with pytest.raises(SystemExit):
+        evaluate.parse_arguments(["--shared-root", "/shared", "--config", "a.yaml"])
+
+
+def test_evaluate_defaults_to_generic_output_directory():
+    args = evaluate.parse_arguments(["--config", "campaign.yaml"])
+    assert args.output == Path("var/_direct/diagnostics/evaluation")
+
+
+def test_evaluate_scenario_resolves_the_campaign_recipe(tmp_path, monkeypatch):
+    tree = build_collection_tree(tmp_path)
+    seen = {}
+
+    def fake_build_report(**kwargs):
+        seen.update(kwargs)
+        return {"summary": {}}
+
+    monkeypatch.setattr(evaluate, "build_report", fake_build_report)
+    code = evaluate.main(
+        [
+            "--project-root", str(tree.repo),
+            "--scenario", SCENARIO_ID,
+            "--shared-root", str(tree.shared),
+            "--no-media",
+        ]
+    )
+    assert code == 0
+    assert seen["config_path"] == tree.campaign_recipe.resolve()
+    assert seen["output"] == (
+        tree.repo / "var" / SCENARIO_ID / "diagnostics/evaluation"
+    ).resolve()

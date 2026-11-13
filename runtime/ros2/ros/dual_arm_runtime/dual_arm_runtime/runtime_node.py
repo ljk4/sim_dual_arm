@@ -79,6 +79,7 @@ class RuntimeNode(Node):
         log: EventSink | None = None,
         run_id: str = "",
         initial_episode_id: str | None = None,
+        episode_output: Path | None = None,
     ) -> None:
         super().__init__("episode_runtime")
         self.config = configuration
@@ -90,7 +91,9 @@ class RuntimeNode(Node):
         self._group = ReentrantCallbackGroup()
         self._condition = threading.Condition()
         self._init_stream_state(configuration)
-        self._init_episode(configuration, output, log, run_id, initial_episode_id)
+        self._init_episode(
+            configuration, output, log, run_id, initial_episode_id, episode_output
+        )
         self._callbacks = RuntimeCallbacks(self)
         self._setup_ros(auto_start)
 
@@ -134,6 +137,7 @@ class RuntimeNode(Node):
         log: EventSink | None,
         run_id: str,
         initial_episode_id: str | None,
+        episode_output: Path | None = None,
     ) -> None:
         self._episode = EpisodeRunner(
             configuration,
@@ -152,6 +156,7 @@ class RuntimeNode(Node):
             log=log,
             run_id=run_id,
             initial_episode_id=initial_episode_id,
+            episode_output=episode_output,
         )
         self._control = self._episode.control
         self._task_client = (

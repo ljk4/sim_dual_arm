@@ -2,14 +2,13 @@
 
 Conversion and training are exercised through test doubles that receive the
 real configuration object; the full data pipeline is deliberately not rerun.
-prepare-policy/policy use a real, verifiable synthetic ACT bundle.
+prepare-policy was removed; policy loading uses a real, verifiable synthetic
+ACT bundle instead.
 """
 
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
 
 import pytest
 import yaml
@@ -20,9 +19,6 @@ from learning_scenario_fixtures import (
 )
 from learning_scenario_fixtures import (
     Audit as _Audit,
-)
-from learning_scenario_fixtures import (
-    Tree as _Tree,
 )
 from learning_scenario_fixtures import (
     convert_args as _convert_args,
@@ -46,9 +42,6 @@ from learning_scenario_fixtures import (
     sha as _sha,
 )
 
-sys.path.insert(0, str(ROOT / "learning/lerobot/scripts"))
-import prepare_policy  # noqa: E402
-
 
 def test_convert_uses_selected_dataset_recipe(tmp_path, monkeypatch):
     tree = _make_tree(tmp_path)
@@ -70,8 +63,7 @@ def test_convert_uses_selected_dataset_recipe(tmp_path, monkeypatch):
     assert captured["overrides"]["synthetic"]["value"] is True
 
 
-def test_convert_default_and_explicit_config_are_distinguished(tmp_path, monkeypatch):
-    tree = _make_tree(tmp_path)
+def test_convert_requires_explicit_config_or_scenario(tmp_path, monkeypatch):
     captured: dict = {}
     monkeypatch.setattr(cli, "convert", _fake_convert(captured))
     assert cli.main(
@@ -84,12 +76,10 @@ def test_convert_default_and_explicit_config_are_distinguished(tmp_path, monkeyp
             "--output-root",
             str(tmp_path / "out"),
         ]
-    ) == 0
-    assert captured["config_path"] == (
-        ROOT / "shared/scenarios/panda_stack/configs/learning/act_dataset.yaml"
-    ).resolve()
-    assert captured["selection"] is None
+    ) == 2
+    assert captured == {}
 
+    tree = _make_tree(tmp_path)
     custom = tmp_path / "custom-dataset.yaml"
     document = yaml.safe_load(tree.dataset_recipe.read_text())
     document["task_text"] = "explicit custom task"
@@ -238,7 +228,7 @@ def test_scenario_conflicts_and_missing_arguments_are_explicit(tmp_path, monkeyp
         )
     ) == 2
     assert captured == {}
-    # --shared-root without --scenario
+    # --shared-root without --scenario: the required selection group rejects it
     assert cli.main(
         [
             "--project-root",
@@ -247,7 +237,7 @@ def test_scenario_conflicts_and_missing_arguments_are_explicit(tmp_path, monkeyp
             "--shared-root",
             str(tree.shared),
         ]
-    ) == 1
+    ) == 2
     assert captured == {}
     # unknown scenario
     assert cli.main(
@@ -292,7 +282,7 @@ def test_help_and_parse_do_not_load_scenario(tmp_path):
     assert error.value.code == 0
 
 
-def test_run_sh_does_not_inject_panda_defaults_for_scenario(tmp_path):
+def test_run_sh_forwards_selection_without_implicit_defaults(tmp_path):
     scenario = [
         "convert",
         "--scenario",
@@ -311,9 +301,7 @@ def test_run_sh_does_not_inject_panda_defaults_for_scenario(tmp_path):
     assert "/custom/dataset.yaml" in arguments
 
     arguments = _run_dispatcher(tmp_path, "convert")
-    assert "--config" in arguments
-    index = arguments.index("--config")
-    assert arguments[index + 1].endswith("act_dataset.yaml")
+    assert "--config" not in arguments
 
     arguments = _run_dispatcher(
         tmp_path,
@@ -327,21 +315,14 @@ def test_run_sh_does_not_inject_panda_defaults_for_scenario(tmp_path):
     assert "--config" not in arguments
 
 
-@pytest.mark.parametrize(
-    "command",
-    ["prepare-policy", "policy"],
-)
-def test_learning_help_does_not_require_a_container(command, tmp_path, monkeypatch):
-    if command == "prepare-policy":
-        monkeypatch.setattr(prepare_policy, "_require_container", lambda: None)
-    module = prepare_policy if command == "prepare-policy" else policy_service_cli
+def test_learning_help_does_not_require_a_container():
     with pytest.raises(SystemExit) as error:
-        module.main(["--help"])
+        policy_service_cli.main(["--help"])
     assert error.value.code == 0
 
 
 # --------------------------------------------------------------------------
-# prepare-policy / policy: real bundle verification with a scenario recipe
+# policy service: scenario recipe plus a real verified bundle
 # --------------------------------------------------------------------------
 
 
@@ -351,136 +332,6 @@ def torch_fixtures(tmp_path):
     from act_fixtures import make_act_bundle
 
     return make_act_bundle
-
-
-def _prepare(tree: _Tree, tmp_path: Path, **kwargs):
-    return prepare_policy.prepare_policy(
-        scenario="synthetic_stack",
-        shared_root=tree.shared,
-        run_id=kwargs.pop("run_id", "scenario-run"),
-        output=kwargs.pop("output", tmp_path / "prepared"),
-        require_formal=False,
-        project_root=ROOT,
-        **kwargs,
-    )
-
-
-def test_prepare_policy_scenario_requires_effective_model(tmp_path, torch_fixtures):
-    tree = _make_tree(tmp_path)
-    tree.scenario.document["models"]["bundle"] = None
-    tree.scenario.write()
-    with pytest.raises(prepare_policy.PrepareError, match="models.bundle"):
-        _prepare(tree, tmp_path)
-    assert not (tmp_path / "prepared").exists()
-
-
-def test_prepare_policy_scenario_rejects_empty_bundle_directory(tmp_path, torch_fixtures):
-    tree = _make_tree(tmp_path)
-    tree.scenario.document["models"]["bundle"] = "bundles/act"  # placeholder dir
-    tree.scenario.write()
-    with pytest.raises((prepare_policy.PolicyConfigError, prepare_policy.PrepareError)):
-        _prepare(tree, tmp_path)
-    assert not (tmp_path / "prepared").exists()
-
-
-def test_prepare_policy_scenario_uses_recipe_profiles_and_bundle_override(
-    tmp_path, torch_fixtures
-):
-    tree = _make_tree(tmp_path)
-    bundle = torch_fixtures(tree.scenario.root / "bundles/override")
-    output = tmp_path / "prepared"
-    manifest = _prepare(tree, tmp_path, bundle=bundle, output=output)
-
-    policy = yaml.safe_load((output / "policy.yaml").read_text())
-    binding = json.loads((output / "policy_binding.json").read_text())
-    assert policy["service"]["task_text"] == "scenario service task"
-    assert Path(policy["model"]["bundle_dir"]) == bundle.resolve()
-    assert Path(policy["model"]["robot_profile_path"]) == (
-        tree.scenario.root / "profiles/robot.json"
-    ).resolve()
-    assert binding["model"]["bundle"] == str(bundle.resolve())
-    assert binding["model"]["bundle_digest"] == json.loads(
-        (bundle / "manifest.json").read_text()
-    )["bundle_digest"]
-    assert binding["profile"]["sha256"] == _sha(
-        tree.scenario.root / "profiles/robot.json"
-    )
-    assert binding["observation_schema"]["sha256"] == _sha(
-        tree.scenario.root / "profiles/observation.json"
-    )
-    assert binding["action_schema"]["sha256"] == _sha(
-        tree.scenario.root / "profiles/action.json"
-    )
-    assert manifest["selection"]["mode"] == "scenario"
-    assert manifest["selection"]["recipe"]["path"] == str(
-        tree.service_recipe.resolve()
-    )
-    assert manifest["selection"]["bundle"]["source"] == "override"
-    assert manifest["selection"]["bundle"]["effective"] == str(bundle.resolve())
-    assert manifest["inputs"]["template"] == str(tree.service_recipe.resolve())
-    assert manifest["model_source"]["source"] == "override"
-    assert manifest["model_source"]["path"] == str(bundle.resolve())
-    assert manifest["overrides"]["bundle"]["path"] == str(bundle.resolve())
-
-
-def test_prepare_policy_scenario_binding_bundle_source(tmp_path, torch_fixtures):
-    tree = _make_tree(tmp_path)
-    bundle = torch_fixtures(tree.scenario.root / "bundles/verified")
-    tree.scenario.document["models"]["bundle"] = "bundles/verified"
-    tree.scenario.write()
-    manifest = _prepare(tree, tmp_path)
-    assert manifest["selection"]["bundle"]["source"] == "binding"
-    assert manifest["selection"]["bundle"]["effective"] == str(bundle.resolve())
-    assert manifest["model_source"]["source"] == "binding"
-    assert not (tmp_path / "prepared" / "missing").exists()
-
-
-def test_prepare_policy_scenario_rejects_profile_identity_mismatch(
-    tmp_path, torch_fixtures
-):
-    tree = _make_tree(tmp_path)
-    bundle = torch_fixtures(tree.scenario.root / "bundles/verified")
-    tree.scenario.document["models"]["bundle"] = "bundles/verified"
-    tree.scenario.write()
-    profile = tree.scenario.root / "profiles/robot.json"
-    document = json.loads(profile.read_text())
-    document["robot_id"] = "different_robot"
-    profile.write_text(json.dumps(document) + "\n")
-    with pytest.raises(
-        prepare_policy.PolicyConfigError, match="shipped profile differs"
-    ):
-        _prepare(tree, tmp_path, bundle=bundle)
-    assert not (tmp_path / "prepared").exists()
-
-
-def test_prepare_policy_scenario_rejects_unsupported_implementation(tmp_path):
-    tree = _make_tree(tmp_path)
-    tree.scenario.document["learning"]["implementation"] = "pytorch"
-    tree.scenario.write()
-    with pytest.raises(
-        prepare_policy.PrepareError, match="unsupported learning.implementation"
-    ):
-        _prepare(tree, tmp_path)
-    assert not (tmp_path / "prepared").exists()
-
-
-def test_prepare_policy_scenario_conflicts_with_direct_profile_inputs(
-    tmp_path, torch_fixtures
-):
-    tree = _make_tree(tmp_path)
-    bundle = torch_fixtures(tree.scenario.root / "bundles/override")
-    with pytest.raises(prepare_policy.PrepareError, match="cannot be combined"):
-        _prepare(tree, tmp_path, bundle=bundle, profile=tree.scenario.root / "profiles/robot.json")
-    with pytest.raises(prepare_policy.PrepareError, match="mutually exclusive"):
-        prepare_policy.prepare_policy(
-            template=tree.service_recipe,
-            scenario="synthetic_stack",
-            bundle=bundle,
-            run_id="conflict",
-            output=tmp_path / "conflict",
-            project_root=tree.repo,
-        )
-    assert not (tmp_path / "conflict").exists()
 
 
 def test_policy_service_scenario_uses_recipe_and_effective_bundle(
@@ -577,3 +428,56 @@ def test_policy_service_scenario_rejects_direct_profile_inputs(tmp_path):
             ]
         )
     assert error.value.code == 2
+
+
+def test_train_applies_set_overrides_and_records_them(tmp_path, monkeypatch):
+    tree = _make_tree(tmp_path)
+    captured: dict = {}
+    monkeypatch.setattr(cli, "train", _fake_train(captured))
+    assert cli.main(
+        _scenario_args(
+            tree, "train", "--mode", "smoke", "--set", "budget.limit_seconds=123"
+        )
+    ) == 0
+    assert captured["config"].budget.limit_seconds == 123.0
+    assert captured["kwargs"]["overrides"]["set"]["value"] == ["budget.limit_seconds=123"]
+
+
+def test_policy_service_scenario_applies_set_overrides(tmp_path, torch_fixtures, monkeypatch):
+    tree = _make_tree(tmp_path)
+    torch_fixtures(tree.scenario.root / "bundles/verified", synthetic=False)
+    tree.scenario.document["models"]["bundle"] = "bundles/verified"
+    tree.scenario.write()
+    captured: dict = {}
+
+    class Adapter:
+        def summary(self):
+            return {}
+
+    monkeypatch.setattr(policy_service_cli, "load_act_adapter", lambda config: Adapter())
+
+    def fake_serve(config, adapter, **kwargs):
+        captured["config"] = config
+        captured["snapshot"] = kwargs["snapshot"]
+        return 0
+
+    monkeypatch.setattr(policy_service_cli, "serve_forever", fake_serve)
+    code = policy_service_cli.main(
+        [
+            "--scenario",
+            "synthetic_stack",
+            "--shared-root",
+            str(tree.shared),
+            "--set",
+            "service.task_text=overridden task",
+            "--log-directory",
+            str(tmp_path / "logs"),
+            "--run-id",
+            "scenario-set",
+        ]
+    )
+    assert code == 0
+    assert captured["config"].task_text == "overridden task"
+    assert captured["snapshot"]["overrides"]["set"]["value"] == [
+        "service.task_text=overridden task"
+    ]

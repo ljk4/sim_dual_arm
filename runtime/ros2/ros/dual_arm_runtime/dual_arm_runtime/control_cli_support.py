@@ -34,7 +34,7 @@ from robot_ros_support.qos import INFO_QOS
 STATUS_TOPIC = "/runtime/status"
 START_SERVICE = "/runtime/episode/start"
 END_SERVICE = "/runtime/episode/end"
-RAW_ROOT = Path("/data/raw")
+RAW_ROOT = Path("/data/_direct/logs/recordings")
 RUN_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 EPISODE_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 TERMINAL_PHASES = frozenset({"IDLE", "FAULT"})

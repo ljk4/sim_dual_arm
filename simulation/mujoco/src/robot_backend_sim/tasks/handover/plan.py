@@ -17,12 +17,13 @@ from typing import Any
 import numpy as np
 
 from robot_backend_sim.config.marvin_scene_config import MarvinSceneConfig
+from robot_backend_sim.kinematics.common import sample_joint_path
 from robot_backend_sim.kinematics.dual_arm import (
     BlockEnvelope,
     CarriedBlock,
     ClearanceParameters,
-    IKSolution,
     IKParameters,
+    IKSolution,
     KeyTarget,
     check_joint_path,
     object_pair_set,
@@ -31,8 +32,7 @@ from robot_backend_sim.kinematics.dual_arm import (
     solve_targets,
     tcp_matrix,
 )
-from robot_backend_sim.kinematics.kinematics import KinematicsError, sample_joint_path
-from robot_backend_sim.kinematics.kinematics_clearance import ClearancePoint
+from robot_backend_sim.kinematics.kinematics_clearance import ClearancePoint, KinematicsError
 from robot_backend_sim.physics.marvin.environment import base_world_point
 from robot_backend_sim.physics.marvin.scene import MarvinScene
 from robot_backend_sim.physics.robot_geometry import ArmChain
@@ -491,7 +491,7 @@ def _sample_path_qpos(
     step_rad: float,
     max_samples: int,
 ) -> tuple[tuple[float, ...], ...]:
-    from robot_backend_sim.kinematics.kinematics import sample_joint_path
+    from robot_backend_sim.kinematics.common import sample_joint_path
 
     return sample_joint_path(start, end, max_step_rad=step_rad, max_samples=max_samples)
 
@@ -524,7 +524,7 @@ def _waypoint_lift(
     state.  The returned pieces are the waypoint joint states and the sampled
     relative-pose error curves for both TCPs against that common block pose.
     """
-    from robot_backend_sim.kinematics.kinematics import sample_joint_path
+    from robot_backend_sim.kinematics.common import sample_joint_path
 
     left_offset = np.asarray(left_grasp.position) - block_center
     right_offset = np.asarray(right_grasp.position) - block_center
@@ -539,10 +539,16 @@ def _waypoint_lift(
         left_position = center + left_offset
         right_position = center + right_offset
         targets = (
-            KeyTarget("coord_left", _LEFT, tuple(float(v) for v in left_position), left_grasp.rotation),
-            KeyTarget("coord_right", _RIGHT, tuple(float(v) for v in right_position), right_grasp.rotation),
+            KeyTarget(
+                "coord_left", _LEFT, tuple(float(v) for v in left_position), left_grasp.rotation
+            ),
+            KeyTarget(
+                "coord_right", _RIGHT, tuple(float(v) for v in right_position), right_grasp.rotation
+            ),
         )
-        results = solve_targets(model, current, targets, chains, ik, clearance, None, deadline=deadline)
+        results = solve_targets(
+            model, current, targets, chains, ik, clearance, None, deadline=deadline
+        )
         if not all(result.converged for result in results):
             break
         current = results[-1].qpos
@@ -731,13 +737,19 @@ def plan_handover(
         )
     )
     solved = _plan_targets(
-        solve_targets(model, initial_qpos, sequence_a, chains, ik, clearance, None, deadline=deadline)
+        solve_targets(
+            model, initial_qpos, sequence_a, chains, ik, clearance, None, deadline=deadline
+        )
     )
     solved_b = _plan_targets(
-        solve_targets(model, initial_qpos, sequence_b, chains, ik, clearance, None, deadline=deadline)
+        solve_targets(
+            model, initial_qpos, sequence_b, chains, ik, clearance, None, deadline=deadline
+        )
     )
     solved_c = _plan_targets(
-        solve_targets(model, initial_qpos, sequence_c, chains, ik, clearance, None, deadline=deadline)
+        solve_targets(
+            model, initial_qpos, sequence_c, chains, ik, clearance, None, deadline=deadline
+        )
     )
     all_names = (
         *[target.name for target in sequence_a],
@@ -1377,9 +1389,15 @@ def plan_handover(
             f"{waypoint_max['right_position_error_m']:.6f} m exceeds "
             f"{config.diagnostics.relative_position_tolerance_m:.6f} m"
         )
-    if waypoint_max["left_orientation_error_rad"] > config.diagnostics.relative_orientation_tolerance_rad:
+    if (
+        waypoint_max["left_orientation_error_rad"]
+        > config.diagnostics.relative_orientation_tolerance_rad
+    ):
         failures.append("dual-hold left orientation coordination exceeds the tolerance")
-    if waypoint_max["right_orientation_error_rad"] > config.diagnostics.relative_orientation_tolerance_rad:
+    if (
+        waypoint_max["right_orientation_error_rad"]
+        > config.diagnostics.relative_orientation_tolerance_rad
+    ):
         failures.append("dual-hold right orientation coordination exceeds the tolerance")
 
     place_tcp = tcp_matrix(model, solved["right_place"].qpos, right_site)

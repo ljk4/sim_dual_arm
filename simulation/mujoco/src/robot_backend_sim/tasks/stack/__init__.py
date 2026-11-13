@@ -10,8 +10,8 @@ from typing import Any
 from robot_contracts.models import ContractError, RobotProfile, RunContext
 from robot_contracts.task_state import TaskState
 
-from robot_backend_sim.config.scene_config import SceneConfig
-from robot_backend_sim.kinematics.kinematics import extract_object_pose
+from robot_backend_sim.config.panda_scene_config import SceneConfig
+from robot_backend_sim.kinematics.common import extract_object_pose
 from robot_backend_sim.tasks.base import (
     TaskChunk,
     TaskChunkView,

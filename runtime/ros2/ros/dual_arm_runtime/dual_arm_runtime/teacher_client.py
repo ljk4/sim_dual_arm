@@ -130,7 +130,7 @@ class TeacherTaskClient:
     def chunk(
         self, context: RunContext, episode_id: str, task_epoch: int, request_id: str,
         capture_seq: int, observation_time_ns: int, *, robot_profile_hash: str,
-        chunk_size: int, period_ns: int, handoff_time_ns: int = 0,
+        chunk_size: int, joint_count: int, period_ns: int, handoff_time_ns: int = 0,
     ) -> TeacherChunkFact:
         request_type = teacher_service_type(self.capability)
         request = request_type.Request(
@@ -156,20 +156,30 @@ class TeacherTaskClient:
             raise ContractError("TEACHER_FEEDBACK_MISMATCH", "teacher observation time differs")
         if str(response.robot_profile_hash) != robot_profile_hash:
             raise ContractError("TEACHER_PROFILE_MISMATCH", "teacher profile differs")
-        if int(response.point_count) != chunk_size or int(response.joint_count) != 16:
-            raise ContractError("TEACHER_CHUNK_SHAPE", "teacher chunk is not 60x16")
+        if int(response.point_count) != chunk_size or int(response.joint_count) != joint_count:
+            raise ContractError(
+                "TEACHER_CHUNK_SHAPE",
+                f"teacher chunk is not {chunk_size}x{joint_count}",
+            )
         flat = tuple(float(value) for value in response.positions)
-        if len(flat) != chunk_size * 16:
-            raise ContractError("TEACHER_CHUNK_SHAPE", "teacher positions are not 960-wide")
+        if len(flat) != chunk_size * joint_count:
+            raise ContractError(
+                "TEACHER_CHUNK_SHAPE",
+                f"teacher positions are not {chunk_size * joint_count}-wide",
+            )
         times = tuple(int(value) for value in response.time_from_observation_ns)
         if len(times) != chunk_size:
             raise ContractError("TEACHER_CHUNK_CLOCK", "teacher time grid is incomplete")
         for index, value in enumerate(times):
             if value != (index + 1) * period_ns:
                 raise ContractError(
-                    "TEACHER_CHUNK_CLOCK", "teacher time grid is not a uniform 50 ms"
+                    "TEACHER_CHUNK_CLOCK",
+                    f"teacher time grid does not follow the {period_ns} ns period",
                 )
-        positions = tuple(flat[point * 16 : point * 16 + 16] for point in range(chunk_size))
+        positions = tuple(
+            flat[point * joint_count : (point + 1) * joint_count]
+            for point in range(chunk_size)
+        )
         phase_codes = tuple(int(value) for value in response.phase_codes)
         if len(phase_codes) != chunk_size:
             raise ContractError("TEACHER_CHUNK_SHAPE", "teacher phase codes are incomplete")

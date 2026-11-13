@@ -1,4 +1,4 @@
-"""Three-view preview media generated only from recorded RGB frames."""
+"""Preview media generated only from recorded RGB frames."""
 
 from __future__ import annotations
 
@@ -12,8 +12,6 @@ from typing import Any
 
 from PIL import Image, ImageDraw
 
-CAMERA_ORDER = ("global", "left_wrist", "right_wrist")
-
 
 def _json(path: Path) -> dict[str, Any] | None:
     try:
@@ -23,48 +21,49 @@ def _json(path: Path) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
-def _frame_rows(export: Path, limit: int = 120) -> list[tuple[int, list[Path]]]:
-    index = _json(export / "frame_index.json")
+def _frame_rows(
+    export: Path, limit: int = 120
+) -> tuple[list[tuple[int, list[Path]]], tuple[str, ...]]:
     labels = _json(export / "labels.json")
-    if index is None or labels is None:
-        return []
-    frame_index = index.get("labels")
+    if labels is None:
+        return [], ()
     rows = labels.get("labels")
-    if not isinstance(frame_index, dict) or not isinstance(rows, list):
-        return []
-    camera_order = index.get("camera_order")
-    if camera_order != list(CAMERA_ORDER):
-        return []
+    raw_order = labels.get("camera_order")
+    if (
+        not isinstance(rows, list)
+        or not isinstance(raw_order, list)
+        or not raw_order
+        or not all(isinstance(name, str) and name for name in raw_order)
+        or len(set(raw_order)) != len(raw_order)
+    ):
+        return [], ()
+    camera_order = tuple(raw_order)
     result: list[tuple[int, list[Path]]] = []
     for row in rows:
         if not isinstance(row, dict):
             continue
-        sequences = row.get("frame_seqs")
         label_time = row.get("label_sim_time_ns")
-        if not isinstance(sequences, list) or len(sequences) != 3:
-            continue
-        if not isinstance(label_time, int):
+        rgb = row.get("rgb")
+        if not isinstance(label_time, int) or not isinstance(rgb, dict):
             continue
         paths: list[Path] = []
-        for camera_index, camera in enumerate(CAMERA_ORDER):
-            entry = frame_index.get(str(sequences[camera_index]))
-            if not isinstance(entry, dict):
-                paths = []
-                break
-            record = entry.get(camera)
+        for camera in camera_order:
+            record = rgb.get(camera)
             if not isinstance(record, dict) or not isinstance(record.get("path"), str):
                 paths = []
                 break
             paths.append(export / record["path"])
-        if len(paths) == 3 and all(path.is_file() for path in paths):
+        if paths and all(path.is_file() for path in paths):
             result.append((label_time, paths))
     if len(result) > limit:
         step = max(1, math.ceil(len(result) / limit))
         result = result[::step][:limit]
-    return result
+    return result, camera_order
 
 
-def _montage(paths: list[Path], caption: str) -> Image.Image | None:
+def _montage(
+    paths: list[Path], caption: str, cameras: tuple[str, ...]
+) -> Image.Image | None:
     try:
         images = [Image.open(path).convert("RGB").resize((320, 240)) for path in paths]
     except OSError:
@@ -75,13 +74,15 @@ def _montage(paths: list[Path], caption: str) -> Image.Image | None:
         canvas.paste(image, (index * 320, 30))
     draw = ImageDraw.Draw(canvas)
     draw.text((8, 8), caption, fill=(255, 255, 255))
-    for index, camera in enumerate(CAMERA_ORDER[: len(images)]):
+    for index, camera in enumerate(cameras[: len(images)]):
         draw.text((index * 320 + 8, 250), camera, fill=(255, 255, 255))
     return canvas
 
 
-def _triptych(paths: list[Path], out: Path, caption: str) -> bool:
-    canvas = _montage(paths, caption)
+def _triptych(
+    paths: list[Path], out: Path, caption: str, cameras: tuple[str, ...]
+) -> bool:
+    canvas = _montage(paths, caption, cameras)
     if canvas is None:
         return False
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -89,11 +90,13 @@ def _triptych(paths: list[Path], out: Path, caption: str) -> bool:
     return True
 
 
-def _ffmpeg_video(rows: list[tuple[int, list[Path]]], out: Path) -> str:
+def _ffmpeg_video(
+    rows: list[tuple[int, list[Path]]], cameras: tuple[str, ...], out: Path
+) -> str:
     temporary = Path(tempfile.mkdtemp(prefix="act-eval-"))
     try:
         for index, (_label_time, paths) in enumerate(rows):
-            _triptych(paths, temporary / f"{index:06d}.png", f"frame {index}")
+            _triptych(paths, temporary / f"{index:06d}.png", f"frame {index}", cameras)
         command = [
             "ffmpeg",
             "-y",
@@ -121,10 +124,12 @@ def _ffmpeg_video(rows: list[tuple[int, list[Path]]], out: Path) -> str:
     return ""
 
 
-def _gif_video(rows: list[tuple[int, list[Path]]], out: Path) -> str:
+def _gif_video(
+    rows: list[tuple[int, list[Path]]], cameras: tuple[str, ...], out: Path
+) -> str:
     images = []
     for label_time, paths in rows:
-        canvas = _montage(paths, f"t={label_time} ns")
+        canvas = _montage(paths, f"t={label_time} ns", cameras)
         if canvas is not None:
             images.append(canvas)
     if not images:
@@ -135,19 +140,19 @@ def _gif_video(rows: list[tuple[int, list[Path]]], out: Path) -> str:
 
 
 def write_video(export: Path, out: Path, max_frames: int = 80) -> str:
-    rows = _frame_rows(export, limit=max_frames)
+    rows, cameras = _frame_rows(export, limit=max_frames)
     if not rows:
         return ""
     out.parent.mkdir(parents=True, exist_ok=True)
     if shutil.which("ffmpeg"):
-        video = _ffmpeg_video(rows, out)
+        video = _ffmpeg_video(rows, cameras, out)
         if video:
             return video
-    return _gif_video(rows, out)
+    return _gif_video(rows, cameras, out)
 
 
 def keyframes(export: Path, out_dir: Path, prefix: str) -> list[str]:
-    rows = _frame_rows(export, limit=1000)
+    rows, cameras = _frame_rows(export, limit=1000)
     if not rows:
         return []
     positions = sorted({0, len(rows) // 2, len(rows) - 1})
@@ -155,7 +160,7 @@ def keyframes(export: Path, out_dir: Path, prefix: str) -> list[str]:
     for index in positions:
         label_time, paths = rows[index]
         out = out_dir / f"{prefix}-{index:04d}.png"
-        if _triptych(paths, out, f"{prefix} t={label_time} ns"):
+        if _triptych(paths, out, f"{prefix} t={label_time} ns", cameras):
             result.append(str(out))
     return result
 
@@ -170,4 +175,4 @@ def media_for(metric: dict[str, Any], output: Path) -> None:
     metric["preview_keyframes"] = keyframes(export, preview, prefix)
 
 
-__all__ = ["CAMERA_ORDER", "keyframes", "media_for", "write_video"]
+__all__ = ["keyframes", "media_for", "write_video"]

@@ -221,7 +221,9 @@ def test_record_worker_mode_passes_scenario_selection_to_pool(tmp_path, monkeypa
     assert captured["args"]["selection"]["binding"]["sha256"] == sha(
         tree.scenario.binding_path
     )
-    assert captured["config"]["paths"]["ledger"] == "var/campaigns/synthetic/attempts.jsonl"
+    assert captured["config"]["paths"]["ledger"] == (
+        "var/synthetic_stack/logs/campaign/attempts.jsonl"
+    )
 
 
 def test_parallel_pool_passes_worker_identity_and_isolation(tmp_path, monkeypatch):
@@ -257,14 +259,18 @@ metadata = {
     "runtime_config": os.environ["CAMPAIGN_RUNTIME_CONFIG"],
 }
 (directory / "worker.json").write_text(json.dumps(metadata))
-(directory / "manifest.json").write_text(json.dumps({
+raw = directory / "raw"
+raw.mkdir()
+export = directory / "export"
+export.mkdir()
+(raw / "manifest.json").write_text(json.dumps({
     "recording": {"complete": True},
     "runtime": {"outcome": "stopped", "reason": "TEST"},
 }))
-(directory / "task_result.json").write_text(
+(raw / "task_result.json").write_text(
     json.dumps({"result": {"outcome": "succeeded"}})
 )
-(directory / "quality.json").write_text(json.dumps({"qualified": True}))
+(export / "quality.json").write_text(json.dumps({"qualified": True}))
 ''',
         encoding="utf-8",
     )
@@ -284,7 +290,7 @@ metadata = {
     records = [
         json.loads(line)
         for line in (
-            tree.repo / "var/campaigns/synthetic/attempts.jsonl"
+            tree.repo / "var/synthetic_stack/logs/campaign/attempts.jsonl"
         ).read_text().splitlines()
     ]
     reserved = [item for item in records if item["event"] == "RESERVED"]

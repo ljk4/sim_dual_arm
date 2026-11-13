@@ -17,11 +17,11 @@ import math
 import time
 from dataclasses import dataclass
 
-from robot_backend_sim.kinematics.kinematics import KinematicsError, sample_joint_path
+from robot_backend_sim.kinematics.common import sample_joint_path
 from robot_backend_sim.kinematics.kinematics_clearance import (
     ClearancePoint,
-    CollisionPair,
     CollisionPairSet,
+    KinematicsError,
     _check_finite_and_frozen,
     _frozen_deviation,
     measure_clearance,
@@ -160,7 +160,9 @@ def _pose_matrix(
     return matrix
 
 
-def _chain(model: object, chains: dict[str, ArmChain], side: str) -> tuple[ArmChain, tuple[int, ...]]:
+def _chain(
+    model: object, chains: dict[str, ArmChain], side: str
+) -> tuple[ArmChain, tuple[int, ...]]:
     chain = chains.get(side)
     if chain is None:
         raise KinematicsError("target_invalid", f"unknown arm side {side!r}")

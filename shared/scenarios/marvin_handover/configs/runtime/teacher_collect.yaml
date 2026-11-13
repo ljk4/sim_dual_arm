@@ -26,8 +26,7 @@ reset:
 
 observation:
   reliable: true
-  max_skew_ns: 0
-  max_age_ns: 500000000
+  # max_skew_ns / max_age_ns come from the observation profile.
   wall_arrival_timeout_s: 1.5
   capacity: 32
 

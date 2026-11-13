@@ -8,6 +8,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BeforeValidator, Field, model_validator
 from robot_contracts.models import ContractError, RobotProfile
+from robot_contracts.overrides import OverrideError, apply_overrides
 from robot_contracts.profiles import load_profile, semantic_hash, validate_bindings
 from robot_contracts.validation import (
     NonEmptyStr,
@@ -64,6 +65,12 @@ class ResetConfig(StrictMappingModel):
 
 
 class ObservationConfig(StrictMappingModel):
+    """Observation timing and buffering.
+
+    ``max_skew_ns`` and ``max_age_ns`` default to the observation profile's
+    values when the recipe omits them; an explicit recipe value overrides.
+    """
+
     max_skew_ns: Annotated[NonNegativeInt, Field(le=INT64_MAX)]
     max_age_ns: Annotated[PositiveInt, Field(le=INT64_MAX)]
     wall_arrival_timeout_s: PositiveFloat
@@ -269,6 +276,9 @@ class RuntimeConfiguration(StrictMappingModel):
     schema_root: Path
     control_document: dict[str, Any]
     snapshot_json: str = Field(exclude=True, repr=False)
+    selection: dict[str, Any] | None = None
+    overrides: tuple[str, ...] = ()
+    configuration_source: str = ""
 
     snapshot = property(lambda self: json.loads(self.snapshot_json))
 
@@ -290,25 +300,29 @@ def _load(path: Path) -> dict[str, Any]:
     return document
 
 
-def _referenced(document: dict[str, Any], name: str, base: Path) -> Path:
+def _referenced(
+    document: dict[str, Any], name: str, base_dir: Path, label: str
+) -> Path:
     value = document.get(name)
     if not isinstance(value, str) or not value:
-        raise _error(f"{base}.{name}", "field is required")
-    candidate = (base.parent / value).resolve()
+        raise _error(f"{label}.{name}", "field is required")
+    candidate = (base_dir / value).resolve()
     if not candidate.is_file():
-        raise _error(f"{base}.{name}", f"file does not exist: {candidate}")
+        raise _error(f"{label}.{name}", f"file does not exist: {candidate}")
     return candidate
 
 
-def _load_follower(document: dict[str, Any], base: Path, profile: RobotProfile):
+def _load_follower(
+    document: dict[str, Any], base_dir: Path, label: str, profile: RobotProfile
+):
     name = document.get("follower_config")
     if name is None:
         return None, None
     if not isinstance(name, str) or not name:
-        raise _error(f"{base}.follower_config", "field is required")
-    path = (base.parent / name).resolve()
+        raise _error(f"{label}.follower_config", "field is required")
+    path = (base_dir / name).resolve()
     if not path.is_file():
-        raise _error(f"{base}.follower_config", f"file does not exist: {path}")
+        raise _error(f"{label}.follower_config", f"file does not exist: {path}")
     raw = _load(path)
     try:
         constraints = FollowerConstraints(**raw)
@@ -331,13 +345,50 @@ def _load_follower(document: dict[str, Any], base: Path, profile: RobotProfile):
     )
 
 
-def load_runtime_configuration(config_path: Path, project_root: Path) -> RuntimeConfiguration:
+def load_runtime_configuration(
+    config_path: Path,
+    project_root: Path,
+    *,
+    seed: int | None = None,
+    overrides: tuple[str, ...] | list[str] = (),
+) -> RuntimeConfiguration:
     path = (config_path if config_path.is_absolute() else project_root / config_path).resolve()
     document = _load(path)
-    profile_path = _referenced(document, "robot_profile", path)
-    observation_path = _referenced(document, "observation_schema", path)
-    action_path = _referenced(document, "action_schema", path)
-    control_path = _referenced(document, "control_constraints", path)
+    if seed is not None:
+        reset = document.get("reset")
+        if not isinstance(reset, dict):
+            raise _error(f"{path}.reset", "field is required")
+        reset["seed"] = seed
+    return load_runtime_configuration_document(
+        document,
+        source=str(path),
+        base_dir=path.parent,
+        project_root=project_root,
+        overrides=tuple(overrides),
+    )
+
+
+def load_runtime_configuration_document(
+    document: dict[str, Any],
+    *,
+    source: str,
+    base_dir: Path,
+    project_root: Path,
+    overrides: tuple[str, ...] | list[str] = (),
+    selection: dict[str, Any] | None = None,
+) -> RuntimeConfiguration:
+    """Validate one already-resolved in-memory recipe.
+
+    ``base_dir`` resolves the recipe's own relative references; a scenario
+    loader has already replaced profile/schema paths with their absolute
+    binding paths.  No file is written and no prepared directory is required.
+    """
+    path = Path(source) if source.startswith("/") else base_dir / source
+    label = str(path)
+    profile_path = _referenced(document, "robot_profile", base_dir, label)
+    observation_path = _referenced(document, "observation_schema", base_dir, label)
+    action_path = _referenced(document, "action_schema", base_dir, label)
+    control_path = _referenced(document, "control_constraints", base_dir, label)
     schema_root = project_root / "shared/common/interfaces/schemas"
     profile = load_profile(profile_path, schema_root)
     observation_document = _load(observation_path)
@@ -346,8 +397,22 @@ def load_runtime_configuration(config_path: Path, project_root: Path) -> Runtime
     try:
         validate_bindings(profile, observation_document, action_document, schema_root)
     except ContractError as error:
-        raise _error(str(path), str(error)) from error
-    follower, follower_document = _load_follower(document, path, profile)
+        raise _error(label, str(error)) from error
+    # The observation profile is the single default source for timing bounds.
+    # A recipe only overrides them when it explicitly declares the same keys.
+    observation = document.get("observation")
+    if not isinstance(observation, dict):
+        raise _error(f"{label}.observation", "field is required")
+    observation = dict(observation)
+    for name in ("max_skew_ns", "max_age_ns"):
+        observation.setdefault(name, observation_document[name])
+    document = {**document, "observation": observation}
+    if overrides:
+        try:
+            document = apply_overrides(document, list(overrides))
+        except OverrideError as error:
+            raise _error(label, str(error)) from error
+    follower, follower_document = _load_follower(document, base_dir, label, profile)
     observation_hash = semantic_hash(observation_document)
     action_hash = semantic_hash(action_document)
     policy = document.get("policy")
@@ -364,7 +429,7 @@ def load_runtime_configuration(config_path: Path, project_root: Path) -> Runtime
     try:
         recipe = RuntimeRecipe(**document)
     except StrictMappingError as error:
-        raise _error(str(path), f"{error.field}: {error.message}") from error
+        raise _error(label, f"{error.field}: {error.message}") from error
     effective = recipe.model_dump(
         mode="json",
         exclude={"logging", "recording", "follower", "control_constraints",
@@ -385,10 +450,15 @@ def load_runtime_configuration(config_path: Path, project_root: Path) -> Runtime
                 "action": action_document, "action_hash": action_hash,
                 "action_source": recipe.action_source,
                 "policy_test_only": None if recipe.policy is None
-                else recipe.policy.expected_test_only, "recipe": effective}
+                else recipe.policy.expected_test_only, "recipe": effective,
+                "selection": selection, "overrides": list(overrides),
+                "configuration_source": source}
     return RuntimeConfiguration(
         recipe=recipe, profile=profile, schema_root=schema_root,
         control_document=control_document,
         snapshot_json=json.dumps(snapshot, sort_keys=True, separators=(",", ":"),
                                  allow_nan=False),
+        selection=selection,
+        overrides=tuple(overrides),
+        configuration_source=source,
     )

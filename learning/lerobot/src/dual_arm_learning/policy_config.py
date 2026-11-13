@@ -12,6 +12,7 @@ from typing import Annotated, Any, ClassVar
 from pydantic import BeforeValidator, Field, field_validator, model_validator
 from robot_contracts import validation as rv
 from robot_contracts.models import ContractError, RobotProfile
+from robot_contracts.overrides import apply_overrides
 from robot_run_logging import LogSettings
 
 from .config_yaml import load_yaml
@@ -124,8 +125,12 @@ def parse_policy_config(document: object) -> PolicyServiceConfig:
     return rv.validate_config_model(PolicyServiceConfig, document, "<config>", PolicyConfigError)
 
 
-def load_policy_config(path: str | Path, **overrides: object) -> PolicyServiceConfig:
+def load_policy_config(
+    path: str | Path, *, set_overrides: tuple[str, ...] | list[str] = (), **overrides: object
+) -> PolicyServiceConfig:
     document = load_yaml(path)
+    if set_overrides:
+        document = apply_overrides(document, list(set_overrides))
     if not isinstance(document, dict):
         raise PolicyConfigError(str(path), "<root>", "must be a mapping")
     service, model = document.get("service"), document.get("model", {})

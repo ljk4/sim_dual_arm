@@ -1,4 +1,4 @@
-"""Validation of one accepted stack export before any dataset frame is written."""
+"""Validation of one accepted flat export before any dataset frame is written."""
 
 from __future__ import annotations
 
@@ -32,10 +32,8 @@ class SourceEpisode:
     global_index: int
     rows: tuple[dict[str, Any], ...]
     raw_by_chunk: dict[int, dict[str, Any]]
-    frames: dict[int, dict[str, Any]]
     source_files: dict[str, dict[str, Any]]
     quality: dict[str, Any]
-    summary: dict[str, Any]
     profile_hash: str
     source_facts: dict[str, Any]
 
@@ -185,25 +183,8 @@ def _validate_row_vectors(
     }
 
 
-def _frame_mapping(
-    index: int, frame_entry: dict[str, Any] | None, config: DatasetConfig
-) -> dict[str, Any]:
-    if frame_entry is None:
-        raise ExportError(f"labels[{index}]: no frame_index entry")
-    frames = frame_entry.get("labels")
-    if not isinstance(frames, dict):
-        raise ExportError("frame_index.labels: expected an object")
-    frame_mapping = frames.get(str(index))
-    if not isinstance(frame_mapping, dict):
-        raise ExportError(f"frame_index.labels[{index}]: missing")
-    if set(frame_mapping) != set(config.camera_names):
-        raise ExportError(f"frame_index.labels[{index}]: camera set does not match labels")
-    return frame_mapping
-
-
 def _validate_camera_record(
     entry: dict[str, Any],
-    frame_mapping: dict[str, Any],
     camera: str,
     location: str,
     observation_time: int,
@@ -223,16 +204,6 @@ def _validate_camera_record(
         raise ExportError(f"{location}.rgb.{camera}: capture clock does not match label clock")
     if entry["observation_id"] != row.get("observation_id"):
         raise ExportError(f"{location}.rgb.{camera}: observation ID mismatch")
-    for field in (
-        "frame_seq",
-        "observation_id",
-        "observation_sim_time_ns",
-        "png_sha256",
-        "rgb_sha256",
-        "path",
-    ):
-        if frame_mapping[camera].get(field) != entry.get(field):
-            raise ExportError(f"{location}.rgb.{camera}: frame_index.{field} does not match labels")
     for field in ("png_sha256", "rgb_sha256"):
         if not isinstance(entry[field], str) or PNG_SHA.fullmatch(entry[field]) is None:
             raise ExportError(f"{location}.rgb.{camera}.{field}: bad digest")
@@ -240,22 +211,19 @@ def _validate_camera_record(
 
 def _validate_row_rgb(
     row: dict[str, Any],
-    index: int,
     location: str,
     observation_time: int,
-    frame_entry: dict[str, Any] | None,
     config: DatasetConfig,
     export_dir: Path,
 ) -> None:
     rgb = row.get("rgb")
     if not isinstance(rgb, dict) or tuple(sorted(rgb)) != tuple(sorted(config.camera_names)):
         raise ExportError(f"{location}.rgb: expected exactly the three learning cameras")
-    frame_mapping = _frame_mapping(index, frame_entry, config)
     for camera in config.camera_names:
         entry = rgb[camera]
         if not isinstance(entry, dict):
             raise ExportError(f"{location}.rgb.{camera}: expected an object")
-        _validate_camera_record(entry, frame_mapping, camera, location, observation_time, row)
+        _validate_camera_record(entry, camera, location, observation_time, row)
         relative = Path(str(entry["path"]))
         if relative.is_absolute() or ".." in relative.parts:
             raise ExportError(f"{location}.rgb.{camera}.path: must stay inside the export")
@@ -268,7 +236,6 @@ def _validate_row_rgb(
 def _validate_row(
     row: object,
     index: int,
-    frame_entry: dict[str, Any] | None,
     config: DatasetConfig,
     export_dir: Path,
 ) -> tuple[dict[str, Any], dict[str, np.ndarray], np.ndarray]:
@@ -277,14 +244,14 @@ def _validate_row(
     location = f"labels[{index}]"
     observation_time = _validate_row_clock(row, location, config)
     vectors = _validate_row_vectors(row, location, config)
-    _validate_row_rgb(row, index, location, observation_time, frame_entry, config, export_dir)
+    _validate_row_rgb(row, location, observation_time, config, export_dir)
     return row, vectors, np.asarray([row["raw_chunk_seq"]], dtype=np.int64)
 
 
-def _source_facts(labels: dict[str, Any], summary: dict[str, Any]) -> dict[str, Any]:
-    task = summary.get("task")
-    runtime = summary.get("runtime")
-    recording = summary.get("recording")
+def _source_facts(labels: dict[str, Any], quality: dict[str, Any]) -> dict[str, Any]:
+    task = labels.get("task")
+    runtime = labels.get("runtime")
+    recording = labels.get("recording")
     if not isinstance(task, dict) or task.get("outcome") != "succeeded":
         raise ExportError("export: task outcome is not succeeded")
     if task.get("reason") != "TASK_SUCCEEDED":
@@ -297,8 +264,6 @@ def _source_facts(labels: dict[str, Any], summary: dict[str, Any]) -> dict[str, 
         raise ExportError("export: recording is not complete")
     if recording.get("failure_reason") not in {"", None}:
         raise ExportError("export: recording has a failure reason")
-    if summary.get("episode_id") != labels.get("episode_id"):
-        raise ExportError("export: summary/task episode identity does not match labels")
     facts = {
         "episode_id": labels.get("episode_id"),
         "task": {"outcome": task.get("outcome"), "reason": task.get("reason")},
@@ -307,7 +272,7 @@ def _source_facts(labels: dict[str, Any], summary: dict[str, Any]) -> dict[str, 
             "complete": recording.get("complete"),
             "failure_reason": recording.get("failure_reason", ""),
         },
-        "quality_qualified": summary.get("quality_qualified"),
+        "quality_qualified": quality.get("qualified"),
     }
     facts["facts_sha256"] = canonical_hash(facts)
     return facts
@@ -316,9 +281,7 @@ def _source_facts(labels: dict[str, Any], summary: dict[str, Any]) -> dict[str, 
 _EXPORT_NAMES = (
     "labels.json",
     "raw_predictions.json",
-    "frame_index.json",
     "quality.json",
-    "summary.json",
 )
 
 
@@ -343,15 +306,12 @@ def _export_documents(export_dir: Path) -> tuple[dict[str, Any], ...]:
 def _validate_export_headers(
     labels: dict[str, Any],
     raw_doc: dict[str, Any],
-    frame_doc: dict[str, Any],
     quality: dict[str, Any],
     config: DatasetConfig,
     profile_hash: str,
 ) -> None:
     if labels.get("schema_version") != 1 or raw_doc.get("schema_version") != 1:
         raise ExportError("export: unsupported schema version")
-    if frame_doc.get("schema_version") != 1:
-        raise ExportError("frame_index: unsupported schema version")
     if labels.get("robot_profile_hash") != profile_hash:
         raise ExportError("export: robot profile hash does not match the learning profile")
     if quality.get("qualified") is not True:
@@ -361,9 +321,9 @@ def _validate_export_headers(
         or quality.get("trajectory_qualified") is False
     ):
         raise ExportError("export: visibility/trajectory qualification is false")
-    camera_order = frame_doc.get("camera_order")
+    camera_order = labels.get("camera_order")
     if tuple(camera_order or ()) != config.camera_names:
-        raise ExportError("export: frame_index camera order does not match the profile")
+        raise ExportError("export: labels camera order does not match the profile")
 
 
 def _validate_raw_predictions(
@@ -412,21 +372,14 @@ def _validate_raw_predictions(
 
 def _validate_label_rows(
     rows_value: list[Any],
-    frame_entries: dict[str, Any],
     raw_by_chunk: dict[int, dict[str, Any]],
     config: DatasetConfig,
     export_dir: Path,
-) -> tuple[tuple[dict[str, Any], ...], dict[int, dict[str, Any]]]:
+) -> tuple[dict[str, Any], ...]:
     rows: list[dict[str, Any]] = []
-    frames: dict[int, dict[str, Any]] = {}
     previous_time: int | None = None
     for index, row in enumerate(rows_value):
-        frame_entry = (
-            None
-            if not isinstance(frame_entries.get(str(index)), dict)
-            else {"labels": frame_entries}
-        )
-        _, vectors, _ = _validate_row(row, index, frame_entry, config, export_dir)
+        _, vectors, _ = _validate_row(row, index, config, export_dir)
         observation_time = require_int(
             row.get("observation_sim_time_ns"), f"labels[{index}].observation_sim_time_ns"
         )
@@ -446,8 +399,7 @@ def _validate_label_rows(
         row = dict(row)
         row["_vectors"] = vectors
         rows.append(row)
-        frames[index] = frame_entries[str(index)]
-    return tuple(rows), frames
+    return tuple(rows)
 
 
 def _validate_export(
@@ -457,51 +409,40 @@ def _validate_export(
 ) -> tuple[
     tuple[dict[str, Any], ...],
     dict[int, dict[str, Any]],
-    dict[int, dict[str, Any]],
-    dict[str, Any],
     dict[str, Any],
 ]:
-    labels, raw_doc, frame_doc, quality, summary = _export_documents(export_dir)
-    _validate_export_headers(
-        labels, raw_doc, frame_doc, quality, config, profile_hash
-    )
-    _source_facts(labels, summary)
+    labels, raw_doc, quality = _export_documents(export_dir)
+    _validate_export_headers(labels, raw_doc, quality, config, profile_hash)
+    _source_facts(labels, quality)
     rows_value = labels.get("labels")
     if not isinstance(rows_value, list) or not rows_value:
         raise ExportError("export: labels array is empty")
     summary_labels = labels.get("summary")
     if not isinstance(summary_labels, dict) or summary_labels.get("labels") != len(rows_value):
         raise ExportError("export: label summary count is inconsistent")
-    frame_entries = frame_doc.get("labels")
-    if not isinstance(frame_entries, dict):
-        raise ExportError("frame_index.labels: expected an object")
     raw_by_chunk = _validate_raw_predictions(raw_doc, config)
-    rows, frames = _validate_label_rows(
-        rows_value, frame_entries, raw_by_chunk, config, export_dir
-    )
-    return rows, raw_by_chunk, frames, quality, summary
+    rows = _validate_label_rows(rows_value, raw_by_chunk, config, export_dir)
+    return rows, raw_by_chunk, quality
 
 
 def _predict_episode(
     entry: dict[str, Any], config: DatasetConfig, profile_hash: str
 ) -> SourceEpisode:
     export_dir = resolve_export_dir(entry["attempt_dir"], config.attempt_export_glob)
-    rows, raw_by_chunk, frames, quality, summary = _validate_export(
-        export_dir, config, profile_hash
-    )
+    rows, raw_by_chunk, quality = _validate_export(export_dir, config, profile_hash)
     labels = load_json_document(export_dir / "labels.json")
     if labels.get("seed") != entry["seed"]:
         raise ExportError(
             f"{export_dir}: labels seed {labels.get('seed')} != selected seed {entry['seed']}"
         )
-    if config.require_quality and summary.get("quality_qualified") is not True:
-        raise ExportError(f"{export_dir}: summary is not quality qualified")
-    action_source = str(summary.get("action_source", ""))
+    if config.require_quality and quality.get("qualified") is not True:
+        raise ExportError(f"{export_dir}: export is not quality qualified")
+    action_source = str(labels.get("action_source", ""))
     if action_source != "teacher":
         raise ExportError(
             f"{export_dir}: formal data must come from teacher, not {action_source!r}"
         )
-    facts = _source_facts(labels, summary)
+    facts = _source_facts(labels, quality)
     return SourceEpisode(
         attempt_id=entry["attempt_id"],
         seed=entry["seed"],
@@ -510,10 +451,8 @@ def _predict_episode(
         global_index=entry["global_index"],
         rows=rows,
         raw_by_chunk=raw_by_chunk,
-        frames=frames,
         source_files=_source_files(export_dir),
         quality=quality,
-        summary=summary,
         profile_hash=profile_hash,
         source_facts=facts,
     )

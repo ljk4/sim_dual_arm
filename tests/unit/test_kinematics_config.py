@@ -18,8 +18,8 @@ from robot_backend_sim.config.kinematics_config import (  # noqa: E402
     KinematicsConfigError,
     load_kinematics_config,
 )
-from robot_backend_sim.config.scene_config import load_scene_config  # noqa: E402
-from robot_backend_sim.kinematics import kinematics  # noqa: E402
+from robot_backend_sim.config.panda_scene_config import load_scene_config  # noqa: E402
+from robot_backend_sim.kinematics import common, kinematics  # noqa: E402
 from robot_backend_sim.render import visibility  # noqa: E402
 
 SCENE_PATH = SCENARIO / "configs/simulation/scene/panda_stack.yaml"
@@ -200,8 +200,8 @@ def test_config_rejects_record_only_threshold_and_unknown_camera(tmp_path, scene
 
 
 def test_targets_use_snapshot_centres_and_configured_heights(config):
-    source = kinematics.ObjectPose("source", (0.20, 0.55, 0.77), math.radians(10.0))
-    target = kinematics.ObjectPose("target", (0.36, 0.50, 0.78), math.radians(-4.0))
+    source = common.ObjectPose("source", (0.20, 0.55, 0.77), math.radians(10.0))
+    target = common.ObjectPose("target", (0.36, 0.50, 0.78), math.radians(-4.0))
     targets = kinematics.build_targets(
         source,
         target,
@@ -243,7 +243,7 @@ def test_targets_use_snapshot_centres_and_configured_heights(config):
 
 
 def test_path_sampling_includes_endpoints_and_bounds_step():
-    samples = kinematics.sample_joint_path(
+    samples = common.sample_joint_path(
         (0.0,) * 7,
         (0.05,) + (0.0,) * 6,
         max_step_rad=0.01,
@@ -262,21 +262,21 @@ def test_path_sampling_includes_endpoints_and_bounds_step():
 
 def test_path_sampling_rejects_excessive_or_invalid_input():
     with pytest.raises(kinematics.KinematicsError, match="limit"):
-        kinematics.sample_joint_path(
+        common.sample_joint_path(
             (0.0,) * 7,
             (1.0,) * 7,
             max_step_rad=0.01,
             max_samples=10,
         )
     with pytest.raises(kinematics.KinematicsError, match="finite"):
-        kinematics.sample_joint_path(
+        common.sample_joint_path(
             (math.nan,) + (0.0,) * 6,
             (0.0,) * 7,
             max_step_rad=0.01,
             max_samples=10,
         )
     with pytest.raises(kinematics.KinematicsError, match="same non-zero length"):
-        kinematics.sample_joint_path((0.0,), (), max_step_rad=0.01, max_samples=10)
+        common.sample_joint_path((0.0,), (), max_step_rad=0.01, max_samples=10)
 
 
 def test_png_budget_is_checked_before_creating_a_file(tmp_path):

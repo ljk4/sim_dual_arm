@@ -1,6 +1,6 @@
 # Marvin 标准 Robot API 后端；本阶段不加载任何任务插件。
-# Direct simulation prepare --template 使用本文件；robot.task 与 robot.task_mode
-# 同时省略。任务插件、Teacher 和交接评价由 P03 接入。
+# Direct simulation --config 使用本文件；robot.task 与 robot.task_mode
+# 同时省略。任务插件、Teacher 和交接评价由后端 Teacher/Policy 配方接入。
 robot:
   namespace: /robot
   profile: ../../../profiles/robots/marvin_handover_v1/profile.json

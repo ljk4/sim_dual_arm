@@ -1,4 +1,4 @@
-# 流式 Policy 执行与录制，模型身份由 policy_binding 提供。
+# 流式 Policy 执行与录制，模型身份由已验证 bundle manifest 提供。
 schema_version: 1
 robot_profile: ../../profiles/robots/panda_stack_learning_v1/profile.json
 observation_schema: ../../profiles/observations/panda_rgb_joint_v1.json
@@ -22,8 +22,7 @@ reset:
 
 observation:
   reliable: true
-  max_skew_ns: 0
-  max_age_ns: 500000000
+  # max_skew_ns / max_age_ns come from the observation profile.
   wall_arrival_timeout_s: 1.5
   capacity: 32
 
@@ -34,10 +33,9 @@ control:
   terminal_timeout_s: 20.0
 
 policy:
-  # Template for runtime/ros2/scripts/run.sh prepare.  It reads a generic
-  # Policy binding from the learning side and writes the launchable runtime
-  # config.  The digests below are placeholders, never model identities; a
-  # direct launch must fail validation.
+  # A --scenario launch reads the verified bundle manifest directly and
+  # replaces the digests below in memory.  They remain placeholders, never
+  # model identities; a direct --config launch must fail validation.
   endpoint: learning:50051
   model_bundle_digest: FROM_VERIFIED_ACT_BUNDLE
   processor_digest: FROM_VERIFIED_ACT_BUNDLE
