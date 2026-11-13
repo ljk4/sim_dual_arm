@@ -9,7 +9,7 @@
 | 目录 | 职责内容 |
 | --- | --- |
 | [`src/robot_backend_sim/`](src/robot_backend_sim/README.md) | 物理引擎封装、运动控制、渲染线程、任务插件与 ROS 2 节点实现 |
-| [`assets/franka_emika_panda/`](assets/README.md) | 随仓只读挂载的 Menagerie Franka Emika Panda 模型与网格资产 |
+| [`assets/`](assets/README.md) | 本端持有的机器人模型与网格：`franka_emika_panda/`（Menagerie）和 `marvin/`（原始 URDF/STL） |
 | [`configs/`](configs/README.md) | 后端启动配方（`backend/`）、场景与任务定义（`scene/`）、检查门限（`checks/`）与 `container.env` |
 | [`docker/`](docker/README.md) | 仿真容器 `Dockerfile`、`docker-compose.yml`、`requirements.lock` 与固定 Ruckig wheel |
 | [`scripts/`](scripts/README.md) | 容器内统一命令入口 `run.sh` 与后端配置生成脚本 `prepare_backend.py` |

@@ -8,7 +8,7 @@
 
 `simulation` 容器实行最小化权限挂载：
 
-- 本端目录 `simulation/mujoco/` 只读挂载至 `/app:ro`（含 `/app/assets/franka_emika_panda/` 模型资产）。
+- 本端目录 `simulation/mujoco/` 只读挂载至 `/app:ro`（含 `/app/assets/franka_emika_panda/` 与 `/app/assets/marvin/` 模型资产）。
 - 仓库 `shared/` 只读挂载至 `/shared:ro`；`common/interfaces/` 提供契约，`scenarios/panda_stack/profiles/` 提供机器人档案，`common/python/` 提供共享 Python 包，`common/tools/` 提供 setup、DDS 与检查脚本。
 - ROS 2 SDK 只读挂载至 `/opt/ros-dev:ro`（宿主机 `build/ros-dev/`）。
 - 运行产物目录可写挂载至 `/data`（宿主机 `var/`）。
@@ -34,6 +34,7 @@ docker compose exec simulation bash
 scripts/run.sh --help
 scripts/run.sh environment --run-id env-001
 scripts/run.sh scene --run-id scene-001
+scripts/run.sh marvin --run-id marvin-001
 scripts/run.sh kinematics --run-id kin-001
 # 仓库单测需临时只读挂载完整仓库并使用相应 PROJECT_ROOT/PYTHONPATH；标准挂载不含 tests/。
 ```

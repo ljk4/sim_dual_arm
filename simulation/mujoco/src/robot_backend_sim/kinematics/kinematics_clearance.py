@@ -79,8 +79,26 @@ def _body_movable(model: object, body_id: int) -> bool:
     return False
 
 
-def _robot_body(name: str) -> bool:
-    return name.startswith("left_") or name.startswith("right_")
+# Panda groups used by the existing key-pose check.  New robots pass their own
+# compiled binding instead of relying on these names.
+_PANDA_ROBOT_PREFIXES = ("left_", "right_")
+_PANDA_ROBOT_SIDES = {"left": ("left_",), "right": ("right_",)}
+_PANDA_OBJECT_NAMES = ("source", "target")
+
+
+def _matches_prefix(name: str, prefixes: tuple[str, ...]) -> bool:
+    return any(name.startswith(prefix) for prefix in prefixes)
+
+
+def _side_of(name: str, sides: dict[str, tuple[str, ...]]) -> str | None:
+    for side, prefixes in sides.items():
+        if _matches_prefix(name, prefixes):
+            return side
+    return None
+
+
+def _robot_body(name: str, prefixes: tuple[str, ...]) -> bool:
+    return _matches_prefix(name, prefixes)
 
 
 def _geometry_state(model: object):
@@ -146,25 +164,45 @@ def _pair_exclusion(
     return None, is_explicit
 
 
-def _pair_category(first_name: str, second_name: str) -> str | None:
-    if _robot_body(first_name) and _robot_body(second_name):
+def _pair_category(
+    first_name: str,
+    second_name: str,
+    *,
+    robot_prefixes: tuple[str, ...],
+    robot_sides: dict[str, tuple[str, ...]],
+    object_names: tuple[str, ...],
+) -> str | None:
+    first_robot = _robot_body(first_name, robot_prefixes)
+    second_robot = _robot_body(second_name, robot_prefixes)
+    if first_robot and second_robot:
+        first_side = _side_of(first_name, robot_sides)
+        second_side = _side_of(second_name, robot_sides)
         return (
             "robot_self"
-            if first_name.split("_", 1)[0] == second_name.split("_", 1)[0]
+            if first_side is not None and first_side == second_side
             else "robot_cross"
         )
-    if _robot_body(first_name) or _robot_body(second_name):
-        other = second_name if _robot_body(first_name) else first_name
-        return "robot_object" if other in {"source", "target"} else "robot_scene"
+    if first_robot or second_robot:
+        other = second_name if first_robot else first_name
+        return "robot_object" if other in object_names else "robot_scene"
     return None
 
 
-def build_collision_pairs(model: object) -> CollisionPairSet:
+def build_collision_pairs(
+    model: object,
+    *,
+    robot_prefixes: tuple[str, ...] = _PANDA_ROBOT_PREFIXES,
+    robot_sides: dict[str, tuple[str, ...]] | None = None,
+    object_names: tuple[str, ...] = _PANDA_OBJECT_NAMES,
+) -> CollisionPairSet:
     """Enumerate effective robot-involving physical geom pairs natively.
 
-    All native default exclusions are accounted for explicitly; no global
-    "robot collision off" switch is used and no model margin is modified.
+    The robot adapter passes its own body groups.  The defaults are the Panda
+    stack groups used by the existing key-pose check.  All native default
+    exclusions are accounted for explicitly; no global "robot collision off"
+    switch is used and no model margin is modified.
     """
+    sides = dict(robot_sides) if robot_sides is not None else dict(_PANDA_ROBOT_SIDES)
     state = _geometry_state(model)
     body_names = state["body_names"]
     geom_names = state["geom_names"]
@@ -188,13 +226,21 @@ def build_collision_pairs(model: object) -> CollisionPairSet:
             second_body = state["geom_body"][second]
             first_name = body_names[first_body]
             second_name = body_names[second_body]
-            if not _robot_body(first_name) and not _robot_body(second_name):
+            if not _robot_body(first_name, robot_prefixes) and not _robot_body(
+                second_name, robot_prefixes
+            ):
                 exclusions["non_robot_pair"] = exclusions.get("non_robot_pair", 0) + 1
                 continue
             if not movable[first_body] and not movable[second_body]:
                 exclusions["fixed_connection"] = exclusions.get("fixed_connection", 0) + 1
                 continue
-            category = _pair_category(first_name, second_name)
+            category = _pair_category(
+                first_name,
+                second_name,
+                robot_prefixes=robot_prefixes,
+                robot_sides=sides,
+                object_names=object_names,
+            )
             if category is None:  # pragma: no cover - guarded above
                 continue
             pairs.append(
@@ -217,6 +263,82 @@ def build_collision_pairs(model: object) -> CollisionPairSet:
         exclusions=exclusions,
         total_physical_pairs=physical,
         explicit_pair_count=explicit_count,
+    )
+
+
+def build_object_collision_pairs(
+    model: object,
+    object_names: tuple[str, ...],
+    *,
+    excluded_body_names: tuple[str, ...] = (),
+) -> CollisionPairSet:
+    """Enumerate carried-object pairs outside the object and excluded bodies.
+
+    A carried object is checked against every other collidable body: the
+    environment and robot links, except the named bodies that are allowed to
+    hold it.  The exclusion set is explicit because it changes per path
+    segment (left- or right-hand carry).
+    """
+    if not object_names:
+        raise KinematicsError("collision_pairs_empty", "no carried object was configured")
+    state = _geometry_state(model)
+    body_names = state["body_names"]
+    geom_names = state["geom_names"]
+    excluded = frozenset(excluded_body_names)
+    object_ids = set()
+    for name in object_names:
+        try:
+            object_ids.add(int(model.body(name).id))
+        except KeyError as error:
+            raise KinematicsError(
+                "scene_model_missing_name", f"carried object {name!r} is missing"
+            ) from error
+    explicit = _explicit_pairs(model)
+    pairs: list[CollisionPair] = []
+    exclusions: dict[str, int] = {}
+    physical = 0
+    for first in range(model.ngeom):
+        for second in range(first + 1, model.ngeom):
+            first_body = int(state["geom_body"][first])
+            second_body = int(state["geom_body"][second])
+            if first_body in object_ids and second_body in object_ids:
+                exclusions["same_object"] = exclusions.get("same_object", 0) + 1
+                continue
+            if first_body in object_ids:
+                object_body, other_body = first_body, second_body
+            elif second_body in object_ids:
+                object_body, other_body = second_body, first_body
+            else:
+                continue
+            if body_names[other_body] in excluded:
+                exclusions["holding_finger"] = exclusions.get("holding_finger", 0) + 1
+                continue
+            excluded_reason, _ = _pair_exclusion(first, second, state, explicit)
+            if excluded_reason is not None:
+                exclusions[excluded_reason] = exclusions.get(excluded_reason, 0) + 1
+                continue
+            physical += 1
+            pairs.append(
+                CollisionPair(
+                    geom1=first,
+                    geom2=second,
+                    body1=body_names[first_body],
+                    body2=body_names[second_body],
+                    geom1_name=geom_names[first],
+                    geom2_name=geom_names[second],
+                    category="carried_object",
+                )
+            )
+    if not pairs:
+        raise KinematicsError(
+            "collision_pairs_empty", "no carried-object collision pairs found"
+        )
+    return CollisionPairSet(
+        pairs=tuple(pairs),
+        categories={"carried_object": len(pairs)},
+        exclusions=exclusions,
+        total_physical_pairs=physical,
+        explicit_pair_count=0,
     )
 
 

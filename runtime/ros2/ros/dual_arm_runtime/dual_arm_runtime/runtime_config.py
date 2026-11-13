@@ -29,8 +29,10 @@ from dual_arm_runtime.recording_queue import RecordingSettings
 
 MIN_LEASE_DURATION_NS = 100_000_000
 MAX_LEASE_DURATION_NS = 10_000_000_000
-MAX_CHUNKS = 512
-MAX_TASK_BUDGET_NS = 30_000_000_000
+MAX_CHUNKS = 2048
+# A bounded task budget, not a per-task default.  Recipes declare their own
+# value and the coverage check below ties it to chunks, target count and period.
+MAX_TASK_BUDGET_NS = 300_000_000_000
 STREAM_CHUNK_SIZE = 60
 STREAM_PERIOD_NS = 50_000_000
 INT64_MAX = 2**63 - 1
@@ -153,6 +155,8 @@ class TeacherConfig(StrictMappingModel):
     termination_mode: Literal["finite_chunks", "task"] = "task"
     task_stop_margin_s: PositiveFloat = 1.0
     task_sim_budget_ns: Annotated[PositiveInt, Field(le=MAX_TASK_BUDGET_NS)] = 30_000_000_000
+    # Episode metadata identity selected by the scenario recipe.
+    task_id: NonEmptyStr = "teacher"
 
 
 class RuntimeRecipe(StrictMappingModel):
@@ -244,6 +248,14 @@ class RuntimeRecipe(StrictMappingModel):
                         self.follower.target_count * stream.action_period_ns)
                     raise contract_error(f"{name}.max_chunks",
                                          f"task mode needs at least {required} chunks")
+                # The wall watchdog must leave room for RPC, reset and bounded
+                # stop after a full simulation budget at real-time speed.
+                wall_floor_s = stream.task_sim_budget_ns / 1e9 + 20.0
+                if stream.total_wall_deadline_s < wall_floor_s:
+                    raise contract_error(
+                        f"{name}.total_wall_deadline_s",
+                        f"must be at least {wall_floor_s:.1f} s for this task budget",
+                    )
         return self
 
     @property

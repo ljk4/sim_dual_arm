@@ -122,9 +122,67 @@ def test_policy_max_chunks_can_cover_a_120_chunk_task(tmp_path):
     configuration = load_runtime_configuration(path, ROOT)
     assert configuration.recipe.policy.max_chunks == 120
     assert configuration.recipe.policy.total_sim_deadline_ns == 30_000_000_000
-    value["policy"]["max_chunks"] = 513
+    value["policy"]["max_chunks"] = 2049
     path = write(tmp_path / "over", value, absolute=False)
     with pytest.raises(ContractError, match="max_chunks"):
+        load_runtime_configuration(path, ROOT)
+
+
+def test_teacher_task_budget_is_bounded_and_covered_by_chunks(tmp_path):
+    value = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
+    for field in (
+        "robot_profile",
+        "observation_schema",
+        "action_schema",
+        "control_constraints",
+        "follower_config",
+    ):
+        value[field] = str((CONFIG.parent / value[field]).resolve())
+    value.pop("policy")
+    value["action_source"] = "teacher"
+    value["teacher_api"] = "panda_stack_api_msgs.teacher_chunk.v1"
+    value["teacher"] = {
+        "chunk_size": 60,
+        "action_period_ns": 50_000_000,
+        "initial_lead_ns": 250_000_000,
+        "max_chunks": 400,
+        "total_sim_deadline_ns": 180_000_000_000,
+        "total_wall_deadline_s": 240.0,
+        "prepare_timeout_s": 12.0,
+        "start_timeout_s": 5.0,
+        "chunk_deadline_s": 2.0,
+        "poll_interval_s": 0.02,
+        "termination_mode": "task",
+        "task_stop_margin_s": 1.0,
+        "task_sim_budget_ns": 180_000_000_000,
+        "task_id": "handover",
+    }
+    path = write(tmp_path / "teacher", value, absolute=False)
+    configuration = load_runtime_configuration(path, ROOT)
+    assert configuration.recipe.teacher.task_sim_budget_ns == 180_000_000_000
+    assert configuration.recipe.teacher.max_chunks == 400
+    assert "panda_stack_api_msgs.teacher_chunk.v1" in (
+        configuration.required_capabilities
+    )
+
+    # 180 s at a ten-point, 50 ms window needs 360 chunks.
+    value["teacher"]["max_chunks"] = 359
+    path = write(tmp_path / "short", value, absolute=False)
+    with pytest.raises(ContractError, match="at least 360 chunks"):
+        load_runtime_configuration(path, ROOT)
+
+    # The wall watchdog must cover the simulation budget plus cleanup.
+    value["teacher"]["max_chunks"] = 400
+    value["teacher"]["total_wall_deadline_s"] = 190.0
+    path = write(tmp_path / "wall", value, absolute=False)
+    with pytest.raises(ContractError, match="total_wall_deadline_s"):
+        load_runtime_configuration(path, ROOT)
+
+    # The bounded implementation limit still caps longer requests.
+    value["teacher"]["total_wall_deadline_s"] = 400.0
+    value["teacher"]["task_sim_budget_ns"] = 301_000_000_000
+    path = write(tmp_path / "unbounded", value, absolute=False)
+    with pytest.raises(ContractError, match="task_sim_budget_ns"):
         load_runtime_configuration(path, ROOT)
 
 

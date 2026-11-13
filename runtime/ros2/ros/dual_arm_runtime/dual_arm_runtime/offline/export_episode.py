@@ -366,6 +366,7 @@ def _build(
     runtime_events: list[dict[str, Any]],
     max_labels: int,
     profile: RobotProfile,
+    phases: list[str] | None = None,
 ) -> tuple[
     list[dict[str, Any]],
     list[RawPrediction],
@@ -391,6 +392,7 @@ def _build(
     summary["phase_observations"] = phase_observations(
         runtime_events,
         {item.observation_id: item.sim_time_ns for item in observations},
+        phases,
     )
     return rows, list(raw_by_chunk.values()), summary, times, frame_map
 
@@ -444,8 +446,8 @@ def _quality(
     summary: dict[str, Any],
     times: dict[int, int],
     recipe: dict[str, Any],
+    campaign: dict[str, Any],
 ) -> dict[str, Any]:
-    campaign = yaml.safe_load(args.campaign_config.read_text(encoding="utf-8"))
     backend_events = parse_log_events(
         list(args.backend_log) or sorted(episode.rglob("backend*.log*"))
     )
@@ -560,7 +562,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--shared-root", type=Path)
     parser.add_argument("--runtime-log", type=Path, action="append", default=[])
     parser.add_argument("--backend-log", type=Path, action="append", default=[])
-    parser.add_argument("--max-labels", type=int, default=700)
+    parser.add_argument(
+        "--max-labels",
+        type=int,
+        default=None,
+        help="override the campaign export.max_labels bound",
+    )
     parser.add_argument("--no-previews", action="store_true", help="skip preview PNGs and GIFs")
     args = parser.parse_args(argv)
     from dual_arm_runtime.offline.scenario_selection import campaign_config_path
@@ -579,6 +586,14 @@ def main(argv: list[str] | None = None) -> int:
     except CampaignError as error:
         print(json.dumps({"error": str(error)}), file=sys.stderr)
         return 2
+    campaign = yaml.safe_load(args.campaign_config.read_text(encoding="utf-8"))
+    export = campaign.get("export") if isinstance(campaign.get("export"), dict) else {}
+    max_labels = args.max_labels
+    if max_labels is None:
+        max_labels = int(export.get("max_labels", 700))
+    quality_rules = campaign.get("quality") if isinstance(campaign.get("quality"), dict) else {}
+    phases = quality_rules.get("phases")
+    phases = [str(value) for value in phases] if isinstance(phases, list) else None
     episode = args.episode_dir.resolve()
     out = args.out.resolve()
     manifest, configuration, profile, recipe, root, context = _load_episode(episode)
@@ -588,8 +603,9 @@ def main(argv: list[str] | None = None) -> int:
         metadata,
         camera_names,
         _runtime_events(args, episode, context),
-        args.max_labels,
+        max_labels,
         profile,
+        phases,
     )
     rgb_index = write_images(
         episode / "recording",
@@ -603,7 +619,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     for index, row in enumerate(rows):
         row["rgb"] = rgb_index.get(index, {})
-    quality = _quality(args, episode, context, summary, times, recipe)
+    quality = _quality(args, episode, context, summary, times, recipe, campaign)
     _trajectory_flags(rows, camera_names, quality)
     _write_documents(
         out,
@@ -618,7 +634,15 @@ def main(argv: list[str] | None = None) -> int:
         summary,
         quality,
     )
-    print(json.dumps({"labels": summary["labels"], "quality_qualified": quality["qualified"]}))
+    print(
+        json.dumps(
+            {
+                "labels": summary["labels"],
+                "quality_qualified": quality["qualified"],
+                "max_labels": max_labels,
+            }
+        )
+    )
     return 0 if rows else 1
 
 

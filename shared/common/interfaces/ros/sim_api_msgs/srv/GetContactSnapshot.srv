@@ -1,0 +1,5 @@
+robot_api_msgs/RunContext context
+---
+bool success
+string reason
+sim_api_msgs/ContactSnapshot snapshot

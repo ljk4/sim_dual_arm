@@ -59,7 +59,12 @@ class TargetSource(Protocol):
         ...
 
     def predict(
-        self, observation: object, chunk_index: int, request_id: str
+        self,
+        observation: object,
+        chunk_index: int,
+        request_id: str,
+        *,
+        handoff_time_ns: int = 0,
     ) -> Prediction:
         """Return exactly ``chunk_size`` raw points for this exact capture."""
         ...

@@ -1,0 +1,64 @@
+# Scenario binding v1 for the fixed-base Marvin handover task.
+#
+# This file records selection only.  Numeric recipes stay in the referenced
+# files; profiles are the public robot/observation/action contracts.  Models
+# are deliberately not pinned here: collection must validate without a model,
+# while inference preparation supplies a real verified bundle explicitly.
+# Paths resolve against this file's directory, never the caller's cwd.
+schema_version: 1
+scenario_id: marvin_handover
+description: >-
+  Dual-Marvin airborne handover: MuJoCo simulation, ROS 2 program teacher and
+  LeRobot ACT learning recipes.
+
+backend:
+  kind: simulation
+  implementation: mujoco
+  task_type: handover
+
+runtime:
+  implementation: ros2
+
+learning:
+  implementation: lerobot
+  adapter: act
+
+profiles:
+  robot: profiles/robots/marvin_handover_v1/profile.json
+  observation: profiles/observations/marvin_rgb_joint_v1.json
+  action: profiles/actions/marvin_joint_position_v1.json
+
+recipes:
+  simulation_teacher: configs/simulation/backend/backend_marvin_teacher.yaml
+  simulation_policy: configs/simulation/backend/backend_marvin_policy.yaml
+  runtime_teacher: configs/runtime/teacher_collect.yaml
+  runtime_policy: configs/runtime/policy_eval.yaml
+  campaign: configs/runtime/experiments/handover_campaign.yaml
+  dataset: configs/learning/act_dataset.yaml
+  training: configs/learning/act_training.yaml
+  policy_service: configs/learning/policy.yaml
+
+interfaces:
+  # Common ROS packages.  robot_api_msgs is the core contract; sim_api_msgs is
+  # the optional simulation task lifecycle.
+  common_ros:
+    - robot_api_msgs
+    - sim_api_msgs
+  extension_ros:
+    - extensions/ros/marvin_handover_api_msgs
+  # Explicit Teacher wire capability.  The extension package advertises the
+  # same identifier; a backend advertising a different task's Teacher is
+  # rejected by the episode capability check.
+  teacher_api: marvin_handover_api_msgs.teacher_chunk.v1
+  policy_api: bimanual.policy.v1
+
+# Real diagnostic bundle produced from this task's 128-step smoke training.
+models:
+  bundle: /data/learning/marvin_handover_diag/bundles/p05-smoke-128
+
+source_roots:
+  - ../..
+artifact_roots:
+  - /data
+
+references: []

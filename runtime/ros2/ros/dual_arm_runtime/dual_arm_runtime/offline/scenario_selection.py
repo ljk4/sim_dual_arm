@@ -282,6 +282,54 @@ def _check_teacher_templates(
         )
 
 
+def _check_teacher_budget(
+    runtime_document: dict[str, Any],
+    backend_document: dict[str, Any],
+    backend_path: Path,
+) -> None:
+    """Runtime stream clock and budget must equal the simulation task judge."""
+    teacher = runtime_document.get("teacher")
+    robot = backend_document.get("robot")
+    if not isinstance(teacher, dict) or "task_sim_budget_ns" not in teacher:
+        # Minimal synthetic recipes are validated by RuntimeRecipe at use.
+        return
+    if not isinstance(robot, dict):
+        raise CampaignError("teacher recipes have no robot section")
+    declared_task = robot.get("task")
+    if not isinstance(declared_task, str):
+        raise CampaignError(
+            f"simulation teacher recipe must declare robot.task ({backend_path})"
+        )
+    task_path = (backend_path.parent / declared_task).resolve()
+    if not task_path.is_file():
+        raise CampaignError(f"simulation task recipe is missing: {task_path}")
+    task_document = _load_yaml(task_path, "simulation task recipe")
+    success = task_document.get("success")
+    if not isinstance(success, dict) or "max_task_sim_duration_s" not in success:
+        return
+    task_teacher = task_document.get("teacher")
+    if not isinstance(task_teacher, dict):
+        raise CampaignError(f"simulation task recipe is incomplete: {task_path}")
+    try:
+        budget_ns = round(float(success["max_task_sim_duration_s"]) * 1e9)
+        chunk_size = int(task_teacher["chunk_size"])
+        period_ns = int(task_teacher["action_period_ns"])
+        runtime_budget_ns = int(teacher["task_sim_budget_ns"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise CampaignError(f"teacher budget fields are not numeric: {error}") from error
+    if runtime_budget_ns != budget_ns:
+        raise CampaignError(
+            f"runtime teacher.task_sim_budget_ns {runtime_budget_ns} differs from "
+            f"simulation success.max_task_sim_duration_s ({budget_ns})"
+        )
+    if int(teacher.get("chunk_size", -1)) != chunk_size:
+        raise CampaignError("runtime teacher.chunk_size differs from the simulation task")
+    if int(teacher.get("action_period_ns", -1)) != period_ns:
+        raise CampaignError(
+            "runtime teacher.action_period_ns differs from the simulation task"
+        )
+
+
 def _profile_records(resolved: ResolvedBinding) -> dict[str, dict[str, Any]]:
     records: dict[str, dict[str, Any]] = {}
     for name in PROFILE_FIELDS:
@@ -343,6 +391,7 @@ def select_collection(
         require_parallel=require_parallel,
         expected_teacher_api=teacher_capability["teacher"],
     )
+    _check_teacher_budget(runtime_document, backend_document, backend_path)
     campaign_path = Path(recipes["campaign"]["path"])
     load_campaign(campaign_path)
 

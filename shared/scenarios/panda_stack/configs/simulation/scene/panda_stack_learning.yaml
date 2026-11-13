@@ -1,4 +1,8 @@
 # 学习场景；右腕相机视场角 68°，匹配 panda_stack_learning_v1 档案。
+robot:
+  # The simulation resolves the fixed-version model from its own assets/ root.
+  assembly: panda
+
 physics:
   timestep: 0.002
   gravity: [0.0, 0.0, -9.81]

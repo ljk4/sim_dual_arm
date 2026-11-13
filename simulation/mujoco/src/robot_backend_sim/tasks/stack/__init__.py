@@ -84,6 +84,7 @@ class StackTaskPlugin:
     """The stack task's explicit plugin implementation."""
 
     task_type = "stack"
+    teacher_capability = "panda_stack_api_msgs.teacher_chunk.v1"
 
     def __init__(self, config: StackTaskConfig, *, task_mode: str | None) -> None:
         self.config = config
@@ -401,7 +402,7 @@ class StackTaskPlugin:
     def chunk_view(
         self, *, context: RunContext, task_epoch: int, capture_seq: int,
         observation_time_ns: int, latest_capture_seq: int, capture_times: object,
-        current_sim_time_ns: int,
+        current_sim_time_ns: int, handoff_time_ns: int = 0,
     ) -> TaskChunkView:
         runtime = self._require_runtime()
         state = runtime.state

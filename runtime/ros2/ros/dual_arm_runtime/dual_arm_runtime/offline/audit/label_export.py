@@ -103,6 +103,7 @@ def _label_row(
         "observation_period_ns": period_ns,
         "chunk_seq": block.chunk_seq,
         "command_id": block.command_id,
+        "reference_start_sim_time_ns": block.start_sim_time_ns,
         "started_sim_time_ns": block.started_sim_time_ns,
         "block_end_sim_time_ns": block.effective_end_ns(),
         "applied_positions": list(applied.applied_positions),

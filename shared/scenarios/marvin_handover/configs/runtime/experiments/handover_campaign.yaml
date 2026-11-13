@@ -1,0 +1,145 @@
+# Marvin 交接诊断采集预算、种子与路径（P04 规模，P03 先建立引用）。
+#
+# pilot 与 formal 使用本方案独立种子与台账，不复用 Panda 数据根。
+schema_version: 1
+
+# This six-episode campaign validates the data chain; it is not formal
+# training evidence.  P05 carries the same flag into the dataset recipe.
+diagnostic: true
+formal_split_description: >-
+  first 4 qualified formal attempts train and the last 2 validate
+  (zero-based qualified positions 4 and 5); diagnostic data, not formal
+  training evidence
+
+budget:
+  # One pilot qualifies the teacher/export chain; at most three attempts and
+  # three distinct teacher seeds.  No ACT attempt is reserved in this stage.
+  pilot_seed_first: 3100
+  pilot_seed_last: 3109
+  pilot_max_attempts: 3
+  pilot_act_reserved_attempts: 0
+  pilot_teacher_seed_last: 3102
+  pilot_label_replay_max: 0
+
+  # Six qualified demonstrations, at most eighteen attempts.  The first four
+  # qualified episodes train and the last two validate (zero-based 4 and 5).
+  formal_seed_first: 4100
+  formal_seed_last: 4199
+  formal_max_attempts: 18
+  formal_target_qualified: 6
+  formal_validation_qualified_indices: [4, 5]
+
+  # Model smoke runs use the shared test budget, never pilot or formal seeds.
+  test_seed_first: 5100
+  test_seed_last: 5119
+  test_max_attempts: 10
+  evaluation_max_attempts: 3
+
+  max_raw_bytes: 10737418240
+  reserve_bytes: 2147483648
+  estimated_attempt_bytes: 536870912
+  min_free_bytes: 5368709120
+
+paths:
+  attempts_root: var/campaigns/marvin_handover_v1/attempts
+  ledger: var/campaigns/marvin_handover_v1/attempts.jsonl
+  lock: var/campaigns/marvin_handover_v1/.ledger.lock
+  run_lock: var/campaigns/marvin_handover_v1/.run.lock
+  required_paths:
+    - shared/scenarios/marvin_handover/configs/runtime/teacher_collect.yaml
+    - shared/scenarios/marvin_handover/configs/simulation/backend/backend_marvin_teacher.yaml
+    - shared/scenarios/marvin_handover/configs/simulation/scene/marvin_handover.yaml
+    - shared/scenarios/marvin_handover/configs/simulation/scene/marvin_handover_task.yaml
+    - shared/scenarios/marvin_handover/extensions/ros/marvin_handover_api_msgs/srv/GetTeacherChunk.srv
+    - shared/scenarios/marvin_handover/extensions/ros/marvin_handover_api_msgs/msg/TeacherCapability.msg
+    - shared/scenarios/marvin_handover/profiles/robots/marvin_handover_v1/profile.json
+    - shared/scenarios/marvin_handover/profiles/observations/marvin_rgb_joint_v1.json
+    - shared/scenarios/marvin_handover/profiles/actions/marvin_joint_position_v1.json
+    - shared/scenarios/marvin_handover/profiles/control/marvin_control_v1.yaml
+    - shared/scenarios/marvin_handover/profiles/control/marvin_follower_v1.yaml
+    - runtime/ros2/docker/docker-compose.yml
+    - simulation/mujoco/docker/docker-compose.yml
+  sdk_marker: build/ros-dev/contracts.json
+
+launch:
+  # The supervisor supplies the real two-container command.
+  command: []
+  cleanup_command: []
+  timeout_s: 600.0
+  # runtime closes control, recording and the log inside this bound.
+  stop_grace_s: 45.0
+
+quality:
+  # Segmentation objects come from the handover task plugin: block, table and
+  # the real box bottom.  Intervals are the accepted teacher-chunk phases of
+  # this scenario; a missing required phase fails the export.
+  sidecar: quality.json
+  max_blackout_s: 0.35
+  min_qualified_ratio: 0.85
+  phases: &handover_phases
+    [left_approach, left_grasp, left_lift, handover_approach, dual_hold,
+     left_release, left_retreat, right_transport, right_place, right_release,
+     stable]
+  # Left close, right catch, left release and right release must each have a
+  # time-correlated observation; absent evidence is a failed export.
+  required_phases: [left_grasp, dual_hold, left_release, right_release]
+  # Pixel floors and tolerances were set from the first pilot's real
+  # segmentation counts (per-rule minimum, ratio and longest blackout are kept
+  # in its quality.json).  Required phases measured ratio 1.0 with block
+  # minima of 284 (global), 1260 (left wrist) and 1682 (right wrist); the
+  # floors below keep a large margin.  The left wrist only enters the view
+  # during left_approach and the right wrist only during the second half of
+  # handover_approach, so those intervals are recorded, not gated.
+  rules:
+    # Left grasp: global context plus the left wrist view of the block.
+    - camera: global
+      object: block
+      phases: &all_handover_phases
+        [left_approach, left_grasp, left_lift, handover_approach, dual_hold,
+         left_release, left_retreat, right_transport, right_place, right_release,
+         stable]
+      mode: required
+      min_pixels: 128
+    - camera: left_wrist
+      object: block
+      phases: [left_grasp, left_lift, handover_approach, dual_hold, left_release, left_retreat]
+      mode: required
+      min_pixels: 256
+    - camera: left_wrist
+      object: block
+      phases: [left_approach, right_transport, right_place, right_release, stable]
+      mode: record_only
+      min_pixels: 16
+    # Airborne handover: both wrist views hold the block once the right wrist
+    # has reached the grasp region.
+    - camera: right_wrist
+      object: block
+      phases: [dual_hold, left_release, left_retreat, right_transport, right_place, right_release, stable]
+      mode: required
+      min_pixels: 256
+    - camera: right_wrist
+      object: block
+      phases: [handover_approach]
+      mode: record_only
+      min_pixels: 64
+    # Right transport and place: the box opening stays visible.
+    - camera: global
+      object: box
+      phases: [right_transport, right_place, right_release, stable]
+      mode: required
+      min_pixels: 128
+    - camera: right_wrist
+      object: box
+      phases: [right_place, right_release, stable]
+      mode: record_only
+      min_pixels: 256
+    # The table is context, not a per-phase requirement for the left wrist.
+    - camera: global
+      object: table
+      phases: *all_handover_phases
+      mode: record_only
+      min_pixels: 4096
+
+export:
+  # 57.8 s of exact captures at 20 Hz (1155 states); bounded with margin.
+  max_labels: 1400

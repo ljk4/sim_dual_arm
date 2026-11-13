@@ -1,7 +1,7 @@
 """Prepare one bounded-target follower chunk with exactly one Ruckig call.
 
 This module is a math/config adapter, not a controller.  It reuses the accepted
-``ActionWindow``, ``ChunkAnchor``, ``ReferencePlan`` and ``PandaControlConfig``
+``ActionWindow``, ``ChunkAnchor``, ``ReferencePlan`` and ``ControlConfig``
 inputs, asks Ruckig Community 0.15.3 once for a second-order time-optimal
 trajectory, exports the public phase coefficients, and returns a distinct
 :class:`PreparedFollowerPlan`.  It never calls the strict point-by-point
@@ -24,8 +24,8 @@ from robot_trajectory.follower_math import (
 )
 from robot_trajectory.spline_math import validate_reference_inputs
 
-from robot_backend_sim.config.follower_config import PandaFollowerConfig
-from robot_backend_sim.config.motion_config import PandaControlConfig
+from robot_backend_sim.config.follower_config import FollowerConfig
+from robot_backend_sim.config.motion_config import ControlConfig
 from robot_backend_sim.motion.ruckig_export import export_ruckig_reference
 
 __all__ = ["prepare_follower_plan"]
@@ -144,10 +144,10 @@ def _validate_types(
         raise _invalid("window", "must be an ActionWindow")
     if not isinstance(profile, RobotProfile):
         raise _invalid("profile", "must be a RobotProfile")
-    if not isinstance(control_config, PandaControlConfig):
-        raise _invalid("control_config", "must be a PandaControlConfig")
-    if not isinstance(follower_config, PandaFollowerConfig):
-        raise _invalid("follower_config", "must be a PandaFollowerConfig")
+    if not isinstance(control_config, ControlConfig):
+        raise _invalid("control_config", "must be a ControlConfig")
+    if not isinstance(follower_config, FollowerConfig):
+        raise _invalid("follower_config", "must be a FollowerConfig")
     if not isinstance(is_final, bool):
         raise _invalid("is_final", "must be a bool")
     if duration_grid_ns is None:
@@ -164,8 +164,8 @@ def _validate_identity(
     anchor: ChunkAnchor,
     window: ActionWindow,
     profile: RobotProfile,
-    control_config: PandaControlConfig,
-    follower_config: PandaFollowerConfig,
+    control_config: ControlConfig,
+    follower_config: FollowerConfig,
 ) -> None:
     if tuple(profile.joint_names) != tuple(control_config.joint_names):
         raise ContractError(
@@ -192,7 +192,7 @@ def _validate_identity(
 
 def _validate_window(
     window: ActionWindow,
-    follower_config: PandaFollowerConfig,
+    follower_config: FollowerConfig,
     grid_ns: int | None,
     *,
     is_final: bool,
@@ -216,7 +216,7 @@ def _reference_inputs(
     anchor: ChunkAnchor,
     window: ActionWindow,
     profile: RobotProfile,
-    control_config: PandaControlConfig,
+    control_config: ControlConfig,
     *,
     is_final: bool,
 ):
@@ -281,7 +281,7 @@ def _calculate(
 def _truncation(
     profile_duration_ns: int,
     end_time_ns: int,
-    follower_config: PandaFollowerConfig,
+    follower_config: FollowerConfig,
     grid_ns: int | None,
     *,
     is_final: bool,
@@ -334,8 +334,8 @@ def prepare_follower_plan(
     anchor: ChunkAnchor,
     window: ActionWindow,
     profile: RobotProfile,
-    control_config: PandaControlConfig,
-    follower_config: PandaFollowerConfig,
+    control_config: ControlConfig,
+    follower_config: FollowerConfig,
     *,
     is_final: bool,
     duration_grid_ns: int | None = None,

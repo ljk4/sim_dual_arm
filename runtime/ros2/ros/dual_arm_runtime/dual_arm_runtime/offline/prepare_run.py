@@ -419,6 +419,54 @@ def _resolve_bound_paths(
         document[field] = _container_path(source, project_root)
 
 
+def _check_teacher_budget(
+    document: dict[str, Any], resolved: ResolvedBinding
+) -> None:
+    """The runtime stream clock and budget must match the simulation task judge."""
+    teacher = document.get("teacher")
+    if not isinstance(teacher, dict) or "task_sim_budget_ns" not in teacher:
+        # A minimal direct/synthetic recipe is validated by RuntimeRecipe.
+        return
+    simulation_reference = resolved.references.get("recipes.simulation_teacher")
+    if simulation_reference is None:
+        raise PrepareError("scenario declares no simulation_teacher recipe for teacher preparation")
+    backend_path = simulation_reference.path
+    backend_document = _load_yaml(backend_path, "simulation teacher recipe")
+    robot = backend_document.get("robot")
+    if not isinstance(robot, dict) or not isinstance(robot.get("task"), str):
+        raise PrepareError(
+            f"simulation teacher recipe has no robot.task ({backend_path})"
+        )
+    task_path = (backend_path.parent / robot["task"]).resolve()
+    if not task_path.is_file():
+        raise PrepareError(f"simulation task recipe is missing: {task_path}")
+    task_document = _load_yaml(task_path, "simulation task recipe")
+    success = task_document.get("success")
+    task_teacher = task_document.get("teacher")
+    if not isinstance(success, dict) or "max_task_sim_duration_s" not in success:
+        return
+    if not isinstance(task_teacher, dict):
+        raise PrepareError(f"simulation task recipe is incomplete: {task_path}")
+    try:
+        task_budget_ns = round(float(success["max_task_sim_duration_s"]) * 1e9)
+        task_chunk_size = int(task_teacher["chunk_size"])
+        task_period_ns = int(task_teacher["action_period_ns"])
+        runtime_budget_ns = int(teacher["task_sim_budget_ns"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise PrepareError(f"teacher budget fields are not numeric: {error}") from error
+    if runtime_budget_ns != task_budget_ns:
+        raise PrepareError(
+            f"runtime teacher.task_sim_budget_ns {runtime_budget_ns} differs from "
+            f"simulation success.max_task_sim_duration_s ({task_budget_ns})"
+        )
+    if int(teacher.get("chunk_size", -1)) != task_chunk_size:
+        raise PrepareError("runtime teacher.chunk_size differs from the simulation task")
+    if int(teacher.get("action_period_ns", -1)) != task_period_ns:
+        raise PrepareError(
+            "runtime teacher.action_period_ns differs from the simulation task"
+        )
+
+
 def _run_manifest(
     *,
     run_id: str,
@@ -534,6 +582,7 @@ def prepare_run(
                     f"binding {selected_api!r}"
                 )
             document["teacher_api"] = selected_api
+            _check_teacher_budget(document, resolved_scenario)
         elif not isinstance(declared_api, str) or not declared_api:
             raise PrepareError("direct teacher preparation requires recipe teacher_api")
     if resolved_scenario is not None:

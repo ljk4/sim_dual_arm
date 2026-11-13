@@ -1,0 +1,42 @@
+# Marvin inference following budget measured from the diagnostic ACT model.
+#
+# The 128-step smoke policy predicts a near-constant chunk around the training
+# action mean, so its first target is far from the reset pose.  The Teacher
+# profile's 0.05 rad budget measures a reference against a 50 ms straight line
+# to that first target and rejects the chunk.  This inference-only profile
+# covers the measured target-to-state distance of the exact first observation
+# (right side is already inside the old budget; the left arm is not) with a
+# 1.1 margin.  Joint limits, velocity/acceleration limits, braking feasibility
+# and the follower plan itself are unchanged.  Teacher collection keeps
+# marvin_follower_v1.yaml.
+joint_names:
+  - left_joint1
+  - left_joint2
+  - left_joint3
+  - left_joint4
+  - left_joint5
+  - left_joint6
+  - left_joint7
+  - left_gripper_width
+  - right_joint1
+  - right_joint2
+  - right_joint3
+  - right_joint4
+  - right_joint5
+  - right_joint6
+  - right_joint7
+  - right_gripper_width
+
+# Twenty selected predictions per window (1.0 s at 50 ms per point).
+target_count: 20
+
+# Measured maxima: left [0.2675, 1.1691, 0.4657, 0.8825, 0.4904, 0.3937,
+# 1.3685], right [0.0057, 0.0218, 0.0224, 0.0188, 0.0843, 0.0056, 0.0118],
+# grippers [0.0030, 0.0031].  Values below are those maxima with margin.
+max_target_deviations:
+  [0.30, 1.30, 0.52, 0.98, 0.55, 0.44, 1.51, 0.01,
+   0.05, 0.05, 0.05, 0.05, 0.10, 0.05, 0.05, 0.01]
+
+# A final reference may extend past the selected window to reach the target at
+# zero velocity, but never beyond three seconds in total.
+max_terminal_tail_duration_s: 3.0

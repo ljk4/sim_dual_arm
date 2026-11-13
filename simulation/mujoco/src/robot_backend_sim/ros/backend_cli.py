@@ -23,6 +23,7 @@ from rclpy.signals import SignalHandlerOptions
 from robot_run_logging import EventLogger, LogFailure, LogSettings
 
 from robot_backend_sim.config.backend_config import load_backend_config
+from robot_backend_sim.config.scene_loader import load_scene_config_for
 from robot_backend_sim.physics import assets
 from robot_backend_sim.ros.node import BackendNode
 from robot_backend_sim.runtime.diagnostics import code_provenance
@@ -141,6 +142,15 @@ def _prepare_run(parsed: argparse.Namespace):
     return config, run_id, run_dir, logger
 
 
+def _robot_metadata(config) -> dict[str, str]:
+    scene_config = load_scene_config_for(config.scene_path)
+    assembly = scene_config.robot.assembly
+    return {
+        "robot_assembly": assembly,
+        "robot_model": str(assets.robot_model_path(assembly)),
+    }
+
+
 def _write_run_document(run_dir: Path, config, run_id: str) -> None:
     _write_json(
         run_dir / "run.json",
@@ -148,7 +158,7 @@ def _write_run_document(run_dir: Path, config, run_id: str) -> None:
             "run_id": run_id,
             "created_utc": _now_utc(),
             "config": str(config.source),
-            "panda_model": str(assets.model_paths()[1]),
+            **_robot_metadata(config),
             "effective_configuration": config.canonical_dict(),
             "configuration_sources": _configuration_sources(config),
             "code_provenance": code_provenance(),
@@ -188,7 +198,7 @@ def _emit_backend_start(logger, config, run_id: str) -> None:
             "follower": None if config.follower_path is None else config.follower_path.name,
             "run_id": run_id,
             "config": str(config.source),
-            "panda_model": str(assets.model_paths()[1]),
+            **_robot_metadata(config),
         },
     )
 

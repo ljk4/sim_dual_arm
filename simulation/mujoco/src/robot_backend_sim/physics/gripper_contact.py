@@ -12,26 +12,24 @@ from dataclasses import dataclass
 
 from robot_trajectory.sampling import sample_reference_interval
 
-from robot_backend_sim.config.motion_config import PandaControlConfig
+from robot_backend_sim.config.motion_config import ControlConfig
 from robot_backend_sim.physics.contacts import (
     GripperCompletion,
     GripperContactEvidence,
     empty_contact_evidence,
     evaluate_gripper_completion,
     measure_contact_evidence,
-    validated_panda_completions,
+    validated_gripper_completions,
 )
-from robot_backend_sim.physics.panda_io import Measurement
-from robot_backend_sim.physics.scene import Scene
+from robot_backend_sim.physics.robot_io import Measurement, gripper_indices
+from robot_backend_sim.physics.scene_container import CompiledScene
 
 __all__ = ["REFERENCE_VELOCITY_ATOL_M_S", "ContactUnloader", "GripperContactTracker"]
 
 # A reference velocity this close to zero is numerical standstill, not a
 # measured opening command.
 REFERENCE_VELOCITY_ATOL_M_S = 1e-9
-_GRIPPER_INDEX = {"left": 7, "right": 15}
 _SIDES = ("left", "right")
-_ARM_INDICES = tuple(index for index in range(16) if index not in (7, 15))
 
 
 @dataclass(slots=True)
@@ -91,15 +89,22 @@ class GripperContactTracker:
 
     def __init__(
         self,
-        scene: Scene,
+        scene: CompiledScene,
         binding: object,
-        config: PandaControlConfig,
+        config: ControlConfig,
+        joint_names: tuple[str, ...],
         *,
         contact_unload_timeout_ns: int = 0,
     ) -> None:
         self._scene = scene
         self._binding = binding
         self._config = config
+        self._gripper_index = gripper_indices(joint_names)
+        self._arm_indices = tuple(
+            index
+            for index in range(len(joint_names))
+            if index not in self._gripper_index.values()
+        )
         self._contact_unload_timeout_ns = int(contact_unload_timeout_ns)
         self._unloaders = {side: ContactUnloader() for side in _SIDES}
         self._unloading_axes: frozenset[int] = frozenset()
@@ -133,7 +138,7 @@ class GripperContactTracker:
         initial: float,
         final: float,
     ) -> GripperCompletion:
-        index = _GRIPPER_INDEX[side]
+        index = self._gripper_index[side]
         contact = next(item for item in contacts if item.side == side)
         return evaluate_gripper_completion(
             side=side,
@@ -156,13 +161,13 @@ class GripperContactTracker:
         initial_positions: tuple[float, ...],
         final_positions: tuple[float, ...],
     ) -> tuple[GripperCompletion, ...]:
-        return validated_panda_completions(tuple(
+        return validated_gripper_completions(tuple(
             self._completion(
                 side,
                 measurement,
                 contacts,
-                initial_positions[_GRIPPER_INDEX[side]],
-                final_positions[_GRIPPER_INDEX[side]],
+                initial_positions[self._gripper_index[side]],
+                final_positions[self._gripper_index[side]],
             )
             for side in _SIDES
         ))
@@ -189,7 +194,7 @@ class GripperContactTracker:
             abs(measurement.positions[index] - reference.positions[index])  # type: ignore[attr-defined]
             <= self._config.position_tolerances[index]
             and abs(measurement.velocities[index]) <= self._config.velocity_tolerances[index]
-            for index in _ARM_INDICES
+            for index in self._arm_indices
         )
 
     def update_normal_stability(
@@ -228,13 +233,13 @@ class GripperContactTracker:
         contacts: tuple[GripperContactEvidence, ...],
         hold_positions: tuple[float, ...],
     ) -> tuple[GripperCompletion, ...]:
-        return validated_panda_completions(tuple(
+        return validated_gripper_completions(tuple(
             self._completion(
                 side,
                 measurement,
                 contacts,
-                hold_positions[_GRIPPER_INDEX[side]],
-                hold_positions[_GRIPPER_INDEX[side]],
+                hold_positions[self._gripper_index[side]],
+                hold_positions[self._gripper_index[side]],
             )
             for side in _SIDES
         ))
@@ -255,7 +260,7 @@ class GripperContactTracker:
         constrained: set[int] = set()
         unloading: set[int] = set()
         for side in _SIDES:
-            index = _GRIPPER_INDEX[side]
+            index = self._gripper_index[side]
             target = reference.positions[index]  # type: ignore[attr-defined]
             contact = next(item for item in contacts if item.side == side)
             completion = evaluate_gripper_completion(

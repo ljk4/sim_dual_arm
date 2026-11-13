@@ -69,6 +69,9 @@ quality:
   sidecar: quality.json
   max_blackout_s: 0.35
   min_qualified_ratio: 0.85
+  # Phase order of the stack teacher.  Export derives intervals from the
+  # accepted-chunk phase events; no task phase list is hard-coded in the tool.
+  phases: [pregrasp, grasp, close, lift, transport, lower, open, retreat, stable]
   rules:
     - camera: right_wrist
       object: source
@@ -120,3 +123,7 @@ quality:
       phases: [pregrasp, grasp, close, lift, transport, lower, open, retreat, stable]
       mode: record_only
       min_pixels: 64
+
+export:
+  # Bounded label count for one stack episode (30 s at 20 Hz plus start-up).
+  max_labels: 700

@@ -21,9 +21,50 @@ def read_json(path: Path) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
+def _nested_episode_file(directory: Path, name: str) -> Path | None:
+    """Find the one episode artefact an interrupted launch still produced.
+
+    A launch process can die before copying its episode manifest to the attempt
+    root (for example when the whole process group is signalled).  The recorded
+    episode itself remains under ``stack/<run>/raw/<episode>/``; this lookup
+    lets the terminal summary read the real outcome instead of empty fields.
+    """
+    candidates = sorted(
+        path
+        for path in directory.glob(f"stack/*/raw/*/{name}")
+        if path.is_file()
+    )
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def episode_manifest(directory: Path) -> dict[str, Any] | None:
+    """Read the attempt-root or recorded-episode manifest, if exactly one exists."""
+    path = directory / "manifest.json"
+    if not path.is_file():
+        path = _nested_episode_file(directory, "manifest.json")
+    return None if path is None else read_json(path)
+
+
+def episode_task_result(directory: Path) -> dict[str, Any] | None:
+    path = directory / "task_result.json"
+    if not path.is_file():
+        path = _nested_episode_file(directory, "task_result.json")
+    return None if path is None else read_json(path)
+
+
+class LaunchInterrupted(KeyboardInterrupt):
+    """An interrupted launch that still carries its measured stop outcome."""
+
+    def __init__(self, code: int, wall_s: float, failure: str) -> None:
+        self.code = code
+        self.wall_s = wall_s
+        self.failure = failure
+        super().__init__(failure)
+
+
 def classify(directory: Path, quality_sidecar: str) -> dict[str, Any]:
-    manifest = read_json(directory / "manifest.json")
-    task = read_json(directory / "task_result.json")
+    manifest = episode_manifest(directory)
+    task = episode_task_result(directory)
     quality = read_json(directory / quality_sidecar)
     recording_complete = bool(
         manifest
@@ -72,6 +113,8 @@ def run_command(
     timeout_s: float,
     min_free_bytes: int,
     disk_root: Path,
+    *,
+    stop_grace_s: float = 10.0,
 ) -> tuple[int, float, str]:
     started = time.monotonic()
     deadline = started + timeout_s
@@ -83,18 +126,28 @@ def run_command(
         return 127, time.monotonic() - started, f"launch failed: {error}"
 
     def stop_group(reason: str) -> tuple[int, float, str]:
+        deadline = started + stop_grace_s
         try:
             os.killpg(process.pid, signal.SIGTERM)
         except ProcessLookupError:
             pass
         try:
-            process.wait(timeout=10.0)
+            process.wait(timeout=max(0.0, deadline - time.monotonic()))
         except subprocess.TimeoutExpired:
             try:
                 os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
             process.wait()
+        # The direct child can exit before a descendant that received the same
+        # SIGTERM has finished its bounded recording/log shutdown.  Wait for
+        # the whole group so the terminal summary reads final artefacts.
+        while time.monotonic() < deadline:
+            try:
+                os.killpg(process.pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
         return (
             130 if reason == "interrupted" else (124 if reason == "timeout" else 125),
             time.monotonic() - started,
@@ -112,8 +165,7 @@ def run_command(
                 return stop_group(f"disk free {free} below {min_free_bytes}; launch stopped")
             time.sleep(1.0)
     except KeyboardInterrupt:
-        stop_group("interrupted")
-        raise
+        raise LaunchInterrupted(*stop_group("interrupted")) from None
     code = int(process.returncode)
     if code != 0:
         failure = f"launch exit {code}"
@@ -179,8 +231,11 @@ def reject_docker_command(command: list[str], label: str) -> None:
 
 
 __all__ = [
+    "LaunchInterrupted",
     "acquire_run_lock",
     "classify",
+    "episode_manifest",
+    "episode_task_result",
     "handle_sigterm",
     "lock_owner_alive",
     "read_json",

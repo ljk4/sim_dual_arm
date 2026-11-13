@@ -10,13 +10,13 @@ are not treated as normal force.
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
 from robot_contracts.models import ContractError
 
 __all__ = [
-    "FINGER_BODIES",
     "ContactBinding",
     "FingerBinding",
     "FingerContactEvidence",
@@ -26,16 +26,12 @@ __all__ = [
     "empty_contact_evidence",
     "measure_contact_evidence",
     "resolve_contact_binding",
-    "validated_panda_completions",
+    "validated_gripper_completions",
 ]
 
-# Attached Menagerie Panda bodies: the prefix is applied before the vendor body
-# name, so `left_finger` under the left mount becomes `left_left_finger`.
-FINGER_BODIES = {
-    "left": ("left_left_finger", "left_right_finger"),
-    "right": ("right_left_finger", "right_right_finger"),
-}
 _RESERVED_BODY_NAMES = frozenset({"world", "column", "table"})
+_SIDES = ("left", "right")
+_FINGER_COUNT = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,15 +80,22 @@ def _free_joint_count(model: Any, body_id: int) -> int:
     )
 
 
-def resolve_contact_binding(model: Any, object_names: tuple[str, ...]) -> ContactBinding:
-    """Validate the fixed scene objects and named finger bodies once.
+def resolve_contact_binding(
+    model: Any,
+    object_names: tuple[str, ...],
+    finger_bodies: Mapping[str, tuple[tuple[str, str], ...]],
+) -> ContactBinding:
+    """Validate the configured free objects and the robot's named finger pairs.
 
-    Only the two configured scene objects are admitted as contact targets.  A
+    Only the configured scene objects are admitted as contact targets.  A
     configured object must have exactly one free joint and must not be a
-    reserved world/table/robot body.
+    reserved world/table/robot body.  Each side must name exactly two
+    ``(body_name, joint_name)`` fingers; the robot adapter supplies those names.
     """
     if not isinstance(object_names, tuple) or not object_names:
         raise ContractError("MODEL_MISMATCH", "scene must configure at least one free object")
+    if not isinstance(finger_bodies, Mapping):
+        raise ContractError("MODEL_MISMATCH", "finger bindings must be a mapping")
     objects: list[tuple[str, int]] = []
     seen: set[str] = set()
     for name in object_names:
@@ -112,10 +115,21 @@ def resolve_contact_binding(model: Any, object_names: tuple[str, ...]) -> Contac
         objects.append((name, body_id))
 
     fingers: list[FingerBinding] = []
-    for side in ("left", "right"):
-        for finger_index, body_name in enumerate(FINGER_BODIES[side], start=1):
+    for side in _SIDES:
+        specs = finger_bodies.get(side)
+        if not isinstance(specs, tuple) or len(specs) != _FINGER_COUNT:
+            raise ContractError(
+                "MODEL_MISMATCH",
+                f"finger bindings for {side!r} must name exactly two fingers",
+            )
+        for finger_index, spec in enumerate(specs, start=1):
+            if not isinstance(spec, tuple) or len(spec) != 2:
+                raise ContractError(
+                    "MODEL_MISMATCH",
+                    f"finger {side!r}/{finger_index} must be a (body, joint) pair",
+                )
+            body_name, joint_name = spec
             body_id = _body_id(model, body_name)
-            joint_name = f"{side}_finger_joint{finger_index}"
             try:
                 dof_address = int(model.joint(joint_name).dofadr[0])
             except KeyError as error:
@@ -249,25 +263,29 @@ def measure_contact_evidence(
     calling this function; the returned values are then evidence for the same
     measurement time as the corresponding qpos/qvel read.
     """
-    if side not in FINGER_BODIES:
+    if side not in _SIDES:
         raise ContractError("INVALID_CONTACT", f"unknown gripper side {side!r}")
     fingerprints: list[FingerContactEvidence] = []
-    for finger_index, body_name in enumerate(FINGER_BODIES[side], start=1):
-        finger = binding.finger(side, finger_index)
-        if finger.body_name != body_name:
-            raise ContractError("MODEL_MISMATCH", "finger body binding changed")
+    for finger in sorted(
+        (item for item in binding.fingers if item.side == side),
+        key=lambda item: item.finger_index,
+    ):
+        if finger.finger_index > _FINGER_COUNT:
+            raise ContractError("MODEL_MISMATCH", "finger binding index exceeds two")
         speed = abs(float(data.qvel[finger.dof_address]))
         if not math.isfinite(speed):
-            raise ContractError("INVALID_CONTACT", f"{body_name}.speed is not finite")
+            raise ContractError("INVALID_CONTACT", f"{finger.body_name}.speed is not finite")
         fingerprints.append(
             FingerContactEvidence(
                 side=side,
-                finger_index=finger_index,
-                body_name=body_name,
+                finger_index=finger.finger_index,
+                body_name=finger.body_name,
                 object_forces=_collect_object_forces(model, data, binding, finger),
                 joint_speed_m_s=speed,
             )
         )
+    if len(fingerprints) != _FINGER_COUNT:
+        raise ContractError("MODEL_MISMATCH", f"{side} gripper must bind two fingers")
 
     common: set[str] = set(fingerprints[0].object_names)
     common.intersection_update(fingerprints[1].object_names)
@@ -290,10 +308,12 @@ def empty_contact_evidence(data: Any, binding: ContactBinding, side: str) -> Gri
     mislabel a previous state.  It deliberately records no force evidence.
     """
     fingerprints = []
-    for finger_index, body_name in enumerate(FINGER_BODIES[side], start=1):
+    for finger_index in range(1, _FINGER_COUNT + 1):
         finger = binding.finger(side, finger_index)
         speed = abs(float(data.qvel[finger.dof_address]))
-        fingerprints.append(FingerContactEvidence(side, finger_index, body_name, (), speed))
+        fingerprints.append(
+            FingerContactEvidence(side, finger_index, finger.body_name, (), speed)
+        )
     return GripperContactEvidence(side, (fingerprints[0], fingerprints[1]), None, False)
 
 
@@ -314,12 +334,13 @@ def evaluate_gripper_completion(
     """Apply the accepted POSITION or contact completion rule for one gripper.
 
     Position mode requires both total-opening error and total-opening speed to
-    meet their thresholds.  Contact mode is allowed only when the motion's
-    final reference is not more open than its initial reference, the measured
-    opening is wider than that final reference and the position threshold is
+    meet their thresholds.  Contact mode is allowed only when the measured
+    opening is wider than the final reference and the position threshold is
     still missed, and both named finger bodies touch the same configured free
     object with enough per-finger normal force and slow enough per-finger
-    motion.  It intentionally does not use the summed finger velocity.
+    motion. A rising reference below that aperture still compresses the object;
+    an opening beyond it must complete in position mode. The contact rule does
+    not use the summed finger velocity.
     """
     if contact.side != side:
         raise ContractError("INVALID_CONTACT", "contact evidence side does not match")
@@ -327,10 +348,9 @@ def evaluate_gripper_completion(
     position_ok = abs(error) <= position_tolerance_m and (
         abs(measured_velocity_m_s) <= velocity_tolerance_m_s
     )
-    not_opening = final_reference_m <= initial_reference_m
     still_above = measured_position_m > final_reference_m
     threshold_missed = abs(error) > position_tolerance_m
-    contact_ready = not_opening and still_above and threshold_missed
+    contact_ready = still_above and threshold_missed
     contact_ok = False
     object_name = contact.candidate_object
     if contact_ready and object_name is not None and not contact.ambiguous:
@@ -363,32 +383,32 @@ def evaluate_gripper_completion(
     )
 
 
-def validated_panda_completions(
+def validated_gripper_completions(
     completions: tuple[GripperCompletion, ...],
 ) -> tuple[GripperCompletion, ...]:
-    """Keep the Panda scene's two-sided, two-finger evidence rules explicit.
+    """Keep the two-sided, two-finger evidence rule explicit.
 
     The shared feedback container accepts any bounded, named gripper/finger
-    set.  This backend still requires exactly the left then right Panda
-    grippers, each with finger indices 1 and 2, because its completion and
-    same-object contact rules are defined for those named bodies.
+    set.  This backend still requires exactly the left then right grippers, each
+    with finger indices 1 and 2, because its completion and same-object contact
+    rules are defined for that named pair on both robots.
     """
     sides = tuple(completion.side for completion in completions)
-    if sides != ("left", "right"):
+    if sides != _SIDES:
         raise ContractError(
             "INVALID_GRIPPER_FEEDBACK",
-            "Panda requires exactly left then right gripper completions",
+            "requires exactly left then right gripper completions",
         )
     for completion in completions:
         indices = tuple(finger.finger_index for finger in completion.fingers)
         if indices != (1, 2):
             raise ContractError(
                 "INVALID_GRIPPER_FEEDBACK",
-                f"Panda {completion.side} gripper requires finger indices 1 then 2",
+                f"{completion.side} gripper requires finger indices 1 then 2",
             )
         if any(finger.side != completion.side for finger in completion.fingers):
             raise ContractError(
                 "INVALID_GRIPPER_FEEDBACK",
-                f"Panda {completion.side} finger evidence side does not match",
+                f"{completion.side} finger evidence side does not match",
             )
     return completions

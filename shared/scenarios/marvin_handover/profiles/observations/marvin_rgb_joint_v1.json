@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "schema_id": "marvin_rgb_joint_v1",
+  "joint_names": [
+    "left_joint1",
+    "left_joint2",
+    "left_joint3",
+    "left_joint4",
+    "left_joint5",
+    "left_joint6",
+    "left_joint7",
+    "left_gripper_width",
+    "right_joint1",
+    "right_joint2",
+    "right_joint3",
+    "right_joint4",
+    "right_joint5",
+    "right_joint6",
+    "right_joint7",
+    "right_gripper_width"
+  ],
+  "camera_names": [
+    "global",
+    "left_wrist",
+    "right_wrist"
+  ],
+  "max_skew_ns": 100000000,
+  "max_age_ns": 500000000
+}

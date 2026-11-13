@@ -16,7 +16,7 @@ from robot_contracts.models import ContractError
 from robot_contracts.trajectory.spline import ReferenceSample
 from robot_trajectory.follower import PreparedFollowerPlan
 
-from robot_backend_sim.config.motion_config import CONTROL_JOINT_NAMES, PandaControlConfig
+from robot_backend_sim.config.motion_config import CONTROL_JOINT_NAMES, ControlConfig
 from robot_backend_sim.config.stream_config import StreamConfig
 from robot_backend_sim.motion.motion_types import BoundarySelection, Phase
 from robot_backend_sim.motion.stream_schedule import (
@@ -25,8 +25,8 @@ from robot_backend_sim.motion.stream_schedule import (
     next_grid_time,
     observation_rejection,
 )
-from robot_backend_sim.physics.panda_io import PandaIO
-from robot_backend_sim.physics.scene import Scene
+from robot_backend_sim.physics.robot_io import RobotIO
+from robot_backend_sim.physics.scene_container import CompiledScene
 
 __all__ = [
     "compute_active_chunk_anchor",
@@ -93,28 +93,32 @@ def sim_time_ns(data: object) -> int:
 
 
 def validate_controller_inputs(
-    scene: Scene,
-    io: PandaIO,
-    config: PandaControlConfig,
+    scene: CompiledScene,
+    io: RobotIO,
+    config: ControlConfig,
     stream_config: StreamConfig | None,
     initial_reference: Sequence[float] | None,
 ) -> tuple[int, tuple[float, ...]]:
     """Validate constructor inputs and return ``(step_ns, hold_positions)``."""
-    if not isinstance(io, PandaIO):
-        raise invalid("INVALID_MOTION", "io must be a PandaIO")
-    if not isinstance(config, PandaControlConfig):
-        raise invalid("INVALID_MOTION", "config must be a PandaControlConfig")
-    if not isinstance(scene, Scene):
-        raise invalid("INVALID_MOTION", "scene must be a Scene")
+    if not isinstance(io, RobotIO):
+        raise invalid("INVALID_MOTION", "io must implement the RobotIO contract")
+    if not isinstance(config, ControlConfig):
+        raise invalid("INVALID_MOTION", "config must be a ControlConfig")
+    if not isinstance(scene, CompiledScene):
+        raise invalid("INVALID_MOTION", "scene must be a CompiledScene")
     io.require_scene(scene)
     if tuple(io.joint_names) != config.joint_names:
-        raise invalid("PROFILE_MISMATCH", "PandaIO joint order differs from control config")
+        raise invalid("PROFILE_MISMATCH", "robot I/O joint order differs from the control config")
     if tuple(io.joint_names) != CONTROL_JOINT_NAMES:
-        raise invalid("PROFILE_MISMATCH", "PandaIO joint order is not the fixed 16-joint order")
+        raise invalid("PROFILE_MISMATCH", "robot I/O joint order is not the public 16-joint order")
     if tuple(io.profile.joint_names) != config.joint_names:
-        raise invalid("PROFILE_MISMATCH", "robot profile joint order differs from control config")
+        raise invalid("PROFILE_MISMATCH", "robot profile joint order differs from the control config")
     if not isinstance(io.profile.digest, str) or not io.profile.digest:
         raise invalid("PROFILE_MISMATCH", "robot profile digest is missing")
+    if not scene.contact_object_names or any(
+        not isinstance(name, str) or not name for name in scene.contact_object_names
+    ):
+        raise invalid("MODEL_MISMATCH", "scene must declare non-empty contact object names")
     timestep = float(scene.model.opt.timestep)
     if not math.isfinite(timestep) or timestep <= 0.0:
         raise invalid("MODEL_MISMATCH", "scene timestep must be finite and positive")
@@ -344,7 +348,7 @@ def deadline_decision(
     *,
     phase: Phase,
     wall: int,
-    config: PandaControlConfig,
+    config: ControlConfig,
     stream_config: StreamConfig | None,
     accepted_wall_ns: int | None,
     stop_requested_wall_ns: int | None,

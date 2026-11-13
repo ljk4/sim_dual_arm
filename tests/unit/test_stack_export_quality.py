@@ -14,10 +14,12 @@ def _event(sim_time_ns, pixels):
     }
 
 
-def _rules(required=64, ratio=0.85, blackout=0.2):
+def _rules(required=64, ratio=0.85, blackout=0.2, required_phases=None):
     return {
         "max_blackout_s": blackout,
         "min_qualified_ratio": ratio,
+        "phases": ["pregrasp", "grasp", "stable"],
+        "required_phases": list(required_phases or []),
         "rules": [
             {
                 "camera": "right_wrist",
@@ -81,4 +83,42 @@ def test_missing_required_samples_or_phase_cannot_be_qualified():
         [_event(1_000_000_000, 80)], {}, {1: 1_000_000_000}, _rules()
     )
     assert no_phase["phase_based"] is False
+    assert no_phase["qualified"] is False
+    assert any("no phase boundary" in reason for reason in no_phase["failure_reasons"])
     assert no_phase["rules"][0]["phase"] == "global"
+
+
+def test_missing_required_phase_fails_even_when_rules_pass():
+    summary = export_episode.quality_summary(
+        [_event(1_000_000_000, 80)],
+        {"pregrasp": 1},
+        {1: 1_000_000_000},
+        _rules(required_phases=["dual_hold"]),
+    )
+    assert summary["qualified"] is False
+    assert "missing required phase evidence: dual_hold" in summary["failure_reasons"]
+
+
+def test_scenario_phase_names_are_used_in_order():
+    phases = ["left_approach", "dual_hold", "stable"]
+    events = [
+        {
+            "event": "follower.chunk_accepted",
+            "sim_time_ns": 1_000_000_000,
+            "fields": {"phase": "left_approach"},
+        },
+        {
+            "event": "follower.chunk_accepted",
+            "sim_time_ns": 2_000_000_000,
+            "fields": {"phase": "dual_hold"},
+        },
+        {
+            "event": "follower.chunk_accepted",
+            "sim_time_ns": 3_000_000_000,
+            "fields": {"phase": "pregrasp"},
+        },
+    ]
+    observed = export_episode.phase_observations(
+        events, {1: 1_000_000_000, 2: 2_000_000_000, 3: 3_000_000_000}, phases
+    )
+    assert observed == {"left_approach": 1, "dual_hold": 2}

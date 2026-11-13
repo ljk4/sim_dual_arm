@@ -20,7 +20,7 @@ from robot_contracts.trajectory.follower_reference import FollowerReference
 from robot_backend_sim.config.backend_config import BackendConfig
 from robot_backend_sim.config.follower_config import load_follower_config
 from robot_backend_sim.config.motion_config import load_control_config
-from robot_backend_sim.config.scene_config import load_scene_config
+from robot_backend_sim.config.scene_loader import load_scene_config_for
 from robot_backend_sim.config.stream_config import load_stream_config
 from robot_backend_sim.control.control_state import ControlEvent, ControlStatus
 from robot_backend_sim.motion.planner import _failed_future, _Planner, _request_digest, _TaskPlanner
@@ -66,7 +66,7 @@ class Worker:
         self._fault_lock = threading.Lock()
         self._fault: WorkerFault | None = None
         self._closed = False
-        scene_config = load_scene_config(config.scene_path)
+        scene_config = load_scene_config_for(config.scene_path)  # type: ignore[arg-type]
         control_config = load_control_config(config.control_path)
         stream_config = load_stream_config(config.stream_path)
         profile = load_profile(config.profile_path, config.schemas_path)
@@ -265,6 +265,10 @@ class Worker:
         )
         return value if isinstance(value, ControlStatus) else None
 
+    def contact_snapshot(self) -> Future:
+        """One consistent owner-thread snapshot of contacts and object motion."""
+        return self.request("contact_snapshot", (self._owner.capture_seq,))
+
     def system_stop(self, reason: str, timeout_s: float | None = None) -> Future:
         return self.request(
             "system_stop",
@@ -357,6 +361,7 @@ class Worker:
         request_id: str,
         capture_seq: int,
         observation_time_ns: int,
+        handoff_time_ns: int = 0,
     ) -> Future:
         if self._task_planner is None:
             return _failed_future(ContractError("TASK_DISABLED", "no task plugin is configured"))
@@ -374,6 +379,7 @@ class Worker:
                 "request_id": request_id,
                 "capture_seq": capture_seq,
                 "observation_time_ns": observation_time_ns,
+                "handoff_time_ns": int(handoff_time_ns),
             },
             future,
         )

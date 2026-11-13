@@ -7,8 +7,6 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-PHASES = ("pregrasp", "grasp", "close", "lift", "transport", "lower", "open", "retreat", "stable")
-
 
 def _expand_logs(paths: list[Path]) -> list[Path]:
     expanded: list[Path] = []
@@ -41,8 +39,17 @@ def parse_log_events(paths: list[Path]) -> list[dict[str, Any]]:
 
 
 def phase_observations(
-    runtime_events: list[dict[str, Any]], observation_times: dict[int, int]
+    runtime_events: list[dict[str, Any]],
+    observation_times: dict[int, int],
+    phases: list[str] | tuple[str, ...] | None = None,
 ) -> dict[str, int]:
+    """Map each scenario phase to the observation that first announced it.
+
+    The phase comes from the accepted teacher chunk, which reflects the gate
+    fact measured for that exact capture.  ``phases`` is the scenario's phase
+    order; events for any other task's phase names are ignored.
+    """
+    allowed = None if phases is None else {str(value) for value in phases}
     result: dict[str, int] = {}
     by_time = {value: key for key, value in observation_times.items()}
     for event in runtime_events:
@@ -54,7 +61,12 @@ def phase_observations(
         phase = str(fields.get("phase") or "")
         sim_time = event.get("sim_time_ns")
         observation_id = by_time.get(sim_time)
-        if phase in PHASES and observation_id is not None and phase not in result:
+        if (
+            phase
+            and (allowed is None or phase in allowed)
+            and observation_id is not None
+            and phase not in result
+        ):
             result[phase] = observation_id
     return result
 
@@ -142,7 +154,9 @@ def _phase_intervals(
     return phase_based, intervals
 
 
-def _empty_document(max_blackout_ns: int, min_ratio: float, phase_observations: dict) -> dict:
+def _empty_document(
+    max_blackout_ns: int, min_ratio: float, phase_observations: dict, rules: dict[str, Any]
+) -> dict:
     return {
         "schema_version": 1,
         "qualified": False,
@@ -150,9 +164,25 @@ def _empty_document(max_blackout_ns: int, min_ratio: float, phase_observations: 
         "failure_reasons": ["no quality rules configured"],
         "rules": [],
         "phases": {},
+        "configured_phases": _declared_phases(rules),
+        "required_phases": _declared_required_phases(rules),
         "max_blackout_s": max_blackout_ns / 1e9,
         "min_qualified_ratio": min_ratio,
     }
+
+
+def _declared_phases(rules: dict[str, Any]) -> list[str]:
+    value = rules.get("phases")
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if isinstance(item, str) and item]
+
+
+def _declared_required_phases(rules: dict[str, Any]) -> list[str]:
+    value = rules.get("required_phases")
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if isinstance(item, str) and item]
 
 
 def _evaluate_rule(
@@ -225,15 +255,30 @@ def quality_summary(
     *,
     action_source: str = "",
 ) -> dict[str, Any]:
-    """Evaluate required/record_only rules over full phase intervals."""
+    """Evaluate required/record_only rules over the scenario's phase intervals.
+
+    Phase names and the required-stage set come from the scenario quality
+    recipe.  A missing phase boundary is an explicit failure: this function
+    never falls back to a global visibility verdict.
+    """
     max_blackout_ns = round(float(rules.get("max_blackout_s", 0.35)) * 1e9)
     min_ratio = float(rules.get("min_qualified_ratio", 0.85))
+    configured_phases = _declared_phases(rules)
+    required_phases = _declared_required_phases(rules)
     raw_rules = rules.get("rules")
     if not isinstance(raw_rules, list) or not raw_rules:
-        return _empty_document(max_blackout_ns, min_ratio, phase_observations)
+        return _empty_document(max_blackout_ns, min_ratio, phase_observations, rules)
     timelines = _timelines(quality_events)
     phase_based, phase_intervals = _phase_intervals(phase_observations, observation_times)
     failures: list[str] = []
+    if not phase_based:
+        failures.append(
+            "no phase boundary from recorded follower chunk events; "
+            "phase-based quality cannot be evaluated"
+        )
+    for phase in required_phases:
+        if phase not in phase_observations:
+            failures.append(f"missing required phase evidence: {phase}")
     phase_report: dict[str, Any] = {}
     rule_report: list[dict[str, Any]] = []
     for rule in raw_rules:
@@ -253,13 +298,19 @@ def quality_summary(
             )
         )
     if phase_based:
-        for phase in PHASES:
+        ordered_observed = sorted(
+            phase_report,
+            key=lambda name: phase_intervals.get(name, (0, 0))[0],
+        )
+        for phase in (*configured_phases, *ordered_observed):
             if phase not in phase_report:
                 phase_report[phase] = {
                     "present": phase in phase_observations,
                     "rules": [],
                 }
-    qualified = bool(timelines) and not failures and bool(rule_report)
+    qualified = (
+        bool(timelines) and not failures and bool(rule_report) and phase_based
+    )
     return {
         "schema_version": 1,
         "qualified": qualified,
@@ -268,6 +319,8 @@ def quality_summary(
         "failure_reasons": failures,
         "max_blackout_s": max_blackout_ns / 1e9,
         "min_qualified_ratio": min_ratio,
+        "configured_phases": configured_phases,
+        "required_phases": required_phases,
         "phases": phase_report,
         "rules": rule_report,
         "samples": {f"{camera}.{obj}": len(values) for (camera, obj), values in timelines.items()},
@@ -275,7 +328,6 @@ def quality_summary(
 
 
 __all__ = [
-    "PHASES",
     "parse_log_events",
     "phase_observations",
     "quality_summary",

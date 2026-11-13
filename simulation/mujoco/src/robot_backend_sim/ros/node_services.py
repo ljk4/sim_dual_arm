@@ -234,6 +234,17 @@ class ServiceAdapter:
         return response
 
     @_service
+    async def contact_snapshot(self, request: object, response: object) -> object:
+        context = context_from_message(request.context)  # type: ignore[attr-defined]
+        snapshot = await self._node._await(self._worker.contact_snapshot())
+        from robot_backend_sim.ros.contact_conv import contact_snapshot_message
+
+        response.snapshot = contact_snapshot_message(snapshot, context)  # type: ignore[attr-defined]
+        response.success = True  # type: ignore[attr-defined]
+        response.reason = ""  # type: ignore[attr-defined]
+        return response
+
+    @_service
     async def reset(self, request: object, response: object) -> object:
         new_context = await self._node._await(
             self._worker.reset(
@@ -369,6 +380,7 @@ class ServiceAdapter:
         started = time.monotonic()
         try:
             context = context_from_message(request.context)  # type: ignore[attr-defined]
+            handoff_time = getattr(request, "handoff_time", None)  # type: ignore[attr-defined]
             chunk = await self._node._await(
                 self._worker.get_task_chunk(
                     context,
@@ -377,6 +389,7 @@ class ServiceAdapter:
                     request.request_id,  # type: ignore[attr-defined]
                     int(request.capture_seq),  # type: ignore[attr-defined]
                     time_ns(request.observation_time),  # type: ignore[attr-defined]
+                    0 if handoff_time is None else time_ns(handoff_time),
                 )
             )
         except BaseException as error:  # noqa: BLE001

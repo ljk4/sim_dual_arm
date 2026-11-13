@@ -1,0 +1,68 @@
+# Marvin 交接短时推理评价配方；Teacher 关闭，只运行同一物理评价。
+#
+# 目标位姿、抓持点和候选路径仍由 planning_config 指向的 P02B 配方提供。
+# 门禁与终态判据与 P03 完整配方一致，仅评价预算缩短到 10 s。
+schema_version: 1
+planning_config: ../planning/handover_paths.yaml
+
+success:
+  # 物块八个顶点全部位于箱内、箱底支撑、双手均无接触并持续稳定。
+  stable_duration_s: 1.0
+  # 与 runtime policy.task_sim_budget_ns 一致，由准备入口与测试交叉校验。
+  max_task_sim_duration_s: 10.0
+  max_task_wall_duration_s: 60.0
+  # 允许的接触尺度压入与箱底支撑力下限。
+  box_bottom_tolerance_m: 0.001
+  min_box_support_normal_force_n: 0.5
+  max_linear_speed_m_s: 0.02
+  max_angular_speed_rad_s: 0.2
+  max_position_drift_m: 0.005
+  max_orientation_drift_rad: 0.05
+
+gates:
+  # 每个门禁条件需要连续成立的仿真时间。
+  stable_duration_s: 0.5
+  # 名义段时长之外允许的门禁等待；超过即判该阶段超时。
+  phase_extra_timeout_s: 8.0
+  arm_position_tolerance_rad: 0.015
+  arm_velocity_tolerance_rad_s: 0.02
+  gripper_position_tolerance_m: 0.001
+  gripper_velocity_tolerance_m_s: 0.005
+  # 左爪张开到此开度且无接触才算实际释放。
+  release_opening_m: 0.075
+  release_velocity_max_m_s: 0.005
+  # 已建立的持物允许的短暂接触丢失时间，超时判失持。
+  hold_loss_tolerance_s: 0.3
+  # 离桌门槛：物块中心相对初始中心的高度增量。
+  lift_height_m: 0.10
+  # 机器人-机器人或机器人-箱体的禁止接触力门槛。
+  forbidden_contact_force_n: 0.5
+
+teacher:
+  # Inference runs the same evaluator with an evaluation-only plan and emits
+  # no Teacher targets.  max_plan_duration_s is retained for schema completeness
+  # and is not enforced while the Teacher is disabled.
+  enabled: false
+  plan_wall_timeout_s: 30.0
+  chunk_size: 60
+  action_period_ns: 50000000
+  max_plan_duration_s: 120.0
+  max_joint_velocity_fraction: 0.85
+  max_joint_acceleration_fraction: 0.80
+  gripper_velocity_m_s: 0.04
+  gripper_acceleration_m_s2: 0.5
+  phase_min_duration_s: 0.5
+  # 闭合命令；小于物块 60 mm 宽度时两指受压夹持。
+  left_close_opening_m: 0.05
+  right_close_opening_m: 0.05
+  chunk_cache_entries: 64
+
+capacity:
+  # 16 one-second windows cover the 10 s evaluation budget with margin.
+  expected_chunks: 16
+  expected_references: 16
+  expected_events: 64
+  max_episode_chunks: 64
+  max_teacher_requests: 64
+  rpc_cache_entries: 64
+  backend_chunk_history: 64

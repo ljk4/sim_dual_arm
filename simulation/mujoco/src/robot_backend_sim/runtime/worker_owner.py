@@ -16,8 +16,8 @@ from robot_contracts.stream_request import REQUEST_STREAM_NEXT, StreamRequest
 from robot_contracts.trajectory.follower_reference import FollowerReference
 
 from robot_backend_sim.config.backend_config import BackendConfig
-from robot_backend_sim.config.motion_config import PandaControlConfig
-from robot_backend_sim.config.scene_config import SceneConfig
+from robot_backend_sim.config.motion_config import ControlConfig
+from robot_backend_sim.config.scene_loader import SceneConfigLike
 from robot_backend_sim.config.stream_config import StreamConfig
 from robot_backend_sim.control.control import ControlSession
 from robot_backend_sim.control.control_state import (
@@ -30,8 +30,10 @@ from robot_backend_sim.control.control_state import (
 from robot_backend_sim.control.feedback_mailbox import FeedbackMailbox
 from robot_backend_sim.follower.follower_protocol import follower_reference_from_chunk_status
 from robot_backend_sim.motion.motion_controller import Phase
-from robot_backend_sim.physics.panda_io import PandaIO
-from robot_backend_sim.physics.scene import Scene, build_scene
+from robot_backend_sim.physics.contact_snapshot import build_contact_snapshot
+from robot_backend_sim.physics.robot_adapters import build_io_for, build_scene_for
+from robot_backend_sim.physics.robot_io import gripper_indices
+from robot_backend_sim.physics.scene_container import CompiledScene
 from robot_backend_sim.render.render_worker import Capture, RenderedCapture, RendererThread
 from robot_backend_sim.render.rendering import capture_snapshot
 from robot_backend_sim.tasks import SimTaskPlugin
@@ -106,9 +108,9 @@ class _Owner:
     def __init__(
         self,
         config: BackendConfig,
-        scene_config: SceneConfig,
+        scene_config: SceneConfigLike,
         profile: RobotProfile,
-        control_config: PandaControlConfig,
+        control_config: ControlConfig,
         stream_config: StreamConfig,
         task_plugin: SimTaskPlugin | None,
         task_kinematics: object | None,
@@ -125,6 +127,7 @@ class _Owner:
         self._fault_lock, self._fault, self._system_stop_requested = threading.Lock(), None, False
         self._renderer = self._health_check = self._controller = None
         self._scene = self._owner_context = None
+        self._io = None
         self._renderer_lock = threading.Lock()
         self._captures: queue.Queue[Capture] = queue.Queue(maxsize=config.capture_queue_capacity)
         self._feedback = FeedbackMailbox(config.feedback_queue_capacity)
@@ -143,7 +146,9 @@ class _Owner:
     def start(self) -> None:
         self._thread.start()
 
-    def wait_ready(self, timeout_s: float) -> tuple[Scene, RobotProfile, SceneConfig]:
+    def wait_ready(
+        self, timeout_s: float
+    ) -> tuple[CompiledScene, RobotProfile, SceneConfigLike]:
         done, _pending = wait((self._ready,), timeout=timeout_s)
         if not done:
             raise TimeoutError("physics owner did not become ready")
@@ -183,6 +188,8 @@ class _Owner:
     task_plugin = property(lambda self: self._task_plugin)
 
     task_kinematics = property(lambda self: self._task_kinematics)
+
+    capture_seq = property(lambda self: self._capture_seq)
 
     model = property(lambda self: None if self._scene is None else self._scene.model)
 
@@ -227,12 +234,14 @@ class _Owner:
     def _run(self) -> None:
         controller: ControlSession | None = None
         try:
-            scene = build_scene(self._scene_config)
+            scene = build_scene_for(self._scene_config)
             scene.reset(self._config.seed)
             self._reset_seed = self._config.seed
-            io = PandaIO(
-                scene, self._profile, velocity_feedforward=self._config.velocity_feedforward
+            io = build_io_for(
+                scene, self._profile,
+                velocity_feedforward=self._config.velocity_feedforward,
             )
+            self._io = io
             controller = ControlSession(
                 scene, io, self._control_config, stream_config=self._stream_config,
                 max_history=self._config.command_history_capacity,
@@ -385,11 +394,32 @@ class _Owner:
             return controller.context
         if name == "latest_status":
             return controller.current_status()
+        if name == "contact_snapshot":
+            return self._contact_snapshot(payload)
         if name == "system_stop":
             (reason,) = payload
             self._system_stop_requested = True
             return self._record_reply(controller, controller.system_stop(reason, now))
         raise ContractError("UNKNOWN_OPERATION", name)
+
+    def _contact_snapshot(self, payload: tuple[object, ...]) -> object:
+        if self._scene is None or self._io is None:
+            raise ContractError("SCENE_NOT_READY", "physics owner has no compiled scene")
+        (capture_seq,) = payload
+        import mujoco
+
+        # Refresh contact forces for the current qpos/qvel without stepping.
+        mujoco.mj_forward(self._scene.model, self._scene.data)
+        measurement = self._io.measure()
+        indices = gripper_indices(measurement.joint_names)
+        openings = {
+            side: measurement.positions[index] for side, index in indices.items()
+        }
+        return build_contact_snapshot(
+            self._scene,
+            gripper_openings=openings,
+            capture_seq=int(capture_seq),
+        )
 
     def _dispatch_task(
         self, controller: ControlSession, name: str, payload: tuple[object, ...], now: int

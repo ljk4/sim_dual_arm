@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Annotated
 
 from pydantic import BeforeValidator, Field, model_validator
+from robot_contracts.models import ContractError
 from robot_contracts.validation import (
     NonEmptyStr,
     PositiveFloat,
@@ -20,14 +21,16 @@ from robot_contracts.validation import (
 
 __all__ = [
     "CONTROL_JOINT_NAMES",
-    "PandaControlConfig",
+    "ControlConfig",
     "MotionConfigError",
     "load_control_config",
     "parse_control_config",
 ]
 
-# Kept local so loading the pure configuration does not import MuJoCo.  The
-# order is exactly PandaIO.JOINT_NAMES and the accepted panda_stack_v1 profile.
+# Canonical public order shared by the accepted robot profiles: left arm,
+# left gripper, right arm, right gripper.  A concrete robot binds its profile to
+# this order at controller construction; the YAML joint_names field must match
+# that profile rather than a robot-family module constant.
 CONTROL_JOINT_NAMES = tuple(
     f"{side}_{name}" for side in ("left", "right")
     for name in (*[f"joint{index}" for index in range(1, 8)], "gripper_width"))
@@ -38,7 +41,7 @@ _MAX_NS = 2**63 - 1
 MotionConfigError = StrictMappingError
 
 
-class PandaControlConfig(StrictMappingModel):
+class ControlConfig(StrictMappingModel):
     """Validated controller limits and deadlines in explicit SI units."""
 
 
@@ -58,15 +61,23 @@ class PandaControlConfig(StrictMappingModel):
     finger_velocity_max_m_s: PositiveFloat
 
     @model_validator(mode="after")
-    def _fixed_order(self) -> PandaControlConfig:
-        if self.joint_names != CONTROL_JOINT_NAMES:
-            raise contract_error("joint_names", "must match the fixed 16-joint order")
+    def _shape(self) -> ControlConfig:
+        if len(set(self.joint_names)) != len(self.joint_names):
+            raise contract_error("joint_names", "must be unique")
         for field in ("stable_duration_s", "settle_timeout_s",
                       "motion_wall_timeout_s", "stop_wall_timeout_s"):
             value = _nanoseconds(getattr(self, field))
             if value <= 0 or value > _MAX_NS:
                 raise contract_error(field, "must convert to a positive int64 nanosecond duration")
         return self
+
+    def require_joint_order(self, joint_names: tuple[str, ...]) -> None:
+        """Bind this recipe to one robot profile; never assume a family order."""
+        if tuple(self.joint_names) != tuple(joint_names):
+            raise ContractError(
+                "PROFILE_MISMATCH",
+                "control config joint order differs from the robot profile",
+            )
 
     stable_duration_ns = property(lambda self: _nanoseconds(self.stable_duration_s))
     settle_timeout_ns = property(lambda self: _nanoseconds(self.settle_timeout_s))
@@ -87,11 +98,11 @@ def _nanoseconds(seconds: float) -> int:
 
 def parse_control_config(
     document: object, source: str | Path = "<control config>"
-) -> PandaControlConfig:
-    return validate_config_model(PandaControlConfig, document, source, MotionConfigError)
+) -> ControlConfig:
+    return validate_config_model(ControlConfig, document, source, MotionConfigError)
 
 
-def load_control_config(path: Path | str) -> PandaControlConfig:
+def load_control_config(path: Path | str) -> ControlConfig:
     source = Path(path)
     try:
         document = read_unique_yaml(source)

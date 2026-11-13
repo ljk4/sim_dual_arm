@@ -2,17 +2,18 @@
 
 The core :class:`TaskClient` owns only the optional ``sim_api_msgs`` task
 lifecycle.  This module adds the scenario-specific Teacher chunk client.  The
-generated extension type is imported only when teacher mode creates this
-adapter, so ordinary policy/control never loads ``panda_stack_api_msgs``.
-
-Selection is by explicit capability identifier, never by scenario id.  The
-identifier is validated against the extension's own generated
-``TeacherCapability.ID``; an old backend advertising the bare ``teacher_chunk``
-capability is rejected by the episode capability check.
+generated extension type is selected by explicit capability identifier
+``<package>.teacher_chunk.v<N>`` and imported only when teacher mode creates
+this adapter, so ordinary policy/control never loads a scenario extension.
+The identifier is validated against the extension's own generated
+``TeacherCapability.ID``; an old backend advertising a different capability is
+rejected by the episode capability check.
 """
 
 from __future__ import annotations
 
+import importlib
+import re
 import threading
 from dataclasses import dataclass
 
@@ -22,7 +23,9 @@ from robot_ros_support.conversions import context_message, stamp, time_ns
 from dual_arm_runtime.run_logging import EventSink
 from dual_arm_runtime.task_client import TaskClient
 
-__all__ = ["TeacherChunkFact", "TeacherTaskClient"]
+__all__ = ["TeacherChunkFact", "TeacherTaskClient", "teacher_service_type"]
+
+_CAPABILITY = re.compile(r"^([a-z][a-z0-9_]*)\.teacher_chunk\.v[1-9][0-9]*$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,23 +50,32 @@ class TeacherChunkFact:
 
 
 def teacher_service_type(capability: str):
-    """Resolve the generated extension service only for the runtime adapter."""
+    """Resolve the generated service type named by one Teacher capability."""
+    match = _CAPABILITY.fullmatch(str(capability))
+    if match is None:
+        raise ContractError(
+            "UNSUPPORTED_TEACHER_CAPABILITY",
+            f"{capability!r} is not a <package>.teacher_chunk.v<N> capability",
+        )
+    package = match.group(1)
     try:
-        from panda_stack_api_msgs.msg import TeacherCapability
-        from panda_stack_api_msgs.srv import GetTeacherChunk
-    except ImportError as error:
+        messages = importlib.import_module(f"{package}.msg")
+        services = importlib.import_module(f"{package}.srv")
+        capability_type = messages.TeacherCapability
+        service_type = services.GetTeacherChunk
+    except (ImportError, AttributeError) as error:
         raise ContractError(
             "TEACHER_EXTENSION_MISSING",
             f"teacher capability {capability!r} requires the built "
-            f"panda_stack_api_msgs extension: {error}",
+            f"{package} extension: {error}",
         ) from error
-    if capability != str(TeacherCapability.ID):
+    if str(capability_type.ID) != capability:
         raise ContractError(
             "UNSUPPORTED_TEACHER_CAPABILITY",
             f"runtime selected {capability!r}, extension implements "
-            f"{str(TeacherCapability.ID)!r}",
+            f"{str(capability_type.ID)!r}",
         )
-    return GetTeacherChunk
+    return service_type
 
 
 class TeacherTaskClient:
@@ -118,16 +130,21 @@ class TeacherTaskClient:
     def chunk(
         self, context: RunContext, episode_id: str, task_epoch: int, request_id: str,
         capture_seq: int, observation_time_ns: int, *, robot_profile_hash: str,
-        chunk_size: int, period_ns: int,
+        chunk_size: int, period_ns: int, handoff_time_ns: int = 0,
     ) -> TeacherChunkFact:
         request_type = teacher_service_type(self.capability)
+        request = request_type.Request(
+            context=context_message(context), episode_id=episode_id,
+            task_epoch=task_epoch, request_id=request_id, capture_seq=capture_seq,
+            observation_time=stamp(observation_time_ns),
+        )
+        if hasattr(request, "handoff_time"):
+            request.handoff_time = stamp(
+                handoff_time_ns if handoff_time_ns > 0 else observation_time_ns
+            )
         response = self.task.invoke(
             self._client,
-            request_type.Request(
-                context=context_message(context), episode_id=episode_id,
-                task_epoch=task_epoch, request_id=request_id, capture_seq=capture_seq,
-                observation_time=stamp(observation_time_ns),
-            ),
+            request,
             name="chunk",
             timeout_s=self._chunk_timeout_s,
         )

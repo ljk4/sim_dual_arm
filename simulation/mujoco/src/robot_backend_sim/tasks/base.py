@@ -72,6 +72,7 @@ class TaskChunkView:
     state: TaskState
     feedback: Any
     progress: Any
+    handoff_time_ns: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +119,11 @@ class SimTaskPlugin(Protocol):
 
     @property
     def teacher_enabled(self) -> bool: ...
+
+    @property
+    def teacher_capability(self) -> str:
+        """Explicit wire capability implemented by this task's Teacher IDL."""
+        ...
 
     @property
     def state(self) -> TaskState: ...
@@ -200,6 +206,7 @@ class SimTaskPlugin(Protocol):
         latest_capture_seq: int,
         capture_times: object,
         current_sim_time_ns: int,
+        handoff_time_ns: int = 0,
     ) -> TaskChunkView: ...
 
     def sample_chunk(

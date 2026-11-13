@@ -53,14 +53,14 @@ from dual_arm_runtime.observation import ExactCaptureBuffer, ExactObservation
 from dual_arm_runtime.robot_control_client import RobotControlClient
 from dual_arm_runtime.run_logging import EventSink
 from dual_arm_runtime.runtime_callbacks import RuntimeCallbacks
-from dual_arm_runtime.runtime_config import RuntimeConfiguration
+from dual_arm_runtime.runtime_config import MAX_CHUNKS, RuntimeConfiguration
 from dual_arm_runtime.runtime_identity import execution_identity
 from dual_arm_runtime.runtime_limits import control_limits, task_enabled
 from dual_arm_runtime.task_client import TaskClient, task_state_message_type
 
 _TERMINAL = frozenset({"COMPLETED", "CANCELED", "FAILED"})
 _MAX_EXPECTED_COMMANDS = 64
-_MAX_EXPECTED_CHUNKS = 512
+_MAX_EXPECTED_CHUNKS = MAX_CHUNKS
 
 
 def _terminal(execution: ExecutionFeedback) -> bool:
@@ -656,8 +656,8 @@ class RuntimeNode(Node):
             task_id = (
                 self._recipe.policy.task_id
                 if self._recipe.policy is not None
-                else "panda-stack"
-                if self._recipe.action_source == "teacher"
+                else self._recipe.teacher.task_id
+                if self._recipe.teacher is not None
                 else "runtime-diagnostic"
             )
             self._episode.start(task_id)

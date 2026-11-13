@@ -1,6 +1,6 @@
 # sim_dual_arm
 
-面向双臂机器人的仿真数据采集、ACT 策略训练与流式控制闭环系统。当前基于 MuJoCo 双 Panda 机械臂堆叠任务，实现从程序示教（Teacher）、LeRobot ACT 训练到有界跟随控制（Ruckig `SubmitFollower`）的完整闭环。
+面向双臂机器人的仿真数据采集、ACT 策略训练与流式控制闭环系统。当前已交付双 Panda 堆叠与 Marvin 双臂交接两个方案：从程序示教（Teacher）、LeRobot ACT 训练到有界跟随控制（Ruckig `SubmitFollower`）的闭环，以及 Marvin 的抓取、空中交接、入箱物理任务与诊断学习链路。
 
 ## 架构概览
 
@@ -11,7 +11,7 @@
 - **`learning/lerobot/`**：ROS-free 学习与策略服务端，负责数据集转换、ACT 混合精度训练、模型包（Bundle）导出与 gRPC Policy 推理服务。
 - **`hardware/`**：真机 Robot API 边界说明；当前没有可验证的真实驱动。
 - **`shared/common/`**：公共层，只放跨端接口约束（Policy Protobuf、ROS 2 IDL、JSON Schema）、共享 Python 包与通用工具，不选择具体任务、机器人或算法。
-- **`shared/scenarios/<id>/`**：方案绑定层，用 `binding.yaml` 选择档案、配方与方案专用接口。当前实例为 [`panda_stack`](shared/scenarios/panda_stack/README.md)（MuJoCo + ROS 2 + LeRobot ACT）；[`_template`](shared/scenarios/_template/README.md) 说明替换步骤。Marvin 接入目标见[任务文档](docs/marvin-handover/README.md)。
+- **`shared/scenarios/<id>/`**：方案绑定层，用 `binding.yaml` 选择档案、配方与方案专用接口。当前实例为 [`panda_stack`](shared/scenarios/panda_stack/README.md)（MuJoCo 双 Panda 堆叠）与 [`marvin_handover`](shared/scenarios/marvin_handover/README.md)（Marvin 抓取—空中交接—入箱）；[`_template`](shared/scenarios/_template/README.md) 说明替换步骤。Marvin 的完整目标、阶段与验收见[任务文档](docs/marvin-handover/README.md)。
 
 四端（simulation/runtime/learning/hardware）持有实际实现、依赖、容器和入口脚本；公共协议与当前 Panda/ACT/MuJoCo 实例数值分开维护，方案选择只发生在 `prepare`/`build-ros-sdk` 等准备入口。
 

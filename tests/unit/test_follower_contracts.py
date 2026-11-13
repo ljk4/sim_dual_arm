@@ -312,7 +312,7 @@ def test_follower_config_values_and_round_trip(tmp_path):
         (lambda d: d["max_target_deviations"].__setitem__(0, True), "max_target_deviations[0]"),
         (lambda d: d["max_target_deviations"].__setitem__(0, math.nan), "max_target_deviations[0]"),
         (lambda d: d["max_target_deviations"].__setitem__(0, 0.0), "max_target_deviations[0]"),
-        (lambda d: d["joint_names"].reverse(), "joint_names"),
+        (lambda d: d["joint_names"].__setitem__(0, d["joint_names"][1]), "joint_names"),
     ),
 )
 def test_follower_config_strictly_rejects_bad_documents(mutate, field):
@@ -323,6 +323,18 @@ def test_follower_config_strictly_rejects_bad_documents(mutate, field):
     with pytest.raises(FollowerConfigError) as caught:
         parse_follower_config(document, "<test>")
     assert caught.value.field == field
+
+
+def test_follower_joint_order_is_bound_to_the_selected_robot_profile():
+    from robot_backend_sim.config.follower_config import parse_follower_config
+
+    document = changed()
+    expected_order = tuple(document["joint_names"])
+    document["joint_names"].reverse()
+    config = parse_follower_config(document, "<test>")
+    config.require_joint_order(tuple(document["joint_names"]))
+    with pytest.raises(ContractError, match="robot profile"):
+        config.require_joint_order(expected_order)
 
 
 def test_follower_config_rejects_duplicate_keys(tmp_path):

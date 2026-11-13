@@ -5,7 +5,9 @@ find_package(rosidl_default_generators REQUIRED)
 find_package(builtin_interfaces REQUIRED)
 find_package(robot_api_msgs REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/ContactSnapshot.msg"
   "msg/TaskState.msg"
+  "srv/GetContactSnapshot.srv"
   "srv/GetTaskState.srv"
   "srv/PrepareTask.srv"
   "srv/ResetSimulation.srv"

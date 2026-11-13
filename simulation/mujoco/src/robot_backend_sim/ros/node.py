@@ -46,11 +46,17 @@ from robot_ros_support.stream_conversions import (
 from robot_run_logging import EventContext, EventLogger, LogFailure
 from sensor_msgs.msg import CameraInfo, Image, JointState
 from sim_api_msgs.msg import TaskState as TaskStateMessage
-from sim_api_msgs.srv import GetTaskState, PrepareTask, ResetSimulation, StartTask
+from sim_api_msgs.srv import (
+    GetContactSnapshot,
+    GetTaskState,
+    PrepareTask,
+    ResetSimulation,
+    StartTask,
+)
 from std_msgs.msg import Float64MultiArray, Header
 
 from robot_backend_sim.config.backend_config import BackendConfig
-from robot_backend_sim.config.scene_config import SceneConfig
+from robot_backend_sim.config.scene_loader import SceneConfigLike
 from robot_backend_sim.control.control_state import ControlStatus
 from robot_backend_sim.render.render_worker import RenderedCapture, RendererFactory
 from robot_backend_sim.ros.node_services import ServiceAdapter
@@ -71,6 +77,7 @@ _CAPABILITIES = (
     "control_events",
     "follower_reference",
     "execution_feedback.gripper_set.v1",
+    "contact_snapshot",
 )
 _TASK_CAPABILITIES = ("task_plugin", "task_state")
 _FOLLOWER_CAPABILITY = "bounded_target_follower_v1"
@@ -79,7 +86,7 @@ _EXIT_FAILURE = 1
 
 
 def _mount_calibration(
-    scene_config: SceneConfig, camera: CameraSpec
+    scene_config: SceneConfigLike, camera: CameraSpec
 ) -> tuple[float, float, float, float]:
     """Return (fx, fy, cx, cy) from the scene's declared fovy for this camera."""
     scene_camera = next(
@@ -173,6 +180,7 @@ class BackendNode(Node):
             (GetStreamAnchor, "get_stream_anchor", self._service_adapter.get_anchor),
             (QueryStreamCommand, "query_stream_command", self._service_adapter.query_command),
             (ResetSimulation, "reset_simulation", self._service_adapter.reset),
+            (GetContactSnapshot, "get_contact_snapshot", self._service_adapter.contact_snapshot),
             (PrepareTask, "prepare_task", self._service_adapter.prepare_task),
             (StartTask, "start_task", self._service_adapter.start_task),
             (GetTaskState, "get_task_state", self._service_adapter.get_task_state),
@@ -186,9 +194,12 @@ class BackendNode(Node):
         if self._worker.teacher_enabled:
             from robot_backend_sim.ros.teacher_extension import register_teacher_service
 
+            plugin = self._worker.task_plugin
+            assert plugin is not None
             try:
                 self._teacher_capability = register_teacher_service(
                     self,
+                    capability=plugin.teacher_capability,
                     root=self._root,
                     callback=self._service_adapter.get_task_chunk,
                     callback_group=self._group,
@@ -196,8 +207,8 @@ class BackendNode(Node):
             except ImportError as error:
                 raise ContractError(
                     "TEACHER_EXTENSION_MISSING",
-                    "teacher mode requires the built panda_stack_api_msgs extension "
-                    f"(build with --scenario panda_stack): {error}",
+                    f"teacher mode requires the built {plugin.teacher_capability} "
+                    f"extension: {error}",
                 ) from error
         self.create_timer(0.02, self._publish_pending, callback_group=self._group)
         self.create_timer(0.5, self._publish_info, callback_group=self._group)

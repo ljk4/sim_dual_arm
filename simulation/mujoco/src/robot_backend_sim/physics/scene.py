@@ -19,6 +19,12 @@ import mujoco
 
 from robot_backend_sim.config.scene_config import SceneConfig
 from robot_backend_sim.physics import assets
+from robot_backend_sim.physics.robot_geometry import ArmChain, RobotGeometry
+from robot_backend_sim.physics.scene_container import (
+    CompiledScene,
+    SceneBuildError,
+    compile_spec,
+)
 
 __all__ = ["Scene", "SceneBuildError", "SceneIndices", "build_scene", "gripper_ctrl"]
 
@@ -34,10 +40,6 @@ _INTEGRATORS = {
 }
 
 
-class SceneBuildError(RuntimeError):
-    """The fixed assets or the assembled MuJoCo model are not usable."""
-
-
 @dataclass(frozen=True, slots=True)
 class SceneIndices:
     """Model indices looked up by stable element name, never by adjacency."""
@@ -51,7 +53,7 @@ class SceneIndices:
     tcp_site_ids: Mapping[str, int]
 
 
-class Scene:
+class Scene(CompiledScene):
     """One compiled scene and its writable MuJoCo data."""
 
     def __init__(
@@ -61,11 +63,47 @@ class Scene:
         config: SceneConfig,
         indices: SceneIndices,
     ) -> None:
-        self.model = model
-        self.data = data
+        super().__init__(model, data)
         self.config = config
         self.indices = indices
         self._gripper_ctrl = gripper_ctrl(config.reset.gripper_total_opening)
+
+    @property
+    def contact_object_names(self) -> tuple[str, ...]:
+        return tuple(obj.name for obj in self.config.objects)
+
+    @property
+    def robot_geometry(self) -> RobotGeometry:
+        return RobotGeometry(
+            chains=tuple(
+                ArmChain(
+                    side=side,
+                    joint_names=tuple(f"{side}_joint{index}" for index in range(1, 8)),
+                    tcp_site=f"{side}_tcp",
+                )
+                for side in SIDES
+            ),
+            body_prefixes=("left_", "right_"),
+            side_prefixes={"left": ("left_",), "right": ("right_",)},
+            finger_bodies={
+                "left": (
+                    ("left_left_finger", "left_finger_joint1"),
+                    ("left_right_finger", "left_finger_joint2"),
+                ),
+                "right": (
+                    ("right_left_finger", "right_finger_joint1"),
+                    ("right_right_finger", "right_finger_joint2"),
+                ),
+            },
+        )
+
+    @property
+    def object_free_joint_qpos(self) -> Mapping[str, int]:
+        return self.indices.object_free_joint_qpos
+
+    @property
+    def support_body_names(self) -> tuple[str, ...]:
+        return ("column", "table")
 
     def reset(self, seed: int) -> None:
         """Restart one episode from the configured initial state.
@@ -79,18 +117,7 @@ class Scene:
         generator = random.Random(seed)
         model = self.model
         data = self.data
-        mujoco.mj_resetData(model, data)
-
-        # Clear every writable run-state field explicitly; mj_resetData also
-        # handles fields added by newer MuJoCo releases.
-        data.time = 0.0
-        data.qpos[:] = model.qpos0
-        data.qvel[:] = 0.0
-        data.act[:] = 0.0
-        data.ctrl[:] = 0.0
-        data.qfrc_applied[:] = 0.0
-        data.xfrc_applied[:] = 0.0
-        data.qacc_warmstart[:] = 0.0
+        self.reset_run_state()
 
         half_opening = self.config.reset.gripper_total_opening / 2.0
         for side in SIDES:
@@ -389,15 +416,8 @@ def build_scene(config: SceneConfig) -> Scene:
     _attach_robots(spec, config, panda_xml)
     _add_cameras(spec, config)
     _add_lights(spec)
-    spec.visual.global_.offwidth = max(camera.width for camera in config.cameras)
-    spec.visual.global_.offheight = max(camera.height for camera in config.cameras)
-
-    try:
-        model = spec.compile()
-    except Exception as error:
-        raise SceneBuildError(f"MuJoCo scene compilation failed: {error}") from error
+    model, data = compile_spec(spec, config.cameras, modelname="panda_stack")
     _check_model_shape(model, config)
-    data = mujoco.MjData(model)
     scene = Scene(model, data, config, _build_indices(model, config))
     scene.reset(0)
     return scene

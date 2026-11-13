@@ -1,7 +1,7 @@
 """Single-owner control session over an already owned scene and I/O.
 
 ``ControlSession`` composes an existing :class:`~robot_backend_sim.physics.scene.Scene`,
-the accepted :class:`~robot_backend_sim.physics.panda_io.PandaIO` and the one
+the selected :class:`~robot_backend_sim.physics.robot_io.RobotIO` and the one
 ``MotionController`` physical loop.  It adds explicit leases, immutable command
 identity, bounded idempotent command/chunk history, aggregate status and
 episode-boundary reset.  It never creates a thread, reads a clock/file/network,
@@ -28,7 +28,7 @@ from robot_contracts.control import (
 from robot_contracts.models import ContractError, RunContext
 from robot_trajectory.follower import PreparedFollowerPlan
 
-from robot_backend_sim.config.motion_config import PandaControlConfig
+from robot_backend_sim.config.motion_config import ControlConfig
 from robot_backend_sim.config.stream_config import StreamConfig
 from robot_backend_sim.control.control_events import CommandJournal
 from robot_backend_sim.control.control_state import (
@@ -49,8 +49,8 @@ from robot_backend_sim.control.control_state import (
     _status_from_record,
 )
 from robot_backend_sim.motion.motion_controller import MotionController, MotionSnapshot, Phase
-from robot_backend_sim.physics.panda_io import PandaIO
-from robot_backend_sim.physics.scene import Scene
+from robot_backend_sim.physics.robot_io import RobotIO, gripper_indices
+from robot_backend_sim.physics.scene_container import CompiledScene
 
 __all__ = ["MAX_DEFERRED_EVENTS", "ControlSession", "TIME_DOMAIN_ID"]
 
@@ -83,27 +83,28 @@ class ControlSession:
 
     def __init__(
         self,
-        scene: Scene,
-        io: PandaIO,
-        control_config: PandaControlConfig,
+        scene: CompiledScene,
+        io: RobotIO,
+        control_config: ControlConfig,
         *,
         stream_config: StreamConfig | None = None,
         max_history: int = 256,
         max_chunk_history: int = 128,
     ) -> None:
         self._owner_thread = threading.current_thread()
-        if not isinstance(scene, Scene):
-            raise _invalid("INVALID_CONTROLLER", "scene must be a Scene")
-        if not isinstance(io, PandaIO):
-            raise _invalid("INVALID_CONTROLLER", "io must be a PandaIO")
-        if not isinstance(control_config, PandaControlConfig):
-            raise _invalid("INVALID_CONTROLLER", "control_config must be a PandaControlConfig")
+        if not isinstance(scene, CompiledScene):
+            raise _invalid("INVALID_CONTROLLER", "scene must be a CompiledScene")
+        if not isinstance(io, RobotIO):
+            raise _invalid("INVALID_CONTROLLER", "io must implement the RobotIO contract")
+        if not isinstance(control_config, ControlConfig):
+            raise _invalid("INVALID_CONTROLLER", "control_config must be a ControlConfig")
         if stream_config is not None and not isinstance(stream_config, StreamConfig):
             raise _invalid("INVALID_STREAM_CONFIG", "stream_config must be a StreamConfig")
         io.require_scene(scene)
         self._scene = scene
         self._io = io
         self._control_config = control_config
+        self._gripper_indices = tuple(gripper_indices(io.joint_names).values())
         self._stream_config = stream_config
         self._commands = CommandHistory(max_history)
         self._chunks = ChunkHistory(max_chunk_history)
@@ -164,7 +165,11 @@ class ControlSession:
             return False
         measurement = self._io.measure()
         for index, velocity in enumerate(measurement.velocities):
-            limit = max_gripper_speed_m_s if index in (7, 15) else max_arm_speed_rad_s
+            limit = (
+                max_gripper_speed_m_s
+                if index in self._gripper_indices
+                else max_arm_speed_rad_s
+            )
             if abs(float(velocity)) > limit:
                 return False
         return True

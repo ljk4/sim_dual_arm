@@ -12,7 +12,7 @@ from robot_contracts.trajectory.spline import ReferenceSample
 from robot_trajectory.follower import PreparedFollowerPlan
 from robot_trajectory.sampling import sample_reference_interval
 
-from robot_backend_sim.config.motion_config import PandaControlConfig
+from robot_backend_sim.config.motion_config import ControlConfig
 from robot_backend_sim.config.stream_config import StreamConfig
 from robot_backend_sim.control.braking import BrakingController
 from robot_backend_sim.motion.motion_math import (
@@ -56,17 +56,17 @@ from robot_backend_sim.physics.contacts import (
     resolve_contact_binding,
 )
 from robot_backend_sim.physics.gripper_contact import GripperContactTracker
-from robot_backend_sim.physics.panda_io import Measurement, PandaIO
-from robot_backend_sim.physics.scene import Scene
+from robot_backend_sim.physics.robot_io import Measurement, RobotIO
+from robot_backend_sim.physics.scene_container import CompiledScene
 
 _invalid = ContractError
 
 class MotionRuntime:
     def __init__(
         self,
-        scene: Scene,
-        io: PandaIO,
-        config: PandaControlConfig,
+        scene: CompiledScene,
+        io: RobotIO,
+        config: ControlConfig,
         initial_reference: Sequence[float] | None = None,
         *,
         stream_config: StreamConfig | None = None,
@@ -74,7 +74,7 @@ class MotionRuntime:
         self._owner_thread = threading.current_thread()
         self._scene, self._io, self._config = scene, io, config
         self._binding = resolve_contact_binding(
-            scene.model, tuple(obj.name for obj in scene.config.objects)
+            scene.model, scene.contact_object_names, io.finger_bodies
         )
         self._step_ns, self._hold_positions = validate_controller_inputs(
             scene, io, config, stream_config, initial_reference
@@ -85,7 +85,8 @@ class MotionRuntime:
         )
         self._braking = BrakingController(config)
         self._gripper = GripperContactTracker(
-            scene, self._binding, config, contact_unload_timeout_ns=unload_ns
+            scene, self._binding, config, io.joint_names,
+            contact_unload_timeout_ns=unload_ns,
         )
         self._snapshots = Snapshotter(self._gripper)
         self._tracking = TrackingState()

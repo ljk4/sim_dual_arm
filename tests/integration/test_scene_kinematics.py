@@ -22,7 +22,7 @@ from robot_backend_sim.config.scene_config import load_scene_config  # noqa: E40
 from robot_backend_sim.kinematics import kinematics  # noqa: E402
 from robot_backend_sim.physics.scene import build_scene  # noqa: E402
 from robot_backend_sim.render.rendering import SceneRenderer  # noqa: E402
-from robot_backend_sim.tools import check_kinematics  # noqa: E402
+from robot_backend_sim.tools import check_kinematics, check_kinematics_report  # noqa: E402
 
 CONFIG_PATH = SCENARIO / "configs/simulation/scene/panda_stack.yaml"
 CHECK_PATH = SCENARIO / "configs/simulation/checks/scene_check.yaml"
@@ -332,10 +332,13 @@ def test_real_segmentation_fails_an_impossible_visibility_threshold(
     pose_snapshot = renderer.derive_snapshot(snapshot, updates)
     segmentation = renderer.render_segmentation(pose_snapshot)
     strict_rules = tuple(
-        dataclasses.replace(rule, min_pixels=10**6) if not rule.record_only else rule
+        rule.model_copy(update={"min_pixels": 10**6}) if not rule.record_only else rule
         for rule in kinematics_config.visibility_rules
     )
-    strict_config = dataclasses.replace(kinematics_config, visibility_rules=strict_rules)
+    strict_visibility = kinematics_config.visibility.model_copy(
+        update={"rules": strict_rules}
+    )
+    strict_config = kinematics_config.model_copy(update={"visibility": strict_visibility})
     geom_ids = {
         "source": int(scene.model.geom("source_geom").id),
         "target": int(scene.model.geom("target_geom").id),
@@ -431,7 +434,7 @@ def test_report_write_failure_is_nonzero_and_loud(tmp_path, monkeypatch, capsys)
     logger = FakeLogger(arguments.report_root / arguments.run_id / "logs")
     install_success_fakes(monkeypatch, tmp_path, logger=logger, renderer=FakeRenderer())
     monkeypatch.setattr(
-        check_kinematics,
+        check_kinematics_report,
         "write_json_atomic",
         lambda *_args: (_ for _ in ()).throw(OSError("disk full")),
     )

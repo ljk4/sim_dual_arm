@@ -28,7 +28,7 @@ from robot_backend_sim.motion.motion_types import (
     Phase,
 )
 from robot_backend_sim.motion.stream_schedule import StreamSchedule
-from robot_backend_sim.physics.panda_io import Measurement
+from robot_backend_sim.physics.robot_io import Measurement
 
 __all__ = [
     "failed_terminal",

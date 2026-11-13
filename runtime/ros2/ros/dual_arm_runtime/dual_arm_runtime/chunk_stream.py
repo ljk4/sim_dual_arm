@@ -108,8 +108,10 @@ class PolicyTargetSource:
         self.lease_id = lease_id
 
     def predict(
-        self, observation: ExactObservation, chunk_index: int, request_id: str
+        self, observation: ExactObservation, chunk_index: int, request_id: str,
+        *, handoff_time_ns: int = 0,
     ) -> Prediction:
+        del handoff_time_ns
         if self._context is None:
             raise ContractError("STREAM_NOT_STARTED", "policy source has no context")
         policy_observation = observation_from_exact(
@@ -268,7 +270,12 @@ class ContinuousStreamRunner:
             f"{self.episode_id}-{self._kind()}-{chunk_index}-obs-{observation.observation_id}"
         )
         try:
-            prediction = self.source.predict(observation, chunk_index, request_id)
+            prediction = self.source.predict(
+                observation,
+                chunk_index,
+                request_id,
+                handoff_time_ns=int(anchor.start_sim_time_ns),  # type: ignore[attr-defined]
+            )
         except TaskTerminal as terminal:
             self.task_end = (terminal.runtime_reason, terminal.task_reason, terminal.state)
             raise _TaskComplete from terminal

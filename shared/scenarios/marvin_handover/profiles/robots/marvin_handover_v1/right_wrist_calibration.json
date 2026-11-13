@@ -1,0 +1,18 @@
+{
+  "fovy": 85.0,
+  "height": 240,
+  "name": "right_wrist",
+  "parent": "Arm_R9_Link",
+  "position": [
+    0.0,
+    0.06,
+    0.09
+  ],
+  "quaternion_wxyz": [
+    -0.5,
+    0.5,
+    0.5,
+    0.5
+  ],
+  "width": 320
+}

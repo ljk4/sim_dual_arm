@@ -12,7 +12,7 @@ from collections.abc import Sequence
 from robot_contracts.action_chunks import ChunkAnchor
 from robot_trajectory.follower import PreparedFollowerPlan
 
-from robot_backend_sim.config.motion_config import PandaControlConfig
+from robot_backend_sim.config.motion_config import ControlConfig
 from robot_backend_sim.config.stream_config import StreamConfig
 from robot_backend_sim.motion.motion_runtime import MotionRuntime
 from robot_backend_sim.motion.motion_types import (
@@ -23,8 +23,8 @@ from robot_backend_sim.motion.motion_types import (
     StopReason,
 )
 from robot_backend_sim.motion.stream_schedule import ChunkEvent, ChunkSubmission, StreamSchedule
-from robot_backend_sim.physics.panda_io import PandaIO
-from robot_backend_sim.physics.scene import Scene
+from robot_backend_sim.physics.robot_io import RobotIO
+from robot_backend_sim.physics.scene_container import CompiledScene
 
 __all__ = [
     "ChunkEvent", "ChunkSubmission", "FailedReason", "MotionController",
@@ -33,13 +33,13 @@ __all__ = [
 
 
 class MotionController:
-    """One motion owner bound to the creating thread and one ``PandaIO``."""
+    """One motion owner bound to the creating thread and one robot I/O."""
 
     def __init__(
         self,
-        scene: Scene,
-        io: PandaIO,
-        config: PandaControlConfig,
+        scene: CompiledScene,
+        io: RobotIO,
+        config: ControlConfig,
         initial_reference: Sequence[float] | None = None,
         *,
         stream_config: StreamConfig | None = None,

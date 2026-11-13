@@ -1,0 +1,54 @@
+# Negative diagnostic recipe: the right hand approaches the same block pose but
+# its close command stays wider than the 60 mm block, so the right fingers never
+# contact or support it.  Used only to verify that the left hand keeps holding
+# and the task fails at the dual-hold gate.
+schema_version: 1
+planning_config: ../planning/handover_paths.yaml
+
+success:
+  stable_duration_s: 1.0
+  max_task_sim_duration_s: 180.0
+  max_task_wall_duration_s: 420.0
+  box_bottom_tolerance_m: 0.001
+  min_box_support_normal_force_n: 0.5
+  max_linear_speed_m_s: 0.02
+  max_angular_speed_rad_s: 0.2
+  max_position_drift_m: 0.005
+  max_orientation_drift_rad: 0.05
+
+gates:
+  stable_duration_s: 0.5
+  phase_extra_timeout_s: 8.0
+  arm_position_tolerance_rad: 0.015
+  arm_velocity_tolerance_rad_s: 0.02
+  gripper_position_tolerance_m: 0.001
+  gripper_velocity_tolerance_m_s: 0.005
+  release_opening_m: 0.075
+  release_velocity_max_m_s: 0.005
+  hold_loss_tolerance_s: 0.3
+  lift_height_m: 0.10
+  forbidden_contact_force_n: 0.5
+
+teacher:
+  enabled: true
+  plan_wall_timeout_s: 30.0
+  chunk_size: 60
+  action_period_ns: 50000000
+  max_plan_duration_s: 120.0
+  max_joint_velocity_fraction: 0.85
+  max_joint_acceleration_fraction: 0.80
+  gripper_velocity_m_s: 0.04
+  gripper_acceleration_m_s2: 0.5
+  phase_min_duration_s: 0.5
+  left_close_opening_m: 0.05
+  right_close_opening_m: 0.075
+  chunk_cache_entries: 256
+
+capacity:
+  expected_chunks: 256
+  expected_references: 256
+  expected_events: 1024
+  max_episode_chunks: 400
+  max_teacher_requests: 400
+  rpc_cache_entries: 400
+  backend_chunk_history: 400

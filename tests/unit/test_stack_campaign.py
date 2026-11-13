@@ -1,6 +1,7 @@
 import json
 import sys
 
+import pytest
 import yaml
 from dual_arm_runtime.offline import campaign
 
@@ -265,3 +266,275 @@ def test_teacher_and_replay_cannot_consume_reserved_act_attempts(tmp_path):
         campaign._allocate(config, records, "pilot", "rollout", "teacher", None, root)
     seed, mode = campaign._allocate(config, records, "pilot", "rollout", "act", None, root)
     assert (seed, mode) == (1008, "act")
+
+
+def test_select_writes_generated_manifest_only_after_success(tmp_path):
+    root = _project(tmp_path)
+    config_path = (
+        root
+        / "shared/scenarios/panda_stack/configs/runtime/experiments/stack_campaign.yaml"
+    )
+    config = yaml.safe_load(config_path.read_text())
+    config["budget"].update(
+        formal_target_qualified=6,
+        formal_validation_qualified_indices=[4, 5],
+    )
+    config["formal_split_description"] = "four train, two validate"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    out = root / "build/campaign/SELECTED.json"
+
+    # Insufficient qualified attempts leave no manifest behind.
+    assert campaign.main(
+        ["--project-root", str(root), "select", "--out", str(out)]
+    ) == 1
+    assert not out.exists()
+
+    ledger = root / "build/campaign/attempts.jsonl"
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    lines = []
+    for index in range(6):
+        attempt_id = f"formal:{10000 + index}:run"
+        lines.append(
+            json.dumps(
+                {
+                    "event": "RESERVED",
+                    "attempt_id": attempt_id,
+                    "purpose": "formal",
+                    "kind": "rollout",
+                    "mode": "teacher",
+                    "seed": 10000 + index,
+                    "attempt_dir": str(root / f"build/campaign/attempts/{index}"),
+                    "raw_bytes": 0,
+                }
+            )
+        )
+        lines.append(
+            json.dumps(
+                {
+                    "event": "FINISHED",
+                    "attempt_id": attempt_id,
+                    "qualified": True,
+                    "raw_bytes": 0,
+                }
+            )
+        )
+    ledger.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    assert campaign.main(
+        ["--project-root", str(root), "select", "--out", str(out)]
+    ) == 0
+    document = json.loads(out.read_text())
+    assert document["status"] == "SELECTED"
+    assert document["rule"] == "four train, two validate"
+    assert len(document["training"]) == 4
+    assert [item["seed"] for item in document["validation"]] == [10004, 10005]
+
+    # A later run never overwrites a usable selection manifest.
+    assert campaign.main(
+        ["--project-root", str(root), "select", "--out", str(out)]
+    ) == 2
+    assert json.loads(out.read_text())["status"] == "SELECTED"
+
+
+def _terminal_project(tmp_path):
+    root = _project(tmp_path)
+    attempt = root / "build/campaign/pilot-03102-record-42"
+    episode = attempt / "stack/record-42/raw/pilot-03102-record-42"
+    episode.mkdir(parents=True)
+    (episode / "manifest.json").write_text(
+        json.dumps(
+            {
+                "recording": {"complete": True, "failure_reason": ""},
+                "runtime": {"outcome": "interrupted", "reason": "SIGTERM"},
+                "started_at_ns": 2_000_000_000,
+                "ended_at_ns": 42_000_000_000,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (episode / "task_result.json").write_text(
+        json.dumps(
+            {
+                "result": {
+                    "outcome": "failed",
+                    "reason": "TASK_FAILED: CONTROL_FAILED: RUNTIME_SHUTDOWN",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    ledger = root / "build/campaign/attempts.jsonl"
+    attempt_id = "pilot:3102:record-42"
+    ledger.write_text(
+        "\n".join(
+            json.dumps(record)
+            for record in (
+                {
+                    "event": "RESERVED",
+                    "attempt_id": attempt_id,
+                    "purpose": "pilot",
+                    "kind": "rollout",
+                    "mode": "teacher",
+                    "seed": 3102,
+                    "run_id": "record-42",
+                    "attempt_dir": str(attempt),
+                    "reserved_at_ns": 1_000_000_000,
+                    "budget": {"purpose_attempt_limit": 3},
+                },
+                {
+                    "event": "INTERRUPTED",
+                    "attempt_id": attempt_id,
+                    "seed": 3102,
+                    "purpose": "pilot",
+                    "kind": "rollout",
+                    "mode": "teacher",
+                    "exit_code": 130,
+                    "wall_s": 0.0,
+                    "failure": "interrupted",
+                    "raw_bytes": 0,
+                    "attempt_dir": str(attempt),
+                    "finished_at_ns": 43_000_000_000,
+                    "recording_complete": False,
+                    "runtime_outcome": "",
+                    "runtime_reason": "",
+                    "task_outcome": "",
+                    "quality_qualified": False,
+                    "qualified": False,
+                },
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return root, attempt_id, ledger
+
+
+def test_classify_reads_recorded_episode_without_root_copies(tmp_path):
+    root, _attempt_id, _ledger = _terminal_project(tmp_path)
+    classification = campaign.classify(
+        root / "build/campaign/pilot-03102-record-42", "quality.json"
+    )
+    assert classification == {
+        "recording_complete": True,
+        "runtime_outcome": "interrupted",
+        "runtime_reason": "SIGTERM",
+        "task_outcome": "failed",
+        "quality_qualified": False,
+        "qualified": False,
+    }
+
+
+def test_interrupted_terminal_backfill_preserves_history_and_fills_real_fields(tmp_path):
+    root, attempt_id, ledger = _terminal_project(tmp_path)
+    config = (
+        root
+        / "shared/scenarios/panda_stack/configs/runtime/experiments/stack_campaign.yaml"
+    )
+    assert (
+        campaign.main(
+            [
+                "--project-root",
+                str(root),
+                "--config",
+                str(config),
+                "backfill-terminal",
+                "--attempt-id",
+                attempt_id,
+            ]
+        )
+        == 0
+    )
+    records = [json.loads(line) for line in ledger.read_text().splitlines()]
+    assert [record["event"] for record in records] == ["RESERVED", "INTERRUPTED", "INTERRUPTED"]
+    assert records[0]["budget"] == {"purpose_attempt_limit": 3}
+    assert records[1]["wall_s"] == 0.0
+    terminal = records[-1]
+    assert terminal["attempt_id"] == attempt_id
+    assert terminal["seed"] == 3102
+    assert terminal["purpose"] == "pilot"
+    assert terminal["exit_code"] == 130
+    assert terminal["wall_s"] == 41.0
+    assert terminal["recording_complete"] is True
+    assert terminal["runtime_outcome"] == "interrupted"
+    assert terminal["runtime_reason"] == "SIGTERM"
+    assert terminal["task_outcome"] == "failed"
+    assert terminal["qualified"] is False
+    assert terminal["finished_at_ns"] == 43_000_000_000
+    assert terminal["backfilled_from"]
+
+    # A second append is refused once the true fields are present.
+    assert (
+        campaign.main(
+            [
+                "--project-root",
+                str(root),
+                "--config",
+                str(config),
+                "backfill-terminal",
+                "--attempt-id",
+                attempt_id,
+            ]
+        )
+        == 2
+    )
+    assert len(ledger.read_text().splitlines()) == 3
+
+
+def test_interrupt_waits_for_the_whole_launch_group_and_keeps_wall_time(tmp_path):
+    import os
+    import signal
+    import sys
+    import threading
+
+    from dual_arm_runtime.offline.campaign_execution import (
+        Attempt,
+        LaunchInterrupted,
+        run_command,
+    )
+
+    marker = tmp_path / "child-finished"
+    attempt = Attempt(
+        attempt_id="pilot:1:interrupt",
+        purpose="pilot",
+        kind="rollout",
+        mode="teacher",
+        seed=1,
+        run_id="interrupt",
+        episode_id="interrupt",
+        directory=tmp_path,
+        config="",
+        code={},
+        budget={},
+        reserved_at_ns=0,
+    )
+    child = (
+        "import signal,time;"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN);"
+        f"time.sleep(1.0);open({str(marker)!r},'w').write('ok')"
+    )
+    command = [
+        sys.executable,
+        "-c",
+        "import subprocess,sys,time;"
+        f"subprocess.Popen([sys.executable,'-c',{child!r}]);"
+        "time.sleep(30)",
+    ]
+    timer = threading.Timer(0.3, lambda: os.kill(os.getpid(), signal.SIGINT))
+    timer.start()
+    try:
+        with pytest.raises(LaunchInterrupted) as interrupted:
+            run_command(
+                command,
+                attempt,
+                tmp_path,
+                30.0,
+                0,
+                tmp_path,
+                stop_grace_s=5.0,
+            )
+    finally:
+        timer.cancel()
+    assert interrupted.value.code == 130
+    assert interrupted.value.failure == "interrupted"
+    assert interrupted.value.wall_s >= 1.0
+    assert marker.is_file()

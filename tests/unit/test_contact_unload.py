@@ -100,6 +100,8 @@ def constrained_tracker():
     )
     tracker._unloaders = {side: ContactUnloader() for side in ("left", "right")}
     tracker._unloading_axes = frozenset()
+    tracker._gripper_index = {"left": 7, "right": 15}
+    tracker._arm_indices = tuple(index for index in range(16) if index not in (7, 15))
     return tracker
 
 

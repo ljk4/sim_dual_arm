@@ -7,6 +7,7 @@ from typing import Annotated
 
 from pydantic import BeforeValidator, Field, model_validator
 from robot_contracts.action_chunks import MAX_TARGET_COUNT
+from robot_contracts.models import ContractError
 from robot_contracts.trajectory.constants import MAX_HORIZON_NS
 from robot_contracts.validation import (
     NonEmptyStr,
@@ -24,7 +25,7 @@ from robot_backend_sim.config.motion_config import CONTROL_JOINT_NAMES
 
 __all__ = [
     "FollowerConfigError",
-    "PandaFollowerConfig",
+    "FollowerConfig",
     "load_follower_config",
     "parse_follower_config",
 ]
@@ -35,7 +36,7 @@ _JOINT_COUNT = len(CONTROL_JOINT_NAMES)
 FollowerConfigError = StrictMappingError
 
 
-class PandaFollowerConfig(StrictMappingModel):
+class FollowerConfig(StrictMappingModel):
     """Validated bounded-follower selection, tail and deviation parameters."""
 
 
@@ -47,13 +48,21 @@ class PandaFollowerConfig(StrictMappingModel):
     max_terminal_tail_duration_s: PositiveFloat
 
     @model_validator(mode="after")
-    def _fixed_order(self) -> PandaFollowerConfig:
-        if self.joint_names != CONTROL_JOINT_NAMES:
-            raise contract_error("joint_names", "must match the fixed 16-joint order")
+    def _shape(self) -> FollowerConfig:
+        if len(set(self.joint_names)) != len(self.joint_names):
+            raise contract_error("joint_names", "must be unique")
         if not 1 <= round(self.max_terminal_tail_duration_s * 1_000_000_000) <= MAX_HORIZON_NS:
             raise contract_error("max_terminal_tail_duration_s",
                                  f"must convert to 1..{MAX_HORIZON_NS} ns")
         return self
+
+    def require_joint_order(self, joint_names: tuple[str, ...]) -> None:
+        """Bind this recipe to one robot profile; never assume a family order."""
+        if tuple(self.joint_names) != tuple(joint_names):
+            raise ContractError(
+                "PROFILE_MISMATCH",
+                "follower config joint order differs from the robot profile",
+            )
 
     @property
     def max_terminal_tail_duration_ns(self) -> int:
@@ -70,12 +79,12 @@ class PandaFollowerConfig(StrictMappingModel):
 
 def parse_follower_config(
     document: object, source: str | Path = "<follower config>"
-) -> PandaFollowerConfig:
+) -> FollowerConfig:
     """Validate one mapping and return an immutable follower configuration."""
-    return validate_config_model(PandaFollowerConfig, document, source, FollowerConfigError)
+    return validate_config_model(FollowerConfig, document, source, FollowerConfigError)
 
 
-def load_follower_config(path: Path | str) -> PandaFollowerConfig:
+def load_follower_config(path: Path | str) -> FollowerConfig:
     """Load one YAML follower file, rejecting duplicate/unknown/bool/non-finite data."""
     source = Path(path)
     try:

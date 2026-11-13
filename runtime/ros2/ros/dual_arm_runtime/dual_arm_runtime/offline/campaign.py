@@ -22,8 +22,11 @@ from pathlib import Path
 from typing import Any
 
 from dual_arm_runtime.offline.campaign_execution import (
+    LaunchInterrupted,
     acquire_run_lock,
     classify,
+    episode_manifest,
+    episode_task_result,
     handle_sigterm,
     read_json,
     reject_docker_command,
@@ -160,7 +163,10 @@ def _execute(
             float(config["launch"].get("timeout_s", 180.0)),
             int(config["budget"]["min_free_bytes"]),
             output,
+            stop_grace_s=float(config["launch"].get("stop_grace_s", 10.0)),
         )
+    except LaunchInterrupted as interrupted:
+        code, wall_s, failure = interrupted.code, interrupted.wall_s, interrupted.failure
     except KeyboardInterrupt:
         code, wall_s, failure = 130, 0.0, "interrupted"
     if code not in {124, 125, 130}:
@@ -320,16 +326,28 @@ def command_select(args: argparse.Namespace) -> int:
             )
     target = int(config["budget"]["formal_target_qualified"])
     selected = ordered[:target]
-    validation_positions = {
-        int(value) for value in config["budget"]["formal_validation_qualified_indices"]
+    validation_positions = sorted(
+        {int(value) for value in config["budget"]["formal_validation_qualified_indices"]}
+    )
+    rule = str(config.get("formal_split_description") or "").strip() or (
+        f"first {target} qualified formal attempts; "
+        f"zero-based qualified positions {validation_positions} validate"
+    )
+    document: dict[str, Any] = {
+        "schema_version": 1,
+        "campaign": str(args.config),
+        "diagnostic": bool(config.get("diagnostic", False)),
+        "target": target,
+        "validation_positions": validation_positions,
+        "rule": rule,
     }
     if len(selected) < target:
         print(
             json.dumps(
                 {
+                    **document,
                     "status": "INSUFFICIENT_QUALIFIED",
                     "qualified": len(selected),
-                    "target": target,
                     "selected": selected,
                 },
                 indent=2,
@@ -338,18 +356,27 @@ def command_select(args: argparse.Namespace) -> int:
         return 1
     training = [item for index, item in enumerate(selected) if index not in validation_positions]
     validation = [item for index, item in enumerate(selected) if index in validation_positions]
-    print(
-        json.dumps(
-            {
-                "status": "SELECTED",
-                "qualified": len(selected),
-                "training": training,
-                "validation": validation,
-                "rule": "first 50 qualified formal attempts; 10th/20th/30th/40th/50th validate",
-            },
-            indent=2,
-        )
+    document.update(
+        {
+            "status": "SELECTED",
+            "qualified": len(selected),
+            "training": training,
+            "validation": validation,
+        }
     )
+    if args.out is not None:
+        destination = (project_root / args.out).resolve()
+        if destination.exists():
+            raise CampaignError(
+                f"refusing to overwrite an existing selection manifest: {destination}"
+            )
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(
+            json.dumps(document, indent=2, sort_keys=True, allow_nan=False) + "\n",
+            encoding="utf-8",
+        )
+        document["written"] = str(destination)
+    print(json.dumps(document, indent=2))
     return 0
 
 
@@ -359,6 +386,93 @@ DEFAULT_CAMPAIGN = (
 DEFAULT_RUNTIME_TEACHER = (
     "shared/scenarios/panda_stack/configs/runtime/teacher_collect.yaml"
 )
+
+
+def command_backfill_terminal(args: argparse.Namespace) -> int:
+    """Append the real terminal summary an interrupted launch produced.
+
+    The original RESERVED/INTERRUPTED history is never rewritten: this appends
+    one terminal record re-read from the recorded episode artefacts.  It only
+    accepts an attempt that already has an INTERRUPTED/FAILED terminal fact and
+    only fills facts that are still empty (or a zero wall time).
+    """
+    project_root = args.project_root.resolve()
+    config = _load(project_root / args.config)
+    paths = config["paths"]
+    ledger = Ledger(project_root / paths["ledger"], project_root / paths["lock"])
+    with ledger.locked():
+        records = ledger.records()
+        terminal = _finished(records)
+        reservation = next(
+            (
+                record
+                for record in _attempts(records)
+                if str(record.get("attempt_id")) == args.attempt_id
+            ),
+            None,
+        )
+        previous = terminal.get(args.attempt_id)
+        if reservation is None:
+            raise CampaignError(f"attempt is not reserved in the ledger: {args.attempt_id}")
+        if previous is None or previous.get("event") not in {"INTERRUPTED", "FAILED"}:
+            raise CampaignError(
+                "terminal backfill needs an INTERRUPTED/FAILED attempt: "
+                f"{args.attempt_id}"
+            )
+        directory = Path(str(reservation["attempt_dir"]))
+        classification = classify(directory, str(config["quality"]["sidecar"]))
+        manifest = episode_manifest(directory)
+        if manifest is None or episode_task_result(directory) is None:
+            raise CampaignError(
+                f"attempt has no recorded episode manifest/task result: {directory}"
+            )
+        wall_s = float(previous.get("wall_s") or 0.0)
+        if wall_s <= 0.0:
+            ended = manifest.get("ended_at_ns")
+            reserved_at = reservation.get("reserved_at_ns")
+            if isinstance(ended, int) and isinstance(reserved_at, int) and ended > reserved_at:
+                wall_s = round((ended - reserved_at) / 1e9, 6)
+        if (
+            wall_s > 0.0
+            and previous.get("runtime_outcome")
+            and previous.get("task_outcome")
+            and previous.get("recording_complete") == classification["recording_complete"]
+        ):
+            raise CampaignError(
+                f"terminal summary is already complete for {args.attempt_id}"
+            )
+        record = {
+            "event": previous["event"],
+            "attempt_id": args.attempt_id,
+            "seed": reservation.get("seed"),
+            "purpose": reservation.get("purpose"),
+            "kind": reservation.get("kind"),
+            "mode": reservation.get("mode"),
+            "exit_code": previous.get("exit_code"),
+            "wall_s": wall_s,
+            "failure": previous.get("failure", ""),
+            "raw_bytes": _measure(directory),
+            "attempt_dir": str(directory),
+            "finished_at_ns": previous.get("finished_at_ns", _now_ns()),
+            "recorded_at_ns": _now_ns(),
+            **classification,
+            "backfilled_from": [
+                str(path)
+                for path in (
+                    directory / "manifest.json",
+                    directory / "task_result.json",
+                )
+                if path.is_file()
+            ]
+            or sorted(
+                str(path)
+                for path in directory.glob("stack/*/raw/*/manifest.json")
+            ),
+            "backfill_reason": "terminal summary re-read from recorded episode artefacts",
+        }
+        ledger.append(record)
+    print(json.dumps(record, indent=2, sort_keys=True))
+    return 0
 
 
 def parser() -> argparse.ArgumentParser:
@@ -388,8 +502,18 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("launch_command", nargs=argparse.REMAINDER)
     status = sub.add_parser("status", help="show budgets and consumed raw bytes")
     status.set_defaults()
-    select = sub.add_parser("select", help="select 50 formal attempts and validation split")
+    select = sub.add_parser("select", help="select the qualified formal split")
+    select.add_argument(
+        "--out",
+        default=None,
+        help="write the generated SELECTED manifest only after a successful split",
+    )
     select.set_defaults()
+    backfill = sub.add_parser(
+        "backfill-terminal",
+        help="append a real terminal summary for an interrupted/failed attempt",
+    )
+    backfill.add_argument("--attempt-id", required=True)
     return result
 
 
@@ -429,6 +553,8 @@ def main(argv: list[str] | None = None) -> int:
             return command_status(args)
         if args.action == "select":
             return command_select(args)
+        if args.action == "backfill-terminal":
+            return command_backfill_terminal(args)
         raise CampaignError(f"unknown command {args.action}")
     except CampaignError as error:
         print(json.dumps({"error": str(error)}), file=sys.stderr)

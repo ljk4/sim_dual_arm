@@ -15,7 +15,7 @@ from robot_backend_sim.physics.contacts import (  # noqa: E402
     GripperCompletion,
     GripperContactEvidence,
     evaluate_gripper_completion,
-    validated_panda_completions,
+    validated_gripper_completions,
 )
 from robot_contracts.models import ContractError  # noqa: E402
 
@@ -83,19 +83,19 @@ def _panda_completion(side: str, indices: tuple[int, ...] = (1, 2)) -> GripperCo
 
 def test_panda_completion_evidence_keeps_two_sides_and_two_fingers():
     both = (_panda_completion("left"), _panda_completion("right"))
-    assert validated_panda_completions(both) == both
+    assert validated_gripper_completions(both) == both
     with pytest.raises(ContractError, match="left then right"):
-        validated_panda_completions(
+        validated_gripper_completions(
             (_panda_completion("right"), _panda_completion("left"))
         )
     with pytest.raises(ContractError, match="left then right"):
-        validated_panda_completions((_panda_completion("left"),))
+        validated_gripper_completions((_panda_completion("left"),))
     with pytest.raises(ContractError, match="finger indices 1 then 2"):
-        validated_panda_completions(
+        validated_gripper_completions(
             (_panda_completion("left", (1, 3)), _panda_completion("right"))
         )
     with pytest.raises(ContractError, match="side does not match"):
-        validated_panda_completions(
+        validated_gripper_completions(
             (
                 _panda_completion("left"),
                 GripperCompletion(
@@ -218,6 +218,23 @@ def test_opening_reference_cannot_use_contact_completion_even_with_contact():
     )
     assert completion.mode == "NONE"
     assert completion.contact_ok is False
+
+
+def test_pressure_relief_below_the_measured_aperture_keeps_contact_completion():
+    contact = _contact(
+        _finger(1, (("source", 5.0, 2),)),
+        _finger(2, (("source", 5.0, 2),)),
+        "source",
+    )
+    completion = _completion(
+        contact,
+        initial_reference_m=0.05,
+        final_reference_m=0.05628,
+        target_position_m=0.05628,
+        measured_position_m=0.05846,
+        position_tolerance_m=0.001,
+    )
+    assert completion.mode == "CONTACT"
 
 
 def test_contact_is_not_used_when_the_position_threshold_is_already_met():

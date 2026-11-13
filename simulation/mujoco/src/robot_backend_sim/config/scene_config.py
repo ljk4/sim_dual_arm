@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import math
 from pathlib import Path
 from typing import Annotated, Literal
@@ -11,7 +10,6 @@ from pydantic import BeforeValidator, Field, model_validator
 from robot_contracts.validation import (
     NonEmptyStr,
     PositiveFloat,
-    PositiveInt,
     StrictFloat,
     StrictMappingError,
     StrictMappingModel,
@@ -22,17 +20,25 @@ from robot_contracts.validation import (
     validate_config_model,
 )
 
+from robot_backend_sim.config.camera_config import (
+    CAMERA_NAMES,
+    CameraConfig,
+    Unit,
+    Vec3,
+    camera_declared_description,
+)
+
 __all__ = [
     "CameraConfig", "camera_declared_description", "ColumnConfig", "MountsConfig",
-    "ObjectConfig", "PhysicsConfig", "RandomizationConfig", "ResetConfig", "SceneConfig",
+    "ObjectConfig", "PhysicsConfig", "RandomizationConfig", "ResetConfig", "RobotSelection",
+    "SceneConfig",
     "SceneConfigError", "TableConfig", "CAMERA_NAMES", "CAMERA_PARENTS",
     "FINGER_JOINT_LIMIT", "INTEGRATORS", "MAX_RANDOM_XY", "MAX_RANDOM_YAW_DEG",
     "PANDA_JOINT_RANGES", "load_scene_config",
 ]
 
 SceneConfigError = StrictMappingError
-TOP_LEVEL_KEYS = ("physics", "column", "mounts", "table", "objects", "cameras", "reset")
-CAMERA_NAMES = ("global", "left_wrist", "right_wrist")
+TOP_LEVEL_KEYS = ("physics", "robot", "column", "mounts", "table", "objects", "cameras", "reset")
 CAMERA_PARENTS = {"global": "column", "left_wrist": "left_hand", "right_wrist": "right_hand"}
 INTEGRATORS = ("euler", "implicit", "implicitfast", "rk4")
 PANDA_JOINT_RANGES = (
@@ -44,27 +50,9 @@ MAX_RANDOM_XY = 0.03
 MAX_RANDOM_YAW_DEG = 10.0
 _OBJECT_NAME_PATTERN = r"^[A-Za-z][A-Za-z0-9_]*$"
 _RESERVED_BODY_NAMES = frozenset({"world", "column", "table"})
-CAMERA_FIELDS = ("name", "parent", "position", "quaternion_wxyz", "fovy", "width", "height")
 
-Unit = Annotated[StrictFloat, Field(ge=0.0, le=1.0)]
 Vec2 = Annotated[tuple[StrictFloat, StrictFloat], BeforeValidator(as_tuple)]
-Vec3 = Annotated[tuple[StrictFloat, StrictFloat, StrictFloat], BeforeValidator(as_tuple)]
 Rgba = Annotated[tuple[Unit, Unit, Unit, Unit], BeforeValidator(as_tuple)]
-Quaternion = Annotated[tuple[StrictFloat, StrictFloat, StrictFloat, StrictFloat],
-                       BeforeValidator(as_tuple)]
-
-
-def _declaration(data: object) -> object:
-    if not isinstance(data, dict) or "declared_description_json" in data:
-        return data
-    if not all(name in data for name in CAMERA_FIELDS):
-        return data
-    declaration = {name: data[name] for name in CAMERA_FIELDS}
-    try:
-        encoded = json.dumps(declaration, sort_keys=True, separators=(",", ":"), allow_nan=False)
-    except (TypeError, ValueError):
-        return data
-    return {**data, "declared_description_json": encoded}
 
 
 class PhysicsConfig(StrictMappingModel):
@@ -144,37 +132,6 @@ class ObjectConfig(StrictMappingModel):
         return self
 
 
-class CameraConfig(StrictMappingModel):
-    name: NonEmptyStr
-    parent: NonEmptyStr
-    position: Vec3
-    quaternion_wxyz: Quaternion
-    fovy: Annotated[PositiveFloat, Field(ge=5.0, le=170.0)]
-    width: Annotated[PositiveInt, Field(le=4096)]
-    height: Annotated[PositiveInt, Field(le=4096)]
-    declared_description_json: str = ""
-
-    @model_validator(mode="before")
-    @classmethod
-    def _declaration(cls, data: object) -> object:
-        return _declaration(data)
-
-    @model_validator(mode="after")
-    def _camera(self) -> CameraConfig:
-        if self.name not in CAMERA_NAMES:
-            raise contract_error("name", f"must be one of {CAMERA_NAMES}")
-        if self.parent != CAMERA_PARENTS[self.name]:
-            raise contract_error("parent", f"must be {CAMERA_PARENTS[self.name]!r}")
-        norm = math.sqrt(sum(component * component for component in self.quaternion_wxyz))
-        if not math.isfinite(norm) or norm < 1e-9:
-            raise contract_error("quaternion_wxyz", "must be a non-zero finite quaternion")
-        if abs(norm - 1.0) > 1e-3:
-            raise contract_error("quaternion_wxyz", "must be a unit quaternion")
-        object.__setattr__(self, "quaternion_wxyz",
-                           tuple(component / norm for component in self.quaternion_wxyz))
-        return self
-
-
 class ResetConfig(StrictMappingModel):
     home_joint_positions: Annotated[
         tuple[StrictFloat, ...], BeforeValidator(as_tuple), Field(min_length=7, max_length=7)]
@@ -190,9 +147,16 @@ class ResetConfig(StrictMappingModel):
         return self
 
 
+class RobotSelection(StrictMappingModel):
+    """Explicit robot assembly selection for the Panda scene recipe."""
+
+    assembly: Literal["panda"]
+
+
 class SceneConfig(StrictMappingModel):
     source: str = ""
     physics: PhysicsConfig
+    robot: RobotSelection
     column: ColumnConfig
     mounts: MountsConfig
     table: TableConfig
@@ -222,6 +186,11 @@ class SceneConfig(StrictMappingModel):
     def _scene(self) -> SceneConfig:
         if tuple(camera.name for camera in self.cameras) != CAMERA_NAMES:
             raise contract_error("cameras", f"must be exactly {CAMERA_NAMES}")
+        for index, camera in enumerate(self.cameras):
+            if camera.parent != CAMERA_PARENTS[camera.name]:
+                raise contract_error(
+                    f"cameras[{index}].parent", f"must be {CAMERA_PARENTS[camera.name]!r}"
+                )
         if (len({camera.width for camera in self.cameras}) != 1
                 or len({camera.height for camera in self.cameras}) != 1):
             raise contract_error("cameras", "all cameras must share one resolution")
@@ -253,32 +222,6 @@ class SceneConfig(StrictMappingModel):
                     raise contract_error(f"objects[{second}].nominal_xy",
                                          f"randomized footprint can overlap objects[{first}]")
         return self
-
-
-def camera_declared_description(camera: CameraConfig) -> dict[str, object]:
-    """Return a fresh mutable camera declaration with the original YAML values."""
-    source = "<camera declaration>"
-    if not isinstance(camera, CameraConfig):
-        raise SceneConfigError(source, "<camera>", "must be a CameraConfig")
-    field = f"cameras.{camera.name}"
-    try:
-        declaration = json.loads(camera.declared_description_json)
-    except (TypeError, ValueError) as error:
-        raise SceneConfigError(source, f"{field}.declared_description_json",
-                               "must be a canonical JSON object") from error
-    if not isinstance(declaration, dict):
-        raise SceneConfigError(source, f"{field}.declared_description_json",
-                               "must be a canonical JSON object")
-    try:
-        rebuilt = validate_config_model(CameraConfig, declaration, source, SceneConfigError)
-    except SceneConfigError as error:
-        raise SceneConfigError(source, f"{field}.{error.field}", error.message) from error
-    if rebuilt != camera:
-        mismatch = next(name for name in CameraConfig.model_fields
-                        if getattr(rebuilt, name) != getattr(camera, name))
-        raise SceneConfigError(source, f"{field}.{mismatch}",
-                               "declared camera description does not match typed fields")
-    return declaration
 
 
 def load_scene_config(path: Path | str) -> SceneConfig:

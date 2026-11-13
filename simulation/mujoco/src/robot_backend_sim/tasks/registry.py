@@ -6,7 +6,7 @@ from robot_backend_sim.tasks.base import SimTaskPlugin
 
 __all__ = ["create_task_plugin", "SUPPORTED_TASK_TYPES"]
 
-SUPPORTED_TASK_TYPES = ("stack",)
+SUPPORTED_TASK_TYPES = ("stack", "handover")
 
 
 def create_task_plugin(
@@ -17,6 +17,12 @@ def create_task_plugin(
         from robot_backend_sim.tasks.stack import StackTaskPlugin
 
         return StackTaskPlugin.from_path(
+            task_path, task_mode=task_mode, scene_config=scene_config
+        )
+    if task_type == "handover":
+        from robot_backend_sim.tasks.handover.plugin import HandoverTaskPlugin
+
+        return HandoverTaskPlugin.from_path(
             task_path, task_mode=task_mode, scene_config=scene_config
         )
     raise ValueError(f"unknown simulation task type: {task_type!r}")

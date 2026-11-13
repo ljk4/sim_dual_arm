@@ -22,8 +22,8 @@ from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import Float64MultiArray
 
 from robot_backend_sim.config.backend_config import load_backend_config
-from robot_backend_sim.config.scene_config import load_scene_config
-from robot_backend_sim.physics.scene import build_scene
+from robot_backend_sim.config.scene_loader import load_scene_config_for
+from robot_backend_sim.physics.robot_adapters import build_scene_for
 
 _STATE_SIGNATURE = mujoco.mjtState.mjSTATE_FULLPHYSICS
 _VIEWER_QOS = QoSProfile(
@@ -82,8 +82,8 @@ def main() -> int:
     if not backend.visualization_enabled:
         print("viewer: visualization is disabled for this backend", file=sys.stderr)
         return 2
-    scene_config = load_scene_config(backend.scene_path)
-    scene = build_scene(scene_config)
+    scene_config = load_scene_config_for(backend.scene_path)  # type: ignore[arg-type]
+    scene = build_scene_for(scene_config)
     model = scene.model
     data = scene.data
     topic = args.state_topic or f"{backend.namespace.rstrip('/')}/visualization/mujoco_state"

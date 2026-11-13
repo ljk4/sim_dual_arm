@@ -20,7 +20,7 @@ from robot_contracts.models import ContractError, RobotProfile, RunContext, Targ
 from robot_trajectory.spline_math import validate_reference_inputs
 
 from robot_backend_sim.config.kinematics_config import KinematicsCheckConfig
-from robot_backend_sim.config.motion_config import PandaControlConfig
+from robot_backend_sim.config.motion_config import ControlConfig
 from robot_backend_sim.kinematics.kinematics import (
     CollisionPairSet,
     KeyPoseTarget,
@@ -179,7 +179,7 @@ def _filtered_pairs(model: Any) -> tuple[CollisionPairSet, tuple[str, ...]]:
 
 
 def _joint_limits(
-    profile: RobotProfile, control: PandaControlConfig, teacher: Any
+    profile: RobotProfile, control: ControlConfig, teacher: Any
 ) -> tuple[tuple[float, ...], tuple[float, ...]]:
     velocities = [
         float(joint.max_velocity) * teacher.max_joint_velocity_fraction for joint in profile.joints
@@ -327,7 +327,7 @@ def _gripper_pose_clearance(
 def _teacher_ik(
     model,
     snapshot: TeacherSnapshot,
-    control_config: PandaControlConfig,
+    control_config: ControlConfig,
     kinematics_config: KinematicsCheckConfig,
     teacher,
     *,
@@ -378,7 +378,7 @@ def _teacher_segments(
     teacher,
     results,
     profile: RobotProfile,
-    control_config: PandaControlConfig,
+    control_config: ControlConfig,
 ) -> tuple[list[TeacherSegment], float]:
     right_home = snapshot.right_positions
     left = snapshot.left_positions
@@ -508,7 +508,7 @@ def build_teacher_plan(
     model: Any,
     snapshot: TeacherSnapshot,
     profile: RobotProfile,
-    control_config: PandaControlConfig,
+    control_config: ControlConfig,
     kinematics_config: KinematicsCheckConfig,
     task_config: StackTaskConfig,
     *,
@@ -641,7 +641,7 @@ def sample_teacher_chunk(
     chunk_size: int,
     period_ns: int,
     profile: RobotProfile,
-    control_config: PandaControlConfig,
+    control_config: ControlConfig,
 ) -> TeacherChunk:
     """Sample only the currently gated phase and hold its end pose.
 

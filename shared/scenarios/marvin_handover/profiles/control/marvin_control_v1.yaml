@@ -1,0 +1,59 @@
+# 中文参数说明（维护时优先阅读本段）
+# joint_names：16 个控制轴顺序，与 marvin_handover_v1 档案一致。
+# max_accelerations：各轴最大加速度；臂 rad/s^2，夹爪总开度 m/s^2。
+# position_tolerances：参考与实测位置容差；臂 rad，夹爪 m。
+# velocity_tolerances：参考与实测速度容差；臂 rad/s，夹爪 m/s。
+# stable_duration_s：完成和停止判定所需的连续稳定仿真时间，单位 s。
+# settle_timeout_s：参考轨迹结束后等待稳定的最长时间，单位 s。
+# motion_wall_timeout_s / stop_wall_timeout_s：运动与制动的墙钟上限，单位 s。
+# contact_force_min_n / finger_velocity_max_m_s：接触完成判据。
+
+# Marvin no-ROS motion parameters.  SI units only.  Joint position/velocity
+# hard limits come from marvin_handover_v1; the tolerances below were measured
+# on the real compiled scene and streaming control, not taken from the Panda
+# recipe or the P01A offline 5e-4 m model-consistency tolerance.
+joint_names:
+  - left_joint1
+  - left_joint2
+  - left_joint3
+  - left_joint4
+  - left_joint5
+  - left_joint6
+  - left_joint7
+  - left_gripper_width
+  - right_joint1
+  - right_joint2
+  - right_joint3
+  - right_joint4
+  - right_joint5
+  - right_joint6
+  - right_joint7
+  - right_gripper_width
+
+# Arms brake at 1.0 rad/s^2; each total gripper opening at 0.5 m/s^2.
+max_accelerations:
+  [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.5,
+   1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.5]
+
+# Position tolerances: arm joints 0.010 rad, total opening 0.001 m.
+# Robot self-weight compensation belongs to the servo model.  A blocked
+# closing gripper completes from measured contact rather than position error.
+position_tolerances:
+  [0.010, 0.010, 0.010, 0.010, 0.010, 0.010, 0.010, 0.001,
+   0.010, 0.010, 0.010, 0.010, 0.010, 0.010, 0.010, 0.001]
+
+# Measured velocity tolerances: arm joints 0.02 rad/s, total opening 0.005 m/s.
+# Continuous tracking stayed within 1.7e-3 rad/s and 2.6e-5 m/s.
+velocity_tolerances:
+  [0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.005,
+   0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.005]
+
+# Normal completion and measured stop require 0.2 s of unchanged completion.
+stable_duration_s: 0.2
+settle_timeout_s: 2.0
+motion_wall_timeout_s: 10.0
+stop_wall_timeout_s: 3.0
+
+# Per named finger body normal contact force and per-finger slide speed.
+contact_force_min_n: 0.5
+finger_velocity_max_m_s: 0.003

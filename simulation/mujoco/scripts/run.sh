@@ -37,7 +37,9 @@ commands:
   viewer        open the live MuJoCo GUI for a running backend
   environment   probe the MuJoCo/EGL/camera environment
   scene         check three-camera scene visibility
+  marvin        compile, step, measure and render the Marvin handover scene
   kinematics    check key poses and kinematics clearance
+  handover      build and check the Marvin handover candidate paths
   prepare       write backend.yaml + run_manifest.json from a recipe/seed
   test          run pytest with plugin autoload disabled
 
@@ -134,12 +136,29 @@ case "$command" in
       --report-root "$REPORT_ROOT" \
       "$@"
     ;;
+  marvin)
+    exec python3 -m robot_backend_sim.tools.check_marvin_scene \
+      --scene-config "${SHARED_ROOT:-/shared}/scenarios/marvin_handover/configs/simulation/scene/marvin_handover.yaml" \
+      --profile "${SHARED_ROOT:-/shared}/scenarios/marvin_handover/profiles/robots/marvin_handover_v1/profile.json" \
+      --schemas "${SHARED_ROOT:-/shared}/common/interfaces/schemas" \
+      --report-root "$REPORT_ROOT" \
+      "$@"
+    ;;
   kinematics)
     exec python3 -m robot_backend_sim.tools.check_kinematics \
       --scene-config "${SHARED_ROOT:-/shared}/scenarios/panda_stack/configs/simulation/scene/panda_stack.yaml" \
       --check-config "${SHARED_ROOT:-/shared}/scenarios/panda_stack/configs/simulation/checks/scene_check.yaml" \
       --kinematics-config "${SHARED_ROOT:-/shared}/scenarios/panda_stack/configs/simulation/checks/kinematics_check.yaml" \
       --report-root "$REPORT_ROOT" \
+      "$@"
+    ;;
+  handover)
+    exec python3 -m robot_backend_sim.tools.check_handover_paths \
+      --scene-config "${SHARED_ROOT:-/shared}/scenarios/marvin_handover/configs/simulation/scene/marvin_handover.yaml" \
+      --planning-config "${SHARED_ROOT:-/shared}/scenarios/marvin_handover/configs/simulation/planning/handover_paths.yaml" \
+      --profile "${SHARED_ROOT:-/shared}/scenarios/marvin_handover/profiles/robots/marvin_handover_v1/profile.json" \
+      --schemas "${SHARED_ROOT:-/shared}/common/interfaces/schemas" \
+      --report-root "${DATA_ROOT:-/data}/reports/handover-paths" \
       "$@"
     ;;
   prepare)

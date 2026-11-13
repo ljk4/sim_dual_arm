@@ -25,7 +25,7 @@ from robot_contracts.trajectory.spline import (
 )
 from robot_trajectory.spline_math import check_continuous_limits, compute_reference_extremes
 
-from robot_backend_sim.config.motion_config import PandaControlConfig
+from robot_backend_sim.config.motion_config import ControlConfig
 
 __all__ = ["BrakingController", "BrakingPlan", "plan_braking"]
 
@@ -405,7 +405,7 @@ class BrakingController:
     and every measured velocity is within its configured tolerance.
     """
 
-    def __init__(self, config: PandaControlConfig) -> None:
+    def __init__(self, config: ControlConfig) -> None:
         self._config = config
         self._plan: BrakingPlan | None = None
         self._stop_sim_start_ns: int | None = None

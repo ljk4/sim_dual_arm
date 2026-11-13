@@ -1,0 +1,17 @@
+# 中文参数说明（维护时优先阅读本段）
+# initial_lead_s：首个动作块相对观测的初始提前量，单位 s。
+# min_lead_s：动作交接允许的最小提前量，单位 s。
+# max_observation_age_s：动作块可接受的最大观测年龄，单位 s。
+# stream_wall_timeout_s：整个动作块流的墙钟超时，单位 s。
+# progress_wall_timeout_s：无进展超时，单位 s。
+# tracking_timeout_s：实测跟踪持续超差的触发时间，单位 s。
+
+# Marvin continuous chunk-stream parameters.  SI units only: seconds.
+# Values are shared mechanism timings; the accepted lead and tracking margins
+# were checked against the real backend stream, not copied as a new task policy.
+initial_lead_s: 0.25
+min_lead_s: 0.05
+max_observation_age_s: 0.5
+stream_wall_timeout_s: 120.0
+progress_wall_timeout_s: 3.0
+tracking_timeout_s: 2.0

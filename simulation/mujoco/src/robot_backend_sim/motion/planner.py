@@ -8,13 +8,14 @@ import queue
 import threading
 import time
 from concurrent.futures import Future
+from dataclasses import replace
 
 from robot_contracts.models import ContractError, RobotProfile, RunContext
 from robot_contracts.stream_request import StreamRequest
 
 from robot_backend_sim.config.backend_config import BackendConfig
-from robot_backend_sim.config.follower_config import PandaFollowerConfig
-from robot_backend_sim.config.motion_config import PandaControlConfig
+from robot_backend_sim.config.follower_config import FollowerConfig
+from robot_backend_sim.config.motion_config import ControlConfig
 from robot_backend_sim.control.control_state import (
     ChunkStatus,
     ControlReply,
@@ -45,9 +46,9 @@ class _Planner:
         owner: _Owner,
         config: BackendConfig,
         profile: RobotProfile,
-        control_config: PandaControlConfig,
+        control_config: ControlConfig,
         log: _LoggerSink | None,
-        follower_config: PandaFollowerConfig | None = None,
+        follower_config: FollowerConfig | None = None,
         duration_grid_ns: int | None = 2_000_000,
     ) -> None:
         self._owner = owner
@@ -55,7 +56,7 @@ class _Planner:
         self._profile = profile
         self._control_config = control_config
         self._log = log
-        self._follower_config: PandaFollowerConfig | None = follower_config
+        self._follower_config: FollowerConfig | None = follower_config
         self._duration_grid_ns = duration_grid_ns
         self._queue: queue.Queue[tuple[StreamRequest, Future]] = queue.Queue(
             maxsize=config.planner_queue_capacity
@@ -266,7 +267,7 @@ class _TaskPlanner:
         config: BackendConfig,
         plugin: SimTaskPlugin,
         profile: RobotProfile,
-        control_config: PandaControlConfig,
+        control_config: ControlConfig,
     ) -> None:
         self._owner = owner
         self._config = config
@@ -403,6 +404,7 @@ class _TaskPlanner:
         request_id = payload["request_id"]
         capture_seq = payload["capture_seq"]
         observation_time_ns = payload["observation_time_ns"]
+        handoff_time_ns = int(payload.get("handoff_time_ns", 0))
         assert isinstance(context, RunContext)
         assert isinstance(task_epoch, int)
         assert isinstance(request_id, str)
@@ -415,6 +417,8 @@ class _TaskPlanner:
         )
         if not isinstance(view, TaskChunkView):
             raise ContractError("INVALID_TASK_CHUNK", "owner returned no chunk view")
+        if handoff_time_ns > 0:
+            view = replace(view, handoff_time_ns=handoff_time_ns)
         return self._plugin.sample_chunk(
             view,
             request_id=request_id,

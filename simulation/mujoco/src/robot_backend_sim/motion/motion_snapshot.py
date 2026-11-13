@@ -16,7 +16,7 @@ from robot_backend_sim.motion.motion_types import AppliedStep, MotionResult, Mot
 from robot_backend_sim.motion.stream_schedule import ChunkEvent
 from robot_backend_sim.physics.contacts import GripperCompletion, GripperContactEvidence
 from robot_backend_sim.physics.gripper_contact import GripperContactTracker
-from robot_backend_sim.physics.panda_io import Measurement
+from robot_backend_sim.physics.robot_io import Measurement
 
 __all__ = ["SnapshotContext", "Snapshotter", "TrackingState", "tracking_errors"]
 

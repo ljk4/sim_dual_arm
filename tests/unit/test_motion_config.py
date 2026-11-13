@@ -20,6 +20,7 @@ from robot_backend_sim.config.motion_config import (  # noqa: E402
     load_control_config,
     parse_control_config,
 )
+from robot_contracts.models import ContractError  # noqa: E402
 
 CONFIG_PATH = ROOT / "shared/scenarios/panda_stack/profiles/control/panda_control_v1.yaml"
 DEFAULT_DOCUMENT = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
@@ -73,7 +74,7 @@ def test_config_is_deeply_immutable_and_round_trips_through_a_fresh_snapshot():
     (
         (lambda d: d.update({"unknown": 1}), "unknown"),
         (lambda d: d.pop("stable_duration_s"), "stable_duration_s"),
-        (lambda d: d["joint_names"].reverse(), "joint_names"),
+        (lambda d: d["joint_names"].__setitem__(1, d["joint_names"][0]), "joint_names"),
         (lambda d: d["joint_names"].pop(), "joint_names"),
         (lambda d: d["max_accelerations"].pop(), "max_accelerations"),
         (lambda d: d.__setitem__("max_accelerations", True), "max_accelerations"),
@@ -120,3 +121,11 @@ def test_unknown_and_bool_are_rejected_before_partial_configuration():
     with pytest.raises(MotionConfigError) as caught:
         parse_control_config(document, "inline")
     assert caught.value.field == "stable_duration_s"
+
+
+def test_recipe_binds_to_the_selected_profile_order():
+    config = load_control_config(CONFIG_PATH)
+    config.require_joint_order(config.joint_names)
+    with pytest.raises(ContractError) as caught:
+        config.require_joint_order(tuple(reversed(config.joint_names)))
+    assert caught.value.reason == "PROFILE_MISMATCH"

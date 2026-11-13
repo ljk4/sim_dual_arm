@@ -1,8 +1,23 @@
 # P03 交接任务与 Teacher
 
-前置：P02 完成。目标：新增 `handover` 任务插件，通过受限控制与物理门禁完成[任务行为](task-contract.md)，并提供 runtime 可消费的 Teacher。
+**交付状态：已完成（2026-11-13），见 [deliveries/phase-03.md](deliveries/phase-03.md)。** runtime 任务预算上限为有界 300 s；本任务使用 180 s 仿真预算，实测完整示教 56.1 s。
 
-任务实现消费 P01/P02 提供的机器人/TCP/接触事实，不重复定义原始关节、指关节或执行器映射。Teacher 与门禁可以依赖 MuJoCo 任务观测，通用 worker、控制调度和 runtime 采集流程只依赖其能力与不可变输出。
+前置：P02B 的接触持物、候选路径和标准控制通过。目标：新增 `handover` 生命周期、门禁与评价，通过真实 runtime Teacher 控制链完成[任务行为](task-contract.md)。
+
+任务实现复用 P02B 的目标/路径生成和 P02A 的机器人/TCP/接触能力，不重复定义原始关节、执行器或诊断轨迹。Teacher 与门禁可以依赖 MuJoCo 任务观测，通用 worker、控制调度和 runtime 采集流程只依赖其能力与不可变输出。
+
+## 标准示教链的准备顺序
+
+本阶段必须完成 runtime Teacher 适配和 SDK，不能将其推迟到 P04。按以下顺序建立实际依赖：
+
+1. 实现 handover 任务插件、Teacher IDL 和 simulation/runtime 两端具体扩展适配，明确 capability 与阶段码。
+2. 建立真实 `simulation_teacher`、`runtime_teacher` 和诊断 `campaign` 配方，以及三份 profile 与必要接口组成的最小 `binding.yaml`。campaign 先填写 P04 规定的独立预算/种子/路径，`required_paths` 只列已经存在的文件；模型为 null，尚未实现的 learning/policy 引用不声明。
+3. 在 runtime 容器执行 `build-ros-sdk --scenario marvin_handover --shared-root /shared`，取得实际扩展包和匹配标记，再运行 collection 校验与选择预检。预检不能回退 Panda 的任务配置、Teacher 或台账路径。
+4. simulation/runtime 分别通过 `prepare --scenario marvin_handover --role teacher` 生成新目录配置，启动 backend 与 runtime，通过标准控制链验收示教。运行配置使用 prepared 结果，不省略身份和约束校验。
+
+当前 simulation scenario teacher prepare 校验 collection，必须先有上述真实引用；runtime direct `--template` prepare 当前只支持 policy，不作为 Teacher 入口。P03 创建采集侧引用是启动依赖，P04 再完成实测数据质量、导出与采集验收。
+
+构建包集前关闭本次相关进程。切换 Panda 回归时按 Panda 方案重建活动 SDK 并检查标记，不能让旧进程继续使用被替换的包集。
 
 ## 任务插件与物理评价
 
@@ -35,7 +50,15 @@
 - Teacher 输出经现有动作流与 SubmitFollower 执行。闭爪/换手等离散意图使用明确的阶段保持和实测门禁，避免未来动作块越过尚未通过的门禁而提前松左手。
 - 处理捕获与阶段切换的对应关系：返回的门禁和目标属于被请求的快照，过期 epoch/capture 拒绝；不能用稍后接稳的事实为更早观测生成“已可松手”的目标。
 
-runtime 的新扩展适配可在本阶段一并实现，用于实际验证 Teacher 控制链；正式录制与导出在 P04 完成。
+runtime 的新扩展适配、本阶段真实配方和 SDK 是完整示教的必需交付。录制/导出质量完善和诊断数据集采集在 P04 完成。
+
+## 时限与窗口覆盖
+
+P02B 的连续物理诊断采用 72 个有限 follower 窗口，跨度 122.290 s 仿真时间、128.59 s 测试时间。规划报告的 34.781 s 为多个候选分支段时长累计，不能替代真实调度预算。P03 可用 180 s 仿真预算作为首轮有界起点，再按 Teacher 实际调度和门禁复测；不能沿用 Panda 的短时默认值。
+
+完整示教预算覆盖候选路径、夹爪动作、门禁等待和最终稳定，并与任务插件、Teacher/runtime、停止余量及墙钟时限一致。当前 runtime 任务预算上限为 300 s（见 [runtime_config.py](../../runtime/ros2/ros/dual_arm_runtime/dual_arm_runtime/runtime_config.py)）；本方案为 180 s 仿真、256 块、420 s 墙钟，实测为 56.1 s 仿真、57 块。
+
+若本任务有实测依据需要更长总时限，先在所属实现集中调整该任务时限约束及相关消费者/测试，保持租约、跟踪、轨迹和停止保护有效。`max_chunks × follower.target_count × action_period_ns` 必须覆盖 `task_sim_budget_ns`，墙钟预算覆盖实际仿真速度、RPC 与收尾。准备阶段就验证参数一致，不靠运行时无限延长等待。
 
 ## 验证与完成条件
 
@@ -45,7 +68,7 @@ runtime 的新扩展适配可在本阶段一并实现，用于实际验证 Teach
 
 针对实际失败入口验证：右手未接触/未接稳时左手不松；左手释放后右手失持、阶段超时和运行中中断能终止并收尾。至少右手未接稳与操作者中断两项通过实际仿真运行；其余判断使用针对性状态机/物理测试，避免为故障演示引入永久调试开关。
 
-固定场景下最终需取得连续 5 次复位后的完整成功，可与 P04 的合格采集共用证据。此处衡量重复性；不声明跨布局、随机初态或学习策略成功率。P03 首次完整成功且失败路径有效后可进入 P04，连续性验收在 P06 汇总。
+最终同一模型/配方条件下需取得连续 5 次复位后的完整成功，可与 P04 合格采集共用证据。此处衡量固定场景重复性。P03 首次完整成功且必要失败路径有效后进入 P04；后续修改门禁、模型、场景或执行参数时，受影响的连续成功证据重新取得。
 
 `deliveries/phase-03.md` 记录指标/阶段码定义、门禁参数、接口 capability、全程结果、失败与停止证据，以及任务/机器人/ROS 职责调整。
 

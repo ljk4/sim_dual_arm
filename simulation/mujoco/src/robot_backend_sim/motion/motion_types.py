@@ -9,7 +9,7 @@ from robot_contracts.trajectory.spline import ReferenceSample
 
 from robot_backend_sim.motion.stream_schedule import ChunkEvent
 from robot_backend_sim.physics.contacts import GripperCompletion, GripperContactEvidence
-from robot_backend_sim.physics.panda_io import Measurement
+from robot_backend_sim.physics.robot_io import Measurement
 
 __all__ = [
     "ACTIVE_PHASES",
@@ -129,7 +129,7 @@ class BoundarySelection:
 class AppliedStep:
     """One coherent physical application, used as the source for a later brake.
 
-    ``reference`` is what was actually written to ``PandaIO``.  For a follower,
+    ``reference`` is what was actually written to the selected robot I/O.  For a follower,
     ``sampled_reference`` keeps the untouched coefficient sample and
     ``reference_corrections`` keeps ``sampled - applied`` per axis so the shared
     boundary normalization is independently auditable.  Strict chunks keep the

@@ -1,6 +1,6 @@
 # P01 模型、场景与档案
 
-前置：P00 完成。目标：得到可编译、可步进、可测量的 Marvin 场景及独立档案，为 P02 的控制接入提供基础。
+P01 基础模型、场景、档案和离线结果已交付，见[实际记录](deliveries/phase-01.md)。本文件规定模型与场景职责；当前资产位置、碰撞排除与联动约束已由 [P01A](phase-01-readiness.md) 补齐，见[交付记录](deliveries/phase-01a.md)。
 
 ## 本阶段的职责拆分
 
@@ -10,13 +10,12 @@
 
 ## 文件与数值组织
 
-拟新增方案布局；文件按实际消费者需要建立，不复制 Panda 无关配方：
+模型资产位于 `simulation/mujoco/assets/marvin/`，由 simulation 的 `physics/assets.py` 按 `robot.assembly` 定位；P01A 已完成整理。方案布局如下，文件按实际消费者需要建立：
 
 ```text
 shared/scenarios/marvin_handover/
 ├── README.md
 ├── binding.yaml
-├── assets/marvin/                   # 原始 URDF、网格及来源说明
 ├── profiles/
 │   ├── robots/                     # schema v2 profile、相机标定
 │   ├── observations/               # RGB + measured joint state
@@ -29,14 +28,14 @@ shared/scenarios/marvin_handover/
 └── extensions/ros/                 # P03 实现的 Teacher IDL
 ```
 
-P01 先建立资产、场景与档案；binding 及下游配方随 P02～P05 补齐，P04 接口接通时通过 collection 校验。缺失能力和配方不能用 Panda 文件临时伪装成完整方案。
+P01/P01A 建立可用模型与档案；P02A 使用无任务插件 direct backend。P03 为首次标准 Teacher 示教补齐采集侧配方、binding、IDL、两端适配和 SDK，并通过 collection 预检；P04/P05 再加入实际数据/学习/推理引用。所有声明的引用必须已经存在。
 
 ## 模型与场景任务
 
-1. 将 [源资产](model-notes.md)纳入方案，保留原始几何、关节与惯性语义。处理 `package://` 引用及 fixed 关节无效 limit 等导入适配；转换逻辑放 simulation，输入来源和必要变换写资产说明。
-2. 建立一个固定根 Marvin 装配器，使用本机实际 MuJoCo 版本支持的导入/构造方式。添加执行器与显式手指联动；不复制两份完整机器人来拼出双臂。
+1. 将[源资产](model-notes.md)作为 simulation 的机器人资产管理，保留原始几何、关节与惯性语义。处理 `package://` 引用及 fixed 关节无效 limit 等导入适配；输入来源和必要变换写资产说明。
+2. 建立一个固定根 Marvin 装配器，使用本机实际 MuJoCo 版本支持的导入/构造方式。先检查导入后联动，再补所需执行器/约束，避免源 mimic 与手工约束重复；不复制两份完整机器人来拼出双臂。
 3. 在 simulation 配置中引入足以选择 Panda/Marvin 装配的明确字段或等价的现有选择点，接通配置加载与构造；独立选择 handover 任务环境。通用场景容器接收构造结果，场景的物块、桌面、箱体参数由任务环境配方提供。
-4. 为必要碰撞建立可用的代理几何或经验证的网格。保留双臂互碰和关键手指接触；箱体按底板与四壁构造，验证开口没有被碰撞凸包封闭。记录与源碰撞网格的实际差异。
+4. 为必要碰撞建立可用的代理几何或经验证的网格。保留必要同臂自碰、双臂互碰和手指接触，排除项须有几何依据；箱体按底板与四壁构造，验证开口没有被碰撞凸包封闭。记录与源碰撞网格的实际差异。
 5. 通过模型测量确定物块/箱体初版尺寸、桌高、基座姿态、TCP 与指面。初选抓取区与双臂重叠区，P02 再确认完整路径可达。
 6. 实现确定性复位：机器人、物块、控制目标及任务相关状态回到一致初态。显式绑定 `qpos/dof/actuator` 地址，移除新路径对 Panda `nq/nv/nu` 和地址邻接的依赖。
 
@@ -58,6 +57,6 @@ P01 先建立资产、场景与档案；binding 及下游配方随 P02～P05 补
 
 机器人装配不依赖 handover 阶段/评价器，任务环境通过声明的机器人挂载/工作空间事实组合场景，不读取具体 I/O 内部。通用编译/复位/渲染机制继续服务 Panda 与 Marvin，新增方案的选择和参数来自配方。
 
-Panda 原模型构造与复位测试通过。`deliveries/phase-01.md` 写入实际模型导入方式、公开/物理关节映射、关键参数来源、图像与测量路径，以及交由 P02 验证的可达区。
+Panda 原模型构造与复位相关回归应成立。已有 `deliveries/phase-01.md` 保留当时模型和结果；P01A 另存整理后的实际证据，P02B 再确定完整候选路径和真实持物能力。
 
-目录导航：[任务书入口](README.md) · [前一阶段 P00](phase-00-baseline.md) · [下一阶段 P02](phase-02-motion.md)
+目录导航：[任务书入口](README.md) · [P00](phase-00-baseline.md) · [下一阶段 P01A](phase-01-readiness.md) · [P02 总览](phase-02-motion.md)

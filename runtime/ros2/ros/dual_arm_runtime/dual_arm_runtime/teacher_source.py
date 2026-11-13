@@ -99,7 +99,8 @@ class TeacherTargetSource:
         )
 
     def predict(
-        self, observation: ExactObservation, chunk_index: int, request_id: str
+        self, observation: ExactObservation, chunk_index: int, request_id: str,
+        *, handoff_time_ns: int = 0,
     ) -> Prediction:
         if self._context is None:
             raise ContractError("STREAM_NOT_STARTED", "teacher source has no context")
@@ -114,6 +115,7 @@ class TeacherTargetSource:
                 robot_profile_hash=self.profile.digest,
                 chunk_size=self.chunk_size,
                 period_ns=self.teacher.action_period_ns,
+                handoff_time_ns=handoff_time_ns,
             )
         except ContractError as error:
             if error.reason in {"TASK_NOT_RUNNING", "TEACHER_PLAN_COMPLETE"}:

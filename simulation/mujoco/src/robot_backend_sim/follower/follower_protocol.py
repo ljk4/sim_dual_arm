@@ -18,8 +18,8 @@ from robot_contracts.trajectory.follower_reference import (
 from robot_trajectory.follower import PreparedFollowerPlan
 from robot_trajectory.follower_reference import follower_reference_from_prepared
 
-from robot_backend_sim.config.follower_config import PandaFollowerConfig
-from robot_backend_sim.config.motion_config import PandaControlConfig
+from robot_backend_sim.config.follower_config import FollowerConfig
+from robot_backend_sim.config.motion_config import ControlConfig
 from robot_backend_sim.control.control_state import (
     ChunkStatus,
     ControlStatus,
@@ -43,16 +43,16 @@ def _invalid(reason: str, detail: str) -> ContractError:
 
 
 def validation_limits(
-    control_config: PandaControlConfig,
-    follower_config: PandaFollowerConfig,
+    control_config: ControlConfig,
+    follower_config: FollowerConfig,
     *,
     duration_grid_ns: int | None,
 ) -> FollowerValidationLimits:
     """Convert known backend configuration into the standard-library limits."""
-    if not isinstance(control_config, PandaControlConfig):
-        raise _invalid("INVALID_FOLLOWER_REQUEST", "control_config must be PandaControlConfig")
-    if not isinstance(follower_config, PandaFollowerConfig):
-        raise _invalid("INVALID_FOLLOWER_REQUEST", "follower_config must be PandaFollowerConfig")
+    if not isinstance(control_config, ControlConfig):
+        raise _invalid("INVALID_FOLLOWER_REQUEST", "control_config must be ControlConfig")
+    if not isinstance(follower_config, FollowerConfig):
+        raise _invalid("INVALID_FOLLOWER_REQUEST", "follower_config must be FollowerConfig")
     return FollowerValidationLimits(
         joint_names=follower_config.joint_names,
         max_accelerations=control_config.max_accelerations,
@@ -66,8 +66,8 @@ def validation_limits(
 def prepare_follower_request(
     request: StreamRequest,
     profile: RobotProfile,
-    control_config: PandaControlConfig,
-    follower_config: PandaFollowerConfig,
+    control_config: ControlConfig,
+    follower_config: FollowerConfig,
     *,
     duration_grid_ns: int | None = _GRID_NS,
     is_final: bool | None = None,
@@ -91,10 +91,10 @@ def prepare_follower_request(
         raise _invalid("INVALID_FOLLOWER_REQUEST", "follower request needs an anchor/window")
     if not isinstance(profile, RobotProfile):
         raise _invalid("PROFILE_MISMATCH", "profile must be a RobotProfile")
-    if not isinstance(control_config, PandaControlConfig):
-        raise _invalid("INVALID_FOLLOWER_REQUEST", "control_config must be PandaControlConfig")
-    if not isinstance(follower_config, PandaFollowerConfig):
-        raise _invalid("INVALID_FOLLOWER_REQUEST", "follower_config must be PandaFollowerConfig")
+    if not isinstance(control_config, ControlConfig):
+        raise _invalid("INVALID_FOLLOWER_REQUEST", "control_config must be ControlConfig")
+    if not isinstance(follower_config, FollowerConfig):
+        raise _invalid("INVALID_FOLLOWER_REQUEST", "follower_config must be FollowerConfig")
 
     final = request.settle_at_end if is_final is None else is_final
     if not isinstance(final, bool):

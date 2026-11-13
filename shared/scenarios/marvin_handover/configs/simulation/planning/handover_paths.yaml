@@ -1,0 +1,115 @@
+# Marvin 交接候选路径配方（P02B 实测）。
+#
+# 坐标系：任务目标以机器人基座坐标声明；规划模块读取编译场景后转换为世界坐标。
+# 机器人关节、TCP、限位和碰撞分组来自仿真机器人适配，不在本文件重复。
+# 数值来源：P02B 在编译模型上的 IK/净空测量；改变模型、箱位或初始物块位姿后须重跑。
+schema_version: 1
+frame: robot_base
+
+ik:
+  dt_s: 0.02
+  # The right pre-place pose sits near the workspace boundary and needs a
+  # longer sequential refinement than the easy grasp targets.
+  max_iterations: 2000
+  position_tolerance_m: 0.001
+  orientation_tolerance_rad: 0.005
+  # The task preserves the previous seed implicitly through sequential targets;
+  # the posture term stays zero so it does not bias a reachable grasp.
+  posture_cost: 0.0
+  position_cost: 10.0
+  orientation_cost: 10.0
+  lm_damping: 0.5
+  solver: daqp
+
+clearance:
+  # The measured minimum over all candidate segments is 6.108 mm; the open
+  # pad/table gap at the grasp pose is 7.5 mm.
+  minimum_clearance_m: 0.003
+  collision_detection_distance_m: 0.03
+  sample_step_rad: 0.02
+  max_samples_per_segment: 1000
+
+grasp:
+  # TCP sits 25 mm above the block centre; the pads straddle the 60 mm width.
+  tcp_above_block_center_m: 0.035
+  # Left and co-hold pre-grasps use 40 mm.  The right centre approach needs a
+  # higher, separately measured pre-grasp (see right_initial_pregrasp_height_m).
+  pregrasp_height_m: 0.04
+  # The right approach to the block centre needs a higher pre-grasp; at 40 mm
+  # the open fingertips graze the block's top corner (measured 1.16 mm).
+  right_initial_pregrasp_height_m: 0.115
+  # The left centre lift needs enough margin for the block's measured tilt.
+  lift_height_m: 0.15
+  # The independent right hold reaches 0.99 m TCP at the block centre with the
+  # 33 degree wrist tilt below.
+  right_initial_lift_height_m: 0.150
+  # Short coordinated lift used while both hands hold the block.
+  cohold_lift_height_m: 0.08
+  # Total finger opening target: the 60 mm block stops the fingers before this.
+  closed_opening_m: 0.05
+  left:
+    # Opposite-end grasps keep the hands 120 mm apart during the airborne
+    # transfer.  Physical hold stability is checked from contact snapshots.
+    along_block_y_m: 0.06
+    # Top-down grasp; closing axis is the block's +x width.
+    approach_tilt_deg: 0.0
+    approach_yaw_deg: 0.0
+  right_center:
+    # Independent right hold and the transport grasp use the block centre.
+    along_block_y_m: 0.0
+    # The independent right hold needs a steeper tilt to reach 0.99 m at the
+    # block centre; 33 degrees is the measured value that keeps the wrist
+    # path at the 3 mm clearance while covering the lift.
+    approach_tilt_deg: 33.0
+    approach_yaw_deg: 0.0
+  left_cohold:
+    # Symmetric co-hold points; both hands grasp the block on the table before
+    # the coordinated lift, which keeps the block level.
+    along_block_y_m: 0.06
+    approach_tilt_deg: 0.0
+    approach_yaw_deg: 0.0
+  right_cohold:
+    along_block_y_m: -0.06
+    approach_tilt_deg: 20.0
+    approach_yaw_deg: 0.0
+
+approach:
+  # Safe intermediate poses measured in P02B.  The left pose is the P01A
+  # diagnostic ready point used only as an approach waypoint; the right waits
+  # on its own side before entering the shared workspace.
+  left_ready_tcp_m: [0.55, 0.18, 0.98]
+  right_wait_tcp_m: [0.50, -0.20, 1.04]
+  # The waiting pose is reachable with the 20 degree tilt; grasp poses that
+  # need a steeper tilt are reached after the hand leaves this pose.
+  right_wait_tilt_deg: 20.0
+
+handover:
+  # The handover area is the lifted block pose; no lateral block move is made
+  # while both hands are closed.
+  block_center_offset_m: [0.0, 0.0, 0.12]
+
+retreat:
+  left_tcp_position_m: [0.40, 0.42, 1.06]
+
+transport:
+  # The right hand rotates the block -60 degrees about the vertical while
+  # moving over the box; the 0.296 m box interior contains the rotated block.
+  place_yaw_deg: -60.0
+  # Pre-place keeps the block fully above the box rim before the descent.
+  preplace_block_center_above_rim_m: 0.075
+
+execution:
+  period_ns: 50000000
+  # Smoothstep peak speed is 1.5x the average; duration = factor * delta / vmax.
+  duration_peak_factor: 1.5
+  minimum_segment_duration_s: 0.4
+
+diagnostics:
+  contact_force_min_n: 0.5
+  hold_duration_s: 0.5
+  hold_sample_interval_s: 0.1
+  max_object_linear_speed_m_s: 0.02
+  max_object_angular_speed_rad_s: 0.2
+  relative_position_tolerance_m: 0.005
+  relative_orientation_tolerance_rad: 0.05
+  stop_gripper_tolerance_m: 0.002
