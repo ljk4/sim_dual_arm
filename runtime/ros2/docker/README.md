@@ -14,11 +14,11 @@ docker compose up -d
 docker compose exec runtime bash
 
 # 在容器内构建 SDK 或运行测试：
-runtime/ros2/scripts/run.sh build-ros-sdk --scenario panda_stack --shared-root /shared
+runtime/ros2/scripts/run.sh build-ros-sdk --shared-root /shared
 runtime/ros2/scripts/run.sh build-policy-sdk
 runtime/ros2/scripts/run.sh test -q tests/unit
 ```
 
-`build-ros-sdk` 不指定方案时只构建核心接口至 `build/ros-core`；Panda Teacher 使用上例选择的完整包集，输出至 `build/ros-dev`。
+`build-ros-sdk` 一次编译全部公共与方案扩展接口包至 `build/ros-dev`，切换方案无需重编；`build/`、`log/` 与 `COLCON_HOME` 位于 `/tmp` 临时目录，构建完成后输出根只保留 `install/` 与 `contracts.json`。
 
 目录导航：[上级目录](../README.md)

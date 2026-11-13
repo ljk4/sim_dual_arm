@@ -102,8 +102,8 @@ scripts/run.sh backend --scenario <scenario-id> --role policy \
   --bundle /data/<scenario-id>/models/bundles/<verified-bundle> \
   --seed 0 --run-id policy-backend
 
-# runtime 容器（工作目录 /workspace）
-runtime/ros2/scripts/run.sh build-ros-sdk --scenario <scenario-id> --shared-root /shared
+# runtime 容器（工作目录 /workspace）；一次构建覆盖全部方案接口包
+runtime/ros2/scripts/run.sh build-ros-sdk --shared-root /shared
 runtime/ros2/scripts/record.sh --scenario <scenario-id> \
   --purpose pilot --count 1 --max-consecutive-failures 1
 runtime/ros2/scripts/run.sh interactive --scenario <scenario-id> \

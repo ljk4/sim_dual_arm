@@ -8,16 +8,12 @@ import hashlib
 import importlib
 import json
 import os
-import re
 import subprocess
 import sys
-import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[4]
-OWNER_FILE = "workspace.json"
-OWNER = {"kind": "sim-dual-arm-policy-sdk", "schema_version": 1}
-GENERATED_NAMES = {"dual_arm_policy", "_proto", "pyproject.toml", "source.sha256", OWNER_FILE}
+GENERATED_NAMES = {"dual_arm_policy", "source.sha256"}
 REQUIRED_FILES = (
     "dual_arm_policy/__init__.py",
     "dual_arm_policy/v1/__init__.py",
@@ -80,25 +76,6 @@ def prepare_output(project_root: Path, sdk_root: Path) -> Path:
     unknown = {path.name for path in root.iterdir()} - GENERATED_NAMES
     if unknown:
         raise SDKError(f"UNOWNED_OUTPUT: unknown files in {root}: {sorted(unknown)}")
-    if not any(root.iterdir()):
-        return root
-    owner = root / OWNER_FILE
-    if owner.is_file() and json.loads(owner.read_text()) == OWNER:
-        return root
-    # Recognize the layout produced by the existing canonical generator.
-    try:
-        project_name = tomllib.loads((root / "pyproject.toml").read_text())["project"]["name"]
-        digest = (root / "source.sha256").read_text().strip()
-        staged = root / "_proto/dual_arm_policy/v1/policy.proto"
-        legacy = (
-            project_name == "dual-arm-policy-sdk"
-            and re.fullmatch(r"[0-9a-f]{64}", digest)
-            and hashlib.sha256(staged.read_bytes()).hexdigest() == digest
-        )
-    except (OSError, KeyError, ValueError):
-        legacy = False
-    if not legacy:
-        raise SDKError(f"UNOWNED_OUTPUT: {root}; choose an empty generated SDK directory")
     return root
 
 
@@ -126,7 +103,6 @@ def build_sdk(project_root: Path, sdk_root: Path) -> None:
         if checked.returncode == 0:
             print(checked.stdout, end="")
             return
-        (root / OWNER_FILE).write_text(json.dumps(OWNER, sort_keys=True) + "\n")
         subprocess.run(
             [
                 sys.executable,

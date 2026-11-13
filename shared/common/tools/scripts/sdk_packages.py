@@ -1,10 +1,11 @@
 """Package selection, dependency closure and source digests for the ROS SDK.
 
-The core set is always ``robot_api_msgs``.  A scenario build adds only the
-packages chosen by its binding: ``interfaces.common_ros`` and each
-``interfaces.extension_ros`` directory.  README files are deliberately excluded
-from digests so documentation edits do not invalidate generated code, while
-IDL files and package build metadata do.
+The default set is every package under ``common/interfaces/ros`` plus every
+scenario extension under ``scenarios/*/extensions/ros``, so one build serves all
+scenarios.  A scenario or explicit selection can still narrow a check to the
+packages it requires.  README files are deliberately excluded from digests so
+documentation edits do not invalidate generated code, while IDL files and
+package build metadata do.
 """
 
 from __future__ import annotations
@@ -177,10 +178,25 @@ def core_package_source(shared_root: Path) -> PackageSource:
     return package_source(directory, shared_root, "core", expected_name=CORE_PACKAGE)
 
 
-def core_selection(shared_root: Path) -> PackageSelection:
-    return PackageSelection(
-        Path(shared_root).resolve(), (core_package_source(shared_root),), "core"
-    )
+def full_selection(shared_root: Path) -> PackageSelection:
+    """Collect every common and scenario-extension ROS interface package."""
+    shared = Path(shared_root).resolve()
+    common = shared / COMMON_ROS_ROUTE
+    if not common.is_dir():
+        raise PackageSelectionError(f"common ROS interface directory is missing: {common}")
+    packages: list[PackageSource] = []
+    for directory in sorted(common.iterdir()):
+        if (directory / "package.xml").is_file():
+            role = "core" if directory.name == CORE_PACKAGE else "common"
+            packages.append(
+                package_source(directory, shared, role, expected_name=directory.name)
+            )
+    for directory in sorted(shared.glob("scenarios/*/extensions/ros/*")):
+        if (directory / "package.xml").is_file():
+            packages.append(package_source(directory, shared, "extension"))
+    selection_packages = _deduplicate(packages)
+    check_dependency_closure(selection_packages, shared)
+    return PackageSelection(shared, selection_packages, "full")
 
 
 def _deduplicate(packages: list[PackageSource]) -> tuple[PackageSource, ...]:

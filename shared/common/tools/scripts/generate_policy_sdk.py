@@ -5,40 +5,36 @@ import hashlib
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
 def generate(root: Path, output: Path) -> None:
     source = root / "shared/common/interfaces/policy/v1/policy.proto"
+    output.mkdir(parents=True, exist_ok=True)
     # A previous SDK must never be mistaken for this source revision.
-    for stale in (output / "dual_arm_policy", output / "_proto"):
-        if stale.exists():
-            shutil.rmtree(stale)
-    staging = output / "_proto/dual_arm_policy/v1"
-    staging.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(source, staging / "policy.proto")
-    subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "grpc_tools.protoc",
-            f"--proto_path={output / '_proto'}",
-            f"--python_out={output}",
-            f"--grpc_python_out={output}",
-            str(staging / "policy.proto"),
-        ],
-        check=True,
-    )
+    stale = output / "dual_arm_policy"
+    if stale.exists():
+        shutil.rmtree(stale)
+    # Compile from a scratch directory so no proto copy remains in the SDK.
+    with tempfile.TemporaryDirectory(prefix="policy-sdk-proto-") as scratch:
+        staging = Path(scratch) / "dual_arm_policy/v1"
+        staging.mkdir(parents=True)
+        shutil.copyfile(source, staging / "policy.proto")
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "grpc_tools.protoc",
+                f"--proto_path={scratch}",
+                f"--python_out={output}",
+                f"--grpc_python_out={output}",
+                str(staging / "policy.proto"),
+            ],
+            check=True,
+        )
     for package in (output / "dual_arm_policy", output / "dual_arm_policy/v1"):
         (package / "__init__.py").write_text('"""Generated Policy API SDK."""\n')
-    (output / "pyproject.toml").write_text(
-        '[build-system]\nrequires = ["setuptools>=68", "wheel"]\n'
-        'build-backend = "setuptools.build_meta"\n'
-        '[project]\nname = "dual-arm-policy-sdk"\nversion = "0.1.0"\n'
-        'requires-python = ">=3.12"\n'
-        'dependencies = ["grpcio>=1.73.1,<2", "protobuf>=6.31.1,<7"]\n'
-        '[tool.setuptools.packages.find]\ninclude = ["dual_arm_policy*"]\n'
-    )
     (output / "source.sha256").write_text(hashlib.sha256(source.read_bytes()).hexdigest() + "\n")
     print(f"Generated Policy API SDK: {output}")
 

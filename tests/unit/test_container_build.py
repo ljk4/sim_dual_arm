@@ -87,7 +87,7 @@ def test_symlink_output_not_adopted(tmp_path):
     output.mkdir()
     target = tmp_path / "user-file"
     target.write_text("keep")
-    (output / policy_sdk.OWNER_FILE).symlink_to(target)
+    (output / "source.sha256").symlink_to(target)
     with pytest.raises(policy_sdk.SDKError, match="symlink"):
         policy_sdk.prepare_output(tmp_path / "project", output)
     assert target.read_text() == "keep"

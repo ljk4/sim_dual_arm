@@ -32,7 +32,7 @@ from sdk_packages import (
 
 MARKER_NAME = "contracts.json"
 MARKER_SCHEMA_VERSION = 2
-BUILD_COMMAND = "run.sh build-ros-sdk [--scenario <id>] inside the runtime container"
+BUILD_COMMAND = "run.sh build-ros-sdk inside the runtime container"
 
 
 def environment_record() -> dict[str, object]:
@@ -202,17 +202,19 @@ def _check_package_set(
     recorded: dict[str, dict[str, object]],
     expected: PackageSelection | None,
 ) -> None:
+    """A full build may cover more packages than one scenario requires."""
     if expected is None:
         return
-    expected_names = expected.names
-    if tuple(sorted(recorded)) != tuple(sorted(expected_names)):
+    missing = sorted(set(expected.names) - set(recorded))
+    if missing:
         raise SdkCheckError(
-            "completion marker package set differs from the selected set: "
-            f"marker {sorted(recorded)}, selected {sorted(expected_names)}; "
+            "completion marker is missing required packages: "
+            f"{missing}; built {sorted(recorded)}; "
             f"rebuild with: {BUILD_COMMAND}"
         )
     expected_by_name = expected.by_name()
-    for name, record in recorded.items():
+    for name in expected.names:
+        record = recorded[name]
         package = expected_by_name[name]
         if record.get("role") != package.role:
             raise SdkCheckError(

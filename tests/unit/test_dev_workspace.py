@@ -156,28 +156,31 @@ def test_successful_core_build_writes_marker_and_verify_accepts_it(tmp_path):
     assert verify(project, shared, project / "output") == document
 
 
-def test_core_build_cannot_masquerade_as_a_full_scenario_sdk(tmp_path):
+def test_full_build_covers_every_scenario_and_check_accepts_a_subset(tmp_path):
     project, shared = project_tree(tmp_path)
     add_common(shared, "sim_api_msgs")
     extension = add_extension(shared, "demo_api_msgs", service=True)
-    build(project, shared, project / "output")
+    document = build(project, shared, project / "output")
 
-    with pytest.raises(dev_workspace.ContractCheckError) as caught:
-        verify(
-            project,
-            shared,
-            project / "output",
-            packages=["sim_api_msgs", str(extension)],
-        )
-    assert "package set differs" in str(caught.value)
-
-    document = build(
-        project, shared, project / "output",
-        packages=["sim_api_msgs", str(extension)],
-    )
     assert set(document["packages"]) == {"robot_api_msgs", "sim_api_msgs", "demo_api_msgs"}
     assert document["packages"]["sim_api_msgs"]["role"] == "common"
     assert document["packages"]["demo_api_msgs"]["role"] == "extension"
+    verify(
+        project,
+        shared,
+        project / "output",
+        packages=["sim_api_msgs", str(extension)],
+    )
+
+
+def test_check_rejects_a_required_package_missing_from_the_build(tmp_path):
+    project, shared = project_tree(tmp_path)
+    build(project, shared, project / "output")
+    late = add_extension(shared, "late_api_msgs", service=True)
+
+    with pytest.raises(dev_workspace.ContractCheckError) as caught:
+        verify(project, shared, project / "output", packages=[str(late)])
+    assert "missing required packages" in str(caught.value)
 
 
 def test_readme_change_does_not_invalidate_but_idl_change_does(tmp_path):
@@ -353,68 +356,27 @@ def test_failed_build_removes_previous_marker(tmp_path):
         )
     assert "exit code 7" in str(caught.value)
     assert not (build_root / "contracts.json").exists()
-    assert (build_root / "workspace.json").is_file()
 
     build(project, shared, build_root)
     assert (build_root / "contracts.json").is_file()
 
 
-def test_unowned_nonempty_output_root_is_rejected_and_preserved(tmp_path):
-    project, shared = project_tree(tmp_path)
-    build_root = project / "output"
-    note = build_root / "install/operator-notes.txt"
-    note.parent.mkdir(parents=True)
-    note.write_text("keep this\n")
-    calls = []
-
-    def runner(project_root, root, selection):
-        calls.append((project_root, root))
-        return 0
-
-    selection = dev_workspace.resolve_selection(project, shared_root=shared)
-    with pytest.raises(dev_workspace.DevWorkspaceError) as caught:
-        dev_workspace.build_workspace(
-            project, build_root, selection=selection, shared_root=shared, runner=runner
-        )
-
-    message = str(caught.value)
-    assert "not empty" in message
-    assert "No files were deleted" in message
-    assert note.read_text() == "keep this\n"
-    assert not (build_root / "workspace.json").exists()
-    assert not (build_root / "contracts.json").exists()
-    assert calls == []
-
-
-def test_empty_output_root_is_claimed_then_can_be_rebuilt(tmp_path):
+def test_rebuild_keeps_unknown_top_level_files_and_replaces_outputs(tmp_path):
     project, shared = project_tree(tmp_path)
     build_root = project / "output"
     build_root.mkdir()
 
     build(project, shared, build_root)
-    ownership = json.loads((build_root / "workspace.json").read_text())
-    assert ownership["kind"] == dev_workspace.OWNERSHIP_KIND
-
     kept = build_root / "operator-notes.txt"
     kept.write_text("top-level file\n")
+
     build(project, shared, build_root)
-    assert (build_root / "workspace.json").is_file()
     assert (build_root / "contracts.json").is_file()
     assert kept.read_text() == "top-level file\n"
-
-
-def test_invalid_ownership_marker_is_rejected_without_deletion(tmp_path):
-    project, shared = project_tree(tmp_path)
-    build_root = project / "output"
-    note = build_root / "install/operator-notes.txt"
-    note.parent.mkdir(parents=True)
-    note.write_text("keep this\n")
-    (build_root / "workspace.json").write_text('{"kind": "someone-else"}\n')
-
-    with pytest.raises(dev_workspace.DevWorkspaceError) as caught:
-        build(project, shared, build_root)
-    assert "not recognised" in str(caught.value)
-    assert note.read_text() == "keep this\n"
+    assert not (build_root / "build").exists()
+    assert not (build_root / "log").exists()
+    assert not (build_root / "colcon-home").exists()
+    assert not (build_root / "workspace.json").exists()
 
 
 def test_build_rejects_concurrent_builder_before_cleaning(tmp_path):
@@ -459,7 +421,7 @@ def test_build_rejects_a_file_at_the_output_root(tmp_path):
     assert build_root.read_text() == "not a directory\n"
 
 
-def test_build_removes_symlinked_outputs_in_an_owned_root_without_following(tmp_path):
+def test_build_removes_symlinked_outputs_without_following(tmp_path):
     project, shared = project_tree(tmp_path)
     build_root = project / "output"
     outside = tmp_path / "outside"
@@ -467,7 +429,6 @@ def test_build_removes_symlinked_outputs_in_an_owned_root_without_following(tmp_
     (outside / "keep.txt").write_text("keep\n")
 
     build(project, shared, build_root)
-    assert (build_root / "workspace.json").is_file()
     shutil.rmtree(build_root / "install")
     (build_root / "install").symlink_to(outside, target_is_directory=True)
 
@@ -477,7 +438,7 @@ def test_build_removes_symlinked_outputs_in_an_owned_root_without_following(tmp_
     assert not (build_root / "install").is_symlink()
 
 
-def test_run_colcon_uses_explicit_directories_without_resetting_home(tmp_path, monkeypatch):
+def test_run_colcon_uses_temporary_intermediates_and_cleans_them(tmp_path, monkeypatch):
     captured = {}
 
     def fake_run(command, *, cwd, env, check):
@@ -493,12 +454,18 @@ def test_run_colcon_uses_explicit_directories_without_resetting_home(tmp_path, m
 
     environment = captured["env"]
     assert environment.get("HOME") == os.environ.get("HOME")
-    assert environment["COLCON_HOME"] == str(build_root.resolve() / "colcon-home")
     assert environment["ROS_LOG_DIR"] == dev_workspace.ROS_LOG_DIRECTORY
-    assert str(build_root.resolve() / "build") in captured["command"]
-    assert str(build_root.resolve() / "install") in captured["command"]
-    base_index = captured["command"].index("--base-paths")
-    assert captured["command"][base_index + 1] == str(
+    command = captured["command"]
+    install_base = command[command.index("--install-base") + 1]
+    build_base = command[command.index("--build-base") + 1]
+    log_base = command[command.index("--log-base") + 1]
+    assert install_base == str(build_root.resolve() / "install")
+    assert str(build_root.resolve() / "build") not in command
+    for value in (build_base, log_base, environment["COLCON_HOME"]):
+        assert Path(value).parent.name.startswith("sim-dual-arm-ros-")
+        assert not Path(value).exists()
+    base_index = command.index("--base-paths")
+    assert command[base_index + 1] == str(
         (shared / "common/interfaces/ros/robot_api_msgs").resolve()
     )
 

@@ -56,6 +56,12 @@ var/<scenario-id>/                  # 容器内为 /data/<scenario-id>/
 - **绝对禁止混放**：任何脚本、模块或测试不得将上述四类产物交叉写入同一目录，也不得在 `var/` 根目录下擅自创建 `var/campaigns/`、`var/runs/`、`var/reports/`、`var/prepared/` 等脱离任务目录的野生平级目录。
 - **出现新产物时必须先说明后决定**：当新增功能、工具或实验需要产出新的文件或目录类型时，**严禁在代码中自行决定存放位置**；必须先向用户说明该产物的性质、生命周期与消费者，由用户确认应当**归入上述四个目录中的哪一个**，还是**批准新开目录**后，方可实施。
 
+### `build/`（容器 `/build`）构建目录精简规范
+- **`build/` 仅存放运行时直接加载的生成 SDK**：
+  - `build/ros-dev/`：仅保留 `install/`（编译好的全部公共与方案扩展 ROS 2 接口包）与 `contracts.json`（源码摘要）。`colcon` 编译中间目录（`build/`）、编译日志（`log/`）与 `colcon-home/` 必须在 `/tmp` 中执行或构建完成后立即清理，严禁将数十 MB 的 `.o`/CMake 中间垃圾留在 `build/` 下。
+  - `build/policy-sdk/`（或 `generated/policy-sdk`）：仅保留生成的 `dual_arm_policy/` Python 包与 `source.sha256`，不保留重复拷贝的 `_proto/`、无人安装的 `pyproject.toml` 或 `workspace.json` 所有权守卫文件。
+  - 严禁在 `build/` 下存放评估报告、Linter 缓存或历史兼容的 `workspace.json` 所有权校验文件。
+
 ---
 
 ## 三、Agent 行为与范围约束（HERO Scope Limits）

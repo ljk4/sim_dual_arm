@@ -43,7 +43,7 @@ scripts/run.sh kinematics --run-id kin-001
 
 ## 3. 启动 ROS 2 仿真后端
 
-启动 `backend` 前，须先在 `runtime` 容器中执行 `runtime/ros2/scripts/run.sh build-ros-sdk --scenario panda_stack --shared-root /shared` 生成 `/opt/ros-dev`。无方案选择的核心构建写入 `build/ros-core`，不会覆盖该完整 SDK。
+启动 `backend` 前，须先在 `runtime` 容器中执行 `runtime/ros2/scripts/run.sh build-ros-sdk --shared-root /shared` 生成 `/opt/ros-dev`。一次构建即覆盖全部方案的公共与扩展接口包，切换方案无需重编。
 
 在 `simulation` 容器内直接以方案启动后端；`--scenario` 在内存中解析配方，并把本次实际生效的快照写到 `/data/<scenario-id>/logs/backend/<run-id>/backend.yaml`，日志写到同目录 `log/`：
 

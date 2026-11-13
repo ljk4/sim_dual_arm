@@ -73,7 +73,7 @@ usage() {
 usage: runtime/ros2/scripts/run.sh <command> [arguments...]
 
 commands:
-  build-ros-sdk   build the mounted ROS contract workspace (core-only unless --scenario)
+  build-ros-sdk   build all ROS interface packages into the mounted SDK workspace
   build-policy-sdk generate the mounted Policy SDK in the container
   policy          run one policy execution
   interactive     prompt, reset via episode start, run one policy episode, hold until Ctrl-C
@@ -83,7 +83,7 @@ commands:
   test            run pytest with plugin autoload disabled
 
 Examples:
-  runtime/ros2/scripts/run.sh build-ros-sdk --scenario panda_stack --shared-root /shared
+  runtime/ros2/scripts/run.sh build-ros-sdk --shared-root /shared
   runtime/ros2/scripts/run.sh build-policy-sdk
   runtime/ros2/scripts/run.sh policy --scenario panda_stack \
     --bundle /data/panda_stack/models/bundles/stack-act \

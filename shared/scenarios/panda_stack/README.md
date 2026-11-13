@@ -45,8 +45,8 @@ python3 shared/common/tools/scenario.py validate \
 ### SDK
 
 ```bash
-# runtime 容器：核心 robot_api_msgs、sim_api_msgs 与 panda_stack_api_msgs
-runtime/ros2/scripts/run.sh build-ros-sdk --scenario panda_stack --shared-root /shared
+# runtime 容器：一次构建全部公共与方案扩展接口包，切换方案无需重编
+runtime/ros2/scripts/run.sh build-ros-sdk --shared-root /shared
 runtime/ros2/scripts/run.sh build-policy-sdk
 ```
 

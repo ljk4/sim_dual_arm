@@ -58,7 +58,7 @@ runtime/ros2/scripts/record_parallel.sh --scenario panda_stack \
 
 | 子命令 | 功能说明 |
 | --- | --- |
-| `build-ros-sdk` | 无 `--scenario`/`--package` 时只编译核心 `robot_api_msgs` 至 `/build/ros-core`；带 `--scenario panda_stack` 时按 binding 构建核心、`sim_api_msgs` 与 `panda_stack_api_msgs` 至 `/build/ros-dev` |
+| `build-ros-sdk` | 一次编译 `shared/common/interfaces/ros/*` 与全部 `shared/scenarios/*/extensions/ros/*` 接口包至 `/build/ros-dev/install`，构建产物仅保留 `install/` 与 `contracts.json`，切换方案无需重编；`--scenario <id>` / `--package <name-or-dir>` 仅用于在 `check` 时限定所需包集 |
 | `build-policy-sdk` | 从 `policy.proto` 生成 Python Protobuf/gRPC SDK 至 `/build/generated/policy-sdk` |
 | `policy` | 执行单局非交互式 Policy 推理闭环；接受 `--scenario ... --bundle ...` 或 `--config ...`，日志与录制默认写入 `/data/<scenario-id>/logs/{runs,recordings}`，可用 `--output` 另选位置 |
 | `interactive` | 交互式执行单局 Policy 推理：`--scenario`/`--config` 二选一，自动生成或使用指定 `run-id`，输入 `y` 复位并开始，结束后保持 IDLE 直至 `Ctrl-C` |

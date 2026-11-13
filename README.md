@@ -80,7 +80,7 @@ docker compose -f runtime/ros2/docker/docker-compose.yml exec runtime bash
 
 ```bash
 cd /workspace
-runtime/ros2/scripts/run.sh build-ros-sdk --scenario panda_stack --shared-root /shared
+runtime/ros2/scripts/run.sh build-ros-sdk --shared-root /shared
 runtime/ros2/scripts/run.sh build-policy-sdk
 ```
 

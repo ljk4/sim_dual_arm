@@ -1,12 +1,13 @@
 """Build and verify the host-mounted ROS contract workspace.
 
-The core SDK contains only ``robot_api_msgs``.  A scenario build adds exactly the
-packages selected by its binding (common packages and extension packages).  A
-successful colcon build writes an atomic completion marker next to the generated
-``build``/``install``/``log`` directories.  Consumers verify that marker, the
+The default build compiles every common and scenario-extension ROS interface
+package into a single install tree, so switching scenarios never needs a
+rebuild.  colcon's build, log and cache directories are created in a temporary
+directory that is removed when the build finishes; only ``install/`` and
+``contracts.json`` remain in the output root.  Consumers verify that marker, the
 recorded package set, per-package source digests and generated module origins
-before sourcing the install tree, so a core build cannot masquerade as a full
-scenario SDK and a changed IDL cannot silently keep old generated code.
+before sourcing the install tree, so a changed IDL cannot silently keep old
+generated code.
 """
 
 from __future__ import annotations
@@ -18,9 +19,9 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime
 from pathlib import Path
 
 from sdk_marker import (
@@ -36,20 +37,16 @@ from sdk_packages import (
     SdkCheckError,
     SdkError,
     binding_selection,
-    core_selection,
     explicit_selection,
+    full_selection,
     package_record,
     package_set_sha256,
     shared_root_path,
     validate_build_root,
-    write_json_atomic,
 )
 
 ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_BUILD_ROOT = Path("build/ros-dev")
-OWNERSHIP_NAME = "workspace.json"
-OWNERSHIP_KIND = "sim-dual-arm-dev-ros-workspace"
-OWNERSHIP_SCHEMA_VERSION = 1
 ROS_LOG_DIRECTORY = "/tmp/ros-dev-logs"
 
 
@@ -78,7 +75,7 @@ def resolve_selection(
             return binding_selection(shared, scenario)
         if packages:
             return explicit_selection(Path(project_root), shared, packages)
-        return core_selection(shared)
+        return full_selection(shared)
     except PackageSelectionError as error:
         raise DevWorkspaceError(str(error)) from error
 
@@ -112,16 +109,19 @@ def _remove_known_output(path: Path) -> None:
 
 
 def _clean_outputs(root: Path) -> None:
-    for name in ("build", "install", "log"):
+    # ``build``/``log``/``colcon-home``/``workspace.json`` are removed in case an
+    # older build left its intermediates in the output root.
+    for name in ("build", "install", "log", "colcon-home", "workspace.json"):
         _remove_known_output(root / name)
 
 
-def _prepare_cache_directories(root: Path) -> None:
-    (root / "colcon-home").mkdir(parents=True, exist_ok=True)
-
-
 def colcon_command(
-    project_root: Path, build_root: Path, selection: PackageSelection
+    project_root: Path,
+    build_root: Path,
+    selection: PackageSelection,
+    *,
+    build_base: Path,
+    log_base: Path,
 ) -> list[str]:
     """Use the existing interpreter-policy wrapper, never a host colcon binary."""
     project = Path(project_root).resolve()
@@ -130,12 +130,12 @@ def colcon_command(
         sys.executable,
         str(project / "shared/common/tools/scripts/ros_workspace.py"),
         "--log-base",
-        str(root / "log"),
+        str(log_base),
         "build",
         "--base-paths",
         *(str(package.directory) for package in selection.packages),
         "--build-base",
-        str(root / "build"),
+        str(build_base),
         "--install-base",
         str(root / "install"),
         "--event-handlers",
@@ -148,72 +148,25 @@ def run_colcon(
 ) -> int:
     project = Path(project_root).resolve()
     root = Path(build_root).resolve()
-    environment = os.environ.copy()
-    environment["COLCON_HOME"] = str(root / "colcon-home")
-    environment["ROS_LOG_DIR"] = ROS_LOG_DIRECTORY
-    environment["PYTHONUNBUFFERED"] = "1"
-    completed = subprocess.run(
-        colcon_command(project, root, selection),
-        cwd=project,
-        env=environment,
-        check=False,
-    )
-    return completed.returncode
-
-
-def _ownership_document() -> dict[str, object]:
-    return {
-        "schema_version": OWNERSHIP_SCHEMA_VERSION,
-        "kind": OWNERSHIP_KIND,
-        "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
-    }
-
-
-def _read_ownership(root: Path) -> dict[str, object] | None:
-    path = root / OWNERSHIP_NAME
-    if not path.exists() and not path.is_symlink():
-        return None
-    if path.is_symlink():
-        raise DevWorkspaceError(
-            f"refusing to use build root with a symlinked ownership marker: {path}; "
-            "choose a new/empty --build-root"
+    with tempfile.TemporaryDirectory(prefix="sim-dual-arm-ros-") as scratch:
+        scratch_path = Path(scratch)
+        build_base = scratch_path / "build"
+        log_base = scratch_path / "log"
+        colcon_home = scratch_path / "colcon-home"
+        colcon_home.mkdir()
+        environment = os.environ.copy()
+        environment["COLCON_HOME"] = str(colcon_home)
+        environment["ROS_LOG_DIR"] = ROS_LOG_DIRECTORY
+        environment["PYTHONUNBUFFERED"] = "1"
+        completed = subprocess.run(
+            colcon_command(
+                project, root, selection, build_base=build_base, log_base=log_base
+            ),
+            cwd=project,
+            env=environment,
+            check=False,
         )
-    try:
-        document = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise DevWorkspaceError(
-            f"build root ownership marker is unreadable: {path}: {error}; "
-            "choose a new/empty --build-root or inspect it manually"
-        ) from error
-    if (
-        not isinstance(document, dict)
-        or document.get("schema_version") != OWNERSHIP_SCHEMA_VERSION
-        or document.get("kind") != OWNERSHIP_KIND
-    ):
-        raise DevWorkspaceError(
-            f"build root ownership marker is not recognised: {path}; "
-            "choose a new/empty --build-root or inspect it manually"
-        )
-    return document
-
-
-def _ensure_workspace_owned(root: Path) -> None:
-    """Claim only a new/empty root; never delete unowned contents first."""
-    if root.exists():
-        if not root.is_dir():
-            raise DevWorkspaceError(f"build root exists but is not a directory: {root}")
-        entries = list(root.iterdir())
-        if entries:
-            if _read_ownership(root) is None:
-                raise DevWorkspaceError(
-                    f"build root is not empty and has no {OWNERSHIP_NAME} ownership "
-                    f"marker: {root}; refusing to modify it. Choose a new/empty "
-                    "--build-root or inspect/remove it manually. No files were deleted."
-                )
-            return
-    else:
-        root.mkdir(parents=True)
-    write_json_atomic(root / OWNERSHIP_NAME, _ownership_document())
+        return completed.returncode
 
 
 def _selection_records(selection: PackageSelection) -> dict[str, dict[str, object]]:
@@ -231,22 +184,20 @@ def build_workspace(
     """Build the selected package set and publish the marker after verification."""
     project = Path(project_root).resolve()
     shared = shared_root_path(project, shared_root)
-    chosen = selection or core_selection(shared)
+    chosen = selection or full_selection(shared)
     root = validate_build_root(project, build_root, shared)
     marker_path = root / MARKER_NAME
     build = run_colcon if runner is None else runner
     with build_lock(root):
-        _ensure_workspace_owned(root)
         # Record the exact source snapshot this build consumes.
         records = _selection_records(chosen)
         marker_path.unlink(missing_ok=True)
         _clean_outputs(root)
-        _prepare_cache_directories(root)
         try:
             code = build(project, root, chosen)
             if code != 0:
                 raise DevWorkspaceError(
-                    f"colcon build failed with exit code {code}; outputs kept in {root}"
+                    f"colcon build failed with exit code {code}"
                 )
             document = write_marker(root, chosen, records)
             return document
@@ -304,9 +255,12 @@ def main(argv: list[str] | None = None) -> int:
         explicit = arguments.scenario is not None or bool(arguments.package)
         selection: PackageSelection | None
         if arguments.command in {"check", "status"} and not explicit:
-            # A service-side check verifies whatever package set was recorded;
-            # it must not silently reinterpret a full SDK as a core build.
+            # A service-side check verifies whatever package set was recorded.
             selection = None
+        elif arguments.command == "build" and not arguments.package:
+            # One build covers every scenario; --scenario is accepted on build
+            # for compatibility but never narrows the generated SDK.
+            selection = resolve_selection(project, shared_root=arguments.shared_root)
         else:
             selection = resolve_selection(
                 project,

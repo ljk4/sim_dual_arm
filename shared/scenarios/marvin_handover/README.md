@@ -46,11 +46,11 @@ task:
 
 装配入口按这两个字段组合机器人装配与任务环境；`task.environment=handover` 不用于推断机器人型号。`robot.assembly` 由 simulation 的资产定位解析为本端固定版本模型，recipe 不写模型文件路径。binding 的 `recipes.dataset`、`recipes.training`、`recipes.policy_service`、`recipes.runtime_policy` 与 `recipes.simulation_policy` 指向本方案的诊断配方，`models.bundle` 指向真实诊断 Bundle。
 
-本方案 SDK 包集为 `robot_api_msgs`、`sim_api_msgs` 与 `marvin_handover_api_msgs`。从 Panda 或其他包集切换前，先结束占用 `/opt/ros-dev` 的进程，按本方案重建并核对包集标记，再启动后端：
+本方案接口包为 `robot_api_msgs`、`sim_api_msgs` 与 `marvin_handover_api_msgs`，已包含在全量 SDK 构建中；一次 `build-ros-sdk` 即服务全部方案，切换方案无需重建：
 
 ```bash
 # runtime 容器
-runtime/ros2/scripts/run.sh build-ros-sdk --scenario marvin_handover --shared-root /shared
+runtime/ros2/scripts/run.sh build-ros-sdk --shared-root /shared
 ```
 
 ## 公开契约

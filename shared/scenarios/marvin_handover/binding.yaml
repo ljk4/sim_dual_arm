@@ -52,9 +52,9 @@ interfaces:
   teacher_api: marvin_handover_api_msgs.teacher_chunk.v1
   policy_api: bimanual.policy.v1
 
-# Real diagnostic bundle produced from this task's 128-step smoke training.
+# Models remain null until a verified bundle is supplied via --bundle.
 models:
-  bundle: /data/marvin_handover/models/bundles/p05-smoke-128
+  bundle: null
 
 source_roots:
   - ../..
