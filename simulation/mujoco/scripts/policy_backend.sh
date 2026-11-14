@@ -17,7 +17,7 @@ Start the MuJoCo policy backend (--role policy) inside the simulation
 container and print the resolved configuration file paths and parameters.
 
 options:
-  --scenario <id>       scenario id (default: panda_stack)
+  --scenario <id>       scenario id (required)
   --bundle <dir>        verified ACT bundle directory (optional if declared in binding)
   --seed <int>          initial simulation seed (default: 20000)
   --run-id <id>         backend run id (default: policy-backend)
@@ -28,7 +28,7 @@ options:
 EOF
 }
 
-scenario="panda_stack"
+scenario=""
 bundle=""
 seed="20000"
 run_id="policy-backend"
@@ -105,6 +105,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ -z "$scenario" ]]; then
+  printf 'scripts/policy_backend.sh: --scenario is required\n' >&2
+  exit 2
+fi
 
 if [[ -z "$run_root" ]]; then
   run_root="$DATA_ROOT/$scenario/logs/backend"

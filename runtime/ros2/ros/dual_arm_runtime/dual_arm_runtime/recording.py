@@ -60,7 +60,9 @@ class _RosbagWriter:
         try:
             writer.open(
                 rosbag2_py.StorageOptions(
-                    uri=str(self._directory / "recording"), storage_id="mcap"
+                    uri=str(self._directory / "recording"),
+                    storage_id="mcap",
+                    storage_preset_profile="zstd_fast",
                 ),
                 rosbag2_py.ConverterOptions("", ""),
             )
@@ -134,9 +136,7 @@ class EpisodeRecorder:
         # final location (for example ``<attempt>/raw``) without an extra
         # ``<episode_id>`` nesting level.
         self._final = (
-            Path(episode_directory)
-            if episode_directory is not None
-            else output_root / episode_id
+            Path(episode_directory) if episode_directory is not None else output_root / episode_id
         )
         self._final.parent.mkdir(parents=True, exist_ok=True)
         self.directory = self._final.parent / f".partial-{self._final.name}"

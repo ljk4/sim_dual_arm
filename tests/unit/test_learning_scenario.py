@@ -55,9 +55,7 @@ def test_convert_uses_selected_dataset_recipe(tmp_path, monkeypatch):
     assert captured["selection"]["mode"] == "scenario"
     assert captured["selection"]["recipe"]["field"] == "recipes.dataset"
     assert captured["selection"]["recipe"]["path"] == str(tree.dataset_recipe.resolve())
-    assert captured["selection"]["binding"]["sha256"] == _sha(
-        tree.scenario.binding_path
-    )
+    assert captured["selection"]["binding"]["sha256"] == _sha(tree.scenario.binding_path)
     assert captured["overrides"]["select"]["value"] == str(tmp_path / "select.json")
     assert captured["overrides"]["output_root"]["value"] == str(tmp_path / "out")
     assert captured["overrides"]["synthetic"]["value"] is True
@@ -66,17 +64,20 @@ def test_convert_uses_selected_dataset_recipe(tmp_path, monkeypatch):
 def test_convert_requires_explicit_config_or_scenario(tmp_path, monkeypatch):
     captured: dict = {}
     monkeypatch.setattr(cli, "convert", _fake_convert(captured))
-    assert cli.main(
-        [
-            "--project-root",
-            str(ROOT),
-            "convert",
-            "--select",
-            str(tmp_path / "select.json"),
-            "--output-root",
-            str(tmp_path / "out"),
-        ]
-    ) == 2
+    assert (
+        cli.main(
+            [
+                "--project-root",
+                str(ROOT),
+                "convert",
+                "--select",
+                str(tmp_path / "select.json"),
+                "--output-root",
+                str(tmp_path / "out"),
+            ]
+        )
+        == 2
+    )
     assert captured == {}
 
     tree = _make_tree(tmp_path)
@@ -85,27 +86,28 @@ def test_convert_requires_explicit_config_or_scenario(tmp_path, monkeypatch):
     document["task_text"] = "explicit custom task"
     custom.write_text(yaml.safe_dump(document, sort_keys=False))
     captured.clear()
-    assert cli.main(
-        [
-            "--project-root",
-            str(tree.repo),
-            "convert",
-            "--config",
-            str(custom),
-            "--select",
-            str(tmp_path / "select.json"),
-            "--output-root",
-            str(tmp_path / "out2"),
-        ]
-    ) == 0
+    assert (
+        cli.main(
+            [
+                "--project-root",
+                str(tree.repo),
+                "convert",
+                "--config",
+                str(custom),
+                "--select",
+                str(tmp_path / "select.json"),
+                "--output-root",
+                str(tmp_path / "out2"),
+            ]
+        )
+        == 0
+    )
     assert captured["config_path"] == custom.resolve()
     assert captured["config"].task_text == "explicit custom task"
     assert captured["selection"] is None
 
 
-def test_train_uses_selected_training_recipe_and_checkpoint_provenance(
-    tmp_path, monkeypatch
-):
+def test_train_uses_selected_training_recipe_and_checkpoint_provenance(tmp_path, monkeypatch):
     tree = _make_tree(tmp_path)
     captured: dict = {}
     monkeypatch.setattr(cli, "train", _fake_train(captured))
@@ -184,9 +186,7 @@ def test_verify_data_and_budget_use_selected_training_recipe(tmp_path, monkeypat
         return _Audit()
 
     monkeypatch.setattr(cli, "verify_dataset_manifest", verify)
-    assert cli.main(
-        _scenario_args(tree, "verify-data", "--allow-synthetic")
-    ) == 0
+    assert cli.main(_scenario_args(tree, "verify-data", "--allow-synthetic")) == 0
     assert captured["config"].source == tree.training_recipe.resolve()
     assert captured["verify"]["allow_synthetic"] is True
 
@@ -222,35 +222,37 @@ def test_scenario_conflicts_and_missing_arguments_are_explicit(tmp_path, monkeyp
     captured: dict = {}
     monkeypatch.setattr(cli, "convert", _fake_convert(captured))
     # argparse mutually exclusive group: exit code 2, no dispatch
-    assert cli.main(
-        _scenario_args(
-            tree, "convert", "--config", str(tree.dataset_recipe)
-        )
-    ) == 2
+    assert cli.main(_scenario_args(tree, "convert", "--config", str(tree.dataset_recipe))) == 2
     assert captured == {}
     # --shared-root without --scenario: the required selection group rejects it
-    assert cli.main(
-        [
-            "--project-root",
-            str(tree.repo),
-            "convert",
-            "--shared-root",
-            str(tree.shared),
-        ]
-    ) == 2
+    assert (
+        cli.main(
+            [
+                "--project-root",
+                str(tree.repo),
+                "convert",
+                "--shared-root",
+                str(tree.shared),
+            ]
+        )
+        == 2
+    )
     assert captured == {}
     # unknown scenario
-    assert cli.main(
-        [
-            "--project-root",
-            str(tree.repo),
-            "train",
-            "--scenario",
-            "missing",
-            "--shared-root",
-            str(tree.shared),
-        ]
-    ) == 1
+    assert (
+        cli.main(
+            [
+                "--project-root",
+                str(tree.repo),
+                "train",
+                "--scenario",
+                "missing",
+                "--shared-root",
+                str(tree.shared),
+            ]
+        )
+        == 1
+    )
     assert captured == {}
 
 
@@ -293,9 +295,7 @@ def test_scripts_forward_selection_without_implicit_defaults(tmp_path):
     assert "--scenario" in arguments
     assert "--config" not in arguments
 
-    arguments = _run_dispatcher(
-        tmp_path, "convert.sh", "--config", "/custom/dataset.yaml"
-    )
+    arguments = _run_dispatcher(tmp_path, "convert.sh", "--config", "/custom/dataset.yaml")
     assert arguments.count("--config") == 1
     assert "/custom/dataset.yaml" in arguments
 
@@ -304,7 +304,7 @@ def test_scripts_forward_selection_without_implicit_defaults(tmp_path):
 
     arguments = _run_dispatcher(
         tmp_path,
-        "policy_backend.sh",
+        "policy.sh",
         "--scenario",
         "synthetic_stack",
         "--shared-root",
@@ -372,9 +372,7 @@ def test_policy_service_scenario_uses_recipe_and_effective_bundle(
     config = captured["config"]
     assert config.task_text == "scenario service task"
     assert config.bundle_dir == bundle.resolve()
-    assert config.robot_profile_path == (
-        tree.scenario.root / "profiles/robot.json"
-    ).resolve()
+    assert config.robot_profile_path == (tree.scenario.root / "profiles/robot.json").resolve()
     snapshot = captured["snapshot"]
     assert snapshot["config"]["path"] == str(tree.service_recipe.resolve())
     assert snapshot["selection"]["mode"] == "scenario"
@@ -433,11 +431,12 @@ def test_train_applies_set_overrides_and_records_them(tmp_path, monkeypatch):
     tree = _make_tree(tmp_path)
     captured: dict = {}
     monkeypatch.setattr(cli, "train", _fake_train(captured))
-    assert cli.main(
-        _scenario_args(
-            tree, "train", "--mode", "smoke", "--set", "budget.limit_seconds=123"
+    assert (
+        cli.main(
+            _scenario_args(tree, "train", "--mode", "smoke", "--set", "budget.limit_seconds=123")
         )
-    ) == 0
+        == 0
+    )
     assert captured["config"].budget.limit_seconds == 123.0
     assert captured["kwargs"]["overrides"]["set"]["value"] == ["budget.limit_seconds=123"]
 

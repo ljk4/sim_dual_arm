@@ -404,7 +404,7 @@ def build_report(
         },
         "limits": [
             "model selection uses validation masked L1 only",
-            "physical stacking success is measured by the supervised campaign, not this loss",
+            "physical task success is measured by the supervised campaign, not this loss",
             "synthetic fixtures never count as the 50 formal episodes",
         ],
     }

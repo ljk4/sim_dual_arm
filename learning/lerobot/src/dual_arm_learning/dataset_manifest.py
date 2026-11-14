@@ -10,6 +10,7 @@ from typing import Any
 
 import numpy as np
 from PIL import Image
+from robot_contracts.project_paths import project_path
 
 from .config import DatasetConfig
 from .console_progress import ConsoleProgress
@@ -21,6 +22,59 @@ from .dataset_common import (
     tree_hashes,
 )
 from .dataset_export import SourceEpisode
+
+_NORMALIZED_VECTOR_FEATURES = ("observation.state", "observation.velocity", "action")
+
+
+def _stable_vector_statistics(values: np.ndarray) -> dict[str, list]:
+    vectors = np.asarray(values, dtype=np.float64)
+    result = {
+        "min": vectors.min(axis=0).tolist(),
+        "max": vectors.max(axis=0).tolist(),
+        "mean": vectors.mean(axis=0).tolist(),
+        "std": vectors.std(axis=0).tolist(),
+        "count": [len(vectors)],
+    }
+    for name, quantile in (("q01", 0.01), ("q10", 0.1), ("q50", 0.5), ("q90", 0.9), ("q99", 0.99)):
+        result[name] = np.quantile(vectors, quantile, axis=0).tolist()
+    return result
+
+
+def _write_vector_statistics(root: Path) -> None:
+    """Derive normalization statistics from stored rows with centered float64 variance."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    table = pq.ParquetDataset(root / "data").read(
+        columns=["episode_index", *_NORMALIZED_VECTOR_FEATURES]
+    )
+    indices = table.column("episode_index").to_numpy()
+    vectors = {
+        key: np.asarray(table.column(key).to_pylist(), dtype=np.float64)
+        for key in _NORMALIZED_VECTOR_FEATURES
+    }
+    episodes = {
+        int(index): {
+            key: _stable_vector_statistics(values[indices == index])
+            for key, values in vectors.items()
+        }
+        for index in np.unique(indices)
+    }
+    for path in sorted((root / "meta/episodes").rglob("*.parquet")):
+        metadata = pq.read_table(path)
+        episode_indices = metadata.column("episode_index").to_pylist()
+        for key in _NORMALIZED_VECTOR_FEATURES:
+            for statistic in episodes[episode_indices[0]][key]:
+                name = f"stats/{key}/{statistic}"
+                values = [episodes[index][key][statistic] for index in episode_indices]
+                column = pa.array(values, type=metadata.schema.field(name).type)
+                metadata = metadata.set_column(metadata.schema.get_field_index(name), name, column)
+        pq.write_table(metadata, path)
+    path = root / "meta/stats.json"
+    stats = json.loads(path.read_text(encoding="utf-8"))
+    for key, values in vectors.items():
+        stats[key] = _stable_vector_statistics(values)
+    path.write_text(json.dumps(stats, indent=2, allow_nan=False) + "\n", encoding="utf-8")
 
 
 def _json_safe(value: Any) -> Any:
@@ -38,7 +92,7 @@ def _json_safe(value: Any) -> Any:
 def _stats_summary(stats: dict[str, dict[str, Any]]) -> dict[str, Any]:
     selected = {
         key: stats[key]
-        for key in ("observation.state", "observation.velocity", "action", "raw_action_chunk")
+        for key in (*_NORMALIZED_VECTOR_FEATURES, "raw_action_chunk")
         if key in stats
     }
     return {
@@ -61,7 +115,7 @@ def _write_split(
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
     features = config.feature_spec()
-    for key in ("observation.state", "observation.velocity", "action"):
+    for key in _NORMALIZED_VECTOR_FEATURES:
         features[key]["names"] = list(joint_names)
     for camera in config.camera_names:
         features[f"observation.images.{camera}"]["names"] = ["height", "width", "channels"]
@@ -123,6 +177,7 @@ def _write_split(
         if progress is not None:
             progress.detail("整理数据集文件")
         dataset.finalize()
+    _write_vector_statistics(root)
 
 
 def _split_manifest(
@@ -228,7 +283,7 @@ def _code_hashes(project_root: Path) -> dict[str, str]:
         "learning/lerobot/src/dual_arm_learning/training_support.py",
         "learning/lerobot/src/dual_arm_learning/bundle.py",
     ):
-        path = project_root / relative
+        path = project_path(relative, project_root)
         if path.is_file():
             result[relative] = file_sha256(path)
     return result
@@ -332,9 +387,7 @@ def _manifest_body(
             "chunk_size": config.chunk_size,
             "action_lead_ns": config.action_lead_ns,
         },
-        "splits": _split_sections(
-            train_section, validation_section, train_eps, validation_eps
-        ),
+        "splits": _split_sections(train_section, validation_section, train_eps, validation_eps),
         "processors": {
             "root": "processors",
             "training_stats_only": True,

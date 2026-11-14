@@ -57,10 +57,10 @@ teacher:
 
 capacity:
   # 1 s 执行窗口；一次完整示教按 60 s 仿真跨度预算。
-  expected_chunks: 256
-  expected_references: 256
-  expected_events: 1024
-  max_episode_chunks: 400
-  max_teacher_requests: 400
-  rpc_cache_entries: 400
-  backend_chunk_history: 400
+  expected_chunks: 512
+  expected_references: 512
+  expected_events: 2048
+  max_episode_chunks: 512
+  max_teacher_requests: 512
+  rpc_cache_entries: 512
+  backend_chunk_history: 512

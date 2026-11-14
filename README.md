@@ -48,11 +48,11 @@ mkdir -p build var
 ./env.sh exec <env> [cmd...]  # 进入已运行的容器执行命令（默认 bash）
 ./env.sh stop <env>           # 停止指定环境容器
 ./env.sh rm <env>             # 停止并删除指定环境容器
-./env.sh viewer [args...]     # 启动 MuJoCo 实时可视化（默认 panda_stack teacher）
+./env.sh viewer [args...]     # 显式指定方案或配置，启动 MuJoCo 实时可视化
 ./env.sh ps                   # 查看当前项目所有容器状态
 ```
 
-`build/` 存放生成的 SDK、构建结果和缓存，`var/` 存放运行日志、录制、数据集、模型与台账。两者整体由 Git 忽略，不提交空目录或 `.gitkeep`；各构建和运行命令按需创建子目录。首次启动前由宿主机用户创建这两个根目录，避免 Docker 自动创建后归 root 所有；UID/GID 应与 Compose 中的运行用户一致。
+`build/` 仅存放运行时加载的生成 SDK，`var/` 存放运行日志、录制、数据集、模型与台账。两者整体由 Git 忽略，不提交空目录或 `.gitkeep`；各构建和运行命令按需创建子目录。首次启动前由宿主机用户创建这两个根目录，避免 Docker 自动创建后归 root 所有；UID/GID 应与 Compose 中的运行用户一致。
 
 三端容器统一将各自的实现目录只读挂载为 `/app`（`working_dir: /app`），公共目录 `shared/` 只读挂载为 `/shared`，运行输出 `var/` 挂载为 `/data`；runtime/learning 额外将 `build/` 挂载为 `/build`，simulation 仅只读挂载所需的 `build/ros-dev` 至 `/opt/ros-dev`。更新挂载配置后，重新执行 `./env.sh up <env>` 使配置生效。
 
@@ -100,10 +100,10 @@ scripts/build_sdk.sh
 ./env.sh simulation
 ```
 
-在 `simulation` 容器内直接以方案启动示教后端（默认 `--scenario panda_stack --seed 0 --run-id teacher-backend`，启动时会打印所用配置文件路径与完整生效参数）：
+在 `simulation` 容器内直接以方案启动示教后端（显式指定方案；默认 `--seed 0 --run-id teacher-backend`，启动时会打印所用配置文件路径与完整生效参数）：
 
 ```bash
-scripts/teacher_backend.sh
+scripts/teacher_backend.sh --scenario panda_stack
 ```
 
 `teacher_backend.sh` 会在内存中读取 `binding.yaml`、展开配方路径、打印配置路径与详细参数，并写入本次实际生效的快照 `/data/panda_stack/logs/backend/teacher-backend/backend.yaml`；运行日志位于 `/data/panda_stack/logs/backend/teacher-backend/log`。`--run-id teacher-backend` 同时是 runtime 端 `record.sh` 的默认后端日志位置，单路试采无需再指定 `--backend-log`。
@@ -119,8 +119,8 @@ scripts/teacher_backend.sh --scenario panda_stack --seed 0 --run-id teacher-back
 `viewer` 独立订阅后端发布的只读物理状态快照，不参与物理步进与控制。它同样直接接受 `--scenario`（或直接 `--config`）。在宿主机桌面环境下（若报 X11 权限错误，先在宿主机执行 `xhost +SI:localuser:$(id -un)`）：
 
 ```bash
-# 默认启动 panda_stack teacher 视角；也可透传参数，如 ./env.sh viewer --scenario panda_stack --role policy
-./env.sh viewer
+# 显式选择方案和角色；policy 角色使用 --role policy
+./env.sh viewer --scenario panda_stack --role teacher
 ```
 
 ### 2.4 单路试采一次，确认完整链路
@@ -159,7 +159,7 @@ scripts/record.sh \
 
 ### 2.7 查看数据集与训练/验证清单状态
 
-正式台账累计达标并正常结束时（`reason=target_reached`），采集入口会自动原子写出 `var/panda_stack/datasets/formal-select.json`，无需手动重定向。回到 **runtime 容器终端**即可查看当前数据集、磁盘占用与训练/验证清单划分状态（默认 `--scenario panda_stack`）：
+正式台账累计达标并正常结束时（`reason=target_reached`），采集入口会自动原子写出 `var/panda_stack/datasets/formal-select.json`，无需手动重定向。回到 **runtime 容器终端**即可查看当前数据集、磁盘占用与训练/验证清单划分状态（显式指定方案）：
 
 ```bash
 scripts/record.sh status --scenario panda_stack
@@ -189,9 +189,9 @@ scripts/convert.sh --scenario panda_stack
 
 转换时终端只显示配置、日志路径和原地刷新的进度，包括已完成条数、百分比、用时和预计剩余时间；编码器等详细输出写入日志。训练使用同样的显示方式，额外显示 step、loss 和验证状态。重定向输出时仅保留阶段摘要，避免生成大量进度行。可用 `--log-file /data/panda_stack/logs/convert/<文件名>.log` 指定详细日志；需要原始输出和 JSON 结果时添加 `--no-progress`。
 
-训练前将官方 ResNet18 权重文件 `resnet18-f37072fd.pth` 放到宿主机 `build/cache/torch/hub/checkpoints/`；也可在 learning 容器内用 `RESNET18_WEIGHTS` 指定现有权重文件。训练按离线方式运行，缺少权重时会报错，不会自动下载。
+训练使用共享官方 ResNet18 权重文件 `third_party/weights/resnet18-f37072fd.pth`（两方案共用，长期保留，不属于 `build/` 生成产物）；也可在 learning 容器内用 `RESNET18_WEIGHTS` 指定现有权重文件。训练按离线方式运行，缺少权重时会报错，不会自动下载。
 
-启动完整模式训练（默认启用 PyAV 视频解码、张量批处理、多进程预取与 CUDA bfloat16 混合精度）：
+启动完整模式训练（默认 5000 步，启用 PyAV 视频解码、张量批处理、多进程预取与 CUDA bfloat16 混合精度）：
 
 ```bash
 scripts/train.sh --scenario panda_stack --mode full
@@ -199,12 +199,14 @@ scripts/train.sh --scenario panda_stack --mode full
 
 训练完成后，记录终端输出的 `run_dir` 并导出可部署的 safetensors 模型包（Bundle）：
 
+检查点保存在 `models/runs/<run-id>/`；训练事件、指标和训练终态摘要保存在同方案的 `logs/training/<run-id>/`。
+
 ```bash
 TRAIN_RUN="/data/panda_stack/models/runs/<实际生成的-run-目录名>"
 scripts/bundle.sh \
   --scenario panda_stack --mode full \
   --run "$TRAIN_RUN" \
-  --output /data/panda_stack/models/bundles/stack-act
+  --output /data/panda_stack/models/bundles/<verified-bundle>
 ```
 
 ### 3.3 直接启动 Policy 推理服务
@@ -214,7 +216,7 @@ scripts/bundle.sh \
 ```bash
 scripts/policy.sh \
   --scenario panda_stack \
-  --bundle /data/panda_stack/models/bundles/stack-act
+  --bundle /data/panda_stack/models/bundles/<verified-bundle>
 ```
 
 服务默认监听 `50051`，日志目录为 `/data/panda_stack/logs/policy-service`（可用 `--log-directory` 或环境变量 `ACT_LOG_DIRECTORY` 修改）。保持该终端运行。若本机尚未生成 Policy SDK，先在 runtime 容器执行 `scripts/build_sdk.sh`。
@@ -226,7 +228,7 @@ scripts/policy.sh \
 ```bash
 scripts/policy_backend.sh \
   --scenario panda_stack \
-  --bundle /data/panda_stack/models/bundles/stack-act \
+  --bundle /data/panda_stack/models/bundles/<verified-bundle> \
   --seed 20000 --run-id policy-backend
 ```
 
@@ -239,7 +241,7 @@ scripts/policy_backend.sh \
 ```bash
 scripts/interactive.sh \
   --scenario panda_stack \
-  --bundle /data/panda_stack/models/bundles/stack-act \
+  --bundle /data/panda_stack/models/bundles/<verified-bundle> \
   --seed 20000 --run-id policy-interactive
 ```
 
@@ -248,7 +250,7 @@ scripts/interactive.sh \
 ```bash
 scripts/policy.sh \
   --scenario panda_stack \
-  --bundle /data/panda_stack/models/bundles/stack-act \
+  --bundle /data/panda_stack/models/bundles/<verified-bundle> \
   --reset-seed 20000 --run-id policy-run
 ```
 
@@ -257,18 +259,20 @@ scripts/policy.sh \
 ```bash
 scripts/interactive.sh \
   --scenario panda_stack \
-  --bundle /data/panda_stack/models/bundles/stack-act \
+  --bundle /data/panda_stack/models/bundles/<verified-bundle> \
   --seed 20001 --run-id policy-interactive-2
 ```
 
-如需无人工干预批量仿真推理测试（仅支持 MuJoCo 仿真后端且禁止可视化，启动时打印配置与参数，结束后输出成功率与报告路径）：
+如需无人工干预批量仿真推理测试（仅支持 MuJoCo 仿真后端且禁止可视化，执行前需保持第 3.3 节 `learning` 容器的 `scripts/policy.sh` 与第 3.4 节 `simulation` 容器的 `scripts/policy_backend.sh` 同时在线；启动时打印配置与参数，结束后输出成功率与报告路径）：
 
 ```bash
 scripts/batch_policy.sh \
   --scenario panda_stack \
-  --bundle /data/panda_stack/models/bundles/stack-act \
-  --count 20 --seed-start 20000
+  --bundle /data/panda_stack/models/bundles/<verified-bundle> \
+  --count 10 --seed-start 20000
 ```
+
+本轮每个方案累计 120 次推理，每批最多 10 次；保留失败、拒绝与取消记录，并按模型和有效配置分组审计。验收要求每个方案至少一次真实任务成功。
 
 ### 3.6 用 `--set` 调参与采集产物
 
@@ -276,11 +280,11 @@ scripts/batch_policy.sh \
 
 ```bash
 # simulation：降低仿真速度
-scripts/teacher_backend.sh --run-id teacher-slow --set run.realtime_speed=0.4
+scripts/teacher_backend.sh --scenario panda_stack --run-id teacher-slow --set run.realtime_speed=0.4
 
 # runtime：放宽观测最大年龄（该键由观测档案派生，也可覆盖）
 scripts/interactive.sh --scenario panda_stack \
-  --bundle /data/panda_stack/models/bundles/stack-act \
+  --bundle /data/panda_stack/models/bundles/<verified-bundle> \
   --run-id policy-fast --set observation.max_age_ns=200000000
 
 # learning：只运行 smoke 预算并指定轮次数
@@ -329,7 +333,7 @@ var/panda_stack/
 
 ## 4. 使用 marvin_handover
 
-`marvin_handover` 与 `panda_stack` 使用完全相同的入口，只需替换 `--scenario`：
+`marvin_handover` 与 `panda_stack` 使用完全相同的入口，训练默认同样为 50 条正式数据（45 训练 / 5 验证）与 full 5000 步，共享同一份 ResNet18 权重；只需替换 `--scenario`：
 
 ```bash
 # simulation：示教后端
@@ -339,9 +343,13 @@ scripts/teacher_backend.sh --scenario marvin_handover --seed 0 --run-id teacher-
 scripts/record.sh --scenario marvin_handover \
   --purpose pilot --count 1 --max-consecutive-failures 1
 
-# learning：转换与训练（诊断配方）
+# 宿主机项目根目录：并行补足 50 条正式数据
+./record_parallel.sh --scenario marvin_handover \
+  --purpose formal --target-total 50 --workers auto
+
+# learning：正式转换与 full 训练
 scripts/convert.sh --scenario marvin_handover
-scripts/train.sh --scenario marvin_handover --mode smoke
+scripts/train.sh --scenario marvin_handover --mode full
 
 # 推理：learning 策略服务、simulation 后端、runtime 交互闭环
 scripts/policy.sh --scenario marvin_handover \
@@ -352,10 +360,15 @@ scripts/policy_backend.sh --scenario marvin_handover \
 scripts/interactive.sh --scenario marvin_handover \
   --bundle /data/marvin_handover/models/bundles/<bundle> \
   --seed 5100 --run-id policy-interactive
+
+# runtime：批量推理（需保持上方 policy.sh 与 policy_backend.sh 在线），每批最多 10 次，累计 120 次，验收至少一次真实成功
+scripts/batch_policy.sh --scenario marvin_handover \
+  --bundle /data/marvin_handover/models/bundles/<bundle> \
+  --count 10 --seed-start 5100
 ```
 
-该方案的 `binding.yaml` 已指向一个真实诊断 Bundle；换成新 Bundle 时只需改 `--bundle`，档案与配方无需改动。方案说明见 [`shared/scenarios/marvin_handover/README.md`](shared/scenarios/marvin_handover/README.md)。
+该方案的 `binding.yaml` 中 `models.bundle` 为空；推理时通过 `--bundle` 显式提供已验证 Bundle，档案与配方无需改动。方案说明见 [`shared/scenarios/marvin_handover/README.md`](shared/scenarios/marvin_handover/README.md)。
 
 ---
 
-目录导航：[文档索引](docs/README.md) · [公共层与方案绑定](shared/README.md) · [架构简化任务](docs/architecture-tasks/simplification/README.md) · [实施规则](RULES.md)
+目录导航：[文档索引](docs/README.md) · [公共层与方案绑定](shared/README.md) · [实施规则](RULES.md)

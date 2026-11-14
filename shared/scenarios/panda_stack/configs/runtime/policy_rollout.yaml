@@ -45,16 +45,15 @@ policy:
   task_text: Pick up the red source cube and place it on the blue target cube.
   chunk_size: 60
   action_period_ns: 50000000
-  # A 10-point execution window is 0.5 s at the fixed 50 ms period. The
+  # A five-point execution window is 0.25 s at the fixed 50 ms period. The
   # provider still returns a complete 3 s (60 point) chunk and the interface
   # remains 60x16; overlapping windows drop predictions that are already stale
-  # at handoff, so a window is not always points 0..9 of a fresh chunk. No
-  # hidden queue and no ground-truth rescue are introduced.
+  # at handoff, so a window is not always points 0..4 of a fresh chunk.
   # Settle before task prepare/start; the 30 s task budget starts afterwards.
   # ACT still consumes only subsequent fresh RGB and measured state.
   startup_settle_sim_ns: 2000000000
   initial_lead_ns: 250000000
-  max_chunks: 64
+  max_chunks: 256
   total_sim_deadline_ns: 30000000000
   # Half-speed simulation needs 60s wall time for the 30s physical task.
   # Leave bounded room for startup, RGB delivery, RPC and the final stop.

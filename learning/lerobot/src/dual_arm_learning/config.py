@@ -11,6 +11,7 @@ from typing import Annotated, Literal
 
 from pydantic import AliasPath, BeforeValidator, Field, model_validator
 from robot_contracts.overrides import apply_overrides
+from robot_contracts.project_paths import project_path
 from robot_contracts.validation import (
     NonEmptyStr,
     NonNegativeFloat,
@@ -26,14 +27,24 @@ from robot_contracts.validation import (
 
 from .config_yaml import ConfigError, load_yaml
 
-__all__ = ["BudgetSpec", "CheckpointSpec", "ConfigError", "DatasetConfig", "LoggingSpec",
-           "ModeSpec", "ModelSpec", "RGBEncoderSpec", "TrainingConfig",
-           "load_dataset_config", "load_training_config", "parse_dataset_config",
-           "parse_training_config"]
+__all__ = [
+    "BudgetSpec",
+    "CheckpointSpec",
+    "ConfigError",
+    "DatasetConfig",
+    "LoggingSpec",
+    "ModeSpec",
+    "ModelSpec",
+    "RGBEncoderSpec",
+    "TrainingConfig",
+    "load_dataset_config",
+    "load_training_config",
+    "parse_dataset_config",
+    "parse_training_config",
+]
 
 PNG_SHA = re.compile(r"^[0-9a-f]{64}$")
 OptionalSha = Annotated[str, Field(strict=True, pattern=r"^(?:[0-9a-f]{64})?$")]
-_TASK_TEXT = "Pick up the red source cube and place it on the blue target cube."
 PINNED_REVISION = "7e241bd630a3719a56157a497ce5d08f244784f1"
 
 
@@ -50,17 +61,16 @@ def unknown(block: object, allowed: set[str], prefix: str) -> None:
                 raise contract_error(f"{prefix}.{key}", "unknown key")
 
 
-def absolute(value: object, root: Path) -> Path:
-    candidate = Path(str(value))
-    return candidate if candidate.is_absolute() else (root / candidate).resolve()
-
-
-Episodes = Annotated[tuple[Annotated[int, Field(strict=True, ge=0, le=9999)], ...] | None,
-                     BeforeValidator(episodes_before)]
-Names3 = Annotated[tuple[NonEmptyStr, ...], BeforeValidator(as_tuple),
-                   Field(min_length=3, max_length=3)]
-VectorN = Annotated[tuple[NonNegativeInt, ...], BeforeValidator(as_tuple),
-                    Field(min_length=1, max_length=50)]
+Episodes = Annotated[
+    tuple[Annotated[int, Field(strict=True, ge=0, le=9999)], ...] | None,
+    BeforeValidator(episodes_before),
+]
+Names3 = Annotated[
+    tuple[NonEmptyStr, ...], BeforeValidator(as_tuple), Field(min_length=3, max_length=3)
+]
+VectorN = Annotated[
+    tuple[NonNegativeInt, ...], BeforeValidator(as_tuple), Field(min_length=1, max_length=50)
+]
 FORMAL_SPLIT = (50, 45, 5)
 FORMAL_VALIDATION_POSITIONS = (9, 19, 29, 39, 49)
 
@@ -163,7 +173,7 @@ class DatasetConfig(StrictMappingModel):
     camera_names: Names3
     camera_width: Annotated[int, Field(strict=True, ge=320, le=320)]
     camera_height: Annotated[int, Field(strict=True, ge=240, le=240)]
-    task_text: NonEmptyStr = _TASK_TEXT
+    task_text: NonEmptyStr
     profile_path: Path = Field(validation_alias="profile")
     select_path: Path = Field(validation_alias="select")
     output_root: Path
@@ -173,35 +183,50 @@ class DatasetConfig(StrictMappingModel):
     require_quality: bool
     diagnostic: bool = False
     expected_formal_episodes: Annotated[int, Field(strict=True, ge=1, le=9999)] = Field(
-        validation_alias=AliasPath("expected", "formal_episodes"))
+        validation_alias=AliasPath("expected", "formal_episodes")
+    )
     expected_training_episodes: Annotated[int, Field(strict=True, ge=1, le=9999)] = Field(
-        validation_alias=AliasPath("expected", "training_episodes"))
+        validation_alias=AliasPath("expected", "training_episodes")
+    )
     expected_validation_episodes: Annotated[int, Field(strict=True, ge=1, le=9999)] = Field(
-        validation_alias=AliasPath("expected", "validation_episodes"))
+        validation_alias=AliasPath("expected", "validation_episodes")
+    )
     validation_positions: VectorN = Field(
-        validation_alias=AliasPath("expected", "validation_positions"))
+        validation_alias=AliasPath("expected", "validation_positions")
+    )
     lerobot_source_revision: NonEmptyStr = Field(
-        validation_alias=AliasPath("lerobot", "source_revision"))
+        validation_alias=AliasPath("lerobot", "source_revision")
+    )
     lerobot_source_archive_sha256: OptionalSha = Field(
-        default="", validation_alias=AliasPath("lerobot", "source_archive_sha256"))
+        default="", validation_alias=AliasPath("lerobot", "source_archive_sha256")
+    )
     video_backend: Literal["pyav", "torchcodec"] = Field(
-        default="pyav", validation_alias=AliasPath("lerobot", "video_backend"))
+        default="pyav", validation_alias=AliasPath("lerobot", "video_backend")
+    )
     video_files_size_mb: Annotated[int, Field(strict=True, ge=16, le=16384)] = Field(
-        validation_alias=AliasPath("lerobot", "video_files_size_mb"))
+        validation_alias=AliasPath("lerobot", "video_files_size_mb")
+    )
     data_files_size_mb: Annotated[int, Field(strict=True, ge=16, le=16384)] = Field(
-        validation_alias=AliasPath("lerobot", "data_files_size_mb"))
+        validation_alias=AliasPath("lerobot", "data_files_size_mb")
+    )
     encoder_threads: Annotated[int, Field(strict=True, ge=0, le=64)] = Field(
-        validation_alias=AliasPath("lerobot", "encoder_threads"))
+        validation_alias=AliasPath("lerobot", "encoder_threads")
+    )
     image_writer_threads: Annotated[int, Field(strict=True, ge=0, le=64)] = Field(
-        validation_alias=AliasPath("lerobot", "image_writer_threads"))
+        validation_alias=AliasPath("lerobot", "image_writer_threads")
+    )
     rgb_vcodec: Literal["h264"] = Field(
-        validation_alias=AliasPath("lerobot", "rgb_encoder", "vcodec"))
+        validation_alias=AliasPath("lerobot", "rgb_encoder", "vcodec")
+    )
     rgb_g: Annotated[int, Field(strict=True, ge=2, le=2)] = Field(
-        validation_alias=AliasPath("lerobot", "rgb_encoder", "g"))
+        validation_alias=AliasPath("lerobot", "rgb_encoder", "g")
+    )
     rgb_crf: Annotated[int, Field(strict=True, ge=18, le=18)] = Field(
-        validation_alias=AliasPath("lerobot", "rgb_encoder", "crf"))
+        validation_alias=AliasPath("lerobot", "rgb_encoder", "crf")
+    )
     rgb_preset: Literal["veryfast"] = Field(
-        validation_alias=AliasPath("lerobot", "rgb_encoder", "preset"))
+        validation_alias=AliasPath("lerobot", "rgb_encoder", "preset")
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -213,10 +238,14 @@ class DatasetConfig(StrictMappingModel):
         dataset_after(self)
         return self
 
-    rgb_encoder = property(lambda self: RGBEncoderSpec(
-        vcodec=self.rgb_vcodec, g=self.rgb_g, crf=self.rgb_crf, preset=self.rgb_preset))
+    rgb_encoder = property(
+        lambda self: RGBEncoderSpec(
+            vcodec=self.rgb_vcodec, g=self.rgb_g, crf=self.rgb_crf, preset=self.rgb_preset
+        )
+    )
     profile_sha256 = property(
-        lambda self: hashlib.sha256(self.profile_path.read_bytes()).hexdigest())
+        lambda self: hashlib.sha256(self.profile_path.read_bytes()).hexdigest()
+    )
 
     def feature_spec(self) -> dict[str, dict[str, object]]:
         return feature_spec(self)
@@ -237,31 +266,41 @@ class TrainingConfig(StrictMappingModel):
     validation_dir: NonEmptyStr = Field(validation_alias=AliasPath("data", "validation_dir"))
     verify_hashes: bool = Field(validation_alias=AliasPath("data", "verify_hashes"))
     sample_filter: Path | None = Field(
-        default=None, validation_alias=AliasPath("data", "sample_filter"))
+        default=None, validation_alias=AliasPath("data", "sample_filter")
+    )
     batch_size: Annotated[PositiveInt, Field(le=256)] = Field(
-        validation_alias=AliasPath("training", "batch_size"))
+        validation_alias=AliasPath("training", "batch_size")
+    )
     num_workers: Annotated[NonNegativeInt, Field(le=32)] = Field(
-        default=4, validation_alias=AliasPath("training", "num_workers"))
+        default=4, validation_alias=AliasPath("training", "num_workers")
+    )
     pin_memory: bool = Field(default=True, validation_alias=AliasPath("training", "pin_memory"))
     prefetch_factor: Annotated[PositiveInt, Field(le=32)] = Field(
-        default=2, validation_alias=AliasPath("training", "prefetch_factor"))
+        default=2, validation_alias=AliasPath("training", "prefetch_factor")
+    )
     use_amp: bool = Field(default=True, validation_alias=AliasPath("training", "use_amp"))
     amp_dtype: Literal["bfloat16", "float16"] = Field(
-        default="bfloat16", validation_alias=AliasPath("training", "amp_dtype"))
+        default="bfloat16", validation_alias=AliasPath("training", "amp_dtype")
+    )
     lr: Annotated[PositiveFloat, Field(ge=1e-12)] = Field(
-        validation_alias=AliasPath("training", "lr"))
-    weight_decay: NonNegativeFloat = Field(
-        validation_alias=AliasPath("training", "weight_decay"))
+        validation_alias=AliasPath("training", "lr")
+    )
+    weight_decay: NonNegativeFloat = Field(validation_alias=AliasPath("training", "weight_decay"))
     grad_clip_norm: NonNegativeFloat = Field(
-        validation_alias=AliasPath("training", "grad_clip_norm"))
+        validation_alias=AliasPath("training", "grad_clip_norm")
+    )
     log_every_steps: Annotated[PositiveInt, Field(le=1_000_000)] = Field(
-        validation_alias=AliasPath("training", "log_every_steps"))
+        validation_alias=AliasPath("training", "log_every_steps")
+    )
     val_every_steps: Annotated[PositiveInt, Field(le=1_000_000)] = Field(
-        validation_alias=AliasPath("training", "val_every_steps"))
+        validation_alias=AliasPath("training", "val_every_steps")
+    )
     save_every_steps: Annotated[PositiveInt, Field(le=1_000_000)] = Field(
-        validation_alias=AliasPath("training", "save_every_steps"))
+        validation_alias=AliasPath("training", "save_every_steps")
+    )
     val_batches: Annotated[PositiveInt, Field(le=10000)] = Field(
-        validation_alias=AliasPath("training", "val_batches"))
+        validation_alias=AliasPath("training", "val_batches")
+    )
     deterministic: bool = Field(validation_alias=AliasPath("training", "deterministic"))
     modes: dict[str, ModeSpec]
     model: ModelSpec
@@ -297,16 +336,29 @@ def dataset_before(data: object) -> object:
     root = data.get("project_root", Path("."))
     for name in ("profile", "select", "output_root", "cache_root"):
         if name in data and not isinstance(data[name], Path):
-            data[name] = root / Path(data[name])
-    unknown(data.get("expected"), {"formal_episodes", "training_episodes",
-                                   "validation_episodes", "validation_positions"}, "expected")
+            data[name] = project_path(data[name], root)
+    unknown(
+        data.get("expected"),
+        {"formal_episodes", "training_episodes", "validation_episodes", "validation_positions"},
+        "expected",
+    )
     lerobot = data.get("lerobot")
-    unknown(lerobot, {"source_revision", "source_archive_sha256", "rgb_encoder",
-                      "video_backend", "video_files_size_mb", "data_files_size_mb",
-                      "encoder_threads", "image_writer_threads"}, "lerobot")
+    unknown(
+        lerobot,
+        {
+            "source_revision",
+            "source_archive_sha256",
+            "rgb_encoder",
+            "video_backend",
+            "video_files_size_mb",
+            "data_files_size_mb",
+            "encoder_threads",
+            "image_writer_threads",
+        },
+        "lerobot",
+    )
     if isinstance(lerobot, dict):
-        unknown(lerobot.get("rgb_encoder"), {"vcodec", "g", "crf", "preset"},
-                "lerobot.rgb_encoder")
+        unknown(lerobot.get("rgb_encoder"), {"vcodec", "g", "crf", "preset"}, "lerobot.rgb_encoder")
     return data
 
 
@@ -319,35 +371,40 @@ def dataset_after(config) -> None:
         if config.expected_formal_episodes != (
             config.expected_training_episodes + config.expected_validation_episodes
         ):
-            raise contract_error("expected.formal_episodes",
-                                 "must equal the training and validation episode counts")
+            raise contract_error(
+                "expected.formal_episodes", "must equal the training and validation episode counts"
+            )
         if len(config.validation_positions) != config.expected_validation_episodes:
-            raise contract_error("validation_positions",
-                                 "must name every validation episode")
-        if any(position >= config.expected_formal_episodes
-               for position in config.validation_positions):
-            raise contract_error("validation_positions",
-                                 "must stay inside the configured episode range")
+            raise contract_error("validation_positions", "must name every validation episode")
+        if any(
+            position >= config.expected_formal_episodes for position in config.validation_positions
+        ):
+            raise contract_error(
+                "validation_positions", "must stay inside the configured episode range"
+            )
     else:
-        if (config.expected_formal_episodes, config.expected_training_episodes,
-                config.expected_validation_episodes) != FORMAL_SPLIT:
+        if (
+            config.expected_formal_episodes,
+            config.expected_training_episodes,
+            config.expected_validation_episodes,
+        ) != FORMAL_SPLIT:
             raise contract_error("expected", "formal data must be exactly 50/45/5")
         if config.validation_positions != FORMAL_VALIDATION_POSITIONS:
-            raise contract_error("validation_positions",
-                                 "must be the 10th/20th/30th/40th/50th")
+            raise contract_error("validation_positions", "must be the 10th/20th/30th/40th/50th")
     if config.lerobot_source_revision != PINNED_REVISION:
         raise contract_error("lerobot.source_revision", "must be the pinned revision")
     if config.lerobot_source_archive_sha256:
-        binding = config.project_root / "learning/lerobot/docker/learning-source.json"
+        binding = project_path("learning/lerobot/docker/learning-source.json", config.project_root)
         if binding.is_file():
             declared = json.loads(binding.read_text(encoding="utf-8")).get("archive_sha256")
             if declared and config.lerobot_source_archive_sha256 != declared:
-                raise contract_error("lerobot.source_archive_sha256",
-                                     "differs from the source binding")
-    if (config.attempt_export_glob.count("*") > 1
-            or not config.attempt_export_glob.endswith("export")):
-        raise contract_error("attempt_export_glob",
-                             "must be a bounded glob ending in export")
+                raise contract_error(
+                    "lerobot.source_archive_sha256", "differs from the source binding"
+                )
+    if config.attempt_export_glob.count("*") > 1 or not config.attempt_export_glob.endswith(
+        "export"
+    ):
+        raise contract_error("attempt_export_glob", "must be a bounded glob ending in export")
 
 
 def training_before(data: object) -> object:
@@ -359,33 +416,62 @@ def training_before(data: object) -> object:
     if isinstance(block, dict):
         block = dict(block)
         for key in ("config", "root"):
-            block[key] = absolute(block[key], root)
+            block[key] = project_path(block[key], root)
         if block.get("sample_filter") is not None:
-            block["sample_filter"] = absolute(block["sample_filter"], root)
-        unknown(block, {"config", "root", "manifest", "train_dir", "validation_dir",
-                        "verify_hashes", "sample_filter"}, "data")
+            block["sample_filter"] = project_path(block["sample_filter"], root)
+        unknown(
+            block,
+            {
+                "config",
+                "root",
+                "manifest",
+                "train_dir",
+                "validation_dir",
+                "verify_hashes",
+                "sample_filter",
+            },
+            "data",
+        )
         data["data"] = block
-    unknown(data.get("training"), {"batch_size", "num_workers", "pin_memory",
-                                   "prefetch_factor", "use_amp", "amp_dtype", "lr",
-                                   "weight_decay", "grad_clip_norm", "log_every_steps",
-                                   "val_every_steps", "save_every_steps", "val_batches",
-                                   "deterministic"}, "training")
+    unknown(
+        data.get("training"),
+        {
+            "batch_size",
+            "num_workers",
+            "pin_memory",
+            "prefetch_factor",
+            "use_amp",
+            "amp_dtype",
+            "lr",
+            "weight_decay",
+            "grad_clip_norm",
+            "log_every_steps",
+            "val_every_steps",
+            "save_every_steps",
+            "val_batches",
+            "deterministic",
+        },
+        "training",
+    )
     model = data.get("model")
     if isinstance(model, dict):
         model = dict(model)
         weights = model.get("weights")
         if isinstance(weights, dict):
-            model["weights"] = {**weights, "path": absolute(weights["path"], root)}
+            model["weights"] = {**weights, "path": project_path(weights["path"], root)}
         data["model"] = model
-    data["cache_root"] = absolute(
-        data.get("cache_root", "build/cache/huggingface-learning"), root)
-    for section, keys in (("budget", ("ledger", "lock")),
-                          ("checkpoint", ("root",)), ("logging", ("root",))):
+    if "cache_root" in data:
+        data["cache_root"] = project_path(data["cache_root"], root)
+    for section, keys in (
+        ("budget", ("ledger", "lock")),
+        ("checkpoint", ("root",)),
+        ("logging", ("root",)),
+    ):
         block = data.get(section)
         if isinstance(block, dict):
             block = dict(block)
             for key in keys:
-                block[key] = absolute(block[key], root)
+                block[key] = project_path(block[key], root)
             data[section] = block
     return data
 
@@ -397,14 +483,9 @@ def training_after(config) -> None:
         raise contract_error("mode", "must be one of the configured modes")
     full = config.modes["full"]
     if full.episodes is not None:
-        raise contract_error("modes.full.episodes",
-                             "must use every configured training episode")
+        raise contract_error("modes.full.episodes", "must use every configured training episode")
     if not full.validation or full.split != "train":
-        raise contract_error("modes.full",
-                             "must validate on the independent validation split")
-    if config.budget.limit_seconds > 14400.0:
-        raise contract_error("budget.limit_seconds",
-                             "task training budget is capped at 14400 s")
+        raise contract_error("modes.full", "must validate on the independent validation split")
 
 
 def feature_spec(config) -> dict[str, dict[str, object]]:
@@ -412,8 +493,7 @@ def feature_spec(config) -> dict[str, dict[str, object]]:
         "observation.state": {"dtype": "float32", "shape": (config.state_dim,)},
         "observation.velocity": {"dtype": "float32", "shape": (config.state_dim,)},
         "action": {"dtype": "float32", "shape": (config.state_dim,)},
-        "raw_action_chunk": {"dtype": "float32",
-                             "shape": (config.chunk_size, config.state_dim)},
+        "raw_action_chunk": {"dtype": "float32", "shape": (config.chunk_size, config.state_dim)},
         "observation.sim_time_ns": {"dtype": "int64", "shape": (1,)},
         "action.sim_time_ns": {"dtype": "int64", "shape": (1,)},
         "source.episode_index": {"dtype": "int64", "shape": (1,)},
@@ -421,7 +501,9 @@ def feature_spec(config) -> dict[str, dict[str, object]]:
     }
     for camera in config.camera_names:
         features[f"observation.images.{camera}"] = {
-            "dtype": "video", "shape": (config.camera_height, config.camera_width, 3)}
+            "dtype": "video",
+            "shape": (config.camera_height, config.camera_width, 3),
+        }
     return features
 
 
@@ -429,8 +511,9 @@ def parse_dataset_config(document: object, project_root: str | Path) -> DatasetC
     root = Path(project_root).resolve()
     if not isinstance(document, dict):
         raise ConfigError("<dataset>", "<root>", "must be a mapping")
-    return validate_config_model(DatasetConfig, {**document, "project_root": root},
-                                 "<dataset>", ConfigError)
+    return validate_config_model(
+        DatasetConfig, {**document, "project_root": root}, "<dataset>", ConfigError
+    )
 
 
 def load_dataset_config(
@@ -459,7 +542,8 @@ def parse_training_config(
     if not isinstance(document, dict):
         raise ConfigError(str(source), "<root>", "must be a mapping")
     dataset = parse_dataset_config(
-        load_yaml(absolute(_dataset_config_path(document), root)), root)
+        load_yaml(project_path(_dataset_config_path(document), root)), root
+    )
     value = copy.deepcopy(document)
     value.update({"project_root": root, "source": Path(source), "dataset": dataset})
     return validate_config_model(TrainingConfig, value, source, ConfigError)

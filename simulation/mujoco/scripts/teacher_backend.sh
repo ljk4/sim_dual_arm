@@ -17,7 +17,7 @@ Start the MuJoCo teacher backend (--role teacher) inside the simulation
 container and print the resolved configuration file paths and parameters.
 
 options:
-  --scenario <id>       scenario id (default: panda_stack)
+  --scenario <id>       scenario id (required)
   --seed <int>          initial simulation seed (default: 0)
   --run-id <id>         backend run id (default: teacher-backend)
   --shared-root <path>  override shared scenarios root
@@ -27,7 +27,7 @@ options:
 EOF
 }
 
-scenario="panda_stack"
+scenario=""
 seed="0"
 run_id="teacher-backend"
 shared_root=""
@@ -95,6 +95,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ -z "$scenario" ]]; then
+  printf 'scripts/teacher_backend.sh: --scenario is required\n' >&2
+  exit 2
+fi
 
 if [[ -z "$run_root" ]]; then
   run_root="$DATA_ROOT/$scenario/logs/backend"

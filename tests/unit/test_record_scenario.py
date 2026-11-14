@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 import yaml
 from collection_fixtures import SCENARIO_ID, build_collection_tree, sha
@@ -40,12 +42,8 @@ def test_selection_returns_binding_recipes_profiles_and_capabilities(tmp_path):
         "sha256": sha(tree.scenario.binding_path),
     }
     assert selection["recipes"]["campaign"]["path"] == str(tree.campaign_recipe.resolve())
-    assert selection["recipes"]["runtime_teacher"]["path"] == str(
-        tree.runtime_recipe.resolve()
-    )
-    assert selection["recipes"]["simulation_teacher"]["path"] == str(
-        tree.backend_recipe.resolve()
-    )
+    assert selection["recipes"]["runtime_teacher"]["path"] == str(tree.runtime_recipe.resolve())
+    assert selection["recipes"]["simulation_teacher"]["path"] == str(tree.backend_recipe.resolve())
     assert selection["profiles"]["robot"]["path"] == str(
         (tree.scenario.root / "profiles/robot.json").resolve()
     )
@@ -58,9 +56,7 @@ def test_selection_returns_binding_recipes_profiles_and_capabilities(tmp_path):
             (tree.scenario.root / "extensions/ros/panda_stack_api_msgs").resolve()
         ),
     }
-    assert selection["interfaces"]["teacher_api"] == (
-        "panda_stack_api_msgs.teacher_chunk.v1"
-    )
+    assert selection["interfaces"]["teacher_api"] == ("panda_stack_api_msgs.teacher_chunk.v1")
 
 
 @pytest.mark.parametrize(
@@ -72,9 +68,7 @@ def test_selection_returns_binding_recipes_profiles_and_capabilities(tmp_path):
         ("common_ros", ["robot_api_msgs"], "unsupported Teacher capability"),
     ],
 )
-def test_unsupported_declared_capabilities_are_rejected(
-    tmp_path, field, value, message
-):
+def test_unsupported_declared_capabilities_are_rejected(tmp_path, field, value, message):
     tree = build_collection_tree(tmp_path)
     document = tree.scenario.document
     if field == "backend_kind":
@@ -93,9 +87,7 @@ def test_unsupported_declared_capabilities_are_rejected(
 
 def test_teacher_recipes_must_declare_teacher_mode(tmp_path):
     tree = build_collection_tree(tmp_path)
-    _rewrite(
-        tree.runtime_recipe, lambda document: document.update(action_source="policy")
-    )
+    _rewrite(tree.runtime_recipe, lambda document: document.update(action_source="policy"))
     with pytest.raises(CampaignError, match="action_source: teacher"):
         _select(tree)
 
@@ -120,19 +112,14 @@ def test_parallel_selection_requires_render_quality(tmp_path):
 
 def test_missing_teacher_service_definition_is_rejected(tmp_path):
     tree = build_collection_tree(tmp_path)
-    (
-        tree.scenario.root
-        / "extensions/ros/panda_stack_api_msgs/srv/GetTeacherChunk.srv"
-    ).unlink()
+    (tree.scenario.root / "extensions/ros/panda_stack_api_msgs/srv/GetTeacherChunk.srv").unlink()
     with pytest.raises(CampaignError, match="no selected extension declares"):
         _select(tree)
 
 
 def test_teacher_capability_must_match_the_selected_extension(tmp_path):
     tree = build_collection_tree(tmp_path)
-    tree.scenario.document["interfaces"]["teacher_api"] = (
-        "panda_stack_api_msgs.teacher_chunk.v2"
-    )
+    tree.scenario.document["interfaces"]["teacher_api"] = "panda_stack_api_msgs.teacher_chunk.v2"
     tree.scenario.write()
     with pytest.raises(CampaignError, match="no selected extension declares"):
         _select(tree)
@@ -150,9 +137,7 @@ def test_recipe_profile_must_match_the_binding(tmp_path):
     tree = build_collection_tree(tmp_path)
     _rewrite(
         tree.runtime_recipe,
-        lambda document: document.update(
-            robot_profile="../profiles/observation.json"
-        ),
+        lambda document: document.update(robot_profile="../profiles/observation.json"),
     )
     with pytest.raises(CampaignError, match="differs from scenario profile"):
         _select(tree)
@@ -273,8 +258,10 @@ def test_record_scenario_conflicts_fail_before_any_ledger(tmp_path):
         "--shared-root",
         str(tree.shared),
     ]
-    for extra in (["--config", str(tree.campaign_recipe)],
-                  ["--runtime-config", str(tree.runtime_recipe)]):
+    for extra in (
+        ["--config", str(tree.campaign_recipe)],
+        ["--runtime-config", str(tree.runtime_recipe)],
+    ):
         with pytest.raises(SystemExit) as error:
             record.main([*base, *extra])
         assert error.value.code == 2
@@ -295,9 +282,7 @@ def test_campaign_scenario_uses_binding_and_rejects_conflicts(tmp_path, monkeypa
         str(tree.shared),
     ]
     captured: dict = {}
-    monkeypatch.setattr(
-        campaign, "command_run", lambda args: captured.update(vars(args)) or 0
-    )
+    monkeypatch.setattr(campaign, "command_run", lambda args: captured.update(vars(args)) or 0)
     assert campaign.main([*base, "run", "--purpose", "pilot"]) == 0
     assert captured["config"] == str(tree.campaign_recipe.resolve())
     assert captured["runtime_config"] == str(tree.runtime_recipe.resolve())
@@ -306,9 +291,7 @@ def test_campaign_scenario_uses_binding_and_rejects_conflicts(tmp_path, monkeypa
         campaign.main([*base, "--config", "explicit.yaml", "status"])
     assert error.value.code == 2
     with pytest.raises(SystemExit) as error:
-        campaign.main(
-            [*base, "run", "--purpose", "pilot", "--runtime-config", "explicit.yaml"]
-        )
+        campaign.main([*base, "run", "--purpose", "pilot", "--runtime-config", "explicit.yaml"])
     assert error.value.code == 2
     assert not (tree.repo / "var/synthetic_stack/logs/campaign/attempts.jsonl").exists()
 
@@ -357,21 +340,23 @@ def test_export_campaign_config_selection_and_conflict(tmp_path):
     episode.mkdir()
     code = export_episode.main(
         [
-            "--episode-dir", str(episode),
-            "--out", str(tmp_path / "export"),
-            "--scenario", SCENARIO_ID,
-            "--shared-root", str(tree.shared),
-            "--campaign-config", str(tree.campaign_recipe),
+            "--episode-dir",
+            str(episode),
+            "--out",
+            str(tmp_path / "export"),
+            "--scenario",
+            SCENARIO_ID,
+            "--shared-root",
+            str(tree.shared),
+            "--campaign-config",
+            str(tree.campaign_recipe),
         ]
     )
     assert code == 2
 
 
 def test_real_campaign_required_paths_use_the_actual_teacher_package():
-    path = (
-        ROOT
-        / "shared/scenarios/panda_stack/configs/runtime/experiments/stack_campaign.yaml"
-    )
+    path = ROOT / "shared/scenarios/panda_stack/configs/runtime/experiments/stack_campaign.yaml"
     document = yaml.safe_load(path.read_text())
     required = document["paths"]["required_paths"]
     teacher = [item for item in required if item.endswith("GetTeacherChunk.srv")]
@@ -382,3 +367,31 @@ def test_real_campaign_required_paths_use_the_actual_teacher_package():
         assert (ROOT / item).exists(), item
     # The SDK marker is generated by build-ros-sdk, not shipped in a checkout.
     assert document["paths"]["sdk_marker"] == "build/ros-dev/contracts.json"
+
+
+def test_direct_relative_recipes_reach_collector_as_mounted_paths(tmp_path, monkeypatch):
+    tree = build_collection_tree(tmp_path)
+    monkeypatch.setenv("PROJECT_CONTAINER", "1")
+    monkeypatch.setenv("PROJECT_ROOT", str(tree.repo))
+    monkeypatch.setenv("SHARED_ROOT", str(tree.shared))
+    monkeypatch.chdir(tmp_path)
+    parser = record.parser()
+    args = parser.parse_args(
+        [
+            "--project-root",
+            str(tree.repo),
+            "--config",
+            str(tree.campaign_recipe.relative_to(tree.repo)),
+            "--runtime-config",
+            str(tree.runtime_recipe.relative_to(tree.repo)),
+        ]
+    )
+    record._resolve_selection(args, parser)
+    command = record._collector_command(args)
+    for flag, expected in [
+        ("--campaign-config", tree.campaign_recipe),
+        ("--runtime-config", tree.runtime_recipe),
+    ]:
+        actual = command[command.index(flag) + 1]
+        assert actual == str(expected.resolve())
+        assert Path(actual).read_text() == expected.read_text()

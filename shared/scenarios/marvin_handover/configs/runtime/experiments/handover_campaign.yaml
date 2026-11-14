@@ -1,15 +1,10 @@
-# Marvin 交接诊断采集预算、种子与路径（P04 规模，P03 先建立引用）。
+# Marvin 交接正式采集预算、种子与路径。
 #
 # pilot 与 formal 使用本方案独立种子与台账，不复用 Panda 数据根。
 schema_version: 1
 
-# This six-episode campaign validates the data chain; it is not formal
-# training evidence.  P05 carries the same flag into the dataset recipe.
-diagnostic: true
-formal_split_description: >-
-  first 4 qualified formal attempts train and the last 2 validate
-  (zero-based qualified positions 4 and 5); diagnostic data, not formal
-  training evidence
+# Formal training evidence: 50 qualified demonstrations, 45 train / 5 validate.
+diagnostic: false
 
 budget:
   # One pilot qualifies the teacher/export chain; at most three attempts and
@@ -21,21 +16,23 @@ budget:
   pilot_teacher_seed_last: 3102
   pilot_label_replay_max: 0
 
-  # Six qualified demonstrations, at most eighteen attempts.  The first four
-  # qualified episodes train and the last two validate (zero-based 4 and 5).
+  # Fifty qualified demonstrations, at most one hundred attempts.
+  # Qualified positions 9, 19, 29, 39 and 49 validate; the other 45 train.
   formal_seed_first: 4100
   formal_seed_last: 4199
-  formal_max_attempts: 18
-  formal_target_qualified: 6
-  formal_validation_qualified_indices: [4, 5]
+  formal_max_attempts: 100
+  formal_target_qualified: 50
+  formal_validation_qualified_indices: [9, 19, 29, 39, 49]
 
   # Model smoke runs use the shared test budget, never pilot or formal seeds.
   test_seed_first: 5100
   test_seed_last: 5119
-  test_max_attempts: 10
-  evaluation_max_attempts: 3
+  test_max_attempts: 20
+  evaluation_max_attempts: 20
 
-  max_raw_bytes: 10737418240
+  # 60 GiB including failed attempts and every raw byte under the attempt
+  # root; the 50-qualified target is not capped below 50 GiB.
+  max_raw_bytes: 64424509440
   reserve_bytes: 2147483648
   estimated_attempt_bytes: 536870912
   min_free_bytes: 5368709120
@@ -59,7 +56,6 @@ paths:
     - shared/scenarios/marvin_handover/profiles/control/marvin_control_v1.yaml
     - shared/scenarios/marvin_handover/profiles/control/marvin_follower_v1.yaml
     - runtime/ros2/docker/docker-compose.yml
-    - simulation/mujoco/docker/docker-compose.yml
   sdk_marker: build/ros-dev/contracts.json
 
 launch:

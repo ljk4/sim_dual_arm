@@ -68,9 +68,6 @@ def test_contract_verifies_stats_and_rejects_tampered_synthetic(tmp_path):
         (root / "processors/train_stats_summary.json").write_text(
             json.dumps(stats) + "\n", encoding="utf-8"
         )
-        (root / "metadata/train_stats_summary.json").write_text(
-            json.dumps(stats) + "\n", encoding="utf-8"
-        )
 
     reseal_bundle(bundle, mutate_stats)
     with pytest.raises(PolicyConfigError, match="training-split-only"):
@@ -84,9 +81,7 @@ def test_contract_rejects_tampered_dataset_split_and_temporal_ensemble(tmp_path)
     def mutate_dataset(root: Path) -> None:
         document = json.loads((root / "metadata/dataset_manifest.json").read_text())
         document["splits"]["training"]["episode_count"] = 44
-        document["splits"]["training"]["episodes"] = document["splits"]["training"][
-            "episodes"
-        ][:44]
+        document["splits"]["training"]["episodes"] = document["splits"]["training"]["episodes"][:44]
         (root / "metadata/dataset_manifest.json").write_text(
             json.dumps(document) + "\n", encoding="utf-8"
         )
@@ -168,7 +163,7 @@ def test_formal_contract_rejects_small_or_diagnostic_bundles(tmp_path):
 
 def test_temporal_ensemble_setting_is_optional_and_strictly_bounded(tmp_path):
     template = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
-    assert template["model"]["temporal_ensemble_coeff"] == pytest.approx(0.01)
+    assert template["model"]["temporal_ensemble_coeff"] is None
 
     from dual_arm_learning.policy_config import PolicyServiceConfig
 

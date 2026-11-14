@@ -54,7 +54,7 @@ def test_public_act_training_resume_and_bundle_use_real_model(tmp_path):
         ledger=str(tmp_path / "budget.jsonl"), lock=str(tmp_path / "budget.lock")
     )
     document["checkpoint"]["root"] = str(tmp_path / "runs")
-    document["logging"]["root"] = str(tmp_path / "runs")
+    document["logging"]["root"] = str(tmp_path / "logs")
     config = tmp_path / "training.yaml"
     config.write_text(yaml.safe_dump(document))
 
@@ -81,9 +81,18 @@ def test_public_act_training_resume_and_bundle_use_real_model(tmp_path):
         return result if operator else json.loads(result.stdout)
 
     log = tmp_path / "train-console.log"
-    first = cli("train", "--config", str(config), "--max-steps", "2", "--allow-synthetic",
-                "--log-file", str(log), operator=True)
-    run, = (tmp_path / "runs").iterdir()
+    first = cli(
+        "train",
+        "--config",
+        str(config),
+        "--max-steps",
+        "2",
+        "--allow-synthetic",
+        "--log-file",
+        str(log),
+        operator=True,
+    )
+    (run,) = (tmp_path / "runs").iterdir()
     assert f"run_dir: {run}" in first.stdout
     assert "2/2 step 100.0%" in first.stderr
     assert "loss=" in first.stderr
@@ -100,10 +109,13 @@ def test_public_act_training_resume_and_bundle_use_real_model(tmp_path):
     ]
     assert len(terminals) == 2
     assert budget["used_seconds"] == pytest.approx(sum(t["elapsed_seconds"] for t in terminals))
-    metrics = [json.loads(line) for line in (run / "metrics.jsonl").read_text().splitlines()]
+    log_root = tmp_path / "logs" / run.name
+    metrics = [json.loads(line) for line in (log_root / "metrics.jsonl").read_text().splitlines()]
     assert all(row["kl_loss"] > 0 for row in metrics if row["phase"] == "train")
     assert all(row["grad_norm"] > 0 for row in metrics if row["phase"] == "train")
-    assert len(list(run.glob("events-*"))) == 2
+    assert len(list(log_root.glob("events-*"))) == 2
+    assert not list(run.glob("*.json*"))
+    assert (log_root / "training_report.json").is_file()
     bundle = cli(
         "bundle",
         "--config",

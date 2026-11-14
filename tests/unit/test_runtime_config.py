@@ -138,6 +138,12 @@ def test_teacher_task_budget_is_bounded_and_covered_by_chunks(tmp_path):
         "follower_config",
     ):
         value[field] = str((CONFIG.parent / value[field]).resolve())
+    # This budget fixture intentionally models a ten-point window.
+    follower = yaml.safe_load(Path(value["follower_config"]).read_text())
+    follower["target_count"] = 10
+    fixture_follower = tmp_path / "follower-budget.yaml"
+    fixture_follower.write_text(yaml.safe_dump(follower))
+    value["follower_config"] = str(fixture_follower)
     value.pop("policy")
     value["action_source"] = "teacher"
     value["teacher_api"] = "panda_stack_api_msgs.teacher_chunk.v1"
@@ -161,9 +167,7 @@ def test_teacher_task_budget_is_bounded_and_covered_by_chunks(tmp_path):
     configuration = load_runtime_configuration(path, ROOT)
     assert configuration.recipe.teacher.task_sim_budget_ns == 180_000_000_000
     assert configuration.recipe.teacher.max_chunks == 400
-    assert "panda_stack_api_msgs.teacher_chunk.v1" in (
-        configuration.required_capabilities
-    )
+    assert "panda_stack_api_msgs.teacher_chunk.v1" in (configuration.required_capabilities)
 
     # 180 s at a ten-point, 50 ms window needs 360 chunks.
     value["teacher"]["max_chunks"] = 359
@@ -220,9 +224,7 @@ def test_policy_startup_settle_accepts_zero_to_five_seconds(tmp_path, value):
     document["policy"]["startup_settle_sim_ns"] = value
     configuration = load_runtime_configuration(write_policy(tmp_path, document), ROOT)
     assert configuration.recipe.policy.startup_settle_sim_ns == value
-    assert (
-        configuration.snapshot["recipe"]["policy"]["startup_settle_sim_ns"] == value
-    )
+    assert configuration.snapshot["recipe"]["policy"]["startup_settle_sim_ns"] == value
 
 
 @pytest.mark.parametrize("value", [-1, True, 1.5, "1000", 5_000_000_001])

@@ -32,10 +32,10 @@ queues:
   render_snapshots: 4
   render_outputs: 8
   captures: 32
-  events: 1024
+  events: 2048
   feedback: 64
-  accepted_references: 256
-  follower_references: 256
+  accepted_references: 512
+  follower_references: 512
 
 limits:
   planner_health_s: 30.0

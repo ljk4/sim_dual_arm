@@ -46,11 +46,9 @@ def load_runtime(template: Path, directory: Path):
 
 def test_single_follower_source_owns_target_count_and_deviation_budget():
     config = load_follower_config(FOLLOWER)
-    assert config.target_count == 10
-    assert config.target_count * 50_000_000 == 500_000_000
-    assert config.max_target_deviations == (
-        (0.30,) * 6 + (0.40, 0.04) + (0.30,) * 6 + (0.40, 0.04)
-    )
+    assert config.target_count == 5
+    assert config.target_count * 50_000_000 == 250_000_000
+    assert config.max_target_deviations == ((0.30,) * 6 + (0.40, 0.04) + (0.30,) * 6 + (0.40, 0.04))
     assert config.max_terminal_tail_duration_s == 3.0
 
 
@@ -80,15 +78,15 @@ def test_chunked_runtime_keeps_the_60x16_interface_and_covers_the_task(tmp_path)
     assert runtime.recipe.teacher is None
 
     loaded_follower = load_follower_config(FOLLOWER)
-    assert follower.target_count == loaded_follower.target_count == 10
+    assert follower.target_count == loaded_follower.target_count == 5
     assert policy.chunk_size == 60
     assert policy.action_period_ns == 50_000_000
     assert follower.duration_grid_ns == 2_000_000
 
     window_ns = follower.target_count * policy.action_period_ns
-    assert window_ns == 500_000_000
-    assert policy.max_chunks == 64
-    assert policy.max_chunks * window_ns == 32_000_000_000
+    assert window_ns == 250_000_000
+    assert policy.max_chunks == 256
+    assert policy.max_chunks * window_ns == 64_000_000_000
     assert policy.startup_settle_sim_ns == 2_000_000_000
     assert policy.max_chunks * window_ns >= policy.task_sim_budget_ns
     assert policy.total_sim_deadline_ns == policy.task_sim_budget_ns == 30_000_000_000

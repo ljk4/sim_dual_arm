@@ -11,6 +11,7 @@ from pathlib import Path
 
 import yaml
 from robot_contracts.overrides import OverrideError, apply_overrides
+from robot_contracts.project_paths import project_path
 
 from dual_arm_runtime.artifact_paths import default_backend_log
 
@@ -32,9 +33,15 @@ def sdk_check_command(
 ) -> list[str]:
     command = [
         sys.executable,
-        str(project_root / "shared/common/tools/scripts/dev_workspace.py"),
-        "check", "--project-root", str(project_root),
-        "--build-root", os.environ.get("ROS_SDK_ROOT", "/build/ros-dev"),
+        str(
+            (shared_root or Path(os.environ.get("SHARED_ROOT", project_root / "shared")))
+            / "common/tools/scripts/dev_workspace.py"
+        ),
+        "check",
+        "--project-root",
+        str(project_root),
+        "--build-root",
+        os.environ.get("ROS_SDK_ROOT", "/build/ros-dev"),
     ]
     if scenario is not None:
         command += ["--scenario", scenario]
@@ -49,9 +56,7 @@ def check_ros_sdk(
     scenario: str | None = None,
     shared_root: Path | None = None,
 ) -> int:
-    command = sdk_check_command(
-        project_root, scenario=scenario, shared_root=shared_root
-    )
+    command = sdk_check_command(project_root, scenario=scenario, shared_root=shared_root)
     return subprocess.run(command, check=False).returncode
 
 
@@ -99,10 +104,8 @@ def main(argv: list[str] | None = None) -> int:
         runtime_arguments = ["--scenario", scenario, "--role", "teacher"]
         if shared_root is not None:
             runtime_arguments += ["--shared-root", str(shared_root)]
-        if args.overrides:
-            runtime_arguments += ["--set", *args.overrides]
     else:
-        template = args.runtime_config.resolve()
+        template = project_path(args.runtime_config, ROOT).resolve()
         recipe = yaml.safe_load(template.read_text(encoding="utf-8"))
         for name in REFERENCES:
             if name in recipe:
@@ -117,19 +120,29 @@ def main(argv: list[str] | None = None) -> int:
         config = attempt / "runtime.yaml"
         config.write_text(yaml.safe_dump(recipe, sort_keys=False), encoding="utf-8")
         runtime_arguments = ["--config", str(config)]
-        if args.overrides:
-            runtime_arguments += ["--set", *args.overrides]
+    for override in args.overrides:
+        runtime_arguments += ["--set", override]
     result = subprocess.run(
         [
-            sys.executable, "-m", "dual_arm_runtime.runtime_node",
-            "--project-root", str(ROOT), "--once",
+            sys.executable,
+            "-m",
+            "dual_arm_runtime.runtime_node",
+            "--project-root",
+            str(ROOT),
+            "--once",
             *runtime_arguments,
-            "--reset-seed", str(seed),
-            "--run-id", run_id,
-            "--episode-id", episode_id,
-            "--output", str(raw),
-            "--episode-dir", str(raw),
-            "--runs-output", str(logs),
+            "--reset-seed",
+            str(seed),
+            "--run-id",
+            run_id,
+            "--episode-id",
+            episode_id,
+            "--output",
+            str(raw),
+            "--episode-dir",
+            str(raw),
+            "--runs-output",
+            str(logs),
         ],
         check=False,
     )
@@ -138,12 +151,19 @@ def main(argv: list[str] | None = None) -> int:
 
     export = subprocess.run(
         [
-            sys.executable, "-m", "dual_arm_runtime.offline.export_episode",
-            "--episode-dir", str(raw),
-            "--out", str(attempt / "export"),
-            "--campaign-config", str(args.campaign_config),
-            "--runtime-log", str(logs / run_id / "logs" / "runtime"),
-            "--backend-log", str(backend_log),
+            sys.executable,
+            "-m",
+            "dual_arm_runtime.offline.export_episode",
+            "--episode-dir",
+            str(raw),
+            "--out",
+            str(attempt / "export"),
+            "--campaign-config",
+            str(args.campaign_config),
+            "--runtime-log",
+            str(logs / run_id / "logs" / "runtime"),
+            "--backend-log",
+            str(backend_log),
             *(["--no-previews"] if args.no_previews else []),
         ],
         check=False,

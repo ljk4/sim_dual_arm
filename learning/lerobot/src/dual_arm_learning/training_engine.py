@@ -68,6 +68,7 @@ class _TrainingContext:
     sample_filter: SampleFilterMask | None
     run_id: str
     run_root: Path
+    log_root: Path
     segment_id: str
     instance_id: str
     logger: Any
@@ -106,29 +107,31 @@ class _TrainingContext:
 def _resume_state(
     config: TrainingConfig, resume_run: Path | None
 ) -> tuple[str, Path, dict[str, Any] | None]:
-    if resume_run is None:
-        run_id = _new_run_id(config)
-        run_root = config.checkpoint.root / run_id
-        _prepare_dir(run_root)
-        return run_id, run_root, None
-    run_root = resume_run.resolve()
-    if not run_root.is_dir():
-        raise TrainingError(f"resume run directory is missing: {run_root}")
-    latest = run_root / "latest.pt"
-    if not latest.is_file():
-        raise TrainingError(f"resume run has no latest.pt: {run_root}")
-    checkpoint = load_checkpoint(latest)
-    validate_checkpoint_binding(checkpoint, config)
-    if checkpoint.get("config_sha256") != config.sha256:
-        raise TrainingError("resume checkpoint was written with a different configuration")
-    if checkpoint.get("mode") != config.mode:
-        raise TrainingError("resume checkpoint mode differs")
-    return run_root.name, run_root, checkpoint
+    if resume_run is not None:
+        run_root = resume_run.resolve()
+        if not run_root.is_dir():
+            raise TrainingError(f"resume run directory is missing: {run_root}")
+        latest = run_root / "latest.pt"
+        if not latest.is_file():
+            raise TrainingError(f"resume run has no latest.pt: {run_root}")
+        checkpoint = load_checkpoint(latest)
+        validate_checkpoint_binding(checkpoint, config)
+        if checkpoint.get("mode") != config.mode:
+            raise TrainingError("resume checkpoint mode differs")
+        return run_root.name, run_root, checkpoint
+    run_id = _new_run_id(config)
+    run_root = config.checkpoint.root / run_id
+    _prepare_dir(run_root)
+    return run_id, run_root, None
 
 
 def _create_context(
-    config: TrainingConfig, allow_synthetic: bool, resume_run: Path | None, max_steps: int | None,
-    *, progress: ConsoleProgress | None = None,
+    config: TrainingConfig,
+    allow_synthetic: bool,
+    resume_run: Path | None,
+    max_steps: int | None,
+    *,
+    progress: ConsoleProgress | None = None,
     selection: dict[str, Any] | None = None,
     overrides: dict[str, Any] | None = None,
 ) -> _TrainingContext:
@@ -138,30 +141,27 @@ def _create_context(
         config, allow_synthetic=allow_synthetic, require_full=config.mode == "full"
     )
     sample_filter = _sample_filter(config, audit)
-    run_id, run_root, checkpoint = _resume_state(config, resume_run)
+    run_id, run_root, resume = _resume_state(config, resume_run)
     segment_id = _new_segment_id(run_id)
-    logger, _ = _make_logger(config, run_id, segment_id)
+    logger, log_root = _make_logger(config, run_id, segment_id)
     context = _TrainingContext(
         config=config,
         audit=audit,
         sample_filter=sample_filter,
         run_id=run_id,
         run_root=run_root,
+        log_root=log_root,
         segment_id=segment_id,
         instance_id=segment_id,
         logger=logger,
-        metrics=MetricsWriter(run_root),
-        budget=BudgetLedger(
-            config.budget.ledger, config.budget.lock, config.budget.limit_seconds
-        ),
+        metrics=MetricsWriter(log_root),
+        budget=BudgetLedger(config.budget.ledger, config.budget.lock, config.budget.limit_seconds),
         ticket=None,
         started=time.monotonic(),
         steps_total=(
-            config.mode_spec.steps
-            if max_steps is None
-            else min(config.mode_spec.steps, max_steps)
+            config.mode_spec.steps if max_steps is None else min(config.mode_spec.steps, max_steps)
         ),
-        resume=checkpoint,
+        resume=resume,
         progress=progress,
         selection=selection,
         overrides=overrides,
@@ -333,9 +333,7 @@ def _prepare_training_context(context: _TrainingContext) -> None:
         context.train_dataset,
         config,
         training=True,
-        indices=(
-            None if context.sample_filter is None else context.sample_filter.eligible_indices
-        ),
+        indices=(None if context.sample_filter is None else context.sample_filter.eligible_indices),
     )
     context.iterator = iter(context.policy_loader)
     context.policy.train()
@@ -355,9 +353,7 @@ def _amp_settings(config: TrainingConfig) -> tuple[bool, Any, Any]:
         config.use_amp and config.device.startswith("cuda") and torch.cuda.is_available()
     )
     dtype = torch.bfloat16 if config.amp_dtype == "bfloat16" else torch.float16
-    scaler = torch.amp.GradScaler(
-        "cuda", enabled=enabled and config.amp_dtype == "float16"
-    )
+    scaler = torch.amp.GradScaler("cuda", enabled=enabled and config.amp_dtype == "float16")
     return enabled, dtype, scaler
 
 
@@ -384,9 +380,7 @@ def _train_step(context: _TrainingContext, amp: tuple[bool, Any, Any]) -> dict[s
         raise TrainingError(f"non-finite training loss at step {context.step}")
     scaler.scale(loss).backward()
     scaler.unscale_(context.optimizer)
-    grad_norm = torch.nn.utils.clip_grad_norm_(
-        context.policy.parameters(), config.grad_clip_norm
-    )
+    grad_norm = torch.nn.utils.clip_grad_norm_(context.policy.parameters(), config.grad_clip_norm)
     if not torch.isfinite(grad_norm):
         raise TrainingError(f"non-finite gradient norm at step {context.step}")
     scaler.step(context.optimizer)
@@ -510,16 +504,12 @@ def _save_final_checkpoints(context: _TrainingContext) -> None:
         try:
             _save_checkpoint(context, "latest", context.final_reason)
         except BaseException as error:
-            context.errors.append(
-                f"latest checkpoint save failed: {type(error).__name__}: {error}"
-            )
+            context.errors.append(f"latest checkpoint save failed: {type(error).__name__}: {error}")
     if config.checkpoint.keep_final:
         try:
             _save_checkpoint(context, "final", context.final_reason)
         except BaseException as error:
-            context.errors.append(
-                f"final checkpoint save failed: {type(error).__name__}: {error}"
-            )
+            context.errors.append(f"final checkpoint save failed: {type(error).__name__}: {error}")
 
 
 def _close_logging(context: _TrainingContext) -> None:
@@ -595,10 +585,7 @@ def _report_payload(context: _TrainingContext) -> dict[str, Any]:
 def _write_report(context: _TrainingContext, report: dict[str, Any]) -> None:
     try:
         payload = json.dumps(report, indent=2, allow_nan=False, default=str) + "\n"
-        (context.run_root / f"training_report-{context.segment_id}.json").write_text(
-            payload, encoding="utf-8"
-        )
-        (context.run_root / "training_report.json").write_text(payload, encoding="utf-8")
+        (context.log_root / "training_report.json").write_text(payload, encoding="utf-8")
     except BaseException as error:
         context.errors.append(f"training report write failed: {type(error).__name__}: {error}")
 
@@ -615,8 +602,7 @@ def _finish_budget(context: _TrainingContext, report: dict[str, Any]) -> None:
         report["errors"] = list(context.errors)
         try:
             payload = json.dumps(report, indent=2, allow_nan=False, default=str) + "\n"
-            (context.run_root / f"training_report-{context.segment_id}.json").write_text(payload)
-            (context.run_root / "training_report.json").write_text(payload)
+            (context.log_root / "training_report.json").write_text(payload)
         except OSError as report_error:
             context.errors.append(f"failure report update failed: {report_error}")
 
@@ -647,8 +633,6 @@ def _raise_training_outcome(context: _TrainingContext, report: dict[str, Any]) -
         raise context.original_error
     if context.interrupted is not None:
         raise context.interrupted
-
-
 
 
 __all__ = [

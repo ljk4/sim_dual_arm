@@ -59,10 +59,9 @@ runtime/ros2/scripts/record.sh --scenario panda_stack --purpose pilot --count 2 
 | 脚本 | 功能说明 |
 | --- | --- |
 | `build_sdk.sh` | 构建 ROS 接口 SDK（`/build/ros-dev/install`）与 Policy Protobuf/gRPC SDK（`/build/generated/policy-sdk`） |
-| `teacher_backend.sh` | 启动示教仿真后端（Teacher Backend） |
 | `record.sh` | 单路示教录制；也支持 `record.sh status --scenario <id>` 查看采集与筛选状态 |
 | `policy.sh` | 执行单局非交互式 Policy 推理闭环；接受 `--scenario ... --bundle ...` 或 `--config ...` |
-| `batch_policy.sh` | 无人工干预批量仿真推理测试（仅仿真后端可用，自动禁用可视化） |
+| `batch_policy.sh` | 无人工干预批量仿真推理测试（仅仿真后端可用，自动禁用可视化；需保持 learning `policy.sh` 与 simulation 推理后端在线） |
 | `interactive.sh` | 交互式执行单局 Policy 推理：`--scenario`/`--config` 二选一，输入 `y` 复位并开始，结束后保持 IDLE 直至 `Ctrl-C` |
 | `test.sh` | 运行固定禁用自动插件收集的 `pytest` 测试套件 |
 

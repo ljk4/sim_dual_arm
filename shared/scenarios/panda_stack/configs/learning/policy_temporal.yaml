@@ -1,4 +1,4 @@
-# ACT Policy 服务与时间融合配方，模型由准备入口绑定。
+# ACT Policy 服务；模型由 --scenario/--bundle 绑定，时间融合可选。
 schema_version: 1
 
 model:
@@ -14,7 +14,7 @@ model:
   gripper_max_correction_m: 0.03
   # Provider-side temporal ensemble aligned to absolute simulation time.
   # Positive values retain older predictions; unset/None keeps it disabled.
-  temporal_ensemble_coeff: 0.01
+  temporal_ensemble_coeff: null
 
 service:
   bind_address: 0.0.0.0

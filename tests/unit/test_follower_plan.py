@@ -35,7 +35,10 @@ PROFILE = load_profile(
     ROOT / "shared/common/interfaces/schemas/v1",
 )
 CONTROL = load_control_config(PROFILES / "control/panda_control_v1.yaml")
-FOLLOWER = load_follower_config(PROFILES / "control/panda_follower_v1.yaml")
+# These trajectory fixtures use ten-point windows independently of scenario cadence.
+FOLLOWER = load_follower_config(PROFILES / "control/panda_follower_v1.yaml").model_copy(
+    update={"target_count": 10}
+)
 BASE = PROFILE.initial_positions
 JOINT_COUNT = len(BASE)
 
@@ -191,9 +194,7 @@ def segment_state(segment, local_s):
     positions = []
     velocities = []
     accelerations = []
-    for c0, c1, c2, c3 in zip(
-        segment.c0, segment.c1, segment.c2, segment.c3, strict=True
-    ):
+    for c0, c1, c2, c3 in zip(segment.c0, segment.c1, segment.c2, segment.c3, strict=True):
         c3_s = c3 * local_s
         positions.append(((c3_s + c2) * local_s + c1) * local_s + c0)
         velocities.append((3.0 * c3_s + 2.0 * c2) * local_s + c1)
@@ -205,9 +206,7 @@ def assert_plan_c1_and_limits(prepared: PreparedFollowerPlan) -> None:
     for index in range(1, len(prepared.plan.segments)):
         previous = prepared.plan.segments[index - 1]
         current = prepared.plan.segments[index]
-        previous_positions, previous_velocities, _ = segment_state(
-            previous, previous.duration_s
-        )
+        previous_positions, previous_velocities, _ = segment_state(previous, previous.duration_s)
         current_positions, current_velocities, _ = segment_state(current, 0.0)
         for axis in range(prepared.joint_count):
             assert previous_positions[axis] == pytest.approx(
@@ -252,9 +251,7 @@ def assert_export_matches_ruckig(trajectory, exported, duration_ns):
             if elapsed_ns < 0 or elapsed_ns > duration_ns:
                 continue
             sample = sample_reference_interval(exported.plan, elapsed_ns)
-            position, velocity, acceleration = trajectory.at_time(
-                elapsed_ns / 1_000_000_000
-            )
+            position, velocity, acceleration = trajectory.at_time(elapsed_ns / 1_000_000_000)
             for axis in range(exported.plan.joint_count):
                 max_position_error = max(
                     max_position_error, abs(sample.positions[axis] - position[axis])
@@ -288,12 +285,8 @@ def assert_export_pv_matches_ruckig(trajectory, exported, duration_ns):
     for elapsed_ns in sorted(sample_times):
         sample = sample_reference_interval(exported.plan, elapsed_ns)
         position, velocity, _ = trajectory.at_time(elapsed_ns / 1_000_000_000)
-        max_position_error = max(
-            max_position_error, abs(sample.positions[0] - position[0])
-        )
-        max_velocity_error = max(
-            max_velocity_error, abs(sample.velocities[0] - velocity[0])
-        )
+        max_position_error = max(max_position_error, abs(sample.positions[0] - position[0]))
+        max_velocity_error = max(max_velocity_error, abs(sample.velocities[0] - velocity[0]))
     assert max_position_error < 5e-9
     assert max_velocity_error < 5e-9
     return max_position_error, max_velocity_error
@@ -330,8 +323,10 @@ def assert_export_pv_matches_ruckig(trajectory, exported, duration_ns):
             BASE,
             (0.0,) * JOINT_COUNT,
             tuple(
-                min(max(value + (0.01 if index % 7 else -0.008), joint.minimum + 1e-3),
-                    joint.maximum - 1e-3)
+                min(
+                    max(value + (0.01 if index % 7 else -0.008), joint.minimum + 1e-3),
+                    joint.maximum - 1e-3,
+                )
                 for index, (value, joint) in enumerate(zip(BASE, PROFILE.joints, strict=True))
             ),
             (0.0,) * JOINT_COUNT,
@@ -525,8 +520,13 @@ def test_export_zero_brake_prefix_does_not_read_padding():
 def test_export_preserves_representable_brake_prefix(position, velocity, target):
     # The first two anchors are from the two failed 2026-11-11 recordings.
     trajectory = calculate_trajectory(
-        [position], [velocity], [target], [0.0],
-        max_velocities=[0.04], max_accelerations=[0.5], minimum_duration_s=0.5,
+        [position],
+        [velocity],
+        [target],
+        [0.0],
+        max_velocities=[0.04],
+        max_accelerations=[0.5],
+        minimum_duration_s=0.5,
     )
     assert trajectory.profiles[0][0].brake.duration >= 0.5e-9
     full_ns = round(trajectory.duration * 1_000_000_000)
@@ -594,14 +594,14 @@ def test_first_window_counterexample_and_bounded_follower():
     assert prepared.window is window
     assert prepared.window.source_targets == window.source_targets
     assert prepared.window.targets == window.targets
-    assert max(prepared.max_target_deviations) <= max(
-        prepared.max_target_deviation_limits
-    )
+    assert max(prepared.max_target_deviations) <= max(prepared.max_target_deviation_limits)
     assert_plan_c1_and_limits(prepared)
     assert prepared.flags.acceleration_limited[0] is True
-    assert prepared.raw_terminal_velocities[0] != pytest.approx(
-        prepared.restricted_terminal_velocities[0]
-    ) or prepared.flags.velocity_limited[0] is False
+    assert (
+        prepared.raw_terminal_velocities[0]
+        != pytest.approx(prepared.restricted_terminal_velocities[0])
+        or prepared.flags.velocity_limited[0] is False
+    )
 
     document = prepared.to_document()
     payload = json.dumps(document, allow_nan=False, indent=2)
@@ -633,9 +633,7 @@ def test_two_radian_ten_second_fragment_with_three_leads(lead_ms):
             )
         else:
             assert prepared.plan.duration_ns == window.end_time_ns
-        assert max(prepared.max_target_deviations) <= max(
-            prepared.max_target_deviation_limits
-        )
+        assert max(prepared.max_target_deviations) <= max(prepared.max_target_deviation_limits)
         assert_plan_c1_and_limits(prepared)
         assert len(prepared.raw_terminal_velocities) == JOINT_COUNT
         assert len(prepared.restricted_terminal_velocities) == JOINT_COUNT
@@ -663,9 +661,7 @@ def test_deterministic_random_100_sixteen_axis_cases():
             anchor_offset = rng.uniform(-min(0.02, span / 20), min(0.02, span / 20))
             anchor_positions.append(clip_to_joint(joint, joint.initial + anchor_offset))
             target_offset = rng.uniform(-min(0.05, span / 8), min(0.05, span / 8))
-            target_positions.append(
-                clip_to_joint(joint, anchor_positions[-1] + target_offset)
-            )
+            target_positions.append(clip_to_joint(joint, anchor_positions[-1] + target_offset))
             velocity_limit = min(0.05, joint.max_velocity * 0.5)
             anchor_velocities.append(rng.uniform(-velocity_limit, velocity_limit))
         source_targets = make_source_targets(
@@ -790,11 +786,7 @@ def test_terminal_speed_is_capped_while_raw_targets_are_preserved():
 def gripper_boundary_source(first_positions, remaining_position):
     targets = []
     for index in range(60):
-        position = (
-            first_positions[index]
-            if index < len(first_positions)
-            else remaining_position
-        )
+        position = first_positions[index] if index < len(first_positions) else remaining_position
         values = list(BASE)
         values[7] = position
         targets.append(Target((index + 1) * 50_000_000, tuple(values)))
@@ -866,8 +858,7 @@ def test_successive_windows_approach_each_joint_boundary_with_inherited_state():
                     tuple(
                         (
                             current_positions[axis]
-                            + (goal - current_positions[7])
-                            * ((point + 1) / FOLLOWER.target_count)
+                            + (goal - current_positions[7]) * ((point + 1) / FOLLOWER.target_count)
                             if axis == 7
                             else current_positions[axis]
                         )

@@ -124,11 +124,10 @@ def colcon_command(
     log_base: Path,
 ) -> list[str]:
     """Use the existing interpreter-policy wrapper, never a host colcon binary."""
-    project = Path(project_root).resolve()
     root = Path(build_root).resolve()
     return [
         sys.executable,
-        str(project / "shared/common/tools/scripts/ros_workspace.py"),
+        str(Path(__file__).resolve().with_name("ros_workspace.py")),
         "--log-base",
         str(log_base),
         "build",
@@ -143,9 +142,7 @@ def colcon_command(
     ]
 
 
-def run_colcon(
-    project_root: Path, build_root: Path, selection: PackageSelection
-) -> int:
+def run_colcon(project_root: Path, build_root: Path, selection: PackageSelection) -> int:
     project = Path(project_root).resolve()
     root = Path(build_root).resolve()
     with tempfile.TemporaryDirectory(prefix="sim-dual-arm-ros-") as scratch:
@@ -159,9 +156,7 @@ def run_colcon(
         environment["ROS_LOG_DIR"] = ROS_LOG_DIRECTORY
         environment["PYTHONUNBUFFERED"] = "1"
         completed = subprocess.run(
-            colcon_command(
-                project, root, selection, build_base=build_base, log_base=log_base
-            ),
+            colcon_command(project, root, selection, build_base=build_base, log_base=log_base),
             cwd=project,
             env=environment,
             check=False,
@@ -196,9 +191,7 @@ def build_workspace(
         try:
             code = build(project, root, chosen)
             if code != 0:
-                raise DevWorkspaceError(
-                    f"colcon build failed with exit code {code}"
-                )
+                raise DevWorkspaceError(f"colcon build failed with exit code {code}")
             document = write_marker(root, chosen, records)
             return document
         except BaseException:

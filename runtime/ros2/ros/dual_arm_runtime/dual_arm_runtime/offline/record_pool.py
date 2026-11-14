@@ -8,10 +8,13 @@ import json
 import os
 import signal
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TextIO
+
+from robot_contracts.project_paths import project_path
 
 from dual_arm_runtime.offline import campaign
 from dual_arm_runtime.offline.campaign_execution import (
@@ -59,25 +62,19 @@ def load_worker_plan(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
             raise CampaignError("scenario worker manifest lacks a Teacher capability")
         for worker in workers:
             if worker.get("teacher_api") != capability:
-                raise CampaignError(
-                    "workers must share the selected Teacher capability"
-                )
+                raise CampaignError("workers must share the selected Teacher capability")
             worker_binding = worker.get("binding") or {}
-            if (
-                worker_binding.get("sha256") != binding["sha256"]
-                or worker_binding.get("path") != binding.get("path")
-            ):
+            if worker_binding.get("sha256") != binding["sha256"] or worker_binding.get(
+                "path"
+            ) != binding.get("path"):
                 raise CampaignError("workers must share the selected binding identity")
             for field in ("runtime_teacher", "simulation_teacher"):
                 worker_recipe = (worker.get("recipes") or {}).get(field) or {}
                 selected_recipe = recipes.get(field) or {}
-                if (
-                    worker_recipe.get("path") != selected_recipe.get("path")
-                    or worker_recipe.get("sha256") != selected_recipe.get("sha256")
-                ):
-                    raise CampaignError(
-                        f"workers must consume the selected {field} recipe"
-                    )
+                if worker_recipe.get("path") != selected_recipe.get("path") or worker_recipe.get(
+                    "sha256"
+                ) != selected_recipe.get("sha256"):
+                    raise CampaignError(f"workers must consume the selected {field} recipe")
     if selection is not None:
         for field in ("run_id_prefix", "output_root"):
             if any(not worker.get(field) for worker in workers):
@@ -119,12 +116,16 @@ def stop_process(process: subprocess.Popen) -> None:
 
 class RecordingPool:
     def __init__(
-        self, args: argparse.Namespace, config: dict[str, Any], ledger: Ledger,
-        workers: list[dict[str, Any]], selection: dict[str, Any] | None = None,
+        self,
+        args: argparse.Namespace,
+        config: dict[str, Any],
+        ledger: Ledger,
+        workers: list[dict[str, Any]],
+        selection: dict[str, Any] | None = None,
     ) -> None:
         self.args, self.config, self.ledger, self.workers = args, config, ledger, workers
         self.selection = selection
-        self.output = args.project_root / config["paths"]["attempts_root"]
+        self.output = project_path(config["paths"]["attempts_root"], args.project_root)
         self.active: list[ActiveRecording] = []
         self.qualified = self.attempted = self.consecutive_failures = self.cancelled = 0
         self.started = time.monotonic()
@@ -153,22 +154,32 @@ class RecordingPool:
         from dual_arm_runtime.offline.record import _collector_command
 
         run_args = argparse.Namespace(
-            purpose=self.args.purpose, kind="rollout", mode="teacher", seed=None,
-            episode_id=None, config=self.args.config,
+            purpose=self.args.purpose,
+            kind="rollout",
+            mode="teacher",
+            seed=None,
+            episode_id=None,
+            config=self.args.config,
             runtime_config=worker["runtime_config"],
         )
         check_environment(self.args.project_root, self.config, self.output)
         run_id_prefix = worker.get("run_id_prefix") or f"record-{worker['id']}"
         attempt = campaign._reserve(
-            self.ledger, self.config, run_args, self.output,
-            f"{run_id_prefix}-{time.time_ns()}", self.args.project_root,
+            self.ledger,
+            self.config,
+            run_args,
+            self.output,
+            f"{run_id_prefix}-{time.time_ns()}",
+            self.args.project_root,
         )
         self.attempted += 1
         with self.ledger.locked():
             self.ledger.append(
                 {
-                    "event": "RUNNING", "attempt_id": attempt.attempt_id,
-                    "started_at_ns": time.time_ns(), "worker": worker["id"],
+                    "event": "RUNNING",
+                    "attempt_id": attempt.attempt_id,
+                    "started_at_ns": time.time_ns(),
+                    "worker": worker["id"],
                     "domain_id": worker["domain_id"],
                     "run_id_prefix": run_id_prefix,
                     "output_root": worker.get("output_root"),
@@ -179,12 +190,24 @@ class RecordingPool:
                 }
             )
         collect_args = argparse.Namespace(
-            **{**vars(self.args), "backend_log": Path(worker["backend_log"]), "no_previews": True}
+            **{
+                **vars(self.args),
+                "runtime_config": Path(worker["runtime_config"]),
+                "backend_log": Path(worker["backend_log"]),
+                "no_previews": True,
+                "overrides": [
+                    *getattr(self.args, "overrides", []),
+                    f"robot_namespace={worker['namespace']}",
+                ],
+            }
         )
         environment = _environment(attempt)
         environment.update(
-            ROS_DOMAIN_ID=str(worker["domain_id"]), MUJOCO_GL="egl",
-            OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1",
+            ROS_DOMAIN_ID=str(worker["domain_id"]),
+            MUJOCO_GL="egl",
+            OMP_NUM_THREADS="1",
+            OPENBLAS_NUM_THREADS="1",
+            MKL_NUM_THREADS="1",
             CAMPAIGN_WORKER_ID=worker["id"],
             CAMPAIGN_WORKER_RUN_ID_PREFIX=run_id_prefix,
         )
@@ -202,8 +225,12 @@ class RecordingPool:
         console = (attempt.directory / "console.log").open("w")
         try:
             process = subprocess.Popen(
-                _collector_command(collect_args), cwd=self.args.project_root,
-                env=environment, start_new_session=True, stdout=console, stderr=subprocess.STDOUT,
+                _collector_command(collect_args),
+                cwd=self.args.project_root,
+                env=environment,
+                start_new_session=True,
+                stdout=console,
+                stderr=subprocess.STDOUT,
             )
         except OSError as error:
             console.close()
@@ -265,8 +292,12 @@ class RecordingPool:
         self.active.remove(active)
         active.console.close()
         _, result, _ = campaign._finish_attempt(
-            self.ledger, active.attempt, self.config, code,
-            time.monotonic() - active.started, failure,
+            self.ledger,
+            active.attempt,
+            self.config,
+            code,
+            time.monotonic() - active.started,
+            failure,
         )
         self.completed(result)
 
@@ -277,8 +308,12 @@ class RecordingPool:
         for active in tuple(self.active):
             active.console.close()
             campaign._finish_attempt(
-                self.ledger, active.attempt, self.config, 130,
-                time.monotonic() - active.started, f"batch stopped: {self.reason}",
+                self.ledger,
+                active.attempt,
+                self.config,
+                130,
+                time.monotonic() - active.started,
+                f"batch stopped: {self.reason}",
             )
             self.active.remove(active)
             self.cancelled += 1
@@ -332,12 +367,16 @@ class RecordingPool:
             sys.stdout.flush()
         elapsed = time.monotonic() - self.started
         summary = {
-            "event": "recording.finished", "reason": self.reason,
-            "requested": self.args.count, "qualified": self.qualified,
-            "attempted": self.attempted, "cancelled": self.cancelled,
+            "event": "recording.finished",
+            "reason": self.reason,
+            "requested": self.args.count,
+            "qualified": self.qualified,
+            "attempted": self.attempted,
+            "cancelled": self.cancelled,
             "consecutive_failures": self.consecutive_failures,
             "max_consecutive_failures": self.args.max_consecutive_failures,
-            "workers": len(self.workers), "elapsed_s": round(elapsed, 3),
+            "workers": len(self.workers),
+            "elapsed_s": round(elapsed, 3),
             "qualified_per_hour": round(self.qualified * 3600 / max(elapsed, 0.001), 1),
             "error": self.allocation_error or None,
             "target_total": self.args.target_total,
@@ -366,10 +405,7 @@ def record_parallel(args: argparse.Namespace, config: dict[str, Any]) -> int:
     if expected is not None:
         if selection is None:
             raise CampaignError("worker manifest has no selection but --scenario was used")
-        if (
-            expected.get("binding", {}).get("sha256")
-            != selection.get("binding", {}).get("sha256")
-        ):
+        if expected.get("binding", {}).get("sha256") != selection.get("binding", {}).get("sha256"):
             raise CampaignError("worker manifest binding differs from the record selection")
     code = check_ros_sdk(
         args.project_root,
@@ -379,8 +415,11 @@ def record_parallel(args: argparse.Namespace, config: dict[str, Any]) -> int:
     if code:
         return code
     paths = config["paths"]
-    ledger = Ledger(args.project_root / paths["ledger"], args.project_root / paths["lock"])
-    run_lock = args.project_root / paths["run_lock"]
+    ledger = Ledger(
+        project_path(paths["ledger"], args.project_root),
+        project_path(paths["lock"], args.project_root),
+    )
+    run_lock = project_path(paths["run_lock"], args.project_root)
     acquire_run_lock(run_lock)
     previous = signal.signal(signal.SIGTERM, handle_sigterm)
     try:

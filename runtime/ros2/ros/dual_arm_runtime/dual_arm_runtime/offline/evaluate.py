@@ -20,6 +20,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from robot_contracts.project_paths import project_path
+
 from dual_arm_runtime.artifact_paths import diagnostics_root
 from dual_arm_runtime.offline import campaign
 from dual_arm_runtime.offline.evaluation_media import (  # noqa: E402
@@ -203,7 +205,7 @@ def build_report(
     config = campaign._load(config_path)
     paths = config["paths"]
     ledger = campaign.Ledger(
-        project_root / paths["ledger"], project_root / paths["lock"]
+        project_path(paths["ledger"], project_root), project_path(paths["lock"], project_root)
     )
     with ledger.locked():
         records = ledger.records()
@@ -215,7 +217,7 @@ def build_report(
     summary = _summary(metrics, duplicates, seed_first, seed_last)
     document = {
         "schema_version": 1,
-        "ledger": str(project_root / paths["ledger"]),
+        "ledger": str(project_path(paths["ledger"], project_root)),
         "purposes": list(purposes),
         "summary": summary,
         "attempts": metrics,
@@ -266,7 +268,7 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parse_arguments(argv)
     project_root = args.project_root.resolve()
-    output = args.output if args.output.is_absolute() else project_root / args.output
+    output = args.output if args.output.is_absolute() else project_path(args.output, project_root)
     try:
         document = build_report(
             project_root=project_root,
@@ -277,9 +279,7 @@ def main(argv: list[str] | None = None) -> int:
                 project_root=project_root,
                 default=None,
             ),
-            purposes=(
-                ("test", "evaluation") if args.purpose == "all" else (args.purpose,)
-            ),
+            purposes=(("test", "evaluation") if args.purpose == "all" else (args.purpose,)),
             output=output.resolve(),
             generate_media=not args.no_media,
         )

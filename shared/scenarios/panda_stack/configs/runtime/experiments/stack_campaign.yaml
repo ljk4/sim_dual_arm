@@ -46,7 +46,6 @@ paths:
     - shared/scenarios/panda_stack/configs/runtime/teacher_collect.yaml
     - shared/scenarios/panda_stack/configs/runtime/policy_rollout.yaml
     - shared/scenarios/panda_stack/configs/learning/policy_temporal.yaml
-    - learning/lerobot/docker/docker-compose.yml
     - runtime/ros2/docker/docker-compose.yml
     - shared/scenarios/panda_stack/configs/simulation/backend/backend_stack_teacher.yaml
     - shared/scenarios/panda_stack/configs/simulation/scene/panda_stack_task.yaml

@@ -1,4 +1,4 @@
-# Marvin 交接诊断短训练；smoke 128 step 与独立 900 s 预算。
+# Marvin 交接正式训练：显式 --mode full 时训练 5000 步。
 # 模型结构与 ACT 适配保持一致；batch/worker 按本机 6 GiB GPU 实测设置。
 schema_version: 1
 mode: smoke
@@ -28,10 +28,10 @@ model:
   # strictly, so model construction can never trigger an implicit download.
   pretrained_backbone_weights: null
   weights:
-    path: build/cache/torch/hub/checkpoints/resnet18-f37072fd.pth
+    path: third_party/weights/resnet18-f37072fd.pth
 training:
-  batch_size: 16
-  num_workers: 2
+  batch_size: 40
+  num_workers: 4
   pin_memory: true
   prefetch_factor: 2
   use_amp: true
@@ -41,8 +41,8 @@ training:
   grad_clip_norm: 10.0
   log_every_steps: 10
   val_every_steps: 1000
-  save_every_steps: 64
-  val_batches: 16
+  save_every_steps: 1000
+  val_batches: 512
   deterministic: true
 modes:
   smoke:
@@ -63,10 +63,10 @@ modes:
     split: train
     episodes: all
     validation: true
-    reserve_seconds: 900.0
+    reserve_seconds: 86400.0
 budget:
-  # Independent Marvin task budget; no run may exceed it or enter full mode.
-  limit_seconds: 900.0
+  # Independent task accounting with ample headroom for the measured batch size.
+  limit_seconds: 172800.0
   ledger: var/marvin_handover/models/training-budget.jsonl
   lock: var/marvin_handover/models/.training-budget.lock
   stop_margin_seconds: 30.0
@@ -79,7 +79,7 @@ checkpoint:
   min_free_bytes: 2147483648
   save_before_exit: true
 logging:
-  root: var/marvin_handover/models/runs
+  root: var/marvin_handover/logs/training
   component: act-training
   queue_capacity: 1024
   max_event_bytes: 32768

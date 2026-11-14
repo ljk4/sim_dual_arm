@@ -19,6 +19,7 @@ import mujoco.viewer
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from robot_contracts.project_paths import project_path
 from std_msgs.msg import Float64MultiArray
 
 from robot_backend_sim.config.backend_config import (
@@ -62,11 +63,22 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _project_root() -> Path:
+    root = os.environ.get("PROJECT_ROOT")
+    return Path(root) if root else Path(__file__).resolve().parents[5]
+
+
+def _resolve_config_path(config: Path) -> Path:
+    if config.is_absolute() or config.is_file():
+        return config.resolve()
+    return project_path(config, _project_root()).resolve()
+
+
 def _load_backend(args: argparse.Namespace):
     if args.scenario is None:
         if args.role != "teacher" or args.shared_root is not None or args.bundle is not None:
             raise ScenarioError("--role/--shared-root/--bundle require --scenario")
-        return load_backend_config(args.config)
+        return load_backend_config(_resolve_config_path(args.config))
     resolved = resolve_scenario_backend(
         scenario=args.scenario,
         role=args.role,

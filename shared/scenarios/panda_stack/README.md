@@ -20,7 +20,7 @@
 - Teacher 动作块：60 点 × 16 维，50 ms 间隔（20 Hz）。
 - Teacher 能力标识：`panda_stack_api_msgs.teacher_chunk.v1`；服务名保持 `<namespace>/get_task_chunk`。
 
-`models.bundle` 有意为空：collection 阶段不绑定模型，`scenario.py validate --stage collection` 可独立通过；inference 阶段必须通过 `--bundle` 提供真实且已由学习端校验的 bundle 目录。运行端与学习端直接读取 `<bundle>/manifest.json`（兼容 `bundle_manifest.json`）校验 Bundle 摘要、Profile 语义哈希、观测/动作顺序与 chunk 大小，不再生成或消费 `policy_binding.json`。
+`models.bundle` 有意为空：collection 阶段不绑定模型，`scenario.py validate --stage collection` 可独立通过；inference 阶段必须通过 `--bundle` 提供真实且已由学习端校验的 bundle 目录。运行端与学习端直接读取 `<bundle>/manifest.json`校验 Bundle 摘要、Profile 语义哈希、观测/动作顺序与 chunk 大小，不再生成或消费 `policy_binding.json`。
 
 `source_roots` 为相对 binding 的共享根 `../..`；`artifact_roots` 为部署数据根 `/data`，因此该 binding 应在项目容器内读取（宿主机没有 `/data`）。
 
@@ -29,12 +29,12 @@
 以下命令在 runtime/learning 容器内执行（共享 Python 包已在 `PYTHONPATH`）：
 
 ```bash
-python3 shared/common/tools/scenario.py show \
-  --binding shared/scenarios/panda_stack/binding.yaml
-python3 shared/common/tools/scenario.py validate \
-  --binding shared/scenarios/panda_stack/binding.yaml --stage collection
-python3 shared/common/tools/scenario.py validate \
-  --binding shared/scenarios/panda_stack/binding.yaml --stage inference \
+python3 /shared/common/tools/scenario.py show \
+  --binding /shared/scenarios/panda_stack/binding.yaml
+python3 /shared/common/tools/scenario.py validate \
+  --binding /shared/scenarios/panda_stack/binding.yaml --stage collection
+python3 /shared/common/tools/scenario.py validate \
+  --binding /shared/scenarios/panda_stack/binding.yaml --stage inference \
   --bundle /data/panda_stack/models/bundles/<verified-bundle>
 ```
 
@@ -84,39 +84,42 @@ scripts/convert.sh --scenario panda_stack
 scripts/train.sh --scenario panda_stack --mode full
 scripts/bundle.sh --scenario panda_stack \
   --mode full --run /data/panda_stack/models/runs/<run-dir> \
-  --output /data/panda_stack/models/bundles/stack-act
+  --output /data/panda_stack/models/bundles/<verified-bundle>
 ```
 
-binding 与直接 `--config` 入口共用 `act_dataset.yaml`、`act_training.yaml`。源文件和产物路径按项目根解析，构建缓存位于 `build/`，数据、训练预算与模型位于 `var/`；容器挂载使这些项目相对路径可写，无需维护第二份容器配置。
+binding 与直接 `--config` 入口共用 `act_dataset.yaml`、`act_training.yaml`。训练默认使用 50 条正式数据（45 训练 / 5 验证）与 full 5000 步；骨干权重为共享官方输入 `third_party/weights/resnet18-f37072fd.pth`。源文件和产物路径按项目根解析，生成 SDK 位于 `build/`，数据、训练预算与模型位于 `var/`；容器挂载使这些项目相对路径可写，无需维护第二份容器配置。
 
 ### 推理
 
 ```bash
 # learning 容器：直接启动 gRPC Policy 服务
-scripts/policy_backend.sh --scenario panda_stack \
-  --bundle /data/panda_stack/models/bundles/stack-act
+scripts/policy.sh --scenario panda_stack \
+  --bundle /data/panda_stack/models/bundles/<verified-bundle>
 
 # simulation 容器：直接启动 Policy 推理后端
 scripts/backend.sh --scenario panda_stack --role policy \
-  --bundle /data/panda_stack/models/bundles/stack-act \
+  --bundle /data/panda_stack/models/bundles/<verified-bundle> \
   --seed 20000 --run-id policy-backend
 
-# runtime 容器：交互式执行一局；非交互式单局或批量测试
+# runtime 容器：交互式执行一局；非交互式单局或批量测试（需保持上方 policy.sh 与 backend.sh 在线）
 scripts/interactive.sh --scenario panda_stack \
-  --bundle /data/panda_stack/models/bundles/stack-act \
+  --bundle /data/panda_stack/models/bundles/<verified-bundle> \
   --seed 20000 --run-id policy-interactive
 scripts/policy.sh --scenario panda_stack \
-  --bundle /data/panda_stack/models/bundles/stack-act \
+  --bundle /data/panda_stack/models/bundles/<verified-bundle> \
   --reset-seed 20000 --run-id policy-run
+scripts/batch_policy.sh --scenario panda_stack \
+  --bundle /data/panda_stack/models/bundles/<verified-bundle> \
+  --count 10 --seed-start 20000
 ```
 
-三端都直接消费同一个已验证 bundle，不再经过 `prepare` / `prepare-policy` 产物。更换种子只需改 `--seed`/`--reset-seed`；临时调参追加 `--set`，例如 `--set observation.max_age_ns=200000000`。直接配置模式仍可用：把 `--scenario panda_stack --role ...` 换成 `--config <recipe>`。
+三端都直接消费同一个已验证 bundle，不再经过 `prepare` / `prepare-policy` 产物。更换种子只需改 `--seed`/`--reset-seed`；临时调参追加 `--set`，例如 `--set observation.max_age_ns=200000000`。直接配置模式仍可用：把 `--scenario panda_stack --role ...` 换成 `--config <recipe>`。本轮推理累计 120 次，每批最多 10 次；失败、拒绝和取消均保留并占用次数。按不同模型与有效配置分组报告，验收要求至少一次真实任务成功。
 
 ## 已知边界
 
 - 方案与直接配置入口共用 `backend_stack_act_chunked.yaml`，该配方的运行速度和容量以文件内设置为准。
 - `learning/lerobot/configs/fake_policy.yaml` 是测试夹具，不属于本方案。
-- 当前已实现并被入口接受的组合只有 MuJoCo 仿真后端、ROS 2 运行端与 LeRobot ACT；第二仿真后端、第二学习算法、第二机器人和真实驱动均未实现。
+- 当前已实现并被入口接受的组合只有 MuJoCo 仿真后端、ROS 2 运行端与 LeRobot ACT；第二仿真后端、第二学习算法、真实驱动均未实现。
 - 小样本诊断可显式使用数据配置的 `diagnostic: true` 与非正式模型准入；输出、台账和模型应放在新的诊断目录，正式配方与默认准入不变。
 
 目录导航：[公共层与方案绑定](../../README.md) · [根 README](../../../README.md)

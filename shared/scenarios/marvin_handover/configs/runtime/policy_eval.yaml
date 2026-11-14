@@ -1,5 +1,5 @@
 # Marvin 交接 Policy 执行与录制，模型身份由已验证 bundle manifest 提供。
-# 首轮 inference 评价预算：10 s 仿真任务、1 s 停止余量、60 s 墙钟。
+# inference 评价预算：180 s 仿真任务、1 s 停止余量、420 s 墙钟。
 schema_version: 1
 robot_profile: ../../profiles/robots/marvin_handover_v1/profile.json
 observation_schema: ../../profiles/observations/marvin_rgb_joint_v1.json
@@ -51,11 +51,11 @@ policy:
   # returns a complete 60-point chunk; the interface remains 60x16.
   startup_settle_sim_ns: 2000000000
   initial_lead_ns: 250000000
-  # 16 windows x 20 points x 50 ms cover 16 s, above the 10 s task budget.
-  max_chunks: 16
-  total_sim_deadline_ns: 10000000000
-  # 10 s of task simulation at half real-time, plus settle, RPC and bounded stop.
-  total_wall_deadline_s: 60.0
+  # 256 windows x 20 points x 50 ms cover 256 s, above the 180 s task budget.
+  max_chunks: 256
+  total_sim_deadline_ns: 180000000000
+  # 180 s of task simulation at half real-time, plus settle, RPC and bounded stop.
+  total_wall_deadline_s: 420.0
   connect_timeout_s: 2.0
   open_deadline_s: 2.0
   predict_deadline_s: 2.0
@@ -64,7 +64,7 @@ policy:
   poll_interval_s: 0.02
   termination_mode: task
   task_stop_margin_s: 1.0
-  task_sim_budget_ns: 10000000000
+  task_sim_budget_ns: 180000000000
 
 motions: []
 

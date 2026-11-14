@@ -96,8 +96,7 @@ def _parse_arguments() -> tuple[argparse.Namespace, list[str]]:
         "--episode-dir",
         type=Path,
         default=None,
-        help="exact final directory for the recorded episode "
-        "(default: <output>/<episode-id>)",
+        help="exact final directory for the recorded episode (default: <output>/<episode-id>)",
     )
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--episode-id", default=os.environ.get("RUNTIME_EPISODE_ID", ""))
@@ -284,9 +283,7 @@ class _RuntimeProcess:
         except BaseException as error:
             self.set_fatal(error)
             print(
-                json.dumps(
-                    {"runtime_error": f"INITIALIZATION: {type(error).__name__}: {error}"}
-                ),
+                json.dumps({"runtime_error": f"INITIALIZATION: {type(error).__name__}: {error}"}),
                 flush=True,
             )
             return False
@@ -455,9 +452,7 @@ class _RuntimeProcess:
                 self.emit_stopping(self.current_failure_code(), "process leaving main")
         except BaseException as error:
             self.set_fatal(error)
-            print(
-                json.dumps({"runtime_error": f"{type(error).__name__}: {error}"}), flush=True
-            )
+            print(json.dumps({"runtime_error": f"{type(error).__name__}: {error}"}), flush=True)
             if self.node is not None:
                 self.request_stop(
                     f"RUNTIME_ERROR: {type(error).__name__}: {error}",
@@ -487,9 +482,7 @@ class _RuntimeProcess:
                 teardown_error = error
                 self.set_fatal(error)
                 print(
-                    json.dumps(
-                        {"runtime_error": f"TEARDOWN: {type(error).__name__}: {error}"}
-                    ),
+                    json.dumps({"runtime_error": f"TEARDOWN: {type(error).__name__}: {error}"}),
                     flush=True,
                 )
         finally:
@@ -544,9 +537,7 @@ class _RuntimeProcess:
             if self.exit_code == 0:
                 self.exit_code = EXIT_RUNTIME_FAILURE
             print(
-                json.dumps(
-                    {"logging_error": f"run.finalizing: {type(error).__name__}: {error}"}
-                ),
+                json.dumps({"logging_error": f"run.finalizing: {type(error).__name__}: {error}"}),
                 file=sys.stderr,
                 flush=True,
             )
@@ -581,14 +572,17 @@ def _print_configuration_summary(configuration: object, args: argparse.Namespace
     print("=== Runtime 配置与详细参数 ===", flush=True)
     selection = getattr(configuration, "selection", None)
     if isinstance(selection, dict) and selection.get("mode") == "scenario":
-        print(f"方案 (scenario): {selection.get('scenario_id')} ({selection.get('role')})", flush=True)
+        print(
+            f"方案 (scenario): {selection.get('scenario_id')} ({selection.get('role')})",
+            flush=True,
+        )
         binding = selection.get("binding") or {}
         if binding.get("path"):
             print(f"Binding 文件:    {binding['path']}", flush=True)
-    print(f"配置文件路径:    {configuration.source}", flush=True)
+    print(f"配置文件路径:    {configuration.configuration_source}", flush=True)
     print(f"输出目录:        {args.output}", flush=True)
     print("--- 详细参数 ---", flush=True)
-    print(json.dumps(configuration.canonical_dict(), indent=2, ensure_ascii=False), flush=True)
+    print(json.dumps(configuration.snapshot, indent=2, ensure_ascii=False), flush=True)
     print("================================", flush=True)
 
 

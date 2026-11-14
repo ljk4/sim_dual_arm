@@ -25,8 +25,8 @@ joint_names:
   - right_joint7
   - right_gripper_width
 
-# Twenty selected predictions per window (1.0 s at 50 ms per point).
-target_count: 20
+# Ten selected predictions per window (0.5 s at 50 ms per point).
+target_count: 10
 
 # Reference-fidelity budget measured on the real follower: 0.05 rad for arm
 # joints and 0.01 m for each total gripper opening.

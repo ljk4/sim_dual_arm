@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 import yaml
+from robot_contracts.project_paths import project_path
 
 from dual_arm_runtime.artifact_paths import default_backend_log
 from dual_arm_runtime.offline import campaign
@@ -42,11 +43,15 @@ def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     result.add_argument("--project-root", type=Path, default=ROOT)
     result.add_argument(
-        "--count", type=positive_int, default=1,
+        "--count",
+        type=positive_int,
+        default=1,
         help="number of NEW qualified episodes to record in this invocation (default: 1)",
     )
     result.add_argument(
-        "--max-consecutive-failures", type=positive_int, default=3,
+        "--max-consecutive-failures",
+        type=positive_int,
+        default=3,
         help="stop after this many consecutive unqualified attempts (default: 3)",
     )
     result.add_argument("--purpose", choices=("formal", "pilot"), default="formal")
@@ -71,7 +76,9 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--worker-manifest", type=Path, help=argparse.SUPPRESS)
     result.add_argument("--target-total", type=positive_int, help=argparse.SUPPRESS)
     result.add_argument(
-        "--backend-log", type=Path, default=None,
+        "--backend-log",
+        type=Path,
+        default=None,
         help="log directory of the running teacher backend",
     )
     return result
@@ -81,9 +88,7 @@ def _resolve_selection(args: argparse.Namespace, cli: argparse.ArgumentParser) -
     """Resolve scenario/direct inputs once, before any ledger or backend work."""
     if args.scenario is not None:
         if args.config is not None or args.runtime_config is not None:
-            cli.error(
-                "--scenario cannot be combined with --config or --runtime-config"
-            )
+            cli.error("--scenario cannot be combined with --config or --runtime-config")
         selection = select_collection(
             scenario=args.scenario,
             shared_root=args.shared_root,
@@ -104,6 +109,8 @@ def _resolve_selection(args: argparse.Namespace, cli: argparse.ArgumentParser) -
         if args.runtime_config is None:
             cli.error("--runtime-config is required with --config")
         args.selection = None
+    args.config = str(project_path(args.config, args.project_root))
+    args.runtime_config = str(project_path(args.runtime_config, args.project_root))
     if args.backend_log is None:
         args.backend_log = default_backend_log(getattr(args, "scenario", None))
 
@@ -111,9 +118,12 @@ def _resolve_selection(args: argparse.Namespace, cli: argparse.ArgumentParser) -
 def _collector_command(args: argparse.Namespace) -> list[str]:
     command = [
         sys.executable,
-        "-m", "dual_arm_runtime.offline.collect_attempt",
-        "--campaign-config", str(args.config),
-        "--backend-log", str(args.backend_log),
+        "-m",
+        "dual_arm_runtime.offline.collect_attempt",
+        "--campaign-config",
+        str(args.config),
+        "--backend-log",
+        str(args.backend_log),
         *(["--no-previews"] if args.no_previews else []),
     ]
     if getattr(args, "scenario", None) is not None:
@@ -128,7 +138,7 @@ def _collector_command(args: argparse.Namespace) -> list[str]:
 
 
 def _preflight(args: argparse.Namespace) -> int:
-    if not (args.project_root / args.runtime_config).is_file():
+    if not (project_path(args.runtime_config, args.project_root)).is_file():
         raise CampaignError(f"runtime config is missing: {args.runtime_config}")
     if not args.backend_log.is_dir():
         raise CampaignError(f"teacher backend log is missing: {args.backend_log}")
@@ -147,11 +157,21 @@ def record(args: argparse.Namespace, config: dict, ledger: Ledger) -> int:
             run_id = f"record-{time.time_ns()}"
             code = campaign.main(
                 [
-                    "--project-root", str(args.project_root),
-                    "--config", args.config,
-                    "run", "--purpose", args.purpose, "--mode", "teacher",
-                    "--run-id", run_id, "--runtime-config", args.runtime_config,
-                    "--", *_collector_command(args),
+                    "--project-root",
+                    str(args.project_root),
+                    "--config",
+                    args.config,
+                    "run",
+                    "--purpose",
+                    args.purpose,
+                    "--mode",
+                    "teacher",
+                    "--run-id",
+                    run_id,
+                    "--runtime-config",
+                    args.runtime_config,
+                    "--",
+                    *_collector_command(args),
                 ]
             )
             with ledger.locked():
@@ -186,8 +206,11 @@ def record(args: argparse.Namespace, config: dict, ledger: Ledger) -> int:
     except KeyboardInterrupt:
         stop_reason, exit_code = "interrupted", 130
     summary = {
-        "event": "recording.finished", "reason": stop_reason,
-        "requested": args.count, "qualified": qualified, "attempted": attempted,
+        "event": "recording.finished",
+        "reason": stop_reason,
+        "requested": args.count,
+        "qualified": qualified,
+        "attempted": attempted,
         "consecutive_failures": consecutive_failures,
         "max_consecutive_failures": args.max_consecutive_failures,
     }
@@ -209,7 +232,7 @@ def record(args: argparse.Namespace, config: dict, ledger: Ledger) -> int:
 
 def _print_status(args: argparse.Namespace, config: dict, ledger: Ledger) -> None:
     paths = config["paths"]
-    output = (args.project_root / str(paths["attempts_root"])).resolve()
+    output = (project_path(str(paths["attempts_root"]), args.project_root)).resolve()
     summary = summarize(ledger.records(), config, output)
     target = int(config["budget"]["formal_target_qualified"])
     formal = summary["purposes"].get("formal", {})
@@ -223,7 +246,8 @@ def _print_status(args: argparse.Namespace, config: dict, ledger: Ledger) -> Non
     print(
         f"正式采集 (formal): 合格 {formal_qualified}/{target} 条（还差 {remaining} 条），"
         f"总尝试 {formal.get('reserved_attempts', 0)} 次"
-        f"（已结束 {formal.get('terminal_attempts', 0)}，进行中/异常 {formal.get('running_or_crashed', 0)}）",
+        f"（已结束 {formal.get('terminal_attempts', 0)}，"
+        f"进行中/异常 {formal.get('running_or_crashed', 0)}）",
         flush=True,
     )
     print(
@@ -234,19 +258,21 @@ def _print_status(args: argparse.Namespace, config: dict, ledger: Ledger) -> Non
     print(f"磁盘占用:          {used_mb:.1f} MB / {limit_mb:.1f} MB", flush=True)
     formal_select_rel = paths.get("formal_select")
     if formal_select_rel:
-        formal_select_path = (args.project_root / formal_select_rel).resolve()
+        formal_select_path = (project_path(formal_select_rel, args.project_root)).resolve()
         if formal_select_path.is_file():
             doc = json.loads(formal_select_path.read_text(encoding="utf-8"))
             status = doc.get("status", "UNKNOWN")
             train_n = len(doc.get("training", []))
             val_n = len(doc.get("validation", []))
             print(
-                f"训练/验证清单:     {status}（训练 {train_n} 条 / 验证 {val_n} 条）-> {formal_select_path}",
+                f"训练/验证清单:     {status}（训练 {train_n} 条 / 验证 {val_n} 条）"
+                f"-> {formal_select_path}",
                 flush=True,
             )
         else:
             print(
-                f"训练/验证清单:     未生成（正式合格达 {target} 条后自动生成于 {formal_select_path}）",
+                f"训练/验证清单:     未生成（正式合格达 {target} 条后自动生成于 "
+                f"{formal_select_path}）",
                 flush=True,
             )
     print("======================================", flush=True)
@@ -257,8 +283,13 @@ def _print_startup_info(args: argparse.Namespace, config: dict, ledger: Ledger) 
     if args.selection is not None:
         print(f"方案 (scenario):   {args.selection['scenario_id']}", flush=True)
         print(f"Binding 文件:      {args.selection['binding']['path']}", flush=True)
-    print(f"Campaign 配置:     {(args.project_root / args.config).resolve()}", flush=True)
-    print(f"Runtime 配置:      {(args.project_root / args.runtime_config).resolve()}", flush=True)
+    print(
+        f"Campaign 配置:     {(project_path(args.config, args.project_root)).resolve()}", flush=True
+    )
+    print(
+        f"Runtime 配置:      {(project_path(args.runtime_config, args.project_root)).resolve()}",
+        flush=True,
+    )
     print(f"Backend 日志目录:  {args.backend_log}", flush=True)
     print(
         f"采集参数:          purpose={args.purpose}, count={args.count}, "
@@ -283,7 +314,7 @@ def _status_command(argv: list[str]) -> int:
     args = cli.parse_args(argv)
     args.project_root = args.project_root.resolve()
     if args.scenario is None and args.config is None:
-        args.scenario = "panda_stack"
+        cli.error("one of --scenario or --config is required")
     try:
         if args.scenario is not None:
             if args.config is not None:
@@ -300,9 +331,12 @@ def _status_command(argv: list[str]) -> int:
             if args.shared_root is not None:
                 cli.error("--shared-root requires --scenario")
             args.selection = None
-        config = load(args.project_root / args.config)
+        config = load(project_path(args.config, args.project_root))
         paths = config["paths"]
-        ledger = Ledger(args.project_root / paths["ledger"], args.project_root / paths["lock"])
+        ledger = Ledger(
+            project_path(paths["ledger"], args.project_root),
+            project_path(paths["lock"], args.project_root),
+        )
         _print_status(args, config, ledger)
         return 0
     except (CampaignError, OSError, ValueError) as error:
@@ -321,8 +355,8 @@ def main(argv: list[str] | None = None) -> int:
     args.project_root = args.project_root.resolve()
     try:
         _resolve_selection(args, cli)
-        args.backend_log = (args.project_root / args.backend_log).resolve()
-        config = load(args.project_root / args.config)
+        args.backend_log = (project_path(args.backend_log, args.project_root)).resolve()
+        config = load(project_path(args.config, args.project_root))
         if args.worker_manifest is not None:
             from dual_arm_runtime.offline.record_pool import record_parallel
 
@@ -332,10 +366,13 @@ def main(argv: list[str] | None = None) -> int:
             return code
         paths = config["paths"]
         if "formal_select" in paths:
-            (args.project_root / paths["formal_select"]).parent.mkdir(
+            (project_path(paths["formal_select"], args.project_root)).parent.mkdir(
                 parents=True, exist_ok=True
             )
-        ledger = Ledger(args.project_root / paths["ledger"], args.project_root / paths["lock"])
+        ledger = Ledger(
+            project_path(paths["ledger"], args.project_root),
+            project_path(paths["lock"], args.project_root),
+        )
         _print_startup_info(args, config, ledger)
         return record(args, config, ledger)
     except (CampaignError, OSError) as error:

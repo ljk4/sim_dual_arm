@@ -12,6 +12,7 @@ from typing import Any
 
 import yaml
 from robot_contracts.overrides import OverrideError, apply_overrides
+from robot_contracts.project_paths import project_path
 
 from dual_arm_runtime.offline.campaign_ledger import CampaignError
 from dual_arm_runtime.offline.collect_attempt import REFERENCES, check_ros_sdk
@@ -76,14 +77,17 @@ def _check_selection_paths(
         expected = Path(selection["recipes"][field]["path"]).resolve()
         actual = path.resolve()
         if actual != expected:
-            raise CampaignError(
-                f"{field} recipe {actual} differs from selected recipe {expected}"
-            )
+            raise CampaignError(f"{field} recipe {actual} differs from selected recipe {expected}")
 
 
 def prepare_workers(
-    project: Path, directory: Path, workers: int, domain_base: int,
-    runtime_template: Path, backend_template: Path, speed: float,
+    project: Path,
+    directory: Path,
+    workers: int,
+    domain_base: int,
+    runtime_template: Path,
+    backend_template: Path,
+    speed: float,
     selection: dict[str, Any] | None = None,
     overrides: tuple[str, ...] | list[str] = (),
 ) -> Path:
@@ -92,11 +96,9 @@ def prepare_workers(
     if not math.isfinite(speed) or not 0.1 < speed <= 100:
         raise CampaignError("realtime speed must be finite and within (0.1, 100]")
     project, directory = project.resolve(), directory.resolve()
-    if not directory.is_relative_to(project / "var"):
+    if not directory.is_relative_to(project_path("var", project)):
         raise CampaignError("worker directory must be below the mounted project var directory")
-    runtime_template, backend_template = (
-        runtime_template.resolve(), backend_template.resolve()
-    )
+    runtime_template, backend_template = (runtime_template.resolve(), backend_template.resolve())
     if selection is not None:
         _check_selection_paths(selection, runtime_template, backend_template)
     runtime = yaml.safe_load(runtime_template.read_text())
@@ -110,17 +112,11 @@ def prepare_workers(
             runtime.get("action_source") != "teacher"
             or backend["robot"].get("task_mode") != "teacher"
         ):
-            raise CampaignError(
-                "parallel recording requires teacher runtime and backend templates"
-            )
+            raise CampaignError("parallel recording requires teacher runtime and backend templates")
         if not isinstance(runtime.get("teacher_api"), str) or not runtime["teacher_api"]:
-            raise CampaignError(
-                "parallel recording runtime template must declare teacher_api"
-            )
+            raise CampaignError("parallel recording runtime template must declare teacher_api")
         if backend["robot"].get("render_quality", {}).get("enabled") is not True:
-            raise CampaignError(
-                "parallel recording requires backend render_quality.enabled"
-            )
+            raise CampaignError("parallel recording requires backend render_quality.enabled")
     for name in REFERENCES:
         if name in runtime:
             runtime[name] = str((runtime_template.parent / runtime[name]).resolve())
@@ -146,14 +142,18 @@ def prepare_workers(
         backend_path.write_text(yaml.safe_dump(backend, sort_keys=False))
         entries.append(
             {
-                "id": worker_id, "domain_id": domain_id, "namespace": namespace,
+                "id": worker_id,
+                "domain_id": domain_id,
+                "namespace": namespace,
                 "run_id_prefix": f"{directory.name}-{worker_id}",
                 "output_root": str(worker_dir),
                 "runtime_config": str(runtime_path),
                 "backend_config": simulation_path(backend_path, project),
                 "backend_log": str(worker_dir / "backend-runs/backend/log"),
                 "run_root": simulation_path(worker_dir / "backend-runs", project),
-                "binding": None if selection is None else {
+                "binding": None
+                if selection is None
+                else {
                     **selection.get("binding", {}),
                     "scenario_id": selection.get("scenario_id"),
                 },
@@ -236,17 +236,17 @@ def main() -> int:
             runtime_config = Path(selection["recipes"]["runtime_teacher"]["path"])
             backend_template = Path(selection["recipes"]["simulation_teacher"]["path"])
         else:
-            runtime_config = args.runtime_config
-            backend_template = args.backend_template
-            runtime_config = (
-                runtime_config if runtime_config.is_absolute() else ROOT / runtime_config
-            )
-            backend_template = (
-                backend_template if backend_template.is_absolute() else ROOT / backend_template
-            )
+            runtime_config = project_path(args.runtime_config, ROOT)
+            backend_template = project_path(args.backend_template, ROOT)
         manifest = prepare_workers(
-            ROOT, args.directory, args.workers, args.domain_base,
-            runtime_config, backend_template, args.realtime_speed, selection,
+            ROOT,
+            args.directory,
+            args.workers,
+            args.domain_base,
+            runtime_config,
+            backend_template,
+            args.realtime_speed,
+            selection,
             args.overrides,
         )
     except (CampaignError, OSError, ValueError, KeyError, TypeError) as error:

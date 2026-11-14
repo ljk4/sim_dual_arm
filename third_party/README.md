@@ -3,8 +3,9 @@
 本目录管理固定版本的外部开源代码库：
 
 - **`src/lerobot-act-v0.6.1/`**：学习端容器只读挂载使用的固定版本 LeRobot 源码（上游版本与摘要记录于 [`learning/lerobot/docker/learning-source.json`](../learning/lerobot/docker/learning-source.json)）。`src/` 目录由根 `.gitignore` 忽略，保持上游文件与许可证原样不作修改。
+- **`weights/`**：两方案共享的官方训练输入，当前为 `resnet18-f37072fd.pth`。该目录长期保留，不属于 `build/` 或生成 SDK，也不随构建缓存清理；两方案训练配方直接引用 `third_party/weights/resnet18-f37072fd.pth`。
 
-学习端的 `PROJECT_SOURCE_PATHS` 直接使用该目录下的 `src/`。新检出仓库或清理本地源码后，需要按 `learning-source.json` 的 `revision` 恢复对应上游源码至声明的 `source` 路径；构建容器镜像不会下载这份源码。训练所需的本地骨干权重见[训练步骤](../README.md#32-转换数据集与训练-act-模型)。
+学习端的 `PROJECT_SOURCE_PATHS` 直接使用该目录下的 `src/`。新检出仓库或清理本地源码后，需要按 `learning-source.json` 的 `revision` 恢复对应上游源码至声明的 `source` 路径；构建容器镜像不会下载这份源码。训练所需的本地骨干权重位于 `weights/`，来源与使用方式见[训练步骤](../README.md#32-转换数据集与训练-act-模型)。
 
 ## 其他外部资产位置
 

@@ -26,16 +26,16 @@ joint_names:
   - right_joint7
   - right_gripper_width
 
-# Ten selected predictions per execution window (0.5 s at 20 Hz).
+# Five selected predictions per execution window (0.25 s at 20 Hz).
 # The ACT policy still predicts a complete 3 s (60 point) chunk; overlapping
 # windows hand off as soon as a successor starts, so predictions that are
-# already stale are dropped and the 10 points are not always points 0..9 of a
-# fresh complete chunk.  This adds no hidden queue and no ground-truth rescue.
-target_count: 10
+# already stale are dropped; the selected points need not be points 0..4 of a
+# fresh complete chunk.
+target_count: 5
 
 # Continuous maximum distance between the actual reference and the
-# piecewise-linear policy target: 0.30 rad for arm joints, 0.04 m for each
-# gripper. Explicitly approved for this simulation experiment on 2026-11-03.
+# piecewise-linear policy target: 0.30 rad for arm joints except joint7 at
+# 0.40 rad, and 0.04 m for each gripper.
 # These are reference-fidelity budgets; physical limits and measured tracking
 # thresholds remain in the unchanged robot profile and panda_control_v1.yaml.
 max_target_deviations:

@@ -24,6 +24,7 @@ _PROJECT = Path(os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().paren
 
 from robot_contracts.models import RobotProfile  # noqa: E402
 from robot_contracts.overrides import OverrideError, apply_overrides  # noqa: E402
+from robot_contracts.project_paths import project_path  # noqa: E402
 
 from dual_arm_runtime.offline.audit.label_export import (  # noqa: E402
     AppliedBlock,
@@ -185,15 +186,23 @@ def _read_metadata(recording: Path, root: str) -> dict[str, Any]:
         rosbag2_py.ConverterOptions("", ""),
     )
     try:
-        required = {f"{root}/state", f"{root}/follower_references", f"{root}/control_events",
-                    f"{root}/execution_feedback", "/runtime/commands",
-                    "/runtime/observation_index"}
+        required = {
+            f"{root}/state",
+            f"{root}/follower_references",
+            f"{root}/control_events",
+            f"{root}/execution_feedback",
+            "/runtime/commands",
+            "/runtime/observation_index",
+        }
         topics = reader.get_all_topics_and_types()
         topic_types = {item.name: item.type for item in topics}
         require_current_follower_reference_definition(reader, topic_types, rosbag2_py)
-        types = {item.name: get_message(item.type) for item in topics
-                 if item.name in required or (item.name.startswith(root + "/cameras/")
-                                              and item.name.endswith("/frame"))}
+        types = {
+            item.name: get_message(item.type)
+            for item in topics
+            if item.name in required
+            or (item.name.startswith(root + "/cameras/") and item.name.endswith("/frame"))
+        }
         metadata: dict[str, Any] = {
             "states": {},
             "frames": {},
@@ -371,15 +380,12 @@ def _load_episode(
     from robot_contracts.profiles import profile_from_document, validate_document
 
     manifest = json.loads((episode / "manifest.json").read_text(encoding="utf-8"))
-    validate_document(
-        manifest, manifest_schema_path(_PROJECT / "shared/common/interfaces/schemas", 1)
-    )
+    schema_root = project_path("shared/common/interfaces/schemas", _PROJECT)
+    validate_document(manifest, manifest_schema_path(schema_root, 1))
     if not manifest["recording"]["complete"]:
         raise ValueError(manifest["recording"]["failure_reason"])
     configuration = manifest.get("configuration", {})
-    profile = profile_from_document(
-        configuration["profile"], _PROJECT / "shared/common/interfaces/schemas"
-    )
+    profile = profile_from_document(configuration["profile"], schema_root)
     if profile.digest != manifest["robot_profile_hash"]:
         raise ValueError("recorded profile snapshot does not match the manifest")
     recipe = configuration.get("recipe", {})

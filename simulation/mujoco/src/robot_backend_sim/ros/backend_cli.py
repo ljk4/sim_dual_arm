@@ -23,6 +23,7 @@ import yaml
 from rclpy.executors import ExternalShutdownException, SingleThreadedExecutor
 from rclpy.signals import SignalHandlerOptions
 from robot_contracts.overrides import OverrideError, apply_overrides
+from robot_contracts.project_paths import project_path
 from robot_contracts.validation import UniqueKeyError, read_unique_yaml
 from robot_run_logging import EventLogger, LogFailure, LogSettings
 
@@ -165,8 +166,19 @@ def _validate_arguments(parsed: argparse.Namespace) -> str:
     return parsed.run_id or f"backend-{stem or 'run'}"
 
 
+def _project_root() -> Path:
+    root = os.environ.get("PROJECT_ROOT")
+    return Path(root) if root else Path(__file__).resolve().parents[5]
+
+
+def _resolve_config_path(config: Path) -> Path:
+    if config.is_absolute() or config.is_file():
+        return config.resolve()
+    return project_path(config, _project_root()).resolve()
+
+
 def _direct_document(parsed: argparse.Namespace) -> dict[str, Any]:
-    path = parsed.config.resolve()
+    path = _resolve_config_path(parsed.config)
     try:
         document = read_unique_yaml(path)
     except (UniqueKeyError, OSError) as error:

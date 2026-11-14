@@ -3,9 +3,9 @@
 
 Examples:
   python3 shared/common/tools/scenario.py validate \
-      --binding shared/scenarios/panda_stack/binding.yaml --stage collection
+      --binding shared/scenarios/<scenario-id>/binding.yaml --stage collection
   python3 shared/common/tools/scenario.py show \
-      --binding shared/scenarios/panda_stack/binding.yaml
+      --binding shared/scenarios/<scenario-id>/binding.yaml
 
 The tool never imports ROS, MuJoCo, PyTorch or a scenario implementation, never
 starts a process and never writes campaign ledgers, seeds or other state.

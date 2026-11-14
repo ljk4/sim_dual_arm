@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from robot_contracts.project_paths import project_path
 
 from .config import PNG_SHA, DatasetConfig
 
@@ -113,7 +114,7 @@ def source_archive_sha256(config: DatasetConfig) -> str:
     """Return the configured archive digest or the actual source binding digest."""
     if config.lerobot_source_archive_sha256:
         return config.lerobot_source_archive_sha256
-    binding = config.project_root / "learning/lerobot/docker/learning-source.json"
+    binding = project_path("learning/lerobot/docker/learning-source.json", config.project_root)
     try:
         value = json.loads(binding.read_text(encoding="utf-8")).get("archive_sha256")
     except (OSError, json.JSONDecodeError):

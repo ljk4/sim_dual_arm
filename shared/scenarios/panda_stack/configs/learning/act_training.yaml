@@ -27,15 +27,15 @@ model:
   # strictly, so model construction can never trigger an implicit download.
   pretrained_backbone_weights: null
   weights:
-    path: build/cache/torch/hub/checkpoints/resnet18-f37072fd.pth
+    path: third_party/weights/resnet18-f37072fd.pth
 training:
-  batch_size: 32
+  batch_size: 40
   num_workers: 4
   pin_memory: true
   prefetch_factor: 2
   use_amp: true
   amp_dtype: bfloat16
-  lr: 0.00001
+  lr: 0.0001
   weight_decay: 0.0001
   grad_clip_norm: 10.0
   log_every_steps: 10
@@ -62,9 +62,9 @@ modes:
     split: train
     episodes: all
     validation: true
-    reserve_seconds: 7200.0
+    reserve_seconds: 86400.0
 budget:
-  limit_seconds: 14400.0
+  limit_seconds: 172800.0
   ledger: var/panda_stack/models/training-budget.jsonl
   lock: var/panda_stack/models/.training-budget.lock
   stop_margin_seconds: 30.0
@@ -77,7 +77,7 @@ checkpoint:
   min_free_bytes: 2147483648
   save_before_exit: true
 logging:
-  root: var/panda_stack/models/runs
+  root: var/panda_stack/logs/training
   component: act-training
   queue_capacity: 1024
   max_event_bytes: 32768

@@ -499,9 +499,7 @@ def test_act_entry_loads_warms_logs_and_shuts_down_cleanly(bundle, tmp_path):
     import lerobot
 
     sdk = str(Path(dual_arm_policy.__file__).parents[1])
-    source = os.environ.get(
-        "LEARNING_SOURCE", str(Path(lerobot.__file__).resolve().parents[1])
-    )
+    source = os.environ.get("LEARNING_SOURCE", str(Path(lerobot.__file__).resolve().parents[1]))
     environment["PROJECT_CONTAINER"] = "1"
     environment["POLICY_SDK_ROOT"] = str(ROOT / "build/generated/policy-sdk")
     environment["PATH"] = str(Path(sys.executable).parent) + ":" + environment["PATH"]
@@ -519,7 +517,7 @@ def test_act_entry_loads_warms_logs_and_shuts_down_cleanly(bundle, tmp_path):
     process = subprocess.Popen(
         [
             "bash",
-            str(ROOT / "learning/lerobot/scripts/policy_backend.sh"),
+            str(ROOT / "learning/lerobot/scripts/policy.sh"),
             "--config",
             str(config_path),
             "--log-directory",

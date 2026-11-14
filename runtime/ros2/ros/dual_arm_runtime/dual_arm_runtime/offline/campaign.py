@@ -22,6 +22,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from robot_contracts.project_paths import project_path
+
 from dual_arm_runtime.offline.campaign_execution import (
     LaunchInterrupted,
     acquire_run_lock,
@@ -103,8 +105,8 @@ def _reserve(
             config=args.runtime_config,
             code=_code_fingerprint(
                 project_root,
-                project_root / args.config,
-                project_root / args.runtime_config,
+                project_path(args.config, project_root),
+                project_path(args.runtime_config, project_root),
             ),
             budget={
                 "max_raw_bytes": int(config["budget"]["max_raw_bytes"]),
@@ -230,12 +232,14 @@ def _measure(directory: Path) -> int:
 
 def command_run(args: argparse.Namespace) -> int:
     project_root = args.project_root.resolve()
-    config = _load(project_root / args.config, args.overrides)
+    config = _load(project_path(args.config, project_root), args.overrides)
     paths = config["paths"]
     attempts_root = args.attempts_root or str(config["paths"]["attempts_root"])
-    output = (project_root / attempts_root).resolve()
-    ledger = Ledger(project_root / paths["ledger"], project_root / paths["lock"])
-    run_lock = project_root / paths["run_lock"]
+    output = (project_path(attempts_root, project_root)).resolve()
+    ledger = Ledger(
+        project_path(paths["ledger"], project_root), project_path(paths["lock"], project_root)
+    )
+    run_lock = project_path(paths["run_lock"], project_root)
     _check_environment(project_root, config, output)
     command = list(args.launch_command or config["launch"].get("command") or [])
     if command and command[0] == "--":
@@ -291,10 +295,12 @@ def command_run(args: argparse.Namespace) -> int:
 
 def command_status(args: argparse.Namespace) -> int:
     project_root = args.project_root.resolve()
-    config = _load(project_root / args.config, args.overrides)
+    config = _load(project_path(args.config, project_root), args.overrides)
     paths = config["paths"]
-    ledger = Ledger(project_root / paths["ledger"], project_root / paths["lock"])
-    output = (project_root / str(config["paths"]["attempts_root"])).resolve()
+    ledger = Ledger(
+        project_path(paths["ledger"], project_root), project_path(paths["lock"], project_root)
+    )
+    output = (project_path(str(config["paths"]["attempts_root"]), project_root)).resolve()
     summary = _summarize(ledger.records(), config, output)
     summary["formal_target_qualified"] = int(config["budget"]["formal_target_qualified"])
     print(json.dumps(summary, indent=2, sort_keys=True))
@@ -324,10 +330,7 @@ def _formal_selection(
     target = int(config["budget"]["formal_target_qualified"])
     selected = ordered[:target]
     validation_positions = sorted(
-        {
-            int(value)
-            for value in config["budget"].get("formal_validation_qualified_indices", [])
-        }
+        {int(value) for value in config["budget"].get("formal_validation_qualified_indices", [])}
     )
     rule = str(config.get("formal_split_description") or "").strip() or (
         f"first {target} qualified formal attempts; "
@@ -389,19 +392,21 @@ def write_formal_selection(
     document = _formal_selection(config, records, config_name)
     if document["status"] != "SELECTED":
         return None
-    destination = (project_root / formal_selection_path(config)).resolve()
+    destination = (project_path(formal_selection_path(config), project_root)).resolve()
     write_selection(document, destination)
     return destination
 
 
 def command_select(args: argparse.Namespace) -> int:
     project_root = args.project_root.resolve()
-    config = _load(project_root / args.config, args.overrides)
+    config = _load(project_path(args.config, project_root), args.overrides)
     paths = config["paths"]
-    ledger = Ledger(project_root / paths["ledger"], project_root / paths["lock"])
+    ledger = Ledger(
+        project_path(paths["ledger"], project_root), project_path(paths["lock"], project_root)
+    )
     document = _formal_selection(config, ledger.records(), str(args.config))
     if args.output is not None and document["status"] == "SELECTED":
-        destination = (project_root / args.output).resolve()
+        destination = (project_path(args.output, project_root)).resolve()
         write_selection(document, destination)
         document["written"] = str(destination)
     print(json.dumps(document, indent=2))
@@ -417,9 +422,11 @@ def command_backfill_terminal(args: argparse.Namespace) -> int:
     only fills facts that are still empty (or a zero wall time).
     """
     project_root = args.project_root.resolve()
-    config = _load(project_root / args.config, args.overrides)
+    config = _load(project_path(args.config, project_root), args.overrides)
     paths = config["paths"]
-    ledger = Ledger(project_root / paths["ledger"], project_root / paths["lock"])
+    ledger = Ledger(
+        project_path(paths["ledger"], project_root), project_path(paths["lock"], project_root)
+    )
     with ledger.locked():
         records = ledger.records()
         terminal = _finished(records)
@@ -436,8 +443,7 @@ def command_backfill_terminal(args: argparse.Namespace) -> int:
             raise CampaignError(f"attempt is not reserved in the ledger: {args.attempt_id}")
         if previous is None or previous.get("event") not in {"INTERRUPTED", "FAILED"}:
             raise CampaignError(
-                "terminal backfill needs an INTERRUPTED/FAILED attempt: "
-                f"{args.attempt_id}"
+                f"terminal backfill needs an INTERRUPTED/FAILED attempt: {args.attempt_id}"
             )
         directory = Path(str(reservation["attempt_dir"]))
         classification = classify(directory, str(config["quality"]["sidecar"]))
@@ -458,9 +464,7 @@ def command_backfill_terminal(args: argparse.Namespace) -> int:
             and previous.get("task_outcome")
             and previous.get("recording_complete") == classification["recording_complete"]
         ):
-            raise CampaignError(
-                f"terminal summary is already complete for {args.attempt_id}"
-            )
+            raise CampaignError(f"terminal summary is already complete for {args.attempt_id}")
         record = {
             "event": previous["event"],
             "attempt_id": args.attempt_id,

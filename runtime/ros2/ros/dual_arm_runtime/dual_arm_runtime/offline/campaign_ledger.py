@@ -17,6 +17,7 @@ from typing import Any
 
 import yaml
 from robot_contracts.overrides import OverrideError, apply_overrides
+from robot_contracts.project_paths import project_path
 
 PURPOSES = {"pilot", "formal", "test", "evaluation"}
 MODES = {"teacher", "act"}
@@ -261,12 +262,14 @@ def raw_consumed(records: list[dict[str, Any]], estimated: int, root: Path | Non
 
 
 def check_environment(project_root: Path, config: dict[str, Any], output: Path) -> None:
-    required = [project_root / str(item) for item in config["paths"].get("required_paths", [])]
+    required = [
+        project_path(str(item), project_root) for item in config["paths"].get("required_paths", [])
+    ]
     for path in required:
         if not path.exists():
             raise CampaignError(f"required path is missing: {path}")
     marker = config["paths"].get("sdk_marker")
-    if marker and not (project_root / str(marker)).exists():
+    if marker and not (project_path(str(marker), project_root)).exists():
         raise CampaignError(f"SDK marker is missing: {marker}")
     free = shutil.disk_usage(output.parent if output.parent.exists() else project_root).free
     minimum = int(config["budget"]["min_free_bytes"])

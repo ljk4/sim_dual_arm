@@ -37,12 +37,12 @@ control:
   terminal_timeout_s: 20.0
 
 # The task judge allows 180 s of simulation time; the stream stops 1 s early.
-# 256 chunks cover 256 s at the follower's 20-point, 50 ms selection window.
+# 512 chunks cover 256 s at the follower's 10-point, 50 ms selection window.
 teacher:
   chunk_size: 60
   action_period_ns: 50000000
   initial_lead_ns: 250000000
-  max_chunks: 256
+  max_chunks: 512
   total_sim_deadline_ns: 180000000000
   total_wall_deadline_s: 420.0
   prepare_timeout_s: 30.0

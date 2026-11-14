@@ -201,9 +201,7 @@ def _validate_window(
     if end_time_ns > MAX_HORIZON_NS:
         raise _invalid("window.end_time_ns", "exceeds the shared three-second horizon")
     if end_time_ns > follower_config.max_terminal_tail_duration_ns:
-        raise _invalid(
-            "window.end_time_ns", "exceeds the configured terminal-tail duration"
-        )
+        raise _invalid("window.end_time_ns", "exceeds the configured terminal-tail duration")
     if grid_ns is not None and not is_final and end_time_ns % grid_ns != 0:
         raise _invalid(
             "window.end_time_ns",
@@ -263,6 +261,12 @@ def _calculate(
         grid_ns,
     )
     profile_duration_ns = int(round(trajectory.duration * _NS_PER_S))
+    if profile_duration_ns > MAX_HORIZON_NS:
+        raise ContractError(
+            "FOLLOWER_HORIZON_EXCEEDED",
+            f"Ruckig curve duration {profile_duration_ns}ns exceeds the reference "
+            f"contract horizon {MAX_HORIZON_NS}ns",
+        )
     if grid_ns is not None and profile_duration_ns % grid_ns != 0:
         raise ContractError(
             "FOLLOWER_GRID_MISMATCH",
@@ -321,9 +325,7 @@ def _check_exported(exported, inputs, *, is_final: bool) -> None:
             "FOLLOWER_BRAKING_INFEASIBLE",
             f"exported endpoint cannot be braked within joint limits: {error}",
         ) from error
-    if is_final and any(
-        abs(velocity) > VELOCITY_ATOL for velocity in exported.end_velocities
-    ):
+    if is_final and any(abs(velocity) > VELOCITY_ATOL for velocity in exported.end_velocities):
         raise ContractError(
             "FOLLOWER_INFEASIBLE",
             "final Ruckig export did not end at zero velocity",
@@ -362,9 +364,7 @@ def prepare_follower_plan(
         duration_grid_ns,
     )
     _validate_identity(anchor, window, profile, control_config, follower_config)
-    end_time_ns = _validate_window(
-        window, follower_config, grid_ns, is_final=is_final
-    )
+    end_time_ns = _validate_window(window, follower_config, grid_ns, is_final=is_final)
     inputs, raw_terminal_velocities, restricted_terminal_velocities = _reference_inputs(
         anchor, window, profile, control_config, is_final=is_final
     )

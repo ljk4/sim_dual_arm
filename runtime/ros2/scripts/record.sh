@@ -5,5 +5,11 @@ set -euo pipefail
 APP_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${PROJECT_SETUP:-${SHARED_ROOT:-$APP_ROOT/../../shared}/common/tools/docker/setup.sh}"
 
+if [[ "${1:-}" == "status" ]]; then
+  shift
+  exec python3 -m dual_arm_runtime.offline.record status \
+    --project-root "${PROJECT_ROOT:-$APP_ROOT}" "$@"
+fi
+
 exec python3 -m dual_arm_runtime.offline.record \
   --project-root "${PROJECT_ROOT:-$APP_ROOT}" "$@"

@@ -1,5 +1,5 @@
-# Marvin 交接诊断数据转换；4 训练 / 2 验证由 campaign SELECTED 清单决定。
-# 诊断用途：不构成正式训练证据；路径相对项目根。
+# Marvin 交接正式数据转换；50 条合格数据按 45 训练 / 5 验证划分。
+# 正式训练输入，路径相对项目根。
 schema_version: 1
 fps: 20
 chunk_size: 60
@@ -19,13 +19,13 @@ cache_root: var/marvin_handover/datasets/.cache
 attempt_export_glob: "export"
 verify_png_pixels: true
 require_quality: true
-diagnostic: true
+diagnostic: false
 expected:
-  formal_episodes: 6
-  training_episodes: 4
-  validation_episodes: 2
-  # Zero-based positions in the six qualified successes.
-  validation_positions: [4, 5]
+  formal_episodes: 50
+  training_episodes: 45
+  validation_episodes: 5
+  # Zero-based positions in the first 50 qualified successes.
+  validation_positions: [9, 19, 29, 39, 49]
 lerobot:
   source_revision: 7e241bd630a3719a56157a497ce5d08f244784f1
   rgb_encoder:

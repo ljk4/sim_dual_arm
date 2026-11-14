@@ -36,7 +36,7 @@ control:
   stop_timeout_s: 8.0
   terminal_timeout_s: 20.0
 
-# A 30 s task at 0.5 s per executed ten-point window needs at least 60
+# A 30 s task at 0.25 s per executed five-point window needs at least 120
 # chunks.  256 is the hard bound; only the actually executed windows become
 # labels, never the full 60-point raw prediction.
 teacher:

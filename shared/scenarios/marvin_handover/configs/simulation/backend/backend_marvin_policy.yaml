@@ -33,8 +33,8 @@ queues:
   captures: 32
   events: 1024
   feedback: 64
-  accepted_references: 64
-  follower_references: 64
+  accepted_references: 256
+  follower_references: 256
 
 limits:
   planner_health_s: 30.0
@@ -42,7 +42,7 @@ limits:
   request_timeout_s: 10.0
   shutdown_s: 10.0
   command_history: 64
-  chunk_history: 64
+  chunk_history: 256
 
 logging:
   queue_capacity: 256

@@ -13,7 +13,7 @@ usage() {
   ./env.sh exec <env> [cmd...]    进入已运行的容器执行命令 (默认 bash)
   ./env.sh stop <env>             停止指定环境容器
   ./env.sh rm <env>               删除指定环境容器 (先 stop 再 rm -f)
-  ./env.sh viewer [args...]       在宿主机启动 MuJoCo 实时可视化 (默认 --scenario panda_stack --role teacher)
+  ./env.sh viewer <args...>       在宿主机启动 MuJoCo 实时可视化 (显式指定方案或配置)
   ./env.sh ps                     查看当前项目所有容器状态
   ./env.sh list                   列出支持的 Docker 环境
 
@@ -93,7 +93,8 @@ cmd_viewer() {
     exit 1
   fi
   if [[ $# -eq 0 ]]; then
-    set -- --scenario panda_stack --role teacher
+    echo "错误: viewer 必须显式传入 --scenario <id> 或 --config <path>" >&2
+    exit 2
   fi
   docker compose -f "$COMPOSE_FILE" run --rm \
     -e DISPLAY="$DISPLAY" \

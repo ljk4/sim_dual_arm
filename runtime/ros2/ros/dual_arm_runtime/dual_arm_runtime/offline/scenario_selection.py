@@ -20,6 +20,7 @@ from typing import Any
 import yaml
 from robot_contracts.binding import BindingError, ResolvedBinding, load_binding
 from robot_contracts.models import ContractError
+from robot_contracts.project_paths import project_path
 
 from dual_arm_runtime.offline.campaign_ledger import CampaignError
 from dual_arm_runtime.offline.campaign_ledger import load as load_campaign
@@ -65,9 +66,7 @@ def shared_root_path(explicit: Path | None, project_root: Path) -> Path:
 
 def scenario_binding_path(shared_root: Path, scenario: str) -> Path:
     if SCENARIO_ID.fullmatch(scenario) is None or ".." in scenario:
-        raise CampaignError(
-            "scenario id must contain 1..128 safe characters and no path traversal"
-        )
+        raise CampaignError("scenario id must contain 1..128 safe characters and no path traversal")
     path = Path(shared_root) / "scenarios" / scenario / "binding.yaml"
     if not path.is_file():
         raise CampaignError(f"scenario {scenario!r} has no binding file: {path}")
@@ -131,9 +130,7 @@ def _teacher_capability(package: Path) -> str:
     raise CampaignError(f"Teacher capability file has no string ID constant: {path}")
 
 
-def _check_capabilities(
-    resolved: ResolvedBinding, shared_root: Path
-) -> dict[str, str]:
+def _check_capabilities(resolved: ResolvedBinding, shared_root: Path) -> dict[str, str]:
     backend = resolved.binding.backend
     runtime = resolved.binding.runtime
     if backend.kind != "simulation":
@@ -246,14 +243,11 @@ def _check_teacher_templates(
 ) -> None:
     if runtime_document.get("action_source") != "teacher":
         raise CampaignError(
-            "runtime teacher recipe must declare action_source: teacher "
-            f"({runtime_path})"
+            f"runtime teacher recipe must declare action_source: teacher ({runtime_path})"
         )
     declared_api = runtime_document.get("teacher_api")
     if not isinstance(declared_api, str) or not declared_api:
-        raise CampaignError(
-            f"runtime teacher recipe must declare teacher_api ({runtime_path})"
-        )
+        raise CampaignError(f"runtime teacher recipe must declare teacher_api ({runtime_path})")
     if expected_teacher_api is not None and declared_api != expected_teacher_api:
         raise CampaignError(
             f"runtime teacher recipe teacher_api {declared_api!r} differs from "
@@ -264,21 +258,17 @@ def _check_teacher_templates(
         raise CampaignError(f"simulation teacher recipe has no robot object: {backend_path}")
     if robot.get("task_mode") != "teacher":
         raise CampaignError(
-            "simulation teacher recipe must declare robot.task_mode: teacher "
-            f"({backend_path})"
+            f"simulation teacher recipe must declare robot.task_mode: teacher ({backend_path})"
         )
     for name in SIMULATION_REFERENCE_FIELDS:
         declared = robot.get(name)
         if isinstance(declared, str):
             path = (backend_path.parent / declared).resolve()
             if not path.exists():
-                raise CampaignError(
-                    f"simulation teacher recipe robot.{name} is missing: {path}"
-                )
+                raise CampaignError(f"simulation teacher recipe robot.{name} is missing: {path}")
     if require_parallel and robot.get("render_quality", {}).get("enabled") is not True:
         raise CampaignError(
-            "parallel recording requires simulation teacher recipe "
-            "robot.render_quality.enabled"
+            "parallel recording requires simulation teacher recipe robot.render_quality.enabled"
         )
 
 
@@ -297,9 +287,7 @@ def _check_teacher_budget(
         raise CampaignError("teacher recipes have no robot section")
     declared_task = robot.get("task")
     if not isinstance(declared_task, str):
-        raise CampaignError(
-            f"simulation teacher recipe must declare robot.task ({backend_path})"
-        )
+        raise CampaignError(f"simulation teacher recipe must declare robot.task ({backend_path})")
     task_path = (backend_path.parent / declared_task).resolve()
     if not task_path.is_file():
         raise CampaignError(f"simulation task recipe is missing: {task_path}")
@@ -325,9 +313,7 @@ def _check_teacher_budget(
     if int(teacher.get("chunk_size", -1)) != chunk_size:
         raise CampaignError("runtime teacher.chunk_size differs from the simulation task")
     if int(teacher.get("action_period_ns", -1)) != period_ns:
-        raise CampaignError(
-            "runtime teacher.action_period_ns differs from the simulation task"
-        )
+        raise CampaignError("runtime teacher.action_period_ns differs from the simulation task")
 
 
 def _profile_records(resolved: ResolvedBinding) -> dict[str, dict[str, Any]]:
@@ -380,9 +366,7 @@ def select_collection(
     runtime_document = _load_yaml(runtime_path, "runtime teacher recipe")
     backend_document = _load_yaml(backend_path, "simulation teacher recipe")
     _check_runtime_references(runtime_path, runtime_document)
-    _check_recipe_profiles(
-        runtime_path, runtime_document, backend_path, backend_document, profiles
-    )
+    _check_recipe_profiles(runtime_path, runtime_document, backend_path, backend_document, profiles)
     _check_teacher_templates(
         runtime_path,
         runtime_document,
@@ -427,8 +411,7 @@ def direct_selection(
     project_root = Path(project_root).resolve()
 
     def record(field: str, value: Path) -> dict[str, Any]:
-        path = value if value.is_absolute() else project_root / value
-        path = path.resolve()
+        path = project_path(value, project_root).resolve()
         if not path.is_file():
             raise CampaignError(f"direct collection recipe is missing: {path}")
         return {
@@ -476,12 +459,7 @@ def campaign_config_path(
         if default is None:
             raise CampaignError("a campaign recipe is required")
         campaign_config = default
-    path = (
-        campaign_config
-        if campaign_config.is_absolute()
-        else Path(project_root) / campaign_config
-    )
-    path = path.resolve()
+    path = project_path(campaign_config, project_root).resolve()
     if not path.is_file():
         raise CampaignError(f"campaign config is missing: {path}")
     return path

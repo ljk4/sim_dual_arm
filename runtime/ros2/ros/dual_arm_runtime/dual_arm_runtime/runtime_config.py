@@ -10,6 +10,7 @@ from pydantic import BeforeValidator, Field, model_validator
 from robot_contracts.models import ContractError, RobotProfile
 from robot_contracts.overrides import OverrideError, apply_overrides
 from robot_contracts.profiles import load_profile, semantic_hash, validate_bindings
+from robot_contracts.project_paths import project_path
 from robot_contracts.validation import (
     NonEmptyStr,
     NonNegativeInt,
@@ -39,14 +40,22 @@ STREAM_PERIOD_NS = 50_000_000
 INT64_MAX = 2**63 - 1
 UINT64_MAX = 2**64 - 1
 REQUIRED_CAPABILITIES = (
-    "continuous_chunks", "exact_capture", "simulation_reset", "lease", "stop",
-    "command_query", "control_events", "follower_reference",
+    "continuous_chunks",
+    "exact_capture",
+    "simulation_reset",
+    "lease",
+    "stop",
+    "command_query",
+    "control_events",
+    "follower_reference",
     "execution_feedback.gripper_set.v1",
 )
-_VECTOR = Annotated[tuple[StrictFloat, ...], BeforeValidator(as_tuple),
-                    Field(min_length=1, max_length=64)]
-_POSITIVE_VECTOR = Annotated[tuple[PositiveFloat, ...], BeforeValidator(as_tuple),
-                             Field(min_length=1, max_length=64)]
+_VECTOR = Annotated[
+    tuple[StrictFloat, ...], BeforeValidator(as_tuple), Field(min_length=1, max_length=64)
+]
+_POSITIVE_VECTOR = Annotated[
+    tuple[PositiveFloat, ...], BeforeValidator(as_tuple), Field(min_length=1, max_length=64)
+]
 
 
 def _error(location: str, message: str) -> ContractError:
@@ -93,8 +102,9 @@ class FollowerConfig(StrictMappingModel):
 
 
 class FollowerConstraints(StrictMappingModel):
-    joint_names: Annotated[tuple[NonEmptyStr, ...], BeforeValidator(as_tuple),
-                           Field(min_length=1, max_length=64)]
+    joint_names: Annotated[
+        tuple[NonEmptyStr, ...], BeforeValidator(as_tuple), Field(min_length=1, max_length=64)
+    ]
     target_count: Annotated[int, Field(strict=True, ge=2, le=128)]
     max_target_deviations: _POSITIVE_VECTOR
     max_terminal_tail_duration_s: PositiveFloat
@@ -117,10 +127,12 @@ class PolicyConfig(StrictMappingModel):
     expected_test_only: bool
     task_id: NonEmptyStr
     task_text: NonEmptyStr
-    chunk_size: Annotated[int, Field(strict=True, ge=STREAM_CHUNK_SIZE,
-                                     le=STREAM_CHUNK_SIZE)] = STREAM_CHUNK_SIZE
-    action_period_ns: Annotated[int, Field(strict=True, ge=STREAM_PERIOD_NS,
-                                           le=STREAM_PERIOD_NS)] = STREAM_PERIOD_NS
+    chunk_size: Annotated[int, Field(strict=True, ge=STREAM_CHUNK_SIZE, le=STREAM_CHUNK_SIZE)] = (
+        STREAM_CHUNK_SIZE
+    )
+    action_period_ns: Annotated[
+        int, Field(strict=True, ge=STREAM_PERIOD_NS, le=STREAM_PERIOD_NS)
+    ] = STREAM_PERIOD_NS
     initial_lead_ns: PositiveInt = 250_000_000
     max_chunks: Annotated[PositiveInt, Field(le=MAX_CHUNKS)] = 8
     total_sim_deadline_ns: PositiveInt = 8_000_000_000
@@ -139,18 +151,21 @@ class PolicyConfig(StrictMappingModel):
     @model_validator(mode="after")
     def _policy(self) -> PolicyConfig:
         if self.expected_test_only and not self.allow_test_policy:
-            raise contract_error("allow_test_policy",
-                                 "a test-only policy requires allow_test_policy: true")
+            raise contract_error(
+                "allow_test_policy", "a test-only policy requires allow_test_policy: true"
+            )
         return self
 
 
 class TeacherConfig(StrictMappingModel):
     """Program-teacher stream identity, independent of policy RPC settings."""
 
-    chunk_size: Annotated[int, Field(strict=True, ge=STREAM_CHUNK_SIZE,
-                                     le=STREAM_CHUNK_SIZE)] = STREAM_CHUNK_SIZE
-    action_period_ns: Annotated[int, Field(strict=True, ge=STREAM_PERIOD_NS,
-                                           le=STREAM_PERIOD_NS)] = STREAM_PERIOD_NS
+    chunk_size: Annotated[int, Field(strict=True, ge=STREAM_CHUNK_SIZE, le=STREAM_CHUNK_SIZE)] = (
+        STREAM_CHUNK_SIZE
+    )
+    action_period_ns: Annotated[
+        int, Field(strict=True, ge=STREAM_PERIOD_NS, le=STREAM_PERIOD_NS)
+    ] = STREAM_PERIOD_NS
     initial_lead_ns: PositiveInt = 250_000_000
     max_chunks: Annotated[PositiveInt, Field(le=MAX_CHUNKS)] = 128
     total_sim_deadline_ns: PositiveInt = 30_000_000_000
@@ -173,8 +188,9 @@ class RuntimeRecipe(StrictMappingModel):
     action_schema: NonEmptyStr
     control_constraints: NonEmptyStr
     robot_namespace: NonEmptyStr
-    lease_duration_ns: Annotated[int, Field(strict=True, ge=MIN_LEASE_DURATION_NS,
-                                            le=MAX_LEASE_DURATION_NS)]
+    lease_duration_ns: Annotated[
+        int, Field(strict=True, ge=MIN_LEASE_DURATION_NS, le=MAX_LEASE_DURATION_NS)
+    ]
     renew_interval_ns: Annotated[PositiveInt, Field(le=MAX_LEASE_DURATION_NS)]
     command_acceptance_ns: Annotated[PositiveInt, Field(le=INT64_MAX)]
     startup_timeout_s: PositiveFloat
@@ -183,8 +199,7 @@ class RuntimeRecipe(StrictMappingModel):
     reset: ResetConfig
     observation: ObservationConfig
     control: ControlConfig
-    motions: Annotated[tuple[MotionSpec, ...], BeforeValidator(as_tuple),
-                       Field(max_length=64)] = ()
+    motions: Annotated[tuple[MotionSpec, ...], BeforeValidator(as_tuple), Field(max_length=64)] = ()
     action_source: Annotated[str, Field(pattern=r"^(policy|teacher)$")]
     # Explicit capability identifier for a scenario Teacher wire extension.
     # It is required for teacher mode and absent for policy runs.
@@ -214,14 +229,11 @@ class RuntimeRecipe(StrictMappingModel):
     @model_validator(mode="after")
     def _recipe(self) -> RuntimeRecipe:
         if self.renew_interval_ns * 2 >= self.lease_duration_ns:
-            raise contract_error("renew_interval_ns",
-                                 "must be less than half of lease_duration_ns")
+            raise contract_error("renew_interval_ns", "must be less than half of lease_duration_ns")
         if self.motions:
-            raise contract_error("motions",
-                                 "must be empty; the streaming runtime has no motions")
+            raise contract_error("motions", "must be empty; the streaming runtime has no motions")
         if self.control.terminal_timeout_s <= self.command_timeout_s:
-            raise contract_error("control.terminal_timeout_s",
-                                 "must exceed command_timeout_s")
+            raise contract_error("control.terminal_timeout_s", "must exceed command_timeout_s")
         if self.action_source == "policy" and self.policy is None:
             raise contract_error("policy", "policy section requires a policy block")
         if self.action_source == "teacher" and self.teacher is None:
@@ -238,23 +250,26 @@ class RuntimeRecipe(StrictMappingModel):
         if self.action_source != "teacher" and self.teacher is not None:
             raise contract_error("teacher", "teacher section requires action_source=teacher")
         if (self.policy is not None or self.teacher is not None) and self.follower is None:
-            raise contract_error("follower_config",
-                                 "policy/teacher action sources require follower config")
+            raise contract_error(
+                "follower_config", "policy/teacher action sources require follower config"
+            )
         for name, stream in (("policy", self.policy), ("teacher", self.teacher)):
             if stream is None:
                 continue
             if stream.termination_mode == "task":
                 if stream.task_stop_margin_s * 1_000_000_000 >= stream.task_sim_budget_ns:
-                    raise contract_error(f"{name}.task_stop_margin_s",
-                                         "must leave a positive task budget")
+                    raise contract_error(
+                        f"{name}.task_stop_margin_s", "must leave a positive task budget"
+                    )
                 assert self.follower is not None
-                covered = (stream.max_chunks * self.follower.target_count
-                           * stream.action_period_ns)
+                covered = stream.max_chunks * self.follower.target_count * stream.action_period_ns
                 if covered < stream.task_sim_budget_ns:
                     required = stream.task_sim_budget_ns // (
-                        self.follower.target_count * stream.action_period_ns)
-                    raise contract_error(f"{name}.max_chunks",
-                                         f"task mode needs at least {required} chunks")
+                        self.follower.target_count * stream.action_period_ns
+                    )
+                    raise contract_error(
+                        f"{name}.max_chunks", f"task mode needs at least {required} chunks"
+                    )
                 # The wall watchdog must leave room for RPC, reset and bounded
                 # stop after a full simulation budget at real-time speed.
                 wall_floor_s = stream.task_sim_budget_ns / 1e9 + 20.0
@@ -300,9 +315,7 @@ def _load(path: Path) -> dict[str, Any]:
     return document
 
 
-def _referenced(
-    document: dict[str, Any], name: str, base_dir: Path, label: str
-) -> Path:
+def _referenced(document: dict[str, Any], name: str, base_dir: Path, label: str) -> Path:
     value = document.get(name)
     if not isinstance(value, str) or not value:
         raise _error(f"{label}.{name}", "field is required")
@@ -312,9 +325,7 @@ def _referenced(
     return candidate
 
 
-def _load_follower(
-    document: dict[str, Any], base_dir: Path, label: str, profile: RobotProfile
-):
+def _load_follower(document: dict[str, Any], base_dir: Path, label: str, profile: RobotProfile):
     name = document.get("follower_config")
     if name is None:
         return None, None
@@ -352,7 +363,7 @@ def load_runtime_configuration(
     seed: int | None = None,
     overrides: tuple[str, ...] | list[str] = (),
 ) -> RuntimeConfiguration:
-    path = (config_path if config_path.is_absolute() else project_root / config_path).resolve()
+    path = project_path(config_path, project_root).resolve()
     document = _load(path)
     if seed is not None:
         reset = document.get("reset")
@@ -389,7 +400,7 @@ def load_runtime_configuration_document(
     observation_path = _referenced(document, "observation_schema", base_dir, label)
     action_path = _referenced(document, "action_schema", base_dir, label)
     control_path = _referenced(document, "control_constraints", base_dir, label)
-    schema_root = project_root / "shared/common/interfaces/schemas"
+    schema_root = project_path("shared/common/interfaces/schemas", project_root)
     profile = load_profile(profile_path, schema_root)
     observation_document = _load(observation_path)
     action_document = _load(action_path)
@@ -422,18 +433,22 @@ def load_runtime_configuration_document(
         policy.setdefault("action_schema_hash", action_hash)
         policy.setdefault("robot_profile_hash", profile.digest)
         document = {**document, "policy": policy}
-    document = {**document, "robot_profile": str(profile_path),
-                "observation_schema": str(observation_path),
-                "action_schema": str(action_path),
-                "control_constraints": str(control_path), "follower": follower}
+    document = {
+        **document,
+        "robot_profile": str(profile_path),
+        "observation_schema": str(observation_path),
+        "action_schema": str(action_path),
+        "control_constraints": str(control_path),
+        "follower": follower,
+    }
     try:
         recipe = RuntimeRecipe(**document)
     except StrictMappingError as error:
         raise _error(label, f"{error.field}: {error.message}") from error
     effective = recipe.model_dump(
         mode="json",
-        exclude={"logging", "recording", "follower", "control_constraints",
-                 "follower_config"})
+        exclude={"logging", "recording", "follower", "control_constraints", "follower_config"},
+    )
     effective["control_constraints"] = control_document
     if follower_document is not None:
         effective["follower_document"] = follower_document
@@ -445,19 +460,26 @@ def load_runtime_configuration_document(
     effective["required_capabilities"] = required_capabilities
     effective["logging"] = dict(vars(recipe.logging))
     effective["recording"] = dict(vars(recipe.recording))
-    snapshot = {"profile": _load(profile_path), "profile_hash": profile.digest,
-                "observation": observation_document, "observation_hash": observation_hash,
-                "action": action_document, "action_hash": action_hash,
-                "action_source": recipe.action_source,
-                "policy_test_only": None if recipe.policy is None
-                else recipe.policy.expected_test_only, "recipe": effective,
-                "selection": selection, "overrides": list(overrides),
-                "configuration_source": source}
+    snapshot = {
+        "profile": _load(profile_path),
+        "profile_hash": profile.digest,
+        "observation": observation_document,
+        "observation_hash": observation_hash,
+        "action": action_document,
+        "action_hash": action_hash,
+        "action_source": recipe.action_source,
+        "policy_test_only": None if recipe.policy is None else recipe.policy.expected_test_only,
+        "recipe": effective,
+        "selection": selection,
+        "overrides": list(overrides),
+        "configuration_source": source,
+    }
     return RuntimeConfiguration(
-        recipe=recipe, profile=profile, schema_root=schema_root,
+        recipe=recipe,
+        profile=profile,
+        schema_root=schema_root,
         control_document=control_document,
-        snapshot_json=json.dumps(snapshot, sort_keys=True, separators=(",", ":"),
-                                 allow_nan=False),
+        snapshot_json=json.dumps(snapshot, sort_keys=True, separators=(",", ":"), allow_nan=False),
         selection=selection,
         overrides=tuple(overrides),
         configuration_source=source,

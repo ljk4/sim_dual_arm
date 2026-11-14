@@ -17,6 +17,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from robot_contracts.project_paths import project_path
+
 from dual_arm_runtime.offline.campaign_ledger import (
     CampaignError,
     read_records,
@@ -52,12 +54,10 @@ def _sdk_check(
     return result.returncode, (result.stdout + result.stderr).strip()
 
 
-def _campaign_status(
-    project_root: Path, config: dict[str, Any]
-) -> dict[str, Any]:
+def _campaign_status(project_root: Path, config: dict[str, Any]) -> dict[str, Any]:
     paths = config["paths"]
-    output = (project_root / str(paths["attempts_root"])).resolve()
-    records = read_records(project_root / str(paths["ledger"]))
+    output = (project_path(str(paths["attempts_root"]), project_root)).resolve()
+    records = read_records(project_path(str(paths["ledger"]), project_root))
     summary = summarize(records, config, output)
     summary["formal_target_qualified"] = int(config["budget"]["formal_target_qualified"])
     return summary
@@ -114,18 +114,14 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
 
     config = load_campaign(campaign_path)
     paths = config["paths"]
-    attempts_root = (project_root / str(paths["attempts_root"])).resolve()
+    attempts_root = (project_path(str(paths["attempts_root"]), project_root)).resolve()
     from dual_arm_runtime.offline.campaign_ledger import check_environment
 
     check_environment(project_root, config, attempts_root)
     status = _campaign_status(project_root, config)
     if args.target_total is not None:
-        if args.purpose == "formal" and args.target_total > int(
-            status["formal_target_qualified"]
-        ):
-            raise CampaignError(
-                "target total exceeds the campaign formal qualified target"
-            )
+        if args.purpose == "formal" and args.target_total > int(status["formal_target_qualified"]):
+            raise CampaignError("target total exceeds the campaign formal qualified target")
     plan: dict[str, Any] = {
         "schema_version": 1,
         "selection": selection,

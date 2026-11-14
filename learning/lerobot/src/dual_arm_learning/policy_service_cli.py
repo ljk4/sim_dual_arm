@@ -17,6 +17,8 @@ import time
 import uuid
 from pathlib import Path
 
+from robot_contracts.project_paths import project_path
+
 from .adapters.lerobot_act import load_act_adapter
 from .bundle import BundleError, deployment_summary
 from .policy_config import PolicyConfigError, PolicyServiceConfig, load_policy_config
@@ -26,7 +28,8 @@ from .scenario import LearningScenario, ScenarioSelectionError, select_scenario
 
 
 def _project_root() -> Path:
-    return Path(__file__).resolve().parents[4]
+    root = os.environ.get("PROJECT_ROOT")
+    return Path(root) if root else Path(__file__).resolve().parents[4]
 
 
 def _sha256(path: Path) -> str:
@@ -63,9 +66,7 @@ def _write_startup_failure(
                 else ("" if config is None else str(config.bundle_dir))
             ),
             "profile": "" if config is None else str(config.robot_profile_path),
-            "observation_schema": (
-                "" if config is None else str(config.observation_schema_path)
-            ),
+            "observation_schema": ("" if config is None else str(config.observation_schema_path)),
             "action_schema": "" if config is None else str(config.action_schema_path),
             "device": "" if config is None else config.device,
             "contract": None if config is None else deployment_summary(config),
@@ -237,7 +238,7 @@ def main(argv: list[str] | None = None) -> int:
     config_path = (
         Path(f"scenario:{args.scenario}")
         if args.scenario is not None
-        else (args.config if args.config.is_absolute() else project_root / args.config)
+        else project_path(args.config, project_root)
     )
     selection: LearningScenario | None = None
     overrides: dict[str, object] = {}
@@ -275,10 +276,24 @@ def main(argv: list[str] | None = None) -> int:
         else:
             config = load_policy_config(
                 config_path,
-                bundle_dir=args.bundle_dir,
-                robot_profile_path=args.robot_profile,
-                observation_schema_path=args.observation_schema,
-                action_schema_path=args.action_schema,
+                bundle_dir=(
+                    None if args.bundle_dir is None else project_path(args.bundle_dir, project_root)
+                ),
+                robot_profile_path=(
+                    None
+                    if args.robot_profile is None
+                    else project_path(args.robot_profile, project_root)
+                ),
+                observation_schema_path=(
+                    None
+                    if args.observation_schema is None
+                    else project_path(args.observation_schema, project_root)
+                ),
+                action_schema_path=(
+                    None
+                    if args.action_schema is None
+                    else project_path(args.action_schema, project_root)
+                ),
                 device=args.device,
                 set_overrides=args.overrides,
             )
@@ -287,8 +302,8 @@ def main(argv: list[str] | None = None) -> int:
         stage = "load_warm"
         print("=== Policy 服务配置与详细参数 ===", flush=True)
         if selection is not None:
-            print(f"方案 (scenario): {selection.binding.scenario_id}", flush=True)
-            print(f"Binding 文件:    {selection.path}", flush=True)
+            print(f"方案 (scenario): {selection.scenario_id}", flush=True)
+            print(f"Binding 文件:    {selection.resolved.path}", flush=True)
         print(f"配置文件路径:    {config_path.resolve()}", flush=True)
         print("--- 详细参数 ---", flush=True)
         print(json.dumps(config.to_document(), indent=2, ensure_ascii=False), flush=True)

@@ -9,6 +9,7 @@ from typing import Any
 
 import numpy as np
 from PIL import Image
+from robot_contracts.project_paths import project_path
 
 from .config import PNG_SHA, DatasetConfig
 from .dataset_common import (
@@ -117,7 +118,7 @@ def _select_entries(
                     "seed": seed,
                     "attempt_dir": Path(attempt_dir)
                     if Path(attempt_dir).is_absolute()
-                    else config.project_root / attempt_dir,
+                    else project_path(attempt_dir, config.project_root),
                     "split": split_name,
                 }
             )
@@ -317,8 +318,7 @@ def _validate_export_headers(
     if quality.get("qualified") is not True:
         raise ExportError("export: quality sidecar is not qualified")
     if config.require_quality and (
-        quality.get("visibility_qualified") is False
-        or quality.get("trajectory_qualified") is False
+        quality.get("visibility_qualified") is False or quality.get("trajectory_qualified") is False
     ):
         raise ExportError("export: visibility/trajectory qualification is false")
     camera_order = labels.get("camera_order")

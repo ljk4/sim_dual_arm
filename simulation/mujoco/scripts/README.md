@@ -5,6 +5,8 @@
 | 脚本 | 功能说明 | 默认输出路径 |
 | --- | --- | --- |
 | `backend.sh` | 按 `--scenario` 或 `--config` 加载配方，校验 `/opt/ros-dev` SDK 后启动 MuJoCo ROS 2 物理仿真后端 | `/data/<scenario-id>/logs/backend/<run-id>/`（direct 模式 `_direct`） |
+| `teacher_backend.sh` | 显式指定 `--scenario <id>`，启动 Teacher 后端并展示完整生效参数 | `/data/<scenario-id>/logs/backend/<run-id>/` |
+| `policy_backend.sh` | 显式指定 `--scenario <id>`，使用已验证 Bundle 启动推理后端 | `/data/<scenario-id>/logs/backend/<run-id>/` |
 | `viewer.sh` | 订阅 `/robot/visualization/mujoco_state` 快照，通过宿主机 X11 打开只读实时 GUI；支持 `--scenario` | 实时窗口显示 |
 | `test.sh` | 运行固定禁用自动插件收集的 `pytest` 测试套件 | 终端输出 |
 
@@ -29,7 +31,7 @@ scripts/backend.sh --scenario panda_stack --role policy \
 scripts/backend.sh \
   --config /shared/scenarios/panda_stack/configs/simulation/backend/backend_stack_teacher.yaml
 
-# 只读 viewer（宿主机也可以直接用 ./env.sh viewer）
+# 只读 viewer（宿主机用 ./env.sh viewer --scenario panda_stack --role teacher）
 scripts/viewer.sh --scenario panda_stack --role teacher
 ```
 

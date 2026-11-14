@@ -11,7 +11,7 @@ import sys
 import time
 from pathlib import Path
 
-from dual_arm_runtime.artifact_paths import data_root, scenario_segment
+from dual_arm_runtime.artifact_paths import container_data_root, scenario_segment
 from dual_arm_runtime.runtime_cli import _load_configuration
 
 
@@ -46,8 +46,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--role", choices=("policy",), default="policy")
     parser.add_argument("--shared-root", type=Path)
     parser.add_argument("--bundle", type=Path)
-    parser.add_argument("--count", type=positive_int, default=10, help="number of episodes (default: 10)")
-    parser.add_argument("--seed-start", type=non_negative_int, default=20000, help="starting reset seed")
+    parser.add_argument(
+        "--count", type=positive_int, default=10, help="number of episodes (default: 10)"
+    )
+    parser.add_argument(
+        "--seed-start", type=non_negative_int, default=20000, help="starting reset seed"
+    )
     parser.add_argument(
         "--max-consecutive-failures",
         type=positive_int,
@@ -158,11 +162,13 @@ def _print_startup_info(
     print("=== Batch Policy 批量仿真推理配置与详细参数 ===", flush=True)
     selection = getattr(configuration, "selection", None)
     if isinstance(selection, dict) and selection.get("mode") == "scenario":
-        print(f"方案 (scenario): {selection.get('scenario_id')} ({selection.get('role')})", flush=True)
+        print(
+            f"方案 (scenario): {selection.get('scenario_id')} ({selection.get('role')})", flush=True
+        )
         binding = selection.get("binding") or {}
         if binding.get("path"):
             print(f"Binding 文件:    {binding['path']}", flush=True)
-    print(f"配置文件路径:    {configuration.source}", flush=True)
+    print(f"配置文件路径:    {configuration.configuration_source}", flush=True)
     print(f"后端类型:        {backend_info['backend_kind']} (已禁止可视化)", flush=True)
     print(
         f"批量参数:        batch_id={batch_id}, count={args.count}, "
@@ -175,7 +181,7 @@ def _print_startup_info(
     print(f"运行日志目录:    {runs_dir}", flush=True)
     print(f"报告输出路径:    {report_path}", flush=True)
     print("--- 详细参数 ---", flush=True)
-    print(json.dumps(configuration.canonical_dict(), indent=2, ensure_ascii=False), flush=True)
+    print(json.dumps(configuration.snapshot, indent=2, ensure_ascii=False), flush=True)
     print("================================================", flush=True)
 
 
@@ -222,10 +228,21 @@ def _parse_summary(stdout: str) -> dict[str, object] | None:
         stripped = line.strip()
         if stripped.startswith("{") and stripped.endswith("}"):
             try:
-                return json.loads(stripped)
+                summary = json.loads(stripped)
             except json.JSONDecodeError:
                 continue
+            if isinstance(summary, dict) and "task" in summary and "runtime" in summary:
+                return summary
     return None
+
+
+def _episode_succeeded(exit_code: int, summary: dict[str, object]) -> bool:
+    return (
+        exit_code == 0
+        and summary.get("task", {}).get("outcome") == "succeeded"
+        and summary.get("runtime", {}).get("outcome") in {"completed", "stopped"}
+        and summary.get("recording", {}).get("complete") is True
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -236,9 +253,12 @@ def main(argv: list[str] | None = None) -> int:
         if "visualization" in lowered or "viewer" in lowered:
             cli.error("批量仿真推理禁止可视化，不可覆盖 visualization/viewer 配置")
 
-    batch_id = args.batch_id or f"batch-policy-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{os.getpid()}"
+    batch_id = (
+        args.batch_id
+        or f"batch-policy-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{os.getpid()}"
+    )
     segment = scenario_segment(args.scenario)
-    base_data = data_root() / segment
+    base_data = container_data_root() / segment
     recordings_dir = args.output or (base_data / "logs" / "batch-policy" / batch_id / "recordings")
     runs_dir = args.runs_output or (base_data / "logs" / "batch-policy" / batch_id / "runs")
     report_path = base_data / "diagnostics" / "batch-policy" / batch_id / "report.json"
@@ -256,7 +276,7 @@ def main(argv: list[str] | None = None) -> int:
     configuration = _load_configuration(load_args, batch_id)
 
     try:
-        backend_info = _verify_simulation_backend(configuration.runtime.namespace)
+        backend_info = _verify_simulation_backend(configuration.recipe.robot_namespace)
     except RuntimeError as error:
         print(f"batch_policy error: {error}", file=sys.stderr)
         return 2
@@ -298,10 +318,7 @@ def main(argv: list[str] | None = None) -> int:
             console_log = runs_dir / f"{run_id}.console.log"
             console_log.write_text(result.stdout + result.stderr, encoding="utf-8")
             summary = _parse_summary(result.stdout) or {}
-            task_outcome = str(summary.get("task_outcome") or "")
-            episode_ok = result.returncode == 0 and (
-                task_outcome == "succeeded" if task_outcome else summary.get("process_outcome") == "succeeded"
-            )
+            episode_ok = _episode_succeeded(result.returncode, summary)
             if episode_ok:
                 succeeded += 1
                 consecutive_failures = 0
@@ -347,7 +364,7 @@ def main(argv: list[str] | None = None) -> int:
     report = {
         "batch_id": batch_id,
         "scenario": args.scenario,
-        "config": str(configuration.source),
+        "config": str(configuration.configuration_source),
         "backend": backend_info,
         "visualization_disabled": True,
         "requested": args.count,
@@ -361,10 +378,16 @@ def main(argv: list[str] | None = None) -> int:
         "runs_dir": str(runs_dir),
         "episodes": episodes,
     }
-    report_path.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    report_path.write_text(
+        json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
 
     print("=== 批量仿真推理结果 ===", flush=True)
-    print(f"完成局数: {attempted}/{args.count} | 成功: {succeeded} | 失败: {failed} | 成功率: {success_rate:.2f}%", flush=True)
+    print(
+        f"完成局数: {attempted}/{args.count} | 成功: {succeeded} | 失败: {failed} "
+        f"| 成功率: {success_rate:.2f}%",
+        flush=True,
+    )
     print(f"总耗时:   {elapsed:.1f}s", flush=True)
     print(f"详细报告: {report_path}", flush=True)
     print("========================", flush=True)

@@ -113,7 +113,7 @@ scripts/policy.sh --scenario <scenario-id> \
   --reset-seed 0 --run-id policy-run
 
 # learning 容器（工作目录 /app）
-scripts/policy_backend.sh --scenario <scenario-id> \
+scripts/policy.sh --scenario <scenario-id> \
   --bundle /data/<scenario-id>/models/bundles/<verified-bundle>
 scripts/train.sh --scenario <scenario-id> --mode smoke
 ```

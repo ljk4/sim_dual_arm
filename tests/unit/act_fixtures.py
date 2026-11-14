@@ -139,7 +139,6 @@ def make_act_bundle(root: Path, *, synthetic: bool = True) -> Path:
         },
     }
     _write(processors / "train_stats_summary.json", summary)
-    _write(root / "metadata/train_stats_summary.json", summary)
     (root / "metadata/training_config.yaml").write_text("schema_version: 1\n", encoding="utf-8")
     training_config_sha = _sha(root / "metadata/training_config.yaml")
     (root / "metadata/checkpoint.json").write_text(
@@ -331,9 +330,7 @@ def reseal_bundle(root: Path, mutate=None) -> dict[str, Any]:
     manifest["checkpoint"]["config_sha256"] = files["metadata/training_config.yaml"]["sha256"]
     manifest["model"]["sha256"] = files["model.safetensors"]["sha256"]
     manifest["state_dict_sha256"] = files["model.safetensors"]["sha256"]
-    manifest["source"]["training_config_sha256"] = files[
-        "metadata/training_config.yaml"
-    ]["sha256"]
+    manifest["source"]["training_config_sha256"] = files["metadata/training_config.yaml"]["sha256"]
     manifest.pop("bundle_digest", None)
     manifest["bundle_digest"] = _canonical(manifest)
     _write(root / "manifest.json", manifest)

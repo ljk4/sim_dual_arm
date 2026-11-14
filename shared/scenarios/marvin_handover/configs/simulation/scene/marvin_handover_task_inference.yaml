@@ -1,7 +1,7 @@
-# Marvin 交接短时推理评价配方；Teacher 关闭，只运行同一物理评价。
+# Marvin 交接完整任务推理评价配方；Teacher 关闭，只运行同一物理评价。
 #
 # 目标位姿、抓持点和候选路径仍由 planning_config 指向的 P02B 配方提供。
-# 门禁与终态判据与 P03 完整配方一致，仅评价预算缩短到 10 s。
+# 门禁与终态判据与 P03 完整配方一致，评价预算为完整任务 180 s。
 schema_version: 1
 planning_config: ../planning/handover_paths.yaml
 
@@ -9,8 +9,8 @@ success:
   # 物块八个顶点全部位于箱内、箱底支撑、双手均无接触并持续稳定。
   stable_duration_s: 1.0
   # 与 runtime policy.task_sim_budget_ns 一致，由准备入口与测试交叉校验。
-  max_task_sim_duration_s: 10.0
-  max_task_wall_duration_s: 60.0
+  max_task_sim_duration_s: 180.0
+  max_task_wall_duration_s: 420.0
   # 允许的接触尺度压入与箱底支撑力下限。
   box_bottom_tolerance_m: 0.001
   min_box_support_normal_force_n: 0.5
@@ -58,11 +58,11 @@ teacher:
   chunk_cache_entries: 64
 
 capacity:
-  # 16 one-second windows cover the 10 s evaluation budget with margin.
-  expected_chunks: 16
-  expected_references: 16
-  expected_events: 64
-  max_episode_chunks: 64
-  max_teacher_requests: 64
-  rpc_cache_entries: 64
-  backend_chunk_history: 64
+  # 256 one-second windows cover the 180 s evaluation budget with margin.
+  expected_chunks: 256
+  expected_references: 256
+  expected_events: 1024
+  max_episode_chunks: 256
+  max_teacher_requests: 256
+  rpc_cache_entries: 256
+  backend_chunk_history: 256

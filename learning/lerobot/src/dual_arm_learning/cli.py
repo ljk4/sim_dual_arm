@@ -6,10 +6,13 @@ import argparse
 import contextlib
 import dataclasses
 import json
+import os
 import sys
 import time
 from collections.abc import Sequence
 from pathlib import Path
+
+from robot_contracts.project_paths import project_path
 
 from .budget import BudgetError, BudgetLedger
 from .bundle import BundleError, export_bundle, load_bundle
@@ -33,7 +36,8 @@ from .training import TrainingError, train, verify_dataset_manifest
 
 
 def _default_root() -> Path:
-    return Path(__file__).resolve().parents[4]
+    root = os.environ.get("PROJECT_ROOT")
+    return Path(root) if root else Path(__file__).resolve().parents[4]
 
 
 def _print(value: object) -> None:
@@ -93,7 +97,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     for command_parser in (convert_parser, train_parser):
         command_parser.add_argument(
-            "--progress", action=argparse.BooleanOptionalAction, default=False,
+            "--progress",
+            action=argparse.BooleanOptionalAction,
+            default=False,
             help="show concise operator progress and send detailed output to a log file",
         )
         command_parser.add_argument("--log-file", type=Path, help="detail log with --progress")
@@ -107,7 +113,8 @@ def build_parser() -> argparse.ArgumentParser:
     filter_parser.add_argument("--output", type=Path, required=True)
 
     verify_parser = sub.add_parser(
-        "verify-data", help="check the configured split, hashes and source files")
+        "verify-data", help="check the configured split, hashes and source files"
+    )
     _add_selection_arguments(verify_parser)
     verify_parser.add_argument("--mode", choices=("smoke", "overfit", "full"), default=None)
     verify_parser.add_argument("--data-root", type=Path, default=None)
@@ -119,7 +126,9 @@ def build_parser() -> argparse.ArgumentParser:
     bundle_parser = sub.add_parser("bundle", help="export a safetensors-only offline ACT bundle")
     _add_selection_arguments(bundle_parser)
     bundle_parser.add_argument(
-        "--progress", action=argparse.BooleanOptionalAction, default=False,
+        "--progress",
+        action=argparse.BooleanOptionalAction,
+        default=False,
         help="print resolved config paths and parameters before exporting",
     )
     bundle_parser.add_argument("--mode", choices=("smoke", "overfit", "full"), default=None)
@@ -138,26 +147,22 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _training_config(args: argparse.Namespace, config_path: Path) -> object:
-    config = load_training_config(
-        config_path, args.project_root, overrides=args.overrides
-    )
+    config = load_training_config(config_path, args.project_root, overrides=args.overrides)
     if getattr(args, "mode", None):
         config = config.model_copy(update={"mode": args.mode})
     if getattr(args, "data_root", None):
-        data_root = args.data_root
-        if not data_root.is_absolute():
-            data_root = args.project_root / data_root
+        data_root = project_path(args.data_root, args.project_root)
         config = config.model_copy(update={"data_root": data_root})
     return config
 
 
 def _resolve(path: Path, root: Path) -> Path:
-    return path if path.is_absolute() else root / path
+    return project_path(path, root)
 
 
 def _scenario_logs_root(args: argparse.Namespace, root: Path) -> Path:
     segment = args.scenario or "_direct"
-    return root / "var" / segment / "logs"
+    return project_path(Path("var") / segment / "logs", root)
 
 
 def _learning_selection(args: argparse.Namespace, root: Path, *, recipe_field: str):
@@ -235,8 +240,8 @@ def _print_effective_config(
 ) -> None:
     print(f"=== {title} ===", flush=True)
     if selection is not None:
-        print(f"方案 (scenario): {selection.binding.scenario_id}", flush=True)
-        print(f"Binding 文件:    {selection.path}", flush=True)
+        print(f"方案 (scenario): {selection.scenario_id}", flush=True)
+        print(f"Binding 文件:    {selection.resolved.path}", flush=True)
     print(f"配置文件路径:    {config_path}", flush=True)
     print("--- 详细参数 ---", flush=True)
     print(json.dumps(config.model_dump(mode="json"), indent=2, ensure_ascii=False), flush=True)
@@ -254,9 +259,7 @@ def _command_convert(args: argparse.Namespace, root: Path) -> int:
         overrides["select"] = {"value": str(changes["select_path"]), "source": "argument"}
     if args.output_root is not None:
         changes["output_root"] = _resolve(args.output_root, root)
-        overrides["output_root"] = {
-            "value": str(changes["output_root"]), "source": "argument"
-        }
+        overrides["output_root"] = {"value": str(changes["output_root"]), "source": "argument"}
     if args.replace:
         overrides["replace"] = {"value": True, "source": "argument"}
     if args.synthetic:
@@ -266,7 +269,8 @@ def _command_convert(args: argparse.Namespace, root: Path) -> int:
     if changes:
         config = config.model_copy(update=changes)
     settings = [
-        f"清单：{config.select_path}", f"输出：{config.output_root}",
+        f"清单：{config.select_path}",
+        f"输出：{config.output_root}",
         f"划分：{config.expected_training_episodes} 条训练 / "
         f"{config.expected_validation_episodes} 条验证；{config.fps} Hz；"
         f"{len(config.camera_names)} 路 {config.camera_width}×{config.camera_height} RGB",
@@ -276,18 +280,23 @@ def _command_convert(args: argparse.Namespace, root: Path) -> int:
     default_log = _scenario_logs_root(args, root) / "convert" / f"convert-{time.time_ns()}.log"
     with _operator_console(args, "数据转换配置", settings, default_log) as console:
         manifest = convert(
-            select_path=config.select_path, config=config, config_path=config_path,
-            replace=args.replace, synthetic=args.synthetic,
+            select_path=config.select_path,
+            config=config,
+            config_path=config_path,
+            replace=args.replace,
+            synthetic=args.synthetic,
             progress=None if console is None else console.progress,
             selection=_scenario_manifest(selection),
             overrides=overrides or None,
         )
     if args.progress:
         splits = manifest["splits"]
-        print(f"转换完成：训练 {splits['training']['episode_count']} 条 / "
-              f"{splits['training']['frame_count']} 帧；"
-              f"验证 {splits['validation']['episode_count']} 条 / "
-              f"{splits['validation']['frame_count']} 帧")
+        print(
+            f"转换完成：训练 {splits['training']['episode_count']} 条 / "
+            f"{splits['training']['frame_count']} 帧；"
+            f"验证 {splits['validation']['episode_count']} 条 / "
+            f"{splits['validation']['frame_count']} 帧"
+        )
         print(f"数据集：{config.output_root}")
         return 0
     _print(
@@ -313,8 +322,10 @@ def _command_train(args: argparse.Namespace, root: Path) -> int:
         profile_path=config.dataset.profile_path,
         dataset_config_path=config.dataset_config_path,
     )
-    steps = config.mode_spec.steps if args.max_steps is None else min(
-        config.mode_spec.steps, args.max_steps
+    steps = (
+        config.mode_spec.steps
+        if args.max_steps is None
+        else min(config.mode_spec.steps, args.max_steps)
     )
     settings = [
         f"模式：{config.mode}；设备：{config.device}；目标：{steps} step；"
@@ -331,14 +342,19 @@ def _command_train(args: argparse.Namespace, root: Path) -> int:
         if console is not None:
             console.progress.phase("校验训练数据")
         report = train(
-            config, allow_synthetic=args.allow_synthetic, resume_run=args.resume_run,
-            max_steps=args.max_steps, progress=None if console is None else console.progress,
+            config,
+            allow_synthetic=args.allow_synthetic,
+            resume_run=None if args.resume_run is None else _resolve(args.resume_run, root),
+            max_steps=args.max_steps,
+            progress=None if console is None else console.progress,
             selection=_scenario_manifest(selection, dataset_recipe=True),
             overrides=_training_overrides(args, root) or None,
         )
     if args.progress:
-        print(f"训练结束：{report['reason']}；{report['steps']}/{steps} step；"
-              f"best_val_l1={report['best_val_l1']}；用时 {report['duration_seconds']:.1f}s")
+        print(
+            f"训练结束：{report['reason']}；{report['steps']}/{steps} step；"
+            f"best_val_l1={report['best_val_l1']}；用时 {report['duration_seconds']:.1f}s"
+        )
         print(f"run_dir: {config.checkpoint.root / report['run_id']}")
         return 0
     _print(
@@ -407,9 +423,7 @@ def _command_budget(args: argparse.Namespace, root: Path) -> int:
         profile_path=config.dataset.profile_path,
         dataset_config_path=config.dataset_config_path,
     )
-    ledger = BudgetLedger(
-        config.budget.ledger, config.budget.lock, config.budget.limit_seconds
-    )
+    ledger = BudgetLedger(config.budget.ledger, config.budget.lock, config.budget.limit_seconds)
     _print(ledger.status())
     return 0
 

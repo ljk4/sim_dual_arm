@@ -50,12 +50,8 @@ def test_workers_receive_binding_recipes_independent_identity_and_overrides(tmp_
             "sha256": selection["binding"]["sha256"],
             "scenario_id": SCENARIO_ID,
         }
-        assert worker["recipes"]["runtime_teacher"]["sha256"] == sha(
-            tree.runtime_recipe
-        )
-        assert worker["recipes"]["simulation_teacher"]["sha256"] == sha(
-            tree.backend_recipe
-        )
+        assert worker["recipes"]["runtime_teacher"]["sha256"] == sha(tree.runtime_recipe)
+        assert worker["recipes"]["simulation_teacher"]["sha256"] == sha(tree.backend_recipe)
         assert worker["teacher_api"] == "panda_stack_api_msgs.teacher_chunk.v1"
         assert worker["overrides"] == {
             "domain_id": worker["domain_id"],
@@ -68,12 +64,7 @@ def test_workers_receive_binding_recipes_independent_identity_and_overrides(tmp_
         }
         runtime = yaml.safe_load((manifest.parent / worker["id"] / "runtime.yaml").read_text())
         assert runtime["robot_namespace"] == worker["namespace"]
-        backend_path = (
-            tree.repo
-            / "var/pool"
-            / worker["id"]
-            / "backend.yaml"
-        )
+        backend_path = tree.repo / "var/pool" / worker["id"] / "backend.yaml"
         backend = yaml.safe_load(backend_path.read_text())
         assert backend["robot"]["namespace"] == worker["namespace"]
         assert backend["robot"]["visualization_enabled"] is False
@@ -104,9 +95,7 @@ def test_direct_worker_manifest_keeps_explicit_recipe_identity(tmp_path):
     worker = document["workers"][0]
     assert worker["binding"] is None
     assert worker["run_id_prefix"] == "pool-direct-worker-01"
-    assert worker["recipes"]["runtime_teacher"]["path"] == str(
-        tree.runtime_recipe.resolve()
-    )
+    assert worker["recipes"]["runtime_teacher"]["path"] == str(tree.runtime_recipe.resolve())
 
 
 def test_worker_plan_rejects_mixed_binding_identity(tmp_path):
@@ -218,9 +207,7 @@ def test_record_worker_mode_passes_scenario_selection_to_pool(tmp_path, monkeypa
     assert code == 0
     assert captured["args"]["config"] == str(tree.campaign_recipe.resolve())
     assert captured["args"]["runtime_config"] == str(tree.runtime_recipe.resolve())
-    assert captured["args"]["selection"]["binding"]["sha256"] == sha(
-        tree.scenario.binding_path
-    )
+    assert captured["args"]["selection"]["binding"]["sha256"] == sha(tree.scenario.binding_path)
     assert captured["config"]["paths"]["ledger"] == (
         "var/synthetic_stack/logs/campaign/attempts.jsonl"
     )
@@ -245,7 +232,7 @@ def test_parallel_pool_passes_worker_identity_and_isolation(tmp_path, monkeypatc
     monkeypatch.setattr(record_pool, "check_ros_sdk", lambda *args, **kwargs: 0)
     script = tmp_path / "fake_parallel.py"
     script.write_text(
-        '''import json
+        """import json
 import os
 from pathlib import Path
 directory = Path(os.environ["CAMPAIGN_ATTEMPT_DIR"])
@@ -271,45 +258,56 @@ export.mkdir()
     json.dumps({"result": {"outcome": "succeeded"}})
 )
 (export / "quality.json").write_text(json.dumps({"qualified": True}))
-''',
+""",
         encoding="utf-8",
     )
-    monkeypatch.setattr(
-        record, "_collector_command", lambda args: [sys.executable, str(script)]
-    )
+    collector_arguments = []
+
+    def collector_command(args):
+        collector_arguments.append(args)
+        return [sys.executable, str(script)]
+
+    monkeypatch.setattr(record, "_collector_command", collector_command)
     code = record.main(
         [
-            "--project-root", str(tree.repo),
-            "--scenario", SCENARIO_ID,
-            "--shared-root", str(tree.shared),
-            "--worker-manifest", str(manifest),
-            "--count", "2",
+            "--project-root",
+            str(tree.repo),
+            "--scenario",
+            SCENARIO_ID,
+            "--shared-root",
+            str(tree.shared),
+            "--worker-manifest",
+            str(manifest),
+            "--count",
+            "2",
         ]
     )
     assert code == 0
+    assert len(collector_arguments) == 2
+    assert {args.runtime_config for args in collector_arguments} == {
+        Path(worker["runtime_config"]) for worker in document["workers"]
+    }
+    assert {args.overrides[-1] for args in collector_arguments} == {
+        f"robot_namespace={worker['namespace']}" for worker in document["workers"]
+    }
     records = [
         json.loads(line)
-        for line in (
-            tree.repo / "var/synthetic_stack/logs/campaign/attempts.jsonl"
-        ).read_text().splitlines()
+        for line in (tree.repo / "var/synthetic_stack/logs/campaign/attempts.jsonl")
+        .read_text()
+        .splitlines()
     ]
     reserved = [item for item in records if item["event"] == "RESERVED"]
     assert len(reserved) == 2
     facts = [
-        json.loads((Path(item["attempt_dir"]) / "worker.json").read_text())
-        for item in reserved
+        json.loads((Path(item["attempt_dir"]) / "worker.json").read_text()) for item in reserved
     ]
     assert len({item["worker"] for item in facts}) == 2
     assert {item["domain_id"] for item in facts} == {"170", "171"}
     assert {item["scenario_id"] for item in facts} == {SCENARIO_ID}
-    assert {item["binding"] for item in facts} == {
-        sha(tree.scenario.binding_path)
-    }
+    assert {item["binding"] for item in facts} == {sha(tree.scenario.binding_path)}
     assert len({item["run_id_prefix"] for item in facts}) == 2
     assert len({item["output_root"] for item in facts}) == 2
     assert len({item["runtime_config"] for item in facts}) == 2
     summary = json.loads((manifest.parent / "summary.json").read_text())
     assert summary["qualified"] == summary["attempted"] == 2
-    assert summary["selection"]["binding"]["sha256"] == sha(
-        tree.scenario.binding_path
-    )
+    assert summary["selection"]["binding"]["sha256"] == sha(tree.scenario.binding_path)

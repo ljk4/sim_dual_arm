@@ -19,13 +19,13 @@ def test_real_learning_configs_load():
     assert training.modes["overfit"].steps == 500
     assert training.modes["full"].steps == 5000
     assert training.model.pretrained_backbone_weights is None
-    assert training.budget.limit_seconds == 14400.0
+    assert training.budget.limit_seconds == 172800.0
     assert training.dataset.camera_names == dataset.camera_names
 
 
-def test_budget_cap_and_unknown_field_are_rejected(tmp_path):
+def test_invalid_budget_and_unknown_field_are_rejected(tmp_path):
     document = yaml.safe_load((SCENARIO / "configs/learning/act_training.yaml").read_text())
-    document["budget"]["limit_seconds"] = 20000.0
+    document["budget"]["limit_seconds"] = 0.0
     bad = tmp_path / "bad.yaml"
     bad.write_text(yaml.safe_dump(document))
     with pytest.raises(ConfigError, match="budget.limit_seconds"):

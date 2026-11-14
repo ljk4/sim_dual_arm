@@ -18,7 +18,7 @@ from typing import Any
 
 import numpy as np
 
-from .checkpoints import CHECKPOINT_FORMAT, load_checkpoint, training_binding
+from .checkpoints import CHECKPOINT_FORMAT, load_checkpoint, validate_checkpoint_binding
 from .config import TrainingConfig
 from .dataset import canonical_hash, configure_local_caches, tree_hashes
 from .sample_filter import load_filter_mask
@@ -223,15 +223,12 @@ def _export_inputs(
     checkpoint = load_checkpoint(checkpoint_path)
     if checkpoint.get("format") != CHECKPOINT_FORMAT:
         raise BundleError("checkpoint format is not the trusted tool format")
-    if checkpoint.get("config_sha256") != config.sha256:
-        raise BundleError("checkpoint configuration hash does not match the training YAML")
     if not isinstance(checkpoint.get("model"), dict):
         raise BundleError("checkpoint has no model state dictionary")
+    validate_checkpoint_binding(checkpoint, config)
     sample_filter = None
     if config.sample_filter is not None:
         sample_filter = load_filter_mask(config.sample_filter)
-        if checkpoint.get("training_binding") != training_binding(config):
-            raise BundleError("checkpoint was not trained with this sample filter")
     return audit, checkpoint, sample_filter
 
 
@@ -287,10 +284,6 @@ def _copy_metadata(
     shutil.copy2(config.source, metadata / "training_config.yaml")
     if sample_filter is not None:
         _write_json(metadata / "sample_filter.json", sample_filter.document)
-    _write_json(
-        metadata / "train_stats_summary.json",
-        _json(processors / "train_stats_summary.json"),
-    )
     _write_json(
         metadata / "checkpoint.json",
         {
@@ -445,9 +438,7 @@ def _manifest_document(
             "root": "processors",
             "digest": processor_digest,
             "files": {
-                name: record
-                for name, record in files.items()
-                if name.startswith("processors/")
+                name: record for name, record in files.items() if name.startswith("processors/")
             },
         },
         "source": {
