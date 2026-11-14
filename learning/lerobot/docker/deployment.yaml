@@ -2,14 +2,12 @@
 # Mount sources, build settings and environment stay in docker-compose.yml and container.env.
 service: learning
 source:
-  mount: /workspace
-  scope: repository
+  mount: /app
+  scope: implementation
 mounts:
-  /workspace/var: writable
-  /workspace/build: writable
   /build: writable
   /data: writable
   /third_party: read-only
 networks: [learning]
 gpu: true
-commands: [convert, validate, filter, train, bundle, verify-bundle, budget, policy, test]
+commands: [test]

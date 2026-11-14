@@ -1,24 +1,20 @@
-# Runtime 容器构建与编排
+# Runtime 容器构建与使用
 
-- **`Dockerfile`**：基于 `ros:jazzy-ros-base-noble` 构建运行端环境，安装 `colcon`、MCAP、Pydantic、JSON Schema 及 `requirements-dev.txt` 中的依赖。不 `COPY` 业务源码或启动脚本，清空 `ENTRYPOINT` 并以 `CMD ["sleep", "infinity"]` 空闲启动。
-- **`docker-compose.yml`**：定义 `runtime` 服务（默认镜像 `sim-dual-arm/runtime:current`），加载 `../configs/container.env`，同时接入 `ros` 与 `learning` 网络（无需 GPU）。
+- **基础镜像**：`ros:jazzy-ros-base-noble`（空闲启动 `CMD ["sleep", "infinity"]`，不内置业务源码）。
+- **网络与资源**：接入 `ros` 与 `learning` 网络，无需 GPU。
 
 ## 常用操作
 
-首次启动前，在仓库根目录按[环境准备](../../../README.md#1-环境准备)创建输出目录。
+推荐使用仓库根目录 `./env.sh` 管理容器：
 
 ```bash
-cd runtime/ros2/docker
-docker compose build
-docker compose up -d
-docker compose exec runtime bash
+# 宿主机：构建并启动 runtime 容器，然后进入终端
+./env.sh up runtime
+./env.sh enter runtime
 
-# 在容器内构建 SDK 或运行测试：
-runtime/ros2/scripts/run.sh build-ros-sdk --shared-root /shared
-runtime/ros2/scripts/run.sh build-policy-sdk
-runtime/ros2/scripts/run.sh test -q tests/unit
+# 容器内：构建 SDK 或运行测试
+scripts/build_sdk.sh
+scripts/test.sh -q tests/unit
 ```
 
-`build-ros-sdk` 一次编译全部公共与方案扩展接口包至 `build/ros-dev`，切换方案无需重编；`build/`、`log/` 与 `COLCON_HOME` 位于 `/tmp` 临时目录，构建完成后输出根只保留 `install/` 与 `contracts.json`。
-
-目录导航：[上级目录](../README.md)
+> `scripts/build_sdk.sh` 会一次性编译公共与方案扩展 ROS 接口至 `build/ros-dev`，并生成 Policy SDK 至 `build/generated/policy-sdk`；切换方案无需重新编译。

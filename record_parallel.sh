@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Host-only Docker orchestration; business recording stays inside runtime.
 set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ "${PROJECT_CONTAINER:-0}" == "1" ]]; then
   printf '并行入口需要在宿主机执行，用于管理独立 simulation 容器。\n' >&2
   exit 2
 fi
-export PYTHONPATH="$SCRIPT_DIR/../ros/dual_arm_runtime${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH="$ROOT_DIR/runtime/ros2/ros/dual_arm_runtime${PYTHONPATH:+:$PYTHONPATH}"
 exec python3 -m dual_arm_runtime.offline.record_parallel "$@"

@@ -36,13 +36,25 @@ simulation backend ──ROS 2──▶ runtime ──gRPC──▶ learning pol
 git clone https://github.com/ljk4/sim_dual_arm.git
 cd sim_dual_arm
 
-# 首次启动容器前，以当前宿主机用户创建输出根目录
+# 首次启动容器前，以当前宿主机用户创建输出根目录（使用 ./env.sh 启动时会自动创建）
 mkdir -p build var
+```
+
+仓库根目录提供 [`env.sh`](env.sh) 统一管理 `runtime`、`simulation`、`learning` 三个 Docker 环境：
+
+```bash
+./env.sh <env>                # 构建、后台启动并进入容器 bash（up -d --build + exec）
+./env.sh up <env>             # 仅构建并后台启动容器
+./env.sh exec <env> [cmd...]  # 进入已运行的容器执行命令（默认 bash）
+./env.sh stop <env>           # 停止指定环境容器
+./env.sh rm <env>             # 停止并删除指定环境容器
+./env.sh viewer [args...]     # 启动 MuJoCo 实时可视化（默认 panda_stack teacher）
+./env.sh ps                   # 查看当前项目所有容器状态
 ```
 
 `build/` 存放生成的 SDK、构建结果和缓存，`var/` 存放运行日志、录制、数据集、模型与台账。两者整体由 Git 忽略，不提交空目录或 `.gitkeep`；各构建和运行命令按需创建子目录。首次启动前由宿主机用户创建这两个根目录，避免 Docker 自动创建后归 root 所有；UID/GID 应与 Compose 中的运行用户一致。
 
-runtime/learning 容器内 `/build` 与 `/workspace/build` 指向宿主机同一个 `build/`；`/data` 与 `/workspace/var` 指向同一个 `var/`。前者供容器工具使用，后者供项目相对路径使用。simulation 仅挂载所需的 SDK 与 `/data`。更新挂载配置后，重新执行对应服务的 `docker compose up -d` 使配置生效。
+三端容器统一将各自的实现目录只读挂载为 `/app`（`working_dir: /app`），公共目录 `shared/` 只读挂载为 `/shared`，运行输出 `var/` 挂载为 `/data`；runtime/learning 额外将 `build/` 挂载为 `/build`，simulation 仅只读挂载所需的 `build/ros-dev` 至 `/opt/ros-dev`。更新挂载配置后，重新执行 `./env.sh up <env>` 使配置生效。
 
 所有运行期产物按方案归入 `var/<scenario-id>/`（容器 `/data/<scenario-id>/`），任务目录内严格分为四个平级目录：
 
@@ -68,20 +80,16 @@ var/<scenario-id>/
 
 ### 2.1 启动 Runtime 容器并构建 SDK
 
-构建并后台启动 `runtime` 容器：
+构建、后台启动并进入 `runtime` 容器：
 
 ```bash
-docker compose -f runtime/ros2/docker/docker-compose.yml build
-docker compose -f runtime/ros2/docker/docker-compose.yml up -d
-docker compose -f runtime/ros2/docker/docker-compose.yml exec runtime bash
+./env.sh runtime
 ```
 
-在 `runtime` 容器内生成 ROS 2 接口工作空间与 Policy Protobuf/gRPC SDK：
+在 `runtime` 容器内一条命令生成 ROS 2 接口工作空间与 Policy Protobuf/gRPC SDK：
 
 ```bash
-cd /workspace
-runtime/ros2/scripts/run.sh build-ros-sdk --shared-root /shared
-runtime/ros2/scripts/run.sh build-policy-sdk
+scripts/build_sdk.sh
 ```
 
 ### 2.2 启动 Simulation 容器与试采示教后端
@@ -89,27 +97,21 @@ runtime/ros2/scripts/run.sh build-policy-sdk
 在宿主机新终端中构建并进入 `simulation` 容器：
 
 ```bash
-docker compose -f simulation/mujoco/docker/docker-compose.yml build
-docker compose -f simulation/mujoco/docker/docker-compose.yml up -d
-docker compose -f simulation/mujoco/docker/docker-compose.yml exec simulation bash
+./env.sh simulation
 ```
 
-在 `simulation` 容器内直接以方案启动示教后端：
+在 `simulation` 容器内直接以方案启动示教后端（默认 `--scenario panda_stack --seed 0 --run-id teacher-backend`，启动时会打印所用配置文件路径与完整生效参数）：
 
 ```bash
-cd /app
-scripts/run.sh backend \
-  --scenario panda_stack --role teacher \
-  --seed 0 --run-id teacher-backend
+scripts/teacher_backend.sh
 ```
 
-`--scenario` 会在内存中读取 `binding.yaml`、展开配方路径并写入本次实际生效的快照 `/data/panda_stack/logs/backend/teacher-backend/backend.yaml`；运行日志位于 `/data/panda_stack/logs/backend/teacher-backend/log`。`--run-id teacher-backend` 同时是 runtime 端 `record.sh` 的默认后端日志位置，单路试采无需再指定 `--backend-log`。
+`teacher_backend.sh` 会在内存中读取 `binding.yaml`、展开配方路径、打印配置路径与详细参数，并写入本次实际生效的快照 `/data/panda_stack/logs/backend/teacher-backend/backend.yaml`；运行日志位于 `/data/panda_stack/logs/backend/teacher-backend/log`。`--run-id teacher-backend` 同时是 runtime 端 `record.sh` 的默认后端日志位置，单路试采无需再指定 `--backend-log`。
 
-需要临时调参时追加 `--set`，例如降低仿真速度：
+需要切换方案或临时调参时可追加参数，例如降低仿真速度：
 
 ```bash
-scripts/run.sh backend --scenario panda_stack --role teacher \
-  --seed 0 --run-id teacher-backend --set run.realtime_speed=0.4
+scripts/teacher_backend.sh --scenario panda_stack --seed 0 --run-id teacher-backend --set run.realtime_speed=0.4
 ```
 
 ### 2.3 试采时开启实时 MuJoCo 可视化（可选）
@@ -117,26 +119,17 @@ scripts/run.sh backend --scenario panda_stack --role teacher \
 `viewer` 独立订阅后端发布的只读物理状态快照，不参与物理步进与控制。它同样直接接受 `--scenario`（或直接 `--config`）。在宿主机桌面环境下（若报 X11 权限错误，先在宿主机执行 `xhost +SI:localuser:$(id -un)`）：
 
 ```bash
-cd simulation/mujoco/docker
-docker compose run --rm \
-  -e DISPLAY="$DISPLAY" \
-  -e XAUTHORITY=/tmp/.Xauthority \
-  -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
-  -v "${XAUTHORITY:-/dev/null}:/tmp/.Xauthority:ro" \
-  simulation scripts/run.sh viewer \
-  --scenario panda_stack --role teacher
+# 默认启动 panda_stack teacher 视角；也可透传参数，如 ./env.sh viewer --scenario panda_stack --role policy
+./env.sh viewer
 ```
 
 ### 2.4 单路试采一次，确认完整链路
 
-回到 `runtime` 容器终端，使用刚启动的手动 teacher backend 试采一次。试采指定 `pilot`，不占用正式 50 条的名额：
+回到 `runtime` 容器终端，使用刚启动的手动 teacher backend 试采一次。试采指定 `pilot`，不占用正式 50 条的名额（`scripts/record.sh` 会在目录不存在时自动创建、已有台账时默认增量追加，并在启动后自动打印所用配置文件路径、详细参数与当前 campaign 状态）：
 
 ```bash
-mkdir -p /data/panda_stack/logs/campaign /data/panda_stack/datasets
-runtime/ros2/scripts/run.sh campaign --scenario panda_stack status
-
 # 只试一次：合格即结束，失败也立即结束
-runtime/ros2/scripts/record.sh \
+scripts/record.sh \
   --scenario panda_stack --purpose pilot --count 1 --max-consecutive-failures 1
 ```
 
@@ -153,7 +146,7 @@ runtime/ros2/scripts/record.sh \
 在**宿主机新终端的项目根目录**执行：
 
 ```bash
-runtime/ros2/scripts/record_parallel.sh \
+./record_parallel.sh \
   --scenario panda_stack --purpose formal --target-total 50 \
   --workers auto --max-consecutive-failures 3
 ```
@@ -164,25 +157,15 @@ runtime/ros2/scripts/record_parallel.sh \
 
 并行 worker 禁用 viewer 状态发布、预览 PNG 和 GIF，保留训练 RGB、标签及质量门禁。连续失败按完成顺序计数，合格一次清零；连续 3 次不合格会取消在途任务并提前退出，取消项仍占预算。预算/种子不足也会停止。按 `Ctrl-C` 可中断本批次；命令结束时自动清理本批次后台实例。配置、backend 日志和性能汇总保存到 `var/panda_stack/logs/record-pools/pool-*/`。
 
-### 2.7 训练/验证清单
+### 2.7 查看数据集与训练/验证清单状态
 
-正式台账累计达标并正常结束时（`reason=target_reached`），采集入口会自动原子写出 `var/panda_stack/datasets/formal-select.json`，无需手动重定向。回到 **runtime 容器终端**检查状态：
-
-```bash
-cd /workspace
-runtime/ros2/scripts/run.sh campaign --scenario panda_stack status
-```
-
-清单中的 `status` 应为 `SELECTED`、`qualified` 应为 50。它只选择合格的 formal 数据，自动划分为 45 条训练 / 5 条验证，排除 pilot 试采。
-
-如需在手动重新筛选后刷新该文件（例如补齐数据或修改了 campaign 规则），使用：
+正式台账累计达标并正常结束时（`reason=target_reached`），采集入口会自动原子写出 `var/panda_stack/datasets/formal-select.json`，无需手动重定向。回到 **runtime 容器终端**即可查看当前数据集、磁盘占用与训练/验证清单划分状态（默认 `--scenario panda_stack`）：
 
 ```bash
-runtime/ros2/scripts/run.sh campaign --scenario panda_stack select \
-  --output /data/panda_stack/datasets/formal-select.json
+scripts/record.sh status --scenario panda_stack
 ```
 
-`select --output` 只在筛选结果为 `SELECTED` 时原子替换目标文件；数据不足时返回非零且不改动已有清单。
+确认清单状态显示为 `SELECTED`（训练 45 条 / 验证 5 条，自动排除 `pilot` 试采）后，即可进入第 3 节的转换与训练。
 
 ---
 
@@ -193,9 +176,7 @@ runtime/ros2/scripts/run.sh campaign --scenario panda_stack select \
 在宿主机新终端中构建并进入 `learning` 容器：
 
 ```bash
-docker compose -f learning/lerobot/docker/docker-compose.yml build
-docker compose -f learning/lerobot/docker/docker-compose.yml up -d
-docker compose -f learning/lerobot/docker/docker-compose.yml exec learning bash
+./env.sh learning
 ```
 
 ### 3.2 转换数据集与训练 ACT 模型
@@ -203,8 +184,7 @@ docker compose -f learning/lerobot/docker/docker-compose.yml exec learning bash
 在 `learning` 容器内将正式清单中的 50 条合格 episode 转换为 LeRobot 数据集（45 条训练 / 5 条验证，输出至 `/data/panda_stack/datasets/panda_stack_learning_v1`）。转换配方直接读取 `/data/panda_stack/datasets/formal-select.json`，无需移动原始数据：
 
 ```bash
-cd /workspace
-learning/lerobot/scripts/run.sh convert --scenario panda_stack
+scripts/convert.sh --scenario panda_stack
 ```
 
 转换时终端只显示配置、日志路径和原地刷新的进度，包括已完成条数、百分比、用时和预计剩余时间；编码器等详细输出写入日志。训练使用同样的显示方式，额外显示 step、loss 和验证状态。重定向输出时仅保留阶段摘要，避免生成大量进度行。可用 `--log-file /data/panda_stack/logs/convert/<文件名>.log` 指定详细日志；需要原始输出和 JSON 结果时添加 `--no-progress`。
@@ -214,14 +194,14 @@ learning/lerobot/scripts/run.sh convert --scenario panda_stack
 启动完整模式训练（默认启用 PyAV 视频解码、张量批处理、多进程预取与 CUDA bfloat16 混合精度）：
 
 ```bash
-learning/lerobot/scripts/run.sh train --scenario panda_stack --mode full
+scripts/train.sh --scenario panda_stack --mode full
 ```
 
 训练完成后，记录终端输出的 `run_dir` 并导出可部署的 safetensors 模型包（Bundle）：
 
 ```bash
 TRAIN_RUN="/data/panda_stack/models/runs/<实际生成的-run-目录名>"
-learning/lerobot/scripts/run.sh bundle \
+scripts/bundle.sh \
   --scenario panda_stack --mode full \
   --run "$TRAIN_RUN" \
   --output /data/panda_stack/models/bundles/stack-act
@@ -232,21 +212,20 @@ learning/lerobot/scripts/run.sh bundle \
 在 `learning` 容器内用 Bundle 直接启动 gRPC Policy 服务；`--scenario` 读取方案绑定的 `policy_service` 配方与机器人档案，`--bundle` 覆盖 `models.bundle`：
 
 ```bash
-learning/lerobot/scripts/run.sh policy \
+scripts/policy.sh \
   --scenario panda_stack \
   --bundle /data/panda_stack/models/bundles/stack-act
 ```
 
-服务默认监听 `50051`，日志目录为 `/data/panda_stack/logs/policy-service`（可用 `--log-directory` 或环境变量 `ACT_LOG_DIRECTORY` 修改）。保持该终端运行。若本机尚未生成 Policy SDK，先在 runtime 容器执行 `runtime/ros2/scripts/run.sh build-policy-sdk`。
+服务默认监听 `50051`，日志目录为 `/data/panda_stack/logs/policy-service`（可用 `--log-directory` 或环境变量 `ACT_LOG_DIRECTORY` 修改）。保持该终端运行。若本机尚未生成 Policy SDK，先在 runtime 容器执行 `scripts/build_sdk.sh`。
 
 ### 3.4 直接启动推理仿真后端
 
 回到 `simulation` 容器，用同一 Bundle 以 policy 角色启动后端：
 
 ```bash
-cd /app
-scripts/run.sh backend \
-  --scenario panda_stack --role policy \
+scripts/policy_backend.sh \
+  --scenario panda_stack \
   --bundle /data/panda_stack/models/bundles/stack-act \
   --seed 20000 --run-id policy-backend
 ```
@@ -258,16 +237,16 @@ scripts/run.sh backend \
 回到 `runtime` 容器，直接以方案启动一局交互式闭环（自动生成或使用指定 `run-id`，输入 `y` 复位环境并执行一局，结束后保持 IDLE 直至 `Ctrl-C` 退出）：
 
 ```bash
-runtime/ros2/scripts/run.sh interactive \
+scripts/interactive.sh \
   --scenario panda_stack \
   --bundle /data/panda_stack/models/bundles/stack-act \
   --seed 20000 --run-id policy-interactive
 ```
 
-非交互式单局执行使用 `policy`，录制默认落到 `/data/<scenario-id>/logs/recordings/<run-id>`；需要另选位置时再显式传 `--output`：
+非交互式单局执行使用 `scripts/policy.sh`，录制默认落到 `/data/<scenario-id>/logs/recordings/<run-id>`；需要另选位置时再显式传 `--output`：
 
 ```bash
-runtime/ros2/scripts/run.sh policy \
+scripts/policy.sh \
   --scenario panda_stack \
   --bundle /data/panda_stack/models/bundles/stack-act \
   --reset-seed 20000 --run-id policy-run
@@ -276,10 +255,19 @@ runtime/ros2/scripts/run.sh policy \
 后续测试不同随机种子时，直接传入新的种子即可，无需重新生成任何配置：
 
 ```bash
-runtime/ros2/scripts/run.sh interactive \
+scripts/interactive.sh \
   --scenario panda_stack \
   --bundle /data/panda_stack/models/bundles/stack-act \
   --seed 20001 --run-id policy-interactive-2
+```
+
+如需无人工干预批量仿真推理测试（仅支持 MuJoCo 仿真后端且禁止可视化，启动时打印配置与参数，结束后输出成功率与报告路径）：
+
+```bash
+scripts/batch_policy.sh \
+  --scenario panda_stack \
+  --bundle /data/panda_stack/models/bundles/stack-act \
+  --count 20 --seed-start 20000
 ```
 
 ### 3.6 用 `--set` 调参与采集产物
@@ -288,20 +276,19 @@ runtime/ros2/scripts/run.sh interactive \
 
 ```bash
 # simulation：降低仿真速度
-scripts/run.sh backend --scenario panda_stack --role teacher \
-  --run-id teacher-slow --set run.realtime_speed=0.4
+scripts/teacher_backend.sh --run-id teacher-slow --set run.realtime_speed=0.4
 
 # runtime：放宽观测最大年龄（该键由观测档案派生，也可覆盖）
-runtime/ros2/scripts/run.sh interactive --scenario panda_stack \
+scripts/interactive.sh --scenario panda_stack \
   --bundle /data/panda_stack/models/bundles/stack-act \
   --run-id policy-fast --set observation.max_age_ns=200000000
 
 # learning：只运行 smoke 预算并指定轮次数
-learning/lerobot/scripts/run.sh train --scenario panda_stack \
+scripts/train.sh --scenario panda_stack \
   --mode smoke --set modes.smoke.steps=64
 
 # 采集：为每次尝试追加运行时覆盖
-runtime/ros2/scripts/record.sh --scenario panda_stack --purpose pilot --count 1 \
+scripts/record.sh --scenario panda_stack --purpose pilot --count 1 \
   --set observation.max_age_ns=250000000
 ```
 
@@ -346,24 +333,23 @@ var/panda_stack/
 
 ```bash
 # simulation：示教后端
-scripts/run.sh backend --scenario marvin_handover --role teacher \
-  --seed 0 --run-id teacher-backend
+scripts/teacher_backend.sh --scenario marvin_handover --seed 0 --run-id teacher-backend
 
 # runtime：试采
-runtime/ros2/scripts/record.sh --scenario marvin_handover \
+scripts/record.sh --scenario marvin_handover \
   --purpose pilot --count 1 --max-consecutive-failures 1
 
 # learning：转换与训练（诊断配方）
-learning/lerobot/scripts/run.sh convert --scenario marvin_handover
-learning/lerobot/scripts/run.sh train --scenario marvin_handover --mode smoke
+scripts/convert.sh --scenario marvin_handover
+scripts/train.sh --scenario marvin_handover --mode smoke
 
 # 推理：learning 策略服务、simulation 后端、runtime 交互闭环
-learning/lerobot/scripts/run.sh policy --scenario marvin_handover \
+scripts/policy.sh --scenario marvin_handover \
   --bundle /data/marvin_handover/models/bundles/<bundle>
-scripts/run.sh backend --scenario marvin_handover --role policy \
+scripts/policy_backend.sh --scenario marvin_handover \
   --bundle /data/marvin_handover/models/bundles/<bundle> \
   --seed 5100 --run-id policy-backend
-runtime/ros2/scripts/run.sh interactive --scenario marvin_handover \
+scripts/interactive.sh --scenario marvin_handover \
   --bundle /data/marvin_handover/models/bundles/<bundle> \
   --seed 5100 --run-id policy-interactive
 ```

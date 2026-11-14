@@ -34,7 +34,7 @@ def test_two_independent_datasets_train_only_processors_and_padding(tmp_path):
     select = make_select(tmp_path, config, first_frames=61)
     log = tmp_path / "convert.log"
     result = subprocess.run(
-        ["bash", str(ROOT / "learning/lerobot/scripts/run.sh"), "convert",
+        ["bash", str(ROOT / "learning/lerobot/scripts/convert.sh"),
          "--config", str(SCENARIO / "configs/learning/act_dataset.yaml"),
          "--select", str(select), "--output-root", str(config.output_root),
          "--synthetic", "--log-file", str(log)],

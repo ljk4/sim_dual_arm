@@ -213,8 +213,43 @@ class RecordingPool:
             self.completed(result)
             return
         self.active.append(ActiveRecording(attempt, worker, process, console, time.monotonic()))
-        print(json.dumps({"event": "recording.started", "seed": attempt.seed,
-                          "worker": worker["id"], "attempt_id": attempt.attempt_id}), flush=True)
+        self._render_progress()
+
+    def _is_tty(self) -> bool:
+        return sys.stdout.isatty() or os.environ.get("RECORD_PROGRESS_TTY") == "1"
+
+    def _format_duration(self, seconds: float) -> str:
+        total = max(0, int(seconds))
+        minutes, secs = divmod(total, 60)
+        hours, minutes = divmod(minutes, 60)
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}" if hours else f"{minutes:02d}:{secs:02d}"
+
+    def _render_progress(self, *, force: bool = False) -> None:
+        is_tty = self._is_tty()
+        if not is_tty and not force:
+            return
+        total = max(1, self.args.count)
+        ratio = min(1.0, self.qualified / total)
+        width = 20
+        filled = int(width * ratio)
+        bar = "█" * filled + "░" * (width - filled)
+        elapsed = time.monotonic() - self.started
+        eta = (
+            self._format_duration(elapsed * (total - self.qualified) / self.qualified)
+            if self.qualified > 0 and self.qualified < total
+            else "--:--"
+        )
+        line = (
+            f"并行采集 [{bar}] {self.qualified}/{self.args.count} ({int(ratio * 100)}%) "
+            f"| 在途 {len(self.active)} | 已尝试 {self.attempted} "
+            f"| 连败 {self.consecutive_failures}/{self.args.max_consecutive_failures} "
+            f"| 用时 {self._format_duration(elapsed)} | 预计剩余 {eta}"
+        )
+        if is_tty:
+            sys.stdout.write(f"\r\033[K{line}")
+            sys.stdout.flush()
+        else:
+            print(line, flush=True)
 
     def completed(self, result: dict[str, Any]) -> None:
         if result["qualified"]:
@@ -222,24 +257,17 @@ class RecordingPool:
             self.consecutive_failures = 0
         else:
             self.consecutive_failures += 1
-        print(
-            f"并行录制：合格 {self.qualified}/{self.args.count}，已尝试 {self.attempted} 次，"
-            f"连续失败 {self.consecutive_failures}/{self.args.max_consecutive_failures}",
-            flush=True,
-        )
+        self._render_progress()
         if self.consecutive_failures >= self.args.max_consecutive_failures:
             self.reason, self.exit_code = "consecutive_failures", 1
 
     def finish(self, active: ActiveRecording, code: int, failure: str = "") -> None:
         self.active.remove(active)
         active.console.close()
-        event, result, raw_bytes = campaign._finish_attempt(
+        _, result, _ = campaign._finish_attempt(
             self.ledger, active.attempt, self.config, code,
             time.monotonic() - active.started, failure,
         )
-        print(json.dumps({"event": event, "attempt_id": active.attempt.attempt_id,
-                          "worker": active.worker["id"], "raw_bytes": raw_bytes,
-                          **result}, sort_keys=True), flush=True)
         self.completed(result)
 
     def cancel_active(self) -> None:
@@ -298,6 +326,10 @@ class RecordingPool:
             self.reason, self.exit_code = "interrupted", 130
         finally:
             self.cancel_active()
+        self._render_progress(force=not self._is_tty())
+        if self._is_tty():
+            sys.stdout.write("\n")
+            sys.stdout.flush()
         elapsed = time.monotonic() - self.started
         summary = {
             "event": "recording.finished", "reason": self.reason,

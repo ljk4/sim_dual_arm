@@ -11,6 +11,6 @@
 
 - 方案选择由各方案目录下的 `binding.yaml` 声明，数值仍只维护在对应 recipe。
 - 跨端共享的控制限值、受限跟随与流式超时配置集中维护在各方案 `profiles/control/`。
-- `scripts/run.sh backend` / `viewer` 启动时按 `--scenario` 在内存中展开配方，不生成额外的准备目录。
+- `scripts/backend.sh` / `scripts/viewer.sh` 启动时按 `--scenario` 在内存中展开配方，不生成额外的准备目录。
 
 目录导航：[上级目录](../README.md)

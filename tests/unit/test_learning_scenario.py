@@ -282,30 +282,29 @@ def test_help_and_parse_do_not_load_scenario(tmp_path):
     assert error.value.code == 0
 
 
-def test_run_sh_forwards_selection_without_implicit_defaults(tmp_path):
+def test_scripts_forward_selection_without_implicit_defaults(tmp_path):
     scenario = [
-        "convert",
         "--scenario",
         "synthetic_stack",
         "--shared-root",
         str(tmp_path / "shared"),
     ]
-    arguments = _run_dispatcher(tmp_path, *scenario)
+    arguments = _run_dispatcher(tmp_path, "convert.sh", *scenario)
     assert "--scenario" in arguments
     assert "--config" not in arguments
 
     arguments = _run_dispatcher(
-        tmp_path, "convert", "--config", "/custom/dataset.yaml"
+        tmp_path, "convert.sh", "--config", "/custom/dataset.yaml"
     )
     assert arguments.count("--config") == 1
     assert "/custom/dataset.yaml" in arguments
 
-    arguments = _run_dispatcher(tmp_path, "convert")
+    arguments = _run_dispatcher(tmp_path, "convert.sh")
     assert "--config" not in arguments
 
     arguments = _run_dispatcher(
         tmp_path,
-        "policy",
+        "policy_backend.sh",
         "--scenario",
         "synthetic_stack",
         "--shared-root",

@@ -9,19 +9,17 @@
 
 ## 执行方式
 
-所有测试通过各端容器内的 `scripts/run.sh test`（底层调用 [`shared/common/tools/scripts/test.sh`](../shared/common/tools/scripts/test.sh)，固定设置 `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`）执行：
+所有测试通过各端容器内的 `scripts/test.sh`（底层调用 [`shared/common/tools/scripts/test.sh`](../shared/common/tools/scripts/test.sh)，固定设置 `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`）执行：
 
 ```bash
 # 在 runtime 容器内运行单元测试与 ROS 集成测试：
-runtime/ros2/scripts/run.sh test -q tests/unit
+scripts/test.sh -q tests/unit
 
 # 在 learning 容器内运行学习端单元测试：
-learning/lerobot/scripts/run.sh test -q tests/unit
+scripts/test.sh -q tests/unit
 
-# 在 simulation 容器内运行仿真端测试或环境/场景/运动学检查：
-scripts/run.sh environment --run-id env-001
-scripts/run.sh scene --run-id scene-001
-scripts/run.sh kinematics --run-id kin-001
+# 在 simulation 容器内运行仿真端测试：
+scripts/test.sh -q tests/unit
 ```
 
 测试产生的临时文件与缓存输出至 `build/` 或 `var/`，不写入源码目录。

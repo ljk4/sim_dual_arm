@@ -519,8 +519,7 @@ def test_act_entry_loads_warms_logs_and_shuts_down_cleanly(bundle, tmp_path):
     process = subprocess.Popen(
         [
             "bash",
-            str(ROOT / "learning/lerobot/scripts/run.sh"),
-            "policy",
+            str(ROOT / "learning/lerobot/scripts/policy_backend.sh"),
             "--config",
             str(config_path),
             "--log-directory",

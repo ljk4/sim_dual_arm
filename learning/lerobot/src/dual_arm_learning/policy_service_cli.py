@@ -285,6 +285,14 @@ def main(argv: list[str] | None = None) -> int:
             if args.overrides:
                 overrides["set"] = {"value": list(args.overrides), "source": "argument"}
         stage = "load_warm"
+        print("=== Policy 服务配置与详细参数 ===", flush=True)
+        if selection is not None:
+            print(f"方案 (scenario): {selection.binding.scenario_id}", flush=True)
+            print(f"Binding 文件:    {selection.path}", flush=True)
+        print(f"配置文件路径:    {config_path.resolve()}", flush=True)
+        print("--- 详细参数 ---", flush=True)
+        print(json.dumps(config.to_document(), indent=2, ensure_ascii=False), flush=True)
+        print("================================", flush=True)
         adapter = load_act_adapter(config)
         summary = deployment_summary(config)
         startup = _scalar_fields(

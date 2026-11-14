@@ -10,9 +10,18 @@ import sys
 import time
 from pathlib import Path
 
+import yaml
+
 from dual_arm_runtime.artifact_paths import default_backend_log
 from dual_arm_runtime.offline import campaign
-from dual_arm_runtime.offline.campaign_ledger import CampaignError, Ledger, attempts, finished, load
+from dual_arm_runtime.offline.campaign_ledger import (
+    CampaignError,
+    Ledger,
+    attempts,
+    finished,
+    load,
+    summarize,
+)
 from dual_arm_runtime.offline.collect_attempt import check_ros_sdk
 from dual_arm_runtime.offline.scenario_selection import select_collection
 
@@ -198,9 +207,115 @@ def record(args: argparse.Namespace, config: dict, ledger: Ledger) -> int:
     return exit_code
 
 
-def main(argv: list[str] | None = None) -> int:
-    cli = parser()
+def _print_status(args: argparse.Namespace, config: dict, ledger: Ledger) -> None:
+    paths = config["paths"]
+    output = (args.project_root / str(paths["attempts_root"])).resolve()
+    summary = summarize(ledger.records(), config, output)
+    target = int(config["budget"]["formal_target_qualified"])
+    formal = summary["purposes"].get("formal", {})
+    pilot = summary["purposes"].get("pilot", {})
+    formal_qualified = int(formal.get("qualified", 0))
+    remaining = max(0, target - formal_qualified)
+    used_mb = summary["raw_bytes"] / (1024 * 1024)
+    limit_mb = summary["raw_limit_bytes"] / (1024 * 1024)
+    title = args.selection["scenario_id"] if args.selection is not None else "direct"
+    print(f"=== 数据集与采集状态 ({title}) ===", flush=True)
+    print(
+        f"正式采集 (formal): 合格 {formal_qualified}/{target} 条（还差 {remaining} 条），"
+        f"总尝试 {formal.get('reserved_attempts', 0)} 次"
+        f"（已结束 {formal.get('terminal_attempts', 0)}，进行中/异常 {formal.get('running_or_crashed', 0)}）",
+        flush=True,
+    )
+    print(
+        f"试采验证 (pilot):  合格 {pilot.get('qualified', 0)} 条，"
+        f"总尝试 {pilot.get('reserved_attempts', 0)} 次（不计入正式训练清单）",
+        flush=True,
+    )
+    print(f"磁盘占用:          {used_mb:.1f} MB / {limit_mb:.1f} MB", flush=True)
+    formal_select_rel = paths.get("formal_select")
+    if formal_select_rel:
+        formal_select_path = (args.project_root / formal_select_rel).resolve()
+        if formal_select_path.is_file():
+            doc = json.loads(formal_select_path.read_text(encoding="utf-8"))
+            status = doc.get("status", "UNKNOWN")
+            train_n = len(doc.get("training", []))
+            val_n = len(doc.get("validation", []))
+            print(
+                f"训练/验证清单:     {status}（训练 {train_n} 条 / 验证 {val_n} 条）-> {formal_select_path}",
+                flush=True,
+            )
+        else:
+            print(
+                f"训练/验证清单:     未生成（正式合格达 {target} 条后自动生成于 {formal_select_path}）",
+                flush=True,
+            )
+    print("======================================", flush=True)
+
+
+def _print_startup_info(args: argparse.Namespace, config: dict, ledger: Ledger) -> None:
+    print("=== Record 配置与状态摘要 ===", flush=True)
+    if args.selection is not None:
+        print(f"方案 (scenario):   {args.selection['scenario_id']}", flush=True)
+        print(f"Binding 文件:      {args.selection['binding']['path']}", flush=True)
+    print(f"Campaign 配置:     {(args.project_root / args.config).resolve()}", flush=True)
+    print(f"Runtime 配置:      {(args.project_root / args.runtime_config).resolve()}", flush=True)
+    print(f"Backend 日志目录:  {args.backend_log}", flush=True)
+    print(
+        f"采集参数:          purpose={args.purpose}, count={args.count}, "
+        f"max_consecutive_failures={args.max_consecutive_failures}, "
+        f"no_previews={args.no_previews}, overrides={args.overrides}",
+        flush=True,
+    )
+    print("--- Campaign 详细参数 ---", flush=True)
+    print(yaml.safe_dump(config, sort_keys=False, allow_unicode=True), end="", flush=True)
+    _print_status(args, config, ledger)
+
+
+def _status_command(argv: list[str]) -> int:
+    cli = argparse.ArgumentParser(
+        prog="scripts/record.sh status",
+        description="Show human-readable dataset and campaign status.",
+    )
+    cli.add_argument("--project-root", type=Path, default=ROOT)
+    cli.add_argument("--scenario", default=None)
+    cli.add_argument("--shared-root", type=Path)
+    cli.add_argument("--config", help="direct campaign recipe (conflicts with --scenario)")
     args = cli.parse_args(argv)
+    args.project_root = args.project_root.resolve()
+    if args.scenario is None and args.config is None:
+        args.scenario = "panda_stack"
+    try:
+        if args.scenario is not None:
+            if args.config is not None:
+                cli.error("--scenario cannot be combined with --config")
+            selection = select_collection(
+                scenario=args.scenario,
+                shared_root=args.shared_root,
+                project_root=args.project_root,
+                require_parallel=False,
+            )
+            args.config = selection["recipes"]["campaign"]["path"]
+            args.selection = selection
+        else:
+            if args.shared_root is not None:
+                cli.error("--shared-root requires --scenario")
+            args.selection = None
+        config = load(args.project_root / args.config)
+        paths = config["paths"]
+        ledger = Ledger(args.project_root / paths["ledger"], args.project_root / paths["lock"])
+        _print_status(args, config, ledger)
+        return 0
+    except (CampaignError, OSError, ValueError) as error:
+        print(f"status error: {error}", file=sys.stderr)
+        return 2
+
+
+def main(argv: list[str] | None = None) -> int:
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    if raw_argv and raw_argv[0] == "status":
+        return _status_command(raw_argv[1:])
+    cli = parser()
+    args = cli.parse_args(raw_argv)
     if args.target_total is not None and args.worker_manifest is None:
         cli.error("--target-total is supported through record_parallel.sh")
     args.project_root = args.project_root.resolve()
@@ -216,7 +331,12 @@ def main(argv: list[str] | None = None) -> int:
         if code:
             return code
         paths = config["paths"]
+        if "formal_select" in paths:
+            (args.project_root / paths["formal_select"]).parent.mkdir(
+                parents=True, exist_ok=True
+            )
         ledger = Ledger(args.project_root / paths["ledger"], args.project_root / paths["lock"])
+        _print_startup_info(args, config, ledger)
         return record(args, config, ledger)
     except (CampaignError, OSError) as error:
         print(json.dumps({"error": str(error)}), file=sys.stderr)

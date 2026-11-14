@@ -6,17 +6,15 @@ services:
     image: sim-dual-arm/runtime:current
     build: .
     user: "1000:1000"
-    working_dir: /workspace
+    working_dir: /app
     init: true
     restart: "no"
     stop_grace_period: 20s
     pull_policy: never
     env_file: ../configs/container.env
     volumes:
-      - ../../../:/workspace:ro
+      - ../:/app:ro
       - ../../../shared:/shared:ro
-      - ../../../var:/workspace/var
-      - ../../../build:/workspace/build
       - ../../../build:/build
       - ../../../var:/data
     networks: [ros, learning]

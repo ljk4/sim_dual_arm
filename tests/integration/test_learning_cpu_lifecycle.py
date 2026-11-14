@@ -59,9 +59,20 @@ def test_public_act_training_resume_and_bundle_use_real_model(tmp_path):
     config.write_text(yaml.safe_dump(document))
 
     def cli(*arguments, operator=False):
+        if operator:
+            assert arguments[0] == "train"
+            command = ["bash", str(ROOT / "learning/lerobot/scripts/train.sh"), *arguments[1:]]
+        else:
+            command = [
+                sys.executable,
+                "-m",
+                "dual_arm_learning.cli",
+                "--project-root",
+                str(ROOT),
+                *arguments,
+            ]
         result = subprocess.run(
-            ["bash", str(ROOT / "learning/lerobot/scripts/run.sh"),
-             *([] if operator else ["cli"]), *arguments],
+            command,
             capture_output=True,
             text=True,
             timeout=180,

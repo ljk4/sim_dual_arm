@@ -32,7 +32,7 @@ from sdk_packages import (
 
 MARKER_NAME = "contracts.json"
 MARKER_SCHEMA_VERSION = 2
-BUILD_COMMAND = "run.sh build-ros-sdk inside the runtime container"
+BUILD_COMMAND = "scripts/build_sdk.sh inside the runtime container"
 
 
 def environment_record() -> dict[str, object]:

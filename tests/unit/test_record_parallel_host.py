@@ -117,14 +117,15 @@ def test_already_reached_target_does_not_start_simulation_workers(tmp_path, monk
 
 def test_host_container_path_mapping_is_explicit(tmp_path):
     root = tmp_path
-    assert record_parallel.host_path_to_container("shared/x", root) == "/workspace/shared/x"
-    assert record_parallel.host_path_to_container(root / "var/y", root) == "/workspace/var/y"
+    assert record_parallel.host_path_to_container("shared/x", root) == "/shared/x"
+    assert record_parallel.host_path_to_container(root / "var/y", root) == "/data/y"
+    assert record_parallel.host_path_to_container(root / "runtime/ros2/z", root) == "/app/z"
     assert record_parallel.container_path_to_host("/data/y", root) == (root / "var/y").resolve()
     assert record_parallel.container_path_to_host("/shared/z", root) == (
         root / "shared/z"
     ).resolve()
-    assert record_parallel.container_path_to_host("/workspace/w", root) == (
-        root / "w"
+    assert record_parallel.container_path_to_host("/app/w", root) == (
+        root / "runtime/ros2/w"
     ).resolve()
     assert record_parallel.shared_root_to_container(None, root) == "/shared"
     with pytest.raises(ValueError, match="outside the mounted project root"):
@@ -271,9 +272,9 @@ def test_preflight_command_converts_host_paths(tmp_path):
         overrides=[],
     )
     command = record_parallel.DockerWorkers(args, tmp_path / "pool").preflight_command()
-    assert "/workspace/shared/scenarios/x/campaign.yaml" in command
-    assert "/workspace/shared/scenarios/x/runtime.yaml" in command
-    assert "/workspace/shared/scenarios/x/backend.yaml" in command
+    assert "/shared/scenarios/x/campaign.yaml" in command
+    assert "/shared/scenarios/x/runtime.yaml" in command
+    assert "/shared/scenarios/x/backend.yaml" in command
     assert "--parallel" in command
 
     args.scenario = "synthetic_stack"

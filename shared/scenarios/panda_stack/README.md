@@ -46,46 +46,43 @@ python3 shared/common/tools/scenario.py validate \
 
 ```bash
 # runtime 容器：一次构建全部公共与方案扩展接口包，切换方案无需重编
-runtime/ros2/scripts/run.sh build-ros-sdk --shared-root /shared
-runtime/ros2/scripts/run.sh build-policy-sdk
+scripts/build_sdk.sh
 ```
 
 ### 采集
 
 ```bash
 # simulation 容器：直接启动手动 Teacher 后端
-scripts/run.sh backend --scenario panda_stack --role teacher \
+scripts/backend.sh --scenario panda_stack --role teacher \
   --seed 0 --run-id teacher-backend
 
-# simulation 容器：可选实时可视化（独立只读 viewer）
-scripts/run.sh viewer --scenario panda_stack --role teacher
+# 宿主机：可选实时可视化（独立只读 viewer）
+./env.sh viewer --scenario panda_stack --role teacher
 
 # runtime 容器：单路试采（默认读取 /data/panda_stack/logs/backend/teacher-backend/log）
-runtime/ros2/scripts/record.sh --scenario panda_stack \
+scripts/record.sh --scenario panda_stack \
   --purpose pilot --count 1 --max-consecutive-failures 1
 
 # 宿主机项目根目录：并行补足正式数据（自动管理独立 simulation worker）
-runtime/ros2/scripts/record_parallel.sh --scenario panda_stack \
+./record_parallel.sh --scenario panda_stack \
   --purpose formal --target-total 50 --workers auto
 ```
 
 采集配方由 binding 的 `recipes.runtime_teacher` 与 `recipes.campaign` 选择；手动 Teacher 后端在前台运行，单路试采在另一个 runtime 终端执行。并行入口无需手动后端，使用独立 ROS domain、命名空间和日志目录，预览图与 GIF 关闭，训练 RGB、标签和质量门禁保留。
 
-正式采集达到 `--target-total` 时自动原子写出 `var/panda_stack/datasets/formal-select.json`。需要手动刷新时：
+正式采集达到 `--target-total` 时自动原子写出 `var/panda_stack/datasets/formal-select.json`。查看当前采集与筛选状态：
 
 ```bash
-runtime/ros2/scripts/run.sh campaign --scenario panda_stack status
-runtime/ros2/scripts/run.sh campaign --scenario panda_stack select \
-  --output /data/panda_stack/datasets/formal-select.json
+scripts/record.sh status --scenario panda_stack
 ```
 
 ### 数据转换与训练
 
 ```bash
 # learning 容器
-learning/lerobot/scripts/run.sh convert --scenario panda_stack
-learning/lerobot/scripts/run.sh train --scenario panda_stack --mode full
-learning/lerobot/scripts/run.sh bundle --scenario panda_stack \
+scripts/convert.sh --scenario panda_stack
+scripts/train.sh --scenario panda_stack --mode full
+scripts/bundle.sh --scenario panda_stack \
   --mode full --run /data/panda_stack/models/runs/<run-dir> \
   --output /data/panda_stack/models/bundles/stack-act
 ```
@@ -96,19 +93,19 @@ binding 与直接 `--config` 入口共用 `act_dataset.yaml`、`act_training.yam
 
 ```bash
 # learning 容器：直接启动 gRPC Policy 服务
-learning/lerobot/scripts/run.sh policy --scenario panda_stack \
+scripts/policy_backend.sh --scenario panda_stack \
   --bundle /data/panda_stack/models/bundles/stack-act
 
 # simulation 容器：直接启动 Policy 推理后端
-scripts/run.sh backend --scenario panda_stack --role policy \
+scripts/backend.sh --scenario panda_stack --role policy \
   --bundle /data/panda_stack/models/bundles/stack-act \
   --seed 20000 --run-id policy-backend
 
-# runtime 容器：交互式执行一局；非交互式单局默认录制到 /data/<scenario-id>/logs/recordings/<run-id>
-runtime/ros2/scripts/run.sh interactive --scenario panda_stack \
+# runtime 容器：交互式执行一局；非交互式单局或批量测试
+scripts/interactive.sh --scenario panda_stack \
   --bundle /data/panda_stack/models/bundles/stack-act \
   --seed 20000 --run-id policy-interactive
-runtime/ros2/scripts/run.sh policy --scenario panda_stack \
+scripts/policy.sh --scenario panda_stack \
   --bundle /data/panda_stack/models/bundles/stack-act \
   --reset-seed 20000 --run-id policy-run
 ```

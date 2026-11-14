@@ -1,7 +1,8 @@
 """Reject business source/task startup embedded in Dockerfiles and Compose.
 
 Each implementation has exactly one Dockerfile, one docker-compose.yml, one
-deployment.yaml requirement declaration and one scripts/run.sh.  Dockerfiles may
+deployment.yaml requirement declaration and single-purpose scripts/*.sh
+entrypoints (including scripts/test.sh).  Dockerfiles may
 copy pinned dependency files or generated wheels, but not application source or
 an entrypoint wrapper. All services inherit the image's idle command and are
 entered with Compose exec.  Requirements that differ per implementation (GPU,
@@ -45,7 +46,7 @@ DEPENDENCY_SUFFIXES = {
 IDLE_COMMANDS = (["sleep", "infinity"], ["idle"])
 COMPOSE_NAME = "docker-compose.yml"
 DECLARATION_NAME = "deployment.yaml"
-RUN_SCRIPT_NAME = "run.sh"
+TEST_SCRIPT_NAME = "test.sh"
 MOUNT_MODES = {"read-only": True, "writable": False}
 SOURCE_SCOPES = {"implementation", "repository"}
 
@@ -372,7 +373,7 @@ def _declaration_issues(declaration: object, path: Path) -> list[str]:
         or not commands
         or any(not isinstance(command, str) or not command for command in commands)
     ):
-        issues.append(f"{path}: commands must list the required run.sh commands")
+        issues.append(f"{path}: commands must list the required scripts/<command>.sh entrypoints")
     return issues
 
 
@@ -387,13 +388,13 @@ def _check_single_entry(
             for path in (project / end).rglob(COMPOSE_NAME)
             if path.parent.name == "docker"
         )
-        run_scripts = sorted((project / end).rglob(f"scripts/{RUN_SCRIPT_NAME}"))
+        test_scripts = sorted((project / end).rglob(f"scripts/{TEST_SCRIPT_NAME}"))
         if len(dockerfiles) != 1:
             issues.append(f"{project / end}: expected exactly one Dockerfile")
         if len(composes) != 1:
             issues.append(f"{project / end}: expected exactly one docker/{COMPOSE_NAME}")
-        if len(run_scripts) != 1:
-            issues.append(f"{project / end}: expected exactly one scripts/{RUN_SCRIPT_NAME}")
+        if len(test_scripts) != 1:
+            issues.append(f"{project / end}: expected exactly one scripts/{TEST_SCRIPT_NAME}")
         if len(dockerfiles) == 1 and len(composes) == 1:
             dockerfile = dockerfiles[0]
             compose = composes[0]
@@ -401,23 +402,18 @@ def _check_single_entry(
                 issues.append(
                     f"{compose}: must sit next to the single {end} Dockerfile"
                 )
-        if len(composes) == 1 and len(run_scripts) == 1:
-            expected = composes[0].parent.parent / "scripts" / RUN_SCRIPT_NAME
-            if run_scripts[0] != expected:
-                issues.append(f"{run_scripts[0]}: unexpected run.sh location")
+        if len(composes) == 1 and len(test_scripts) == 1:
+            expected_scripts_dir = composes[0].parent.parent / "scripts"
+            if test_scripts[0] != expected_scripts_dir / TEST_SCRIPT_NAME:
+                issues.append(f"{test_scripts[0]}: unexpected {TEST_SCRIPT_NAME} location")
                 continue
-            text = run_scripts[0].read_text(encoding="utf-8")
-            for redundant in ("idle", "shell", "exec"):
-                if re.search(rf"(?m)^\s*{redundant}\)", text):
-                    issues.append(
-                        f"{run_scripts[0]}: {redundant} belongs to Compose or the image CMD"
-                    )
             declaration_path = composes[0].parent / DECLARATION_NAME
             commands = declarations.get(composes[0], {}).get("commands", [])
             for command in commands:
-                if not re.search(rf"(?m)^\s*{re.escape(command)}\)", text):
+                script_name = command if command.endswith(".sh") else f"{command}.sh"
+                if not (expected_scripts_dir / script_name).is_file():
                     issues.append(
-                        f"{run_scripts[0]}: missing named command {command!r}, "
+                        f"{expected_scripts_dir}: missing script {script_name!r}, "
                         f"as declared in {declaration_path}: commands"
                     )
     return issues

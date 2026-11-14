@@ -5,7 +5,7 @@
 - **[`msg/`](msg/README.md)**：机器人状态、相机帧、观测索引、流式命令、跟随参考、执行反馈消息。
 - **[`srv/`](srv/README.md)**：控制租约、Episode 生命周期、流式命令查询、受限跟随提交服务。
 
-[`CMakeLists.txt`](CMakeLists.txt) 是接口编译与安装的唯一入口。修改接口定义后，须在 `runtime` 容器内重新运行 `runtime/ros2/scripts/run.sh build-ros-sdk`。
+[`CMakeLists.txt`](CMakeLists.txt) 是接口编译与安装的唯一入口。修改接口定义后，须在 `runtime` 容器内重新运行 `scripts/build_sdk.sh`。
 
 ## 版本与能力
 

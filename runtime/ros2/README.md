@@ -1,21 +1,24 @@
 # ROS 2 运行端（Runtime ROS 2）
 
-ROS 2 运行端连接仿真/真机后端（Robot API）与策略服务端（Policy API），负责观测同步、控制租约与流式动作块调度、MCAP 录制、标签导出与离线评估。
+ROS 2 运行端负责连接仿真/真机后端（Robot API）与策略服务端（Policy API），完成观测同步、控制调度、示教录制、策略推理与批量测试。
 
-本端持有会话、录制、导出、审计与采集 worker。公共消息和 Policy 契约在 [`shared/common/interfaces/`](../../shared/common/interfaces/policy/README.md)；运行配方、Teacher 与 campaign 选择由 [`shared/scenarios/panda_stack/`](../../shared/scenarios/panda_stack/README.md)（Panda 堆叠）与 [`shared/scenarios/marvin_handover/`](../../shared/scenarios/marvin_handover/README.md)（Marvin 交接）的 binding 声明。
+## 常用入口
+
+- **宿主机并行采集**：仓库根目录 [`./record_parallel.sh`](../../record_parallel.sh)（自动管理多个无界面仿真 worker）。
+- **容器内脚本**（位于 [`scripts/`](scripts/README.md)）：
+  - `scripts/build_sdk.sh`：编译 ROS 2 接口包并生成 Policy SDK。
+  - `scripts/teacher_backend.sh`：启动示教仿真后端。
+  - `scripts/record.sh`：单路示教录制；`scripts/record.sh status --scenario <id>` 查看采集与筛选状态。
+  - `scripts/policy.sh`：单局非交互式策略推理。
+  - `scripts/batch_policy.sh`：无人工干预批量仿真推理测试。
+  - `scripts/interactive.sh`：交互式单局策略推理。
+  - `scripts/test.sh`：运行容器内 `pytest` 测试。
+
+所有运行入口直接通过 `--scenario <id>`（或显式 `--config <path>`）在内存中解析配方，支持 `--set dot.path=value` 覆盖参数，不生成准备目录。
 
 ## 目录结构
 
-- **[`ros/dual_arm_runtime/`](ros/dual_arm_runtime/README.md)**：`dual_arm_runtime` 核心 Python 包。
-- **[`configs/`](configs/README.md)**：运行端私有环境变量 `container.env` 与说明；Teacher、Policy 与 campaign 配方位于 `shared/scenarios/<id>/configs/runtime/`。
-- **[`docker/`](docker/README.md)**：运行端 `Dockerfile`、`docker-compose.yml` 与开发测试依赖清单。
-- **[`scripts/`](scripts/README.md)**：单路录制入口 `record.sh`、宿主机并行编排入口 `record_parallel.sh`、其他命令入口 `run.sh`；Python 业务逻辑集中在 `dual_arm_runtime/offline/`。
-
-## 架构边界
-
-- 运行端不导入后端物理引擎（MuJoCo）代码，也不包含深度学习框架（PyTorch/LeRobot）依赖。
-- 示教录制在 `runtime` 容器内通过 `runtime/ros2/scripts/record.sh --count N` 执行，达到本次新增合格数量或连续失败上限后结束。
-- 单路 pilot 试采合格后，正式采集使用宿主机的 `runtime/ros2/scripts/record_parallel.sh --target-total 50 --workers auto` 补足累计 50 条合格 formal 数据；入口编排独立后台仿真实例，禁用可视化，统一使用原采集台账。
-- 其他业务命令通过 `runtime/ros2/scripts/run.sh <command>` 执行（涵盖 `build-ros-sdk`、`build-policy-sdk`、`policy`、`interactive`、`export`、`campaign`、`evaluate`、`test`）。所有运行入口直接接受 `--scenario <id>` 或显式 `--config`，不生成准备目录。
-
-目录导航：[上级目录](../README.md)
+- [`ros/dual_arm_runtime/`](ros/dual_arm_runtime/README.md)：`dual_arm_runtime` 核心 Python 包。
+- [`configs/`](configs/README.md)：运行端环境变量 `container.env`。
+- [`docker/`](docker/README.md)：`Dockerfile`、`docker-compose.yml` 与依赖清单。
+- [`scripts/`](scripts/README.md)：容器内单职责入口脚本。

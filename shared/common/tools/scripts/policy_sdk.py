@@ -28,7 +28,15 @@ class SDKError(RuntimeError):
 
 
 def proto_path(project_root: Path) -> Path:
-    return project_root / "shared/common/interfaces/policy/v1/policy.proto"
+    candidate = project_root / "shared/common/interfaces/policy/v1/policy.proto"
+    if candidate.is_file():
+        return candidate
+    shared_root = os.environ.get("SHARED_ROOT")
+    if shared_root:
+        shared_candidate = Path(shared_root) / "common/interfaces/policy/v1/policy.proto"
+        if shared_candidate.is_file():
+            return shared_candidate
+    return candidate
 
 
 def verify_sdk(project_root: Path, sdk_root: Path) -> dict:
@@ -39,8 +47,8 @@ def verify_sdk(project_root: Path, sdk_root: Path) -> dict:
     marker = root / "source.sha256"
     if not marker.is_file():
         raise SDKError(
-            f"POLICY_SDK_MISSING: {marker}; run runtime/ros2/scripts/run.sh "
-            "build-policy-sdk"
+            f"POLICY_SDK_MISSING: {marker}; run scripts/build_sdk.sh "
+            "inside the runtime container"
         )
     expected = hashlib.sha256(proto.read_bytes()).hexdigest()
     if marker.read_text().strip() != expected:
@@ -82,7 +90,7 @@ def prepare_output(project_root: Path, sdk_root: Path) -> Path:
 def check_command(project_root: Path, sdk_root: Path) -> list[str]:
     return [
         sys.executable,
-        str(project_root / "shared/common/tools/scripts/policy_sdk.py"),
+        str(Path(__file__).resolve()),
         "check",
         "--project-root",
         str(project_root),
@@ -106,7 +114,7 @@ def build_sdk(project_root: Path, sdk_root: Path) -> None:
         subprocess.run(
             [
                 sys.executable,
-                str(project_root / "shared/common/tools/scripts/generate_policy_sdk.py"),
+                str(Path(__file__).resolve().with_name("generate_policy_sdk.py")),
                 "--output",
                 str(root),
             ],

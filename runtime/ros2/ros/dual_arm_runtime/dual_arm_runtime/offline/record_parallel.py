@@ -19,7 +19,7 @@ from dual_arm_runtime.artifact_paths import scenario_root
 
 ROOT = Path(os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[6])
 CONTAINER_MOUNTS = (
-    ("/workspace", Path(".")),
+    ("/app", Path("runtime/ros2")),
     ("/shared", Path("shared")),
     ("/data", Path("var")),
     ("/build", Path("build")),
@@ -37,8 +37,10 @@ def host_path_to_container(value: str | Path, project_root: Path) -> str:
     """Map a host path to the runtime container; reject unmounted paths."""
     path = _host_path(value, project_root)
     project_root = project_root.resolve()
-    if path.is_relative_to(project_root):
-        return str(Path("/workspace") / path.relative_to(project_root))
+    for container, relative in CONTAINER_MOUNTS:
+        root = (project_root / relative).resolve()
+        if path == root or path.is_relative_to(root):
+            return str(Path(container) / path.relative_to(root))
     raise ValueError(
         f"host path is outside the mounted project root and has no container "
         f"equivalent: {path}"
@@ -163,7 +165,9 @@ class DockerWorkers:
         if pid_file is not None:
             shell += 'echo "$$" > "$1"; shift; '
         return [
-            "docker", "exec", self.runtime, "bash", "-c",
+            "docker", "exec",
+            *(["-e", "RECORD_PROGRESS_TTY=1"] if sys.stdout.isatty() else []),
+            self.runtime, "bash", "-c",
             shell + 'exec "$@"', "bash", *([pid_file] if pid_file else []), *arguments,
         ]
 
@@ -188,7 +192,7 @@ class DockerWorkers:
     def preflight_command(self) -> list[str]:
         command = [
             "python3", "-m", "dual_arm_runtime.offline.record_preflight",
-            "--project-root", "/workspace", "--purpose", self.args.purpose, "--parallel",
+            "--project-root", "/app", "--purpose", self.args.purpose, "--parallel",
         ]
         if getattr(self.args, "scenario", None) is not None:
             command += [
@@ -233,7 +237,7 @@ class DockerWorkers:
             result = subprocess.run(
                 self.runtime_command(
                     ["python3", "-m", "dual_arm_runtime.offline.campaign",
-                     "--project-root", "/workspace", "--config", self.args.config, "status"]
+                     "--project-root", "/app", "--config", self.args.config, "status"]
                 ), check=True, capture_output=True, text=True, timeout=30,
             )
             status = json.loads(result.stdout)
@@ -282,12 +286,11 @@ class DockerWorkers:
 
     def prepare(self, plan: dict | None = None) -> list[dict]:
         self.ensure_runtime()
-        relative = self.directory.relative_to(self.args.project_root)
         subprocess.run(
             self.runtime_command(
                 [
                     "python3", "-m", "dual_arm_runtime.offline.record_workers",
-                    "--directory", str(Path("/workspace") / relative),
+                    "--directory", host_path_to_container(self.directory, self.args.project_root),
                     "--workers", str(self.args.workers),
                     "--domain-base", str(self.args.domain_base),
                     "--realtime-speed", str(self.args.realtime_speed),
@@ -307,7 +310,7 @@ class DockerWorkers:
                 "-e", f"ROS_DOMAIN_ID={worker['domain_id']}",
                 "-e", "OMP_NUM_THREADS=1", "-e", "OPENBLAS_NUM_THREADS=1",
                 "-e", "MKL_NUM_THREADS=1", "-e", "DISPLAY=", "-e", "WAYLAND_DISPLAY=",
-                "simulation", "scripts/run.sh", "backend", "--config", worker["backend_config"],
+                "simulation", "scripts/backend.sh", "--config", worker["backend_config"],
                 "--run-root", worker["run_root"], "--run-id", "backend",
             ], check=True, capture_output=True, text=True, timeout=60,
         )
@@ -329,7 +332,7 @@ class DockerWorkers:
         raise RuntimeError("parallel backends did not become ready within 60 seconds")
 
     def run(self, plan: dict | None = None) -> int:
-        relative = Path("/workspace") / self.directory.relative_to(self.args.project_root)
+        relative = Path(host_path_to_container(self.directory, self.args.project_root))
         selection_arguments = self._scenario_selection_arguments(plan)
         if selection_arguments is None:
             selection_arguments = [
@@ -396,6 +399,42 @@ class DockerWorkers:
             list(executor.map(stop, self.created))
 
 
+def _print_startup_info(
+    args: argparse.Namespace, plan: dict, directory: Path
+) -> None:
+    print("=== Parallel Record 配置与参数摘要 ===", flush=True)
+    selection = plan.get("selection") or {}
+    if selection.get("mode") == "scenario":
+        print(f"方案 (scenario):   {selection.get('scenario_id')}", flush=True)
+        binding = selection.get("binding") or {}
+        if binding.get("path"):
+            print(f"Binding 文件:      {binding['path']}", flush=True)
+        for name, recipe in (selection.get("recipes") or {}).items():
+            if isinstance(recipe, dict) and recipe.get("path"):
+                print(f"配方 ({name}): {recipe['path']}", flush=True)
+    else:
+        print(f"Campaign 配置:     {args.config}", flush=True)
+        print(f"Runtime 配置:      {args.runtime_config}", flush=True)
+        print(f"Backend 模板:      {args.backend_template}", flush=True)
+    params = {
+        "purpose": args.purpose,
+        "count": args.count,
+        "target_total": args.target_total,
+        "workers": args.workers,
+        "max_consecutive_failures": args.max_consecutive_failures,
+        "realtime_speed": args.realtime_speed,
+        "domain_base": args.domain_base,
+        "overrides": args.overrides,
+        "pool_directory": str(directory),
+    }
+    print("--- 运行参数 ---", flush=True)
+    print(json.dumps(params, indent=2, ensure_ascii=False), flush=True)
+    if "campaign_status" in plan:
+        print("--- 当前 Campaign 状态 ---", flush=True)
+        print(json.dumps(plan["campaign_status"], indent=2, ensure_ascii=False), flush=True)
+    print("========================================", flush=True)
+
+
 def main(argv: list[str] | None = None) -> int:
     cli = parser()
     args = cli.parse_args(argv)
@@ -450,6 +489,7 @@ def main(argv: list[str] | None = None) -> int:
     previous = signal.signal(signal.SIGTERM, interrupted)
     try:
         plan = docker.preflight()
+        _print_startup_info(args, plan, directory)
         if args.target_total is not None and docker.resolve_target(plan):
             return 0
         # Only now may this batch create worker configuration and containers.

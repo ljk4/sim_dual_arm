@@ -305,7 +305,7 @@ def test_learning_compose_must_not_mount_ros_or_host_venv():
     assert any("must not mount a host virtualenv" in item for item in issues)
 
 
-def test_compose_checker_rejects_variable_binds_and_requires_nested_writable_mounts():
+def test_compose_checker_rejects_variable_binds_and_requires_declared_mounts():
     document = {
         "services": {
             "runtime": {
@@ -315,7 +315,7 @@ def test_compose_checker_rejects_variable_binds_and_requires_nested_writable_mou
                     "dockerfile": "Dockerfile",
                 },
                 "command": ["idle"],
-                "entrypoint": ["bash", "/workspace/runtime/ros2/scripts/run.sh"],
+                "entrypoint": ["bash", "/app/scripts/run.sh"],
                 "environment": {
                     "PROJECT_CONTAINER": "1",
                     "ROS_DOMAIN_ID": "42",
@@ -326,11 +326,9 @@ def test_compose_checker_rejects_variable_binds_and_requires_nested_writable_mou
                     {
                         "type": "bind",
                         "source": "${PROJECT_ROOT}",
-                        "target": "/workspace",
+                        "target": "/app",
                         "read_only": True,
                     },
-                    {"type": "bind", "source": "build", "target": "/build"},
-                    {"type": "bind", "source": "var", "target": "/data"},
                     {
                         "type": "bind",
                         "source": "/sdk/ros",
@@ -359,8 +357,8 @@ def test_compose_checker_rejects_variable_binds_and_requires_nested_writable_mou
         )
     )
     assert "direct path" in joined
-    assert "/workspace/var writable" in joined
-    assert "/workspace/build writable" in joined
+    assert "/build writable" in joined
+    assert "/data writable" in joined
     assert "must not request GPUs" in joined
 
 

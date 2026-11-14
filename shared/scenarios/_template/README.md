@@ -52,7 +52,7 @@ shared/scenarios/<scenario-id>/
   取显式参数、`SHARED_ROOT` 或容器内 `/shared`。档案 schema 固定从
   `<shared-root>/common/interfaces/schemas` 读取。
 - 配方内部的 profile、场景、控制路径相对配方文件自身解析。容器部署配方中的
-  `/workspace`、`/data` 是该容器内的真实路径。
+  `/app`、`/shared`、`/data` 是各容器内的真实路径。
 
 ## 权威配置与模型引用
 
@@ -79,13 +79,13 @@ shared/scenarios/<scenario-id>/
 只读校验不需要启动仿真；`inference` 阶段需要真实 bundle：
 
 ```bash
-# runtime/learning 容器内（仓库根 /workspace，/data 已挂载）
-python3 shared/common/tools/scenario.py show \
-  --binding shared/scenarios/<scenario-id>/binding.yaml
-python3 shared/common/tools/scenario.py validate \
-  --binding shared/scenarios/<scenario-id>/binding.yaml --stage collection
-python3 shared/common/tools/scenario.py validate \
-  --binding shared/scenarios/<scenario-id>/binding.yaml --stage inference \
+# 宿主机或挂载 /shared 的容器内
+python3 /shared/common/tools/scenario.py show \
+  --binding /shared/scenarios/<scenario-id>/binding.yaml
+python3 /shared/common/tools/scenario.py validate \
+  --binding /shared/scenarios/<scenario-id>/binding.yaml --stage collection
+python3 /shared/common/tools/scenario.py validate \
+  --binding /shared/scenarios/<scenario-id>/binding.yaml --stage inference \
   --bundle /data/<scenario-id>/models/bundles/<verified-bundle>
 ```
 
@@ -95,27 +95,27 @@ python3 shared/common/tools/scenario.py validate \
 
 ```bash
 # simulation 容器（工作目录 /app）
-scripts/run.sh backend --scenario <scenario-id> --role teacher \
+scripts/backend.sh --scenario <scenario-id> --role teacher \
   --seed 0 --run-id teacher-backend
-scripts/run.sh viewer --scenario <scenario-id> --role teacher
-scripts/run.sh backend --scenario <scenario-id> --role policy \
+scripts/viewer.sh --scenario <scenario-id> --role teacher
+scripts/backend.sh --scenario <scenario-id> --role policy \
   --bundle /data/<scenario-id>/models/bundles/<verified-bundle> \
   --seed 0 --run-id policy-backend
 
-# runtime 容器（工作目录 /workspace）；一次构建覆盖全部方案接口包
-runtime/ros2/scripts/run.sh build-ros-sdk --shared-root /shared
-runtime/ros2/scripts/record.sh --scenario <scenario-id> \
+# runtime 容器（工作目录 /app）；一次构建覆盖全部方案接口包与 Policy SDK
+scripts/build_sdk.sh
+scripts/record.sh --scenario <scenario-id> \
   --purpose pilot --count 1 --max-consecutive-failures 1
-runtime/ros2/scripts/run.sh interactive --scenario <scenario-id> \
+scripts/interactive.sh --scenario <scenario-id> \
   --bundle /data/<scenario-id>/models/bundles/<verified-bundle> --seed 0 --run-id policy-interactive
-runtime/ros2/scripts/run.sh policy --scenario <scenario-id> \
+scripts/policy.sh --scenario <scenario-id> \
   --bundle /data/<scenario-id>/models/bundles/<verified-bundle> \
   --reset-seed 0 --run-id policy-run
 
-# learning 容器（工作目录 /workspace）
-learning/lerobot/scripts/run.sh policy --scenario <scenario-id> \
+# learning 容器（工作目录 /app）
+scripts/policy_backend.sh --scenario <scenario-id> \
   --bundle /data/<scenario-id>/models/bundles/<verified-bundle>
-learning/lerobot/scripts/run.sh train --scenario <scenario-id> --mode smoke
+scripts/train.sh --scenario <scenario-id> --mode smoke
 ```
 
 运行入口直接按 binding 解析配方并展开路径，不写 `/data/prepared/` 等中间目录；

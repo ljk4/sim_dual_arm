@@ -30,15 +30,15 @@ runtime/ros2/scripts/record.sh --scenario panda_stack --purpose pilot --count 2 
 
 ## 宿主机并行采集 `record_parallel.sh`
 
-并行采集使用宿主机入口，自动管理独立的 simulation worker：
+并行采集使用仓库根目录的宿主机入口，自动管理独立的 simulation worker：
 
 ```bash
 # 在宿主机项目根目录执行，不在 runtime 容器内执行
-runtime/ros2/scripts/record_parallel.sh --scenario panda_stack \
+./record_parallel.sh --scenario panda_stack \
   --purpose formal --target-total 50 --workers auto
 
 # 也可只指定本次新增的合格条数
-runtime/ros2/scripts/record_parallel.sh --scenario panda_stack \
+./record_parallel.sh --scenario panda_stack \
   --count 10 --workers 4 --max-consecutive-failures 3
 ```
 
@@ -54,37 +54,34 @@ runtime/ros2/scripts/record_parallel.sh --scenario panda_stack \
 
 合格数量仅统计本批次；在途数不会超过剩余目标，也受全局合格目标约束。连续失败按完成顺序统计，达到上限后停止调度并取消在途任务，取消项记入台账且不算合格。预算不足时先完成已预留的任务再退出；中断会取消本批次进程并关闭其 simulation 容器，不停止已有的其他容器。各次尝试的产物按 `attempts/<purpose>-<seed>-<run_id>/` 拍平保存（`raw/`、`logs/`、`export/`，无 `stack/` 子层），批次配置、backend 日志、`workers.json` 和 `summary.json` 放在 `var/<scenario-id>/logs/record-pools/pool-*/`。
 
-## 其余命令 `run.sh`
+## 其余独立入口脚本
 
-| 子命令 | 功能说明 |
+| 脚本 | 功能说明 |
 | --- | --- |
-| `build-ros-sdk` | 一次编译 `shared/common/interfaces/ros/*` 与全部 `shared/scenarios/*/extensions/ros/*` 接口包至 `/build/ros-dev/install`，构建产物仅保留 `install/` 与 `contracts.json`，切换方案无需重编；`--scenario <id>` / `--package <name-or-dir>` 仅用于在 `check` 时限定所需包集 |
-| `build-policy-sdk` | 从 `policy.proto` 生成 Python Protobuf/gRPC SDK 至 `/build/generated/policy-sdk` |
-| `policy` | 执行单局非交互式 Policy 推理闭环；接受 `--scenario ... --bundle ...` 或 `--config ...`，日志与录制默认写入 `/data/<scenario-id>/logs/{runs,recordings}`，可用 `--output` 另选位置 |
-| `interactive` | 交互式执行单局 Policy 推理：`--scenario`/`--config` 二选一，自动生成或使用指定 `run-id`，输入 `y` 复位并开始，结束后保持 IDLE 直至 `Ctrl-C` |
-| `export` | 从录制目录导出逐帧 RGB、动作参考标签与图像质量报告（`export_episode.py`、`export_media.py`、`export_quality.py`）；接受 `--scenario` 或 `--campaign-config` |
-| `campaign` | 查看预算台账、筛选训练/验证集或执行自定义单次尝试（`campaign.py`、`campaign_ledger.py`、`campaign_execution.py`）；全局参数（如 `--scenario`）必须写在子命令之前 |
-| `evaluate` | 生成只读评估指标与可视化对比报告（`evaluate.py`、`evaluation_metrics.py`、`evaluation_media.py`）；接受 `--scenario` 或 `--config`，默认输出 `var/<scenario-id>/diagnostics/evaluation`（direct 模式 `var/_direct/...`） |
-| `test` | 运行固定禁用自动插件收集的 `pytest` 测试套件 |
+| `build_sdk.sh` | 构建 ROS 接口 SDK（`/build/ros-dev/install`）与 Policy Protobuf/gRPC SDK（`/build/generated/policy-sdk`） |
+| `teacher_backend.sh` | 启动示教仿真后端（Teacher Backend） |
+| `record.sh` | 单路示教录制；也支持 `record.sh status --scenario <id>` 查看采集与筛选状态 |
+| `policy.sh` | 执行单局非交互式 Policy 推理闭环；接受 `--scenario ... --bundle ...` 或 `--config ...` |
+| `batch_policy.sh` | 无人工干预批量仿真推理测试（仅仿真后端可用，自动禁用可视化） |
+| `interactive.sh` | 交互式执行单局 Policy 推理：`--scenario`/`--config` 二选一，输入 `y` 复位并开始，结束后保持 IDLE 直至 `Ctrl-C` |
+| `test.sh` | 运行固定禁用自动插件收集的 `pytest` 测试套件 |
 
 常用示例：
 
 ```bash
+# 查看采集进度与数据集状态
+scripts/record.sh status --scenario panda_stack
+
 # 直接以方案执行一局策略
-runtime/ros2/scripts/run.sh policy --scenario panda_stack \
+scripts/policy.sh --scenario panda_stack \
   --bundle /data/panda_stack/models/bundles/stack-act \
   --reset-seed 20000 --run-id policy-run
 
 # 交互式执行
-runtime/ros2/scripts/run.sh interactive --scenario panda_stack \
+scripts/interactive.sh --scenario panda_stack \
   --bundle /data/panda_stack/models/bundles/stack-act --seed 20000 --run-id policy-interactive
-
-# 台账与清单
-runtime/ros2/scripts/run.sh campaign --scenario panda_stack status
-runtime/ros2/scripts/run.sh campaign --scenario panda_stack select \
-  --output /data/panda_stack/datasets/formal-select.json
 ```
 
-> `record.sh`、`record_parallel.sh` 和 `run.sh` 在宿主机直接运行会报错退出（返回码 2）；请先通过 `docker compose -f runtime/ros2/docker/docker-compose.yml exec runtime bash` 进入容器（`record_parallel.sh` 例外，它在宿主机执行）。
+> 容器内脚本在宿主机直接运行会报错退出（返回码 2）；请先通过 `./env.sh enter runtime` 进入容器（`./record_parallel.sh` 在宿主机执行）。
 
 目录导航：[上级目录](../README.md)

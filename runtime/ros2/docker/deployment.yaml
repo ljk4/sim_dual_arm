@@ -2,13 +2,11 @@
 # Mount sources, build settings and environment stay in docker-compose.yml and container.env.
 service: runtime
 source:
-  mount: /workspace
-  scope: repository
+  mount: /app
+  scope: implementation
 mounts:
-  /workspace/var: writable
-  /workspace/build: writable
   /build: writable
   /data: writable
 networks: [ros, learning]
 gpu: false
-commands: [build-ros-sdk, build-policy-sdk, policy, interactive, export, campaign, evaluate, test]
+commands: [test]

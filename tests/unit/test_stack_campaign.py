@@ -148,7 +148,7 @@ def test_label_replay_consumes_a_pilot_attempt_and_needs_used_seed(tmp_path):
                 sys.executable,
                 "-c",
                 "print('ok')",
-                "runtime/ros2/scripts/run.sh",
+                "runtime/ros2/scripts/test.sh",
             ]
         )
         == 0

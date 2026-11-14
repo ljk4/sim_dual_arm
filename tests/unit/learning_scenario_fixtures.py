@@ -160,8 +160,8 @@ def convert_args(tree: Tree, tmp_path: Path) -> list[str]:
     )
 
 
-def run_dispatcher(tmp_path: Path, *arguments: str) -> list[str]:
-    """Run run.sh with stub setup/python3 so only argument injection is observed."""
+def run_dispatcher(tmp_path: Path, script_name: str, *arguments: str) -> list[str]:
+    """Run a learning script with stub setup/python3 so only argument injection is observed."""
     setup = tmp_path / "setup.sh"
     setup.write_text(f'export PROJECT_ROOT="{ROOT}"\n', encoding="utf-8")
     binary = tmp_path / "bin"
@@ -185,7 +185,7 @@ def run_dispatcher(tmp_path: Path, *arguments: str) -> list[str]:
         "CAPTURE": str(capture),
     }
     result = subprocess.run(
-        ["bash", str(ROOT / "learning/lerobot/scripts/run.sh"), *arguments],
+        ["bash", str(ROOT / "learning/lerobot/scripts" / script_name), *arguments],
         env=environment,
         capture_output=True,
         text=True,

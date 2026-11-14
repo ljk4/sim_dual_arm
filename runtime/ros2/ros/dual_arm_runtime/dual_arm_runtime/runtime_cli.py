@@ -74,7 +74,7 @@ def _destroy_ros_resources(
 
 def _parse_arguments() -> tuple[argparse.Namespace, list[str]]:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--project-root", type=Path, default=Path("/workspace"))
+    parser.add_argument("--project-root", type=Path, default=Path("/app"))
     selection = parser.add_mutually_exclusive_group(required=True)
     selection.add_argument("--config", type=Path, help="direct runtime recipe path")
     selection.add_argument(
@@ -577,6 +577,21 @@ class _RuntimeProcess:
         return logging_closed, process_outcome
 
 
+def _print_configuration_summary(configuration: object, args: argparse.Namespace) -> None:
+    print("=== Runtime 配置与详细参数 ===", flush=True)
+    selection = getattr(configuration, "selection", None)
+    if isinstance(selection, dict) and selection.get("mode") == "scenario":
+        print(f"方案 (scenario): {selection.get('scenario_id')} ({selection.get('role')})", flush=True)
+        binding = selection.get("binding") or {}
+        if binding.get("path"):
+            print(f"Binding 文件:    {binding['path']}", flush=True)
+    print(f"配置文件路径:    {configuration.source}", flush=True)
+    print(f"输出目录:        {args.output}", flush=True)
+    print("--- 详细参数 ---", flush=True)
+    print(json.dumps(configuration.canonical_dict(), indent=2, ensure_ascii=False), flush=True)
+    print("================================", flush=True)
+
+
 def main() -> None:
     args, ros_args = _parse_arguments()
     try:
@@ -589,6 +604,7 @@ def main() -> None:
         raise SystemExit(f"invalid run/episode id: {error}") from error
     runs_output = args.runs_output if args.runs_output is not None else runs_root(args.scenario)
     configuration = _load_configuration(args, run_id)
+    _print_configuration_summary(configuration, args)
     try:
         session = initialize_run(
             configuration, run_id=run_id, runs_output=runs_output, output=args.output

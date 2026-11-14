@@ -1,6 +1,6 @@
 # runtime 命令与离线处理
 
-所有 Python 业务入口均支持 `python3 -m dual_arm_runtime.offline.<模块名>`。`scripts/run.sh`、`record.sh`、宿主机 `record_parallel.sh` 保留原参数与操作入口；它们都直接接受 `--scenario <id>` 或显式 `--config`，不经过离线 `prepare`。
+所有 Python 业务入口均支持 `python3 -m dual_arm_runtime.offline.<模块名>`。各端独立入口脚本（`record.sh`、`policy.sh`、`batch_policy.sh`、`interactive.sh` 及宿主机 `record_parallel.sh`）均直接接受 `--scenario <id>` 或显式 `--config`，不经过离线 `prepare`。
 
 - `campaign*`：预算、台账与筛选；达到正式目标时自动原子写出 `formal-select.json`；`collect_*`：单次采集及产物收口。
 - `record*`：串行录制、宿主机 Docker 编排、并行池及 worker 配置。

@@ -36,13 +36,20 @@ def test_standalone_compose_files_share_only_required_networks():
         assert service["init"] is True
         assert "${" not in path.read_text()
         assert (path.parent / "Dockerfile").is_file()
-        assert (path.parent.parent / "scripts/run.sh").is_file()
+        assert (path.parent.parent / "scripts/test.sh").is_file()
+        assert not (path.parent.parent / "scripts/run.sh").exists()
     assert (COMPOSES["simulation"].parent / "../").resolve() == ROOT / "simulation/mujoco"
 
 
 def test_business_scripts_still_refuse_host_execution():
-    scripts = [path.parent.parent / "scripts/run.sh" for path in COMPOSES.values()]
-    scripts.append(ROOT / "runtime/ros2/scripts/record.sh")
+    scripts = [path.parent.parent / "scripts/test.sh" for path in COMPOSES.values()]
+    scripts.extend(
+        [
+            ROOT / "simulation/mujoco/scripts/backend.sh",
+            ROOT / "simulation/mujoco/scripts/viewer.sh",
+            ROOT / "runtime/ros2/scripts/record.sh",
+        ]
+    )
     for script in scripts:
         result = subprocess.run(
             ["bash", str(script), "--help"],
@@ -58,7 +65,7 @@ def test_business_scripts_still_refuse_host_execution():
 
 def test_parallel_entry_shows_help_on_host_without_starting_docker():
     result = subprocess.run(
-        ["bash", str(ROOT / "runtime/ros2/scripts/record_parallel.sh"), "--help"],
+        ["bash", str(ROOT / "record_parallel.sh"), "--help"],
         env={**os.environ, "PROJECT_CONTAINER": "0"},
         capture_output=True, text=True, timeout=10,
     )
@@ -68,7 +75,7 @@ def test_parallel_entry_shows_help_on_host_without_starting_docker():
 
 def test_parallel_entry_explains_host_requirement_inside_container():
     result = subprocess.run(
-        ["bash", str(ROOT / "runtime/ros2/scripts/record_parallel.sh"), "--help"],
+        ["bash", str(ROOT / "record_parallel.sh"), "--help"],
         env={**os.environ, "PROJECT_CONTAINER": "1"},
         capture_output=True, text=True, timeout=10,
     )

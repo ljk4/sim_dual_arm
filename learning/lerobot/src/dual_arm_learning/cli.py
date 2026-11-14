@@ -118,6 +118,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     bundle_parser = sub.add_parser("bundle", help="export a safetensors-only offline ACT bundle")
     _add_selection_arguments(bundle_parser)
+    bundle_parser.add_argument(
+        "--progress", action=argparse.BooleanOptionalAction, default=False,
+        help="print resolved config paths and parameters before exporting",
+    )
     bundle_parser.add_argument("--mode", choices=("smoke", "overfit", "full"), default=None)
     bundle_parser.add_argument("--run", type=Path, required=True)
     bundle_parser.add_argument("--output", type=Path, required=True)
@@ -223,6 +227,22 @@ def _operator_console(args, title, settings, default_log):
     return OperatorConsole(_resolve(path, args.project_root), title, settings)
 
 
+def _print_effective_config(
+    title: str,
+    config_path: Path,
+    selection: object,
+    config: object,
+) -> None:
+    print(f"=== {title} ===", flush=True)
+    if selection is not None:
+        print(f"方案 (scenario): {selection.binding.scenario_id}", flush=True)
+        print(f"Binding 文件:    {selection.path}", flush=True)
+    print(f"配置文件路径:    {config_path}", flush=True)
+    print("--- 详细参数 ---", flush=True)
+    print(json.dumps(config.model_dump(mode="json"), indent=2, ensure_ascii=False), flush=True)
+    print("=" * (len(title) + 8), flush=True)
+
+
 def _command_convert(args: argparse.Namespace, root: Path) -> int:
     config_path, selection = _learning_selection(args, root, recipe_field="dataset")
     config = load_dataset_config(config_path, root, overrides=args.overrides)
@@ -251,6 +271,8 @@ def _command_convert(args: argparse.Namespace, root: Path) -> int:
         f"{config.expected_validation_episodes} 条验证；{config.fps} Hz；"
         f"{len(config.camera_names)} 路 {config.camera_width}×{config.camera_height} RGB",
     ]
+    if args.progress:
+        _print_effective_config("数据转换配置与详细参数", config_path, selection, config)
     default_log = _scenario_logs_root(args, root) / "convert" / f"convert-{time.time_ns()}.log"
     with _operator_console(args, "数据转换配置", settings, default_log) as console:
         manifest = convert(
@@ -302,6 +324,8 @@ def _command_train(args: argparse.Namespace, root: Path) -> int:
         f"数据集：{config.data_root}",
         f"验证：每 {config.val_every_steps} step；检查点：每 {config.save_every_steps} step",
     ]
+    if args.progress:
+        _print_effective_config("ACT 训练配置与详细参数", config_path, selection, config)
     default_log = config.logging.root / "_console" / f"train-{time.time_ns()}.log"
     with _operator_console(args, "ACT 训练配置", settings, default_log) as console:
         if console is not None:
@@ -400,6 +424,10 @@ def _command_bundle(args: argparse.Namespace, root: Path) -> int:
     )
     run = _resolve(args.run, root)
     output = _resolve(args.output, root)
+    if args.progress:
+        _print_effective_config("Bundle 导出配置与详细参数", config_path, selection, config)
+        print(f"训练目录 (run):  {run}", flush=True)
+        print(f"导出目录 (out):  {output}", flush=True)
     manifest = export_bundle(
         config=config,
         run_dir=run,

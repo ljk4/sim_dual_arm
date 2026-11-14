@@ -50,7 +50,7 @@ task:
 
 ```bash
 # runtime 容器
-runtime/ros2/scripts/run.sh build-ros-sdk --shared-root /shared
+scripts/build_sdk.sh
 ```
 
 ## 公开契约
@@ -68,7 +68,12 @@ runtime/ros2/scripts/run.sh build-ros-sdk --shared-root /shared
 在 `simulation` 容器内：
 
 ```bash
-scripts/run.sh marvin --run-id marvin-p01a
+python3 -m robot_backend_sim.tools.check_marvin_scene \
+  --scene-config /shared/scenarios/marvin_handover/configs/simulation/scene/marvin_handover.yaml \
+  --profile /shared/scenarios/marvin_handover/profiles/robots/marvin_handover_v1/profile.json \
+  --schemas /shared/common/interfaces/schemas \
+  --report-root /data/marvin_handover/diagnostics/marvin \
+  --run-id marvin-p01a
 ```
 
 报告写入容器 `/data/marvin_handover/diagnostics/marvin/<run-id>/report.json`，渲染图像写入同一运行目录的 `artifacts/renders/`。检查内容包括：宿主机/容器资产路径解析、编译模型形状与命名绑定、源 URDF 质量/主惯量对照、equality 枚举、TCP/指面/开度测量、静置步进、14 个臂关节低幅方向、左右隔离、夹爪三态开度与联动、桌面/物块/开口箱碰撞、同臂/跨臂/桌/箱/手指有效碰撞探针、开口射线和三路渲染。
@@ -81,19 +86,17 @@ scripts/run.sh marvin --run-id marvin-p01a
 
 ```bash
 # simulation 容器：直接启动 Teacher 后端
-scripts/run.sh backend --scenario marvin_handover --role teacher \
+scripts/backend.sh --scenario marvin_handover --role teacher \
   --seed 0 --run-id teacher-backend
 
 # runtime 容器：试采与正式采集（默认后端日志为 /data/marvin_handover/logs/backend/teacher-backend/log）
-runtime/ros2/scripts/record.sh --scenario marvin_handover \
+scripts/record.sh --scenario marvin_handover \
   --purpose pilot --count 1 --max-consecutive-failures 1
-runtime/ros2/scripts/record.sh --scenario marvin_handover \
+scripts/record.sh --scenario marvin_handover \
   --purpose formal --count 6 --max-consecutive-failures 3
 
-# runtime 容器：查看台账与刷新清单
-runtime/ros2/scripts/run.sh campaign --scenario marvin_handover status
-runtime/ros2/scripts/run.sh campaign --scenario marvin_handover select \
-  --output /data/marvin_handover/datasets/formal-select.json
+# runtime 容器：查看采集与筛选状态
+scripts/record.sh status --scenario marvin_handover
 ```
 
 正式采集达到 campaign 目标时也会自动原子写出 `var/marvin_handover/datasets/formal-select.json`。质量规则按本任务阶段声明：左手抓取看左腕/全局，空中交接看物块与左右腕，运输/放置看右腕/全局与箱口；`left_grasp`、`dual_hold`、`left_release`、`right_release` 为必需阶段，缺失即导出不合格。
@@ -102,9 +105,9 @@ runtime/ros2/scripts/run.sh campaign --scenario marvin_handover select \
 
 ```bash
 # learning 容器：4/2 转换、128 step 短训练、bundle
-learning/lerobot/scripts/run.sh convert --scenario marvin_handover
-learning/lerobot/scripts/run.sh train --scenario marvin_handover --mode smoke
-learning/lerobot/scripts/run.sh bundle --scenario marvin_handover --mode smoke \
+scripts/convert.sh --scenario marvin_handover
+scripts/train.sh --scenario marvin_handover --mode smoke
+scripts/bundle.sh --scenario marvin_handover --mode smoke \
   --run /data/marvin_handover/models/runs/<actual-run> --checkpoint final.pt \
   --output /data/marvin_handover/models/bundles/<new-bundle>
 ```
@@ -115,19 +118,19 @@ learning/lerobot/scripts/run.sh bundle --scenario marvin_handover --mode smoke \
 
 ```bash
 # learning 容器：直接启动 Policy 服务（默认使用 binding 的诊断 Bundle）
-learning/lerobot/scripts/run.sh policy --scenario marvin_handover \
+scripts/policy_backend.sh --scenario marvin_handover \
   --bundle /data/marvin_handover/models/bundles/<bundle>
 
 # simulation 容器：推理后端（不使用 Teacher）
-scripts/run.sh backend --scenario marvin_handover --role policy \
+scripts/backend.sh --scenario marvin_handover --role policy \
   --bundle /data/marvin_handover/models/bundles/<bundle> \
   --seed 5100 --run-id policy-backend
 
 # runtime 容器：交互式一局或非交互式单局
-runtime/ros2/scripts/run.sh interactive --scenario marvin_handover \
+scripts/interactive.sh --scenario marvin_handover \
   --bundle /data/marvin_handover/models/bundles/<bundle> \
   --seed 5100 --run-id policy-interactive
-runtime/ros2/scripts/run.sh policy --scenario marvin_handover \
+scripts/policy.sh --scenario marvin_handover \
   --bundle /data/marvin_handover/models/bundles/<bundle> \
   --reset-seed 5100 --run-id policy-run
 ```
