@@ -1,9 +1,10 @@
-"""User-approved gripper-only target admission with original-output evidence."""
+"""Per-axis bounded target admission with original-output evidence."""
 
 from __future__ import annotations
 
 import hashlib
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,19 +19,28 @@ class Admission:
     reason: str
 
 
-def admit_action_chunk(raw, names, lower, upper, max_correction_m: float) -> Admission:
-    """Keep arm targets strict; clip only named total gripper apertures."""
+def admit_action_chunk(
+    raw, names, lower, upper, corrections: Mapping[str, float]
+) -> Admission:
+    """Project named axes to the profile bounds and reject every overrun.
+
+    ``corrections`` holds the per-axis projection quota in that axis' profile
+    unit.  An axis that is absent (or configured with a zero quota) must
+    already lie inside its bounds at every point of the complete chunk.
+    """
     original = np.asarray(raw, dtype=np.float64)
     admitted = original.copy()
     reason = ""
     for index, name in enumerate(names):
+        quota = float(corrections.get(name, 0.0))
         values = original[:, index]
-        if name in {"left_gripper_width", "right_gripper_width"}:
+        if quota > 0.0:
             admitted[:, index] = np.clip(values, lower[index], upper[index])
-            if np.max(np.abs(admitted[:, index] - values)) > max_correction_m:
-                reason = f"{name}: admission correction exceeds {max_correction_m} m"
-        elif np.any(values < lower[index]) or np.any(values > upper[index]):
-            reason = f"{name}: arm prediction outside hard limits"
+            correction = float(np.max(np.abs(admitted[:, index] - values)))
+            if correction > quota and not reason:
+                reason = f"{name}: admission correction {correction:.6g} exceeds {quota:.6g}"
+        elif (np.any(values < lower[index]) or np.any(values > upper[index])) and not reason:
+            reason = f"{name}: prediction outside hard limits"
     return Admission(admitted, admitted - original, not reason, reason)
 
 

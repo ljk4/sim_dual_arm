@@ -52,3 +52,33 @@ def test_load_fake_config_keeps_provider_settings_out_of_the_service_schema():
     assert isinstance(config, object)
     assert settings.fault == "none"
     assert parse_policy_config(service_document()).chunk_size == 60
+
+
+def test_correction_quotas_are_per_axis_and_strictly_validated():
+    from dual_arm_learning.policy_config import PolicyServiceConfig
+
+    assert "gripper_max_correction_m" not in PolicyServiceConfig.model_fields
+    assert PolicyServiceConfig.model_fields["max_prediction_corrections"].default_factory() == {}
+
+    document = service_document()
+    document["max_prediction_corrections"] = {
+        "left_joint7": 0.01,
+        "left_gripper_width": 0.005,
+    }
+    config = parse_policy_config(document)
+    assert config.max_prediction_corrections == {
+        "left_joint7": 0.01,
+        "left_gripper_width": 0.005,
+    }
+
+    for value in (
+        {"missing_joint": 0.01},
+        {"left_joint7": -0.01},
+        {"left_joint7": float("inf")},
+        {"left_joint7": float("nan")},
+        {"left_joint7": "0.01"},
+    ):
+        document = service_document()
+        document["max_prediction_corrections"] = value
+        with pytest.raises(PolicyConfigError, match="max_prediction_corrections"):
+            parse_policy_config(document)

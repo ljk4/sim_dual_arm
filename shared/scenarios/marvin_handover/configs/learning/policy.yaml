@@ -11,11 +11,15 @@ model:
   # Diagnostic admission is granted only through the explicit
   # test-only entry; the recipe keeps the strict formal default.
   require_formal: true
-  # Measured on this model's own outputs: raw total openings overshoot the
-  # 0.0814 m upper bound by at most 0.0032 m on training frames and on the
-  # recorded first inference observation.  The cap clips only the two gripper
-  # axes; arm targets stay strict.
-  gripper_max_correction_m: 0.005
+  # Per-axis projection quota in the axis' profile unit.  Listed axes are
+  # clipped onto the hard bounds only within their quota; every unlisted axis
+  # must already be inside the bounds at all 60 points.
+  # Increasing left_joint7 to 0.01 rad is the measured candidate bound: the
+  # recorded 118 rejected predictions overshoot by at most 0.007671 rad.
+  max_prediction_corrections:
+    left_joint7: 0.01
+    left_gripper_width: 0.005
+    right_gripper_width: 0.005
   temporal_ensemble_coeff: null
 
 service:

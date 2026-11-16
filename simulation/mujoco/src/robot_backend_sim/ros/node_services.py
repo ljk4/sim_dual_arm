@@ -411,7 +411,9 @@ class ServiceAdapter:
             "backend.task.teacher_chunk",
             message=chunk.phase,
             context=EventContext(
-                episode_id=chunk.request_id, sim_time_ns=chunk.observation_time_ns
+                episode_id=context.episode_id,
+                request_id=chunk.request_id,
+                sim_time_ns=chunk.observation_time_ns,
             ),
             fields={
                 "task_epoch": chunk.task_epoch,

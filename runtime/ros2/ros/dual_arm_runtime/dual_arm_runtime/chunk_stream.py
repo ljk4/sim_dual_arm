@@ -15,6 +15,7 @@ import threading
 import time
 from collections.abc import Callable
 
+from robot_contracts.action_chunks import ActionWindow
 from robot_contracts.models import ContractError, RobotProfile, RunContext, Target
 from robot_contracts.stream_request import (
     REQUEST_STREAM_FIRST,
@@ -24,6 +25,11 @@ from robot_contracts.stream_request import (
 )
 from robot_contracts.trajectory.follower_reference import FollowerValidationLimits
 from robot_run_logging import EventContext, Scalar
+from robot_trajectory.transition_retiming import (
+    RetimedWindow,
+    gripper_axes,
+    retime_action_window,
+)
 
 from dual_arm_runtime.follower_limits import follower_limits  # noqa: F401 - re-export
 from dual_arm_runtime.observation import ExactObservation
@@ -224,11 +230,7 @@ class ContinuousStreamRunner:
             chunk_index += 1
             if chunk_index > 1:
                 anchor = self._wait_successor_anchor(chunk_index)
-                observation = self.io.wait_observation(
-                    self.last_observation_id,
-                    self.configuration.recipe.call_timeout_s,
-                    self.stop_requested,
-                )
+                observation = self._wait_successor_observation(anchor)
                 self._check_stop()
                 if observation.stamp_ns >= anchor.start_sim_time_ns:  # type: ignore[attr-defined]
                     raise ContractError(
@@ -239,6 +241,13 @@ class ContinuousStreamRunner:
             self._run_chunk(chunk_index, observation, anchor)
             self._check_task_end()
         self._emit_completed()
+
+    def _wait_successor_observation(self, anchor: object) -> ExactObservation:
+        return self.io.wait_observation(
+            self.last_observation_id,
+            self.configuration.recipe.call_timeout_s,
+            self.stop_requested,
+        )
 
     def _first_observation(self) -> ExactObservation:
         while True:
@@ -291,7 +300,7 @@ class ContinuousStreamRunner:
             self.source.termination_mode == "finite_chunks"
             and chunk_index == self.source.max_chunks
         )
-        request = self._request(
+        request, retiming = self._request(
             observation, anchor, prediction, chunk_index, final=final
         )
         if request.window is None or len(request.window.selected_indices) != (
@@ -302,6 +311,8 @@ class ContinuousStreamRunner:
                 "prediction has fewer than the configured selected points after hand-off",
             )
         self.io.publish_command(request, self.io.robot_time_ns())
+        if retiming is not None and retiming.retimed:
+            self._emit_retiming(retiming, observation, chunk_index, request_id)
         result = self.control.submit_follower(request)
         self.io.record_follower_reference(result.reference)
         self.io.record_execution(result.execution)
@@ -344,7 +355,7 @@ class ContinuousStreamRunner:
         chunk_index: int,
         *,
         final: bool,
-    ) -> StreamRequest:
+    ) -> tuple[StreamRequest, RetimedWindow | None]:
         targets = tuple(
             Target(time_ns, positions)
             for time_ns, positions in zip(
@@ -353,8 +364,17 @@ class ContinuousStreamRunner:
                 strict=True,
             )
         )
+        window = ActionWindow(
+            observation.observation_id,
+            observation.stamp_ns,
+            int(anchor.start_sim_time_ns),  # type: ignore[attr-defined]
+            targets,
+            self.source.target_count,
+        )
+        retiming = self._retime(window, anchor)
+        response_targets = targets if retiming is None else retiming.window.source_targets
         accept_before = self.io.robot_time_ns() + self.configuration.recipe.command_acceptance_ns
-        return StreamRequest(
+        request = StreamRequest(
             trajectory=Trajectory(
                 self.context,
                 self.control.lease_id,
@@ -363,7 +383,7 @@ class ContinuousStreamRunner:
                 observation.observation_id,
                 accept_before,
                 self.profile.joint_names,
-                targets,
+                response_targets,
             ),
             kind=REQUEST_STREAM_FIRST if chunk_index == 1 else REQUEST_STREAM_NEXT,
             anchor=anchor,  # type: ignore[arg-type]
@@ -371,6 +391,44 @@ class ContinuousStreamRunner:
             target_count=self.source.target_count,
             settle_at_end=final,
         )
+        return request, retiming
+
+    def _retime(self, window: ActionWindow, anchor: object) -> RetimedWindow | None:
+        """Source-specific target shaping hook; the shared stream does none."""
+        return None
+
+    def _emit_retiming(
+        self,
+        retiming: RetimedWindow,
+        observation: ExactObservation,
+        chunk_index: int,
+        request_id: str,
+    ) -> None:
+        """Record each explicit original-to-execution gripper target change."""
+        for axis in retiming.axes:
+            self._emit(
+                "follower.chunk_retimed",
+                reason="FOLLOWER_CHUNK_RETIMED",
+                context=EventContext(
+                    episode_id=self.episode_id,
+                    request_id=request_id,
+                    command_id=self.command_id,
+                    clock_epoch=self.context.clock_epoch,
+                    sim_time_ns=observation.stamp_ns,
+                ),
+                fields={
+                    "chunk_index": chunk_index,
+                    "observation_id": observation.observation_id,
+                    "axis": axis.name,
+                    "original_first": axis.original_positions[0],
+                    "original_last": axis.original_positions[-1],
+                    "adapted_first": axis.adapted_positions[0],
+                    "adapted_last": axis.adapted_positions[-1],
+                    "original_excess": axis.original_excess,
+                    "deviation_budget": axis.budget,
+                    "selected_points": len(axis.original_positions),
+                },
+            )
 
     def _simulation_deadline(self, anchor: object) -> int:
         source = self.source
@@ -609,9 +667,20 @@ class PolicyStreamRunner(ContinuousStreamRunner):
             log=log,
             clock=clock,
         )
+        self.retiming_axes = tuple(range(len(self.profile.joint_names)))
 
     def _kind(self) -> str:
         return "policy"
+
+    def _retime(self, window: ActionWindow, anchor: object) -> RetimedWindow | None:
+        return retime_action_window(
+            window,
+            anchor,  # type: ignore[arg-type]
+            self.profile.joints,
+            self.limits.max_accelerations,
+            self.limits.max_target_deviations,
+            self.retiming_axes,
+        )
 
     def run(self) -> None:
         try:

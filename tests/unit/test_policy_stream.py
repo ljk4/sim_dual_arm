@@ -11,12 +11,15 @@ from dual_arm_runtime.chunk_stream import (
 )
 from dual_arm_runtime.policy_client import PolicyPrediction
 from dual_arm_runtime.runtime_config import load_runtime_configuration
+from dual_arm_runtime.target_source import Prediction
+from dual_arm_runtime.teacher_source import TeacherStreamRunner, TeacherTargetSource
 from robot_contracts.action_chunks import ChunkAnchor
-from robot_contracts.models import ContractError, RunContext
+from robot_contracts.models import ContractError, RunContext, Target
 from robot_contracts.trajectory.spline import ReferenceSample
 
 ROOT = Path(__file__).resolve().parents[2]
 POLICY_CONFIG = ROOT / "tests/fixtures/simulation/policy_unit.yaml"
+TEACHER_CONFIG = ROOT / "shared/scenarios/panda_stack/configs/runtime/teacher_collect.yaml"
 
 
 class _Image:
@@ -508,3 +511,212 @@ def test_startup_settle_rejects_simulation_time_regression(tmp_path):
     with pytest.raises(ContractError) as error:
         runner.run()
     assert error.value.reason == "STREAM_OBSERVATION_REGRESSION"
+
+
+def _retiming_configuration(tmp_path):
+    follower_doc = yaml.safe_load(
+        (POLICY_CONFIG.parent / yaml.safe_load(POLICY_CONFIG.read_text())["follower_config"])
+        .resolve()
+        .read_text(encoding="utf-8")
+    )
+    follower_doc["target_count"] = 5
+    follower_path = tmp_path / "follower_5.yaml"
+    follower_path.write_text(yaml.safe_dump(follower_doc), encoding="utf-8")
+    value = yaml.safe_load(POLICY_CONFIG.read_text(encoding="utf-8"))
+    for field in (
+        "robot_profile",
+        "observation_schema",
+        "action_schema",
+        "control_constraints",
+    ):
+        value[field] = str((POLICY_CONFIG.parent / value[field]).resolve())
+    value["follower_config"] = str(follower_path)
+    value["policy"]["startup_settle_sim_ns"] = 0
+    value["policy"]["max_chunks"] = 8
+    path = tmp_path / "policy.yaml"
+    path.write_text(yaml.safe_dump(value), encoding="utf-8")
+    return load_runtime_configuration(path, ROOT)
+
+
+def test_gripper_transition_is_retimed_before_submission(tmp_path):
+    configuration = _retiming_configuration(tmp_path)
+    profile = configuration.profile
+    gripper = profile.joint_names.index("right_gripper_width")
+    initial = [joint.initial for joint in profile.joints]
+
+    class JumpClient(_Client):
+        def predict(self, context, session_id, request_id, observation, deadline_s=None):
+            times = tuple((index + 1) * 50_000_000 for index in range(60))
+            positions = []
+            for index in times:
+                values = list(observation.positions)
+                if 5 <= (index // 50_000_000) - 1 <= 9:
+                    values[gripper] = 0.079865
+                positions.append(tuple(values))
+            return PolicyPrediction(
+                session_id,
+                request_id,
+                context,
+                observation.observation_id,
+                self.policy.model_bundle_digest,
+                self.profile.joint_names,
+                times,
+                tuple(positions),
+                1_000,
+            )
+
+    class HeldGripperControl(_Control):
+        def get_anchor(self, context, start_sim_time_ns=None):
+            anchor = super().get_anchor(context, start_sim_time_ns)
+            positions = list(anchor.reference.positions)
+            velocities = list(anchor.reference.velocities)
+            positions[gripper] = 0.022205447806916776
+            velocities[gripper] = 0.04
+            return ChunkAnchor(
+                anchor.stream_id,
+                anchor.predecessor_seq,
+                anchor.start_sim_time_ns,
+                ReferenceSample(tuple(positions), tuple(velocities),
+                                anchor.reference.accelerations),
+                anchor.robot_profile_hash,
+            )
+
+    io = _IO(profile)
+    context = RunContext("panda_stack", profile.digest, "backend", "sim", 1, "episode", 1)
+    io.context = context
+    log = _Log()
+    runner = PolicyStreamRunner(
+        configuration,
+        context,
+        "episode",
+        "task",
+        io,
+        HeldGripperControl(profile),
+        JumpClient(configuration.recipe.policy, profile),
+        follower_limits(configuration, configuration.control_document["max_accelerations"]),
+        stop_requested=threading.Event(),
+        log=log,
+        clock=lambda: 0.0,
+    )
+    runner.run()
+
+    first = io.commands[0]
+    assert first.trajectory.targets[5].positions[gripper] == pytest.approx(
+        0.024205447806916774)
+    assert first.trajectory.targets[5].positions[0] == pytest.approx(initial[0])
+    # Every unselected prediction point stays exactly as predicted.
+    for index in list(range(0, 5)) + list(range(10, 60)):
+        assert first.trajectory.targets[index].positions[gripper] == pytest.approx(0.08)
+    retimed = [fields for event, fields in log.events if event == "follower.chunk_retimed"]
+    assert retimed
+    assert retimed[0]["fields"]["axis"] == "right_gripper_width"
+    assert retimed[0]["fields"]["original_first"] == pytest.approx(0.079865)
+    assert retimed[0]["fields"]["adapted_first"] == pytest.approx(0.024205447806916774)
+
+
+def test_teacher_targets_are_not_rewritten_by_policy_adaptation():
+    configuration = load_runtime_configuration(TEACHER_CONFIG, ROOT)
+    assert configuration.recipe.action_source == "teacher"
+    profile = configuration.profile
+    context = RunContext(profile.robot_id, profile.digest, "backend", "sim", 1, "episode", 1)
+    io = _IO(profile, context)
+    control = _Control(profile)
+    observation = io.wait_observation(0, 1.0, threading.Event())
+    anchor = control.get_anchor(context)
+    axis = profile.joint_names.index("right_gripper_width")
+    positions = list(anchor.reference.positions)
+    velocities = list(anchor.reference.velocities)
+    positions[axis] = 0.022205447806916776
+    velocities[axis] = 0.04
+    anchor = ChunkAnchor(
+        anchor.stream_id,
+        anchor.predecessor_seq,
+        anchor.start_sim_time_ns,
+        ReferenceSample(tuple(positions), tuple(velocities),
+                        (0.0,) * len(positions)),
+        anchor.robot_profile_hash,
+    )
+    points = []
+    for _ in range(60):
+        point = list(profile.initial_positions)
+        point[axis] = 0.079865
+        points.append(tuple(point))
+    prediction = Prediction(
+        context=context,
+        observation_id=observation.observation_id,
+        joint_names=profile.joint_names,
+        times_from_observation_ns=tuple((index + 1) * 50_000_000 for index in range(60)),
+        positions=tuple(points),
+        target_count=configuration.recipe.follower.target_count,
+        chunk_digest="teacher-original-chunk",
+    )
+
+    class _StaticTeacherSource(TeacherTargetSource):
+        def predict(self, observation, chunk_index, request_id, *, handoff_time_ns=0):
+            del observation, chunk_index, request_id, handoff_time_ns
+            return prediction
+
+    source = _StaticTeacherSource(
+        object(),
+        configuration.recipe.teacher,
+        profile,
+        target_count=configuration.recipe.follower.target_count,
+        task_seed=10000,
+    )
+    log = _Log()
+    runner = TeacherStreamRunner(
+        configuration,
+        context,
+        "episode",
+        "task",
+        io,
+        control,
+        source,
+        follower_limits(configuration, configuration.control_document["max_accelerations"]),
+        stop_requested=threading.Event(),
+        log=log,
+        clock=lambda: 0.0,
+    )
+    assert runner._kind() == "teacher"
+    runner._run_chunk(1, observation, anchor)
+
+    original = tuple(
+        Target(time_ns, positions)
+        for time_ns, positions in zip(
+            prediction.times_from_observation_ns, prediction.positions, strict=True)
+    )
+    submitted = io.commands[-1]
+    assert submitted.trajectory.targets == original
+    assert submitted.trajectory.joint_names == prediction.joint_names
+    assert submitted.anchor == anchor
+    assert submitted.trajectory.command_id == "episode-teacher"
+    assert submitted.observation_time_ns == observation.stamp_ns
+    assert not [event for event, _ in log.events if event == "follower.chunk_retimed"]
+    accepted = [fields for event, fields in log.events if event == "follower.chunk_accepted"]
+    assert accepted
+    assert accepted[0]["fields"]["chunk_digest"] == "teacher-original-chunk"
+
+    class _RejectingControl(_Control):
+        def submit_follower(self, request):
+            raise ContractError("FOLLOWER_DEVIATION_EXCEEDED", "teacher request rejected")
+
+    rejecting_log = _Log()
+    rejecting = TeacherStreamRunner(
+        configuration,
+        context,
+        "episode",
+        "task",
+        io,
+        _RejectingControl(profile),
+        source,
+        follower_limits(configuration, configuration.control_document["max_accelerations"]),
+        stop_requested=threading.Event(),
+        log=rejecting_log,
+        clock=lambda: 0.0,
+    )
+    with pytest.raises(ContractError) as error:
+        rejecting._run_chunk(1, observation, anchor)
+    assert error.value.reason == "FOLLOWER_DEVIATION_EXCEEDED"
+    assert io.commands[-1].trajectory.targets == original
+    assert not [event for event, _ in rejecting_log.events
+                if event == "follower.chunk_retimed"]

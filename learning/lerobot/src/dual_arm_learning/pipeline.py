@@ -10,7 +10,7 @@ from typing import Any
 import numpy as np
 
 from .adapters.base import PolicyModelAdapter
-from .chunk_admission import Admission, admit_action_chunk, save_prediction
+from .chunk_admission import admit_action_chunk, save_prediction
 from .policy_config import PolicyServiceConfig
 from .policy_types import PolicyError, ProviderCameraSample
 from .temporal_ensemble import EnsembleResult, TemporalEnsemble, validate_coefficient
@@ -63,10 +63,10 @@ class ChunkedPolicyPipeline:
     ) -> None:
         if adapter.action_dim != len(config.action_joint_names):
             raise ValueError("adapter action_dim differs from the configured action joints")
-        if (config.gripper_max_correction_m or config.temporal_ensemble_coeff is not None) and (
+        if (config.max_prediction_corrections or config.temporal_ensemble_coeff is not None) and (
             prediction_directory is None
         ):
-            raise ValueError("gripper admission/temporal ensembling requires prediction artifacts")
+            raise ValueError("prediction admission requires prediction artifacts")
         self.adapter, self.config = adapter, config
         self.prediction_directory = prediction_directory
         self.prediction_max_bytes = prediction_max_bytes
@@ -126,18 +126,16 @@ class ChunkedPolicyPipeline:
         self, output: np.ndarray, observation_time_ns: int, observation_id: int
     ) -> tuple[Any, Any, bool]:
         config = self.config
-        evidence_enabled = bool(config.gripper_max_correction_m or self._ensemble is not None)
-        if evidence_enabled:
-            decision = admit_action_chunk(
-                output,
-                config.action_joint_names,
-                config.joint_lower_bounds,
-                config.joint_upper_bounds,
-                config.gripper_max_correction_m,
-            )
-        else:
-            raw = np.asarray(output, dtype=np.float64)
-            decision = Admission(raw, np.zeros_like(raw), True, "")
+        evidence_enabled = bool(
+            config.max_prediction_corrections or self._ensemble is not None
+        )
+        decision = admit_action_chunk(
+            output,
+            config.action_joint_names,
+            config.joint_lower_bounds,
+            config.joint_upper_bounds,
+            config.max_prediction_corrections,
+        )
         ensemble_result = None
         if decision.accepted and self._ensemble is not None:
             try:

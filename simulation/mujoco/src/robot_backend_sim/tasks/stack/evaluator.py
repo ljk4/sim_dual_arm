@@ -205,6 +205,8 @@ def _finger_contacts(
     count, total = 0, 0.0
     for index in range(int(data.ncon)):
         contact = data.contact[index]
+        if int(contact.efc_address) < 0:
+            continue
         body1 = body_of_geom[int(contact.geom1)]
         body2 = body_of_geom[int(contact.geom2)]
         if (body1 in finger_set and body2 in object_set) or (
@@ -233,6 +235,8 @@ def _right_finger_source_evidence(
     per_finger: dict[int, list[float]] = {body: [] for body in right_fingers}
     for index in range(int(data.ncon)):
         contact = data.contact[index]
+        if int(contact.efc_address) < 0:
+            continue
         body1 = body_of_geom[int(contact.geom1)]
         body2 = body_of_geom[int(contact.geom2)]
         if body1 in right_fingers and body2 == source:
@@ -329,8 +333,9 @@ def _support_xy_error(
         (2.0 * (x * z - w * y), 2.0 * (y * z + w * x), 1.0 - 2.0 * (x * x + y * y)),
     )
     delta = tuple(observation.source.center[i] - target.center[i] for i in range(3))
+    # The rotation maps target-local vectors to world, so world deltas use R.T.
     local = tuple(
-        sum(rotation[row][column] * delta[column] for column in range(3)) for row in range(3)
+        sum(rotation[column][row] * delta[column] for column in range(3)) for row in range(3)
     )
     return (
         abs(local[0]) - (binding.target_half_extents_m[0] - margin_m),

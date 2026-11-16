@@ -31,7 +31,7 @@ joint_names:
 # windows hand off as soon as a successor starts, so predictions that are
 # already stale are dropped; the selected points need not be points 0..4 of a
 # fresh complete chunk.
-target_count: 5
+target_count: 20
 
 # Continuous maximum distance between the actual reference and the
 # piecewise-linear policy target: 0.30 rad for arm joints except joint7 at

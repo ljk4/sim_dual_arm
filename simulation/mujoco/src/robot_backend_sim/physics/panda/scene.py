@@ -243,6 +243,7 @@ def _add_objects(spec: mujoco.MjSpec, config: SceneConfig) -> None:
             mass=obj.mass,
             rgba=list(obj.rgba),
             friction=list(config.physics.object_friction),
+            condim=4 if config.physics.object_friction[1] > 0.0 else 3,
             contype=1,
             conaffinity=1,
         )
@@ -411,6 +412,8 @@ def build_scene(config: SceneConfig) -> Scene:
     spec.option.timestep = config.physics.timestep
     spec.option.gravity = list(config.physics.gravity)
     spec.option.integrator = _INTEGRATORS[config.physics.integrator]
+    spec.option.cone = mujoco.mjtCone.mjCONE_ELLIPTIC
+    spec.option.impratio = 10.0
     _add_static_geometry(spec, config)
     _add_objects(spec, config)
     _attach_robots(spec, config, panda_xml)

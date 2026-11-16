@@ -74,6 +74,28 @@ class _StabilityReference:
 
 
 @dataclass(frozen=True, slots=True)
+class _SequenceFact:
+    """Owner-thread proof of the real airborne handover order."""
+
+    phase: str
+    left_airborne_stable: bool
+    dual_airborne_stable: bool
+    left_release_observed: bool
+    right_airborne_stable: bool
+    complete: bool
+    left_stable_sim_time_ns: int | None
+    dual_stable_sim_time_ns: int | None
+    left_release_sim_time_ns: int | None
+    right_stable_sim_time_ns: int | None
+    left_hold_elapsed_s: float
+    dual_hold_elapsed_s: float
+    right_hold_elapsed_s: float
+    left_min_force_n: float
+    right_min_force_n: float
+    handover_window: bool
+
+
+@dataclass(frozen=True, slots=True)
 class _PrepareFact:
     request_id: str
     content_digest: str
@@ -148,11 +170,12 @@ def evaluation_conditions(
     *,
     position_reference: tuple[float, float, float] | None,
     rotation_reference: tuple[tuple[float, ...], ...] | None,
+    sequence_complete: bool,
 ) -> tuple[TaskCondition, ...]:
     """Every independent final-state condition; no single fact is a shortcut."""
     success = config.success
     contained, message = _containment(layout, observation)
-    box_support = observation.support_force(binding.support_body_names[1])
+    box_support = observation.support_upward_force(binding.box_bottom_geom_names)
     table_support = observation.support_force(binding.support_body_names[0])
     left_released = not observation.left_contacts
     right_released = not observation.right_contacts
@@ -239,6 +262,15 @@ def evaluation_conditions(
             "rad",
             "the block must hold its placed orientation",
         ),
+        (
+            "airborne_handover_sequence",
+            sequence_complete,
+            1.0 if sequence_complete else 0.0,
+            1.0,
+            "bool",
+            "left sole airborne hold, airborne dual hold, then left release "
+            "with a right sole airborne hold, strictly in order",
+        ),
     )
     return tuple(TaskCondition(*spec) for spec in specs)
 
@@ -286,6 +318,20 @@ class HandoverTaskRuntime:
         self._success_position_reference: tuple[float, float, float] | None = None
         self._success_rotation_reference: tuple[tuple[float, ...], ...] | None = None
         self._behavior_phase = "idle"
+        self._sequence_phase = "left"
+        self._sequence_since_ns: int | None = None
+        self._sequence_started_ns: dict[str, int | None] = {
+            "left": None,
+            "dual": None,
+            "right": None,
+        }
+        self._sequence_times: dict[str, int | None] = {
+            "left": None,
+            "dual": None,
+            "release": None,
+            "right": None,
+        }
+        self._sequence_references: dict[str, _StabilityReference] = {}
 
     # -------------------------------------------------------------- properties
     @property
@@ -436,6 +482,16 @@ class HandoverTaskRuntime:
         self._success_position_reference = None
         self._success_rotation_reference = None
         self._behavior_phase = "idle"
+        self._sequence_phase = "left"
+        self._sequence_since_ns = None
+        self._sequence_started_ns = {"left": None, "dual": None, "right": None}
+        self._sequence_times = {
+            "left": None,
+            "dual": None,
+            "release": None,
+            "right": None,
+        }
+        self._sequence_references = {}
 
     def start(
         self,
@@ -494,6 +550,8 @@ class HandoverTaskRuntime:
         if self._failure:
             return self._snapshot()
 
+        self._update_sequence(observation)
+        sequence = self._sequence_fact()
         conditions = evaluation_conditions(
             observation,
             self.binding,
@@ -501,6 +559,7 @@ class HandoverTaskRuntime:
             self.layout,
             position_reference=self._success_position_reference,
             rotation_reference=self._success_rotation_reference,
+            sequence_complete=sequence.complete,
         )
         self._conditions = conditions
         self._update_physical_guards(observation)
@@ -524,8 +583,10 @@ class HandoverTaskRuntime:
         self._behavior_phase = step.phase
         minimum = self.config.planning.diagnostics.contact_force_min_n
         for side in step.holders:
-            if side not in self._references and observation.holding(side, minimum):
+            if observation.holding(side, minimum):
                 self._remember_reference(observation, side)
+            elif not self._established[side]:
+                self._references.pop(side, None)
         elapsed_ns = observation.sim_time_ns - self._step_active_ns
         duration_ns = round(step.duration_s * 1e9)
         timeout_ns = duration_ns + round(self.config.gates.phase_extra_timeout_s * 1e9)
@@ -586,9 +647,6 @@ class HandoverTaskRuntime:
             self._left_release_ns = observation.sim_time_ns
         elif step.gate == "left_retreat":
             self._left_retreat_done = True
-            self._handover_window = False
-        if step.phase == "left_lift":
-            self._handover_window = True
         if step.gate == "released":
             self._established[_RIGHT] = False
             self._references.pop(_RIGHT, None)
@@ -598,6 +656,161 @@ class HandoverTaskRuntime:
         self._step_active_ns = observation.sim_time_ns
         self._step_stable_since_ns = None
         self._step_wait_s = 0.0
+
+    # --------------------------------------------------------- handover proof
+    def _update_sequence(self, observation: HandoverObservation) -> None:
+        """Measure the handover order from physics, independent of plan steps."""
+        minimum = self.config.planning.diagnostics.contact_force_min_n
+        left_holding = observation.holding(_LEFT, minimum)
+        right_holding = observation.holding(_RIGHT, minimum)
+        externally_supported = observation.external_support_force(()) > 0.0
+        airborne_left_candidate = (
+            left_holding
+            and not right_holding
+            and not externally_supported
+            and observation.block_height_above_initial_m
+            >= self.config.gates.lift_height_m
+        )
+        if airborne_left_candidate or (
+            left_holding and self._sequence_times["left"] is not None
+        ):
+            self._remember_sequence_reference(observation, _LEFT)
+        elif self._sequence_times["left"] is None:
+            self._sequence_references.pop(_LEFT, None)
+        airborne_dual_candidate = (
+            left_holding
+            and right_holding
+            and not externally_supported
+            and self._sequence_times["left"] is not None
+        )
+        if airborne_dual_candidate or (
+            right_holding and self._sequence_times["dual"] is not None
+        ):
+            self._remember_sequence_reference(observation, _RIGHT)
+        elif self._sequence_times["dual"] is None:
+            self._sequence_references.pop(_RIGHT, None)
+
+        phase = self._sequence_phase
+        if phase == "left":
+            condition = (
+                left_holding
+                and not right_holding
+                and not externally_supported
+                and observation.block_height_above_initial_m
+                >= self.config.gates.lift_height_m
+                and self._sequence_side_stable(observation, _LEFT)
+            )
+        elif phase == "dual":
+            condition = (
+                left_holding
+                and right_holding
+                and not externally_supported
+                and self._sequence_side_stable(observation, _LEFT)
+                and self._sequence_side_stable(observation, _RIGHT)
+            )
+        elif phase == "right":
+            condition = (
+                right_holding
+                and not externally_supported
+                and self._sequence_side_stable(observation, _RIGHT)
+                and not observation.left_contacts
+                and observation.left_opening_m
+                >= self.config.gates.release_opening_m
+                - self.config.gates.gripper_position_tolerance_m
+                and observation.left_finger_speed_m_s
+                <= self.config.gates.release_velocity_max_m_s
+            )
+        else:
+            condition = False
+
+        now = observation.sim_time_ns
+        if not condition:
+            self._sequence_since_ns = None
+            if phase == "right":
+                self._sequence_started_ns["right"] = None
+                self._sequence_times["release"] = None
+            elif phase == "left":
+                self._sequence_started_ns["left"] = None
+            elif phase == "dual":
+                self._sequence_started_ns["dual"] = None
+            self._handover_window = self._proof_window()
+            return
+        if self._sequence_since_ns is None:
+            self._sequence_since_ns = now
+            self._sequence_started_ns[phase] = now
+            if phase == "right":
+                self._sequence_times["release"] = now
+        if now - self._sequence_since_ns >= round(
+            self.config.gates.stable_duration_s * 1e9
+        ):
+            self._sequence_times[phase] = now
+            self._sequence_since_ns = None
+            if phase == "left":
+                self._sequence_phase = "dual"
+            elif phase == "dual":
+                self._sequence_phase = "right"
+            else:
+                self._sequence_phase = "complete"
+        self._handover_window = self._proof_window()
+
+    def _proof_window(self) -> bool:
+        return (
+            self._sequence_times["left"] is not None
+            and self._sequence_phase != "complete"
+        )
+
+    def _remember_sequence_reference(
+        self, observation: HandoverObservation, side: str
+    ) -> None:
+        if side in self._sequence_references:
+            return
+        position, rotation = relative_block_pose(observation, side)
+        self._sequence_references[side] = _StabilityReference(position, rotation)
+
+    def _sequence_side_stable(self, observation: HandoverObservation, side: str) -> bool:
+        return self._side_stable(
+            observation,
+            side,
+            require_hold=True,
+            require_airborne=False,
+            references=self._sequence_references,
+        )
+
+    def _sequence_fact(self) -> _SequenceFact:
+        now = 0 if self._observation is None else self._observation.sim_time_ns
+
+        def elapsed(key: str) -> float:
+            started = self._sequence_started_ns[key]
+            if started is None:
+                return 0.0
+            completed = self._sequence_times[key]
+            end = now if completed is None else completed
+            return max(0.0, (end - started) / 1e9)
+
+        times = self._sequence_times
+        observation = self._observation
+        return _SequenceFact(
+            phase=self._sequence_phase,
+            left_airborne_stable=times["left"] is not None,
+            dual_airborne_stable=times["dual"] is not None,
+            left_release_observed=times["release"] is not None,
+            right_airborne_stable=times["right"] is not None,
+            complete=self._sequence_phase == "complete",
+            left_stable_sim_time_ns=times["left"],
+            dual_stable_sim_time_ns=times["dual"],
+            left_release_sim_time_ns=times["release"],
+            right_stable_sim_time_ns=times["right"],
+            left_hold_elapsed_s=elapsed("left"),
+            dual_hold_elapsed_s=elapsed("dual"),
+            right_hold_elapsed_s=elapsed("right"),
+            left_min_force_n=(
+                0.0 if observation is None else _min_force(observation, _LEFT)
+            ),
+            right_min_force_n=(
+                0.0 if observation is None else _min_force(observation, _RIGHT)
+            ),
+            handover_window=self._handover_window,
+        )
 
     def _condition(self, observation: HandoverObservation, step: HandoverStep) -> bool:
         gates = self.config.gates
@@ -664,7 +877,9 @@ class HandoverTaskRuntime:
         if step.gate == "released":
             success = self.config.success
             contained, _message = _containment(self.layout, observation)
-            box_support = observation.support_force(self.binding.support_body_names[1])
+            box_support = observation.support_upward_force(
+                self.binding.box_bottom_geom_names
+            )
             return (
                 contained
                 and box_support >= success.min_box_support_normal_force_n
@@ -714,6 +929,7 @@ class HandoverTaskRuntime:
         *,
         require_hold: bool,
         require_airborne: bool,
+        references: dict[str, _StabilityReference] | None = None,
     ) -> bool:
         diagnostics = self.config.planning.diagnostics
         if require_hold and not observation.holding(
@@ -722,7 +938,8 @@ class HandoverTaskRuntime:
             return False
         if require_airborne and self._external_support(observation) > 0.0:
             return False
-        reference = self._references.get(side)
+        source = self._references if references is None else references
+        reference = source.get(side)
         if reference is None:
             return False
         position, rotation = relative_block_pose(observation, side)
@@ -784,13 +1001,10 @@ class HandoverTaskRuntime:
         self._update_hold_loss(observation)
 
     def _update_hold_loss(self, observation: HandoverObservation) -> None:
-        if self._plan is None or not self._plan.steps:
-            return
-        step = self._plan.steps[min(self._step_index, len(self._plan.steps) - 1)]
         minimum = self.config.planning.diagnostics.contact_force_min_n
         tolerance_ns = round(self.config.gates.hold_loss_tolerance_s * 1e9)
         for side in (_LEFT, _RIGHT):
-            if not self._established[side] or side not in step.holders:
+            if not self._holder_required(observation, side):
                 self._loss_since_ns[side] = None
                 continue
             if observation.holding(side, minimum):
@@ -801,11 +1015,40 @@ class HandoverTaskRuntime:
                 self._loss_since_ns[side] = observation.sim_time_ns
                 since = observation.sim_time_ns
             if observation.sim_time_ns - since > tolerance_ns:
+                step = (
+                    None
+                    if self._plan is None or not self._plan.steps
+                    else self._plan.steps[
+                        min(self._step_index, len(self._plan.steps) - 1)
+                    ]
+                )
                 self._fail(
                     "HOLD_LOST",
-                    f"the {side} hand lost the block during {step.phase}",
+                    f"the {side} hand lost the block during "
+                    f"{'the handover' if step is None else step.phase}",
                 )
                 return
+
+    def _holder_required(self, observation: HandoverObservation, side: str) -> bool:
+        if self._plan is not None and self._plan.steps:
+            step = self._plan.steps[min(self._step_index, len(self._plan.steps) - 1)]
+            return self._established[side] and side in step.holders
+        times = self._sequence_times
+        if side == _LEFT:
+            # The stable airborne dual hold establishes the right hand as a
+            # holder. Left contact may then end during the opening ramp, before
+            # full opening and low speed establish the separate release proof.
+            # Right hold loss remains guarded throughout that transition.
+            return times["left"] is not None and times["dual"] is None
+        if times["dual"] is None:
+            return False
+        contained, _message = _containment(self.layout, observation)
+        bottom = observation.support_upward_force(self.binding.box_bottom_geom_names)
+        placed = (
+            contained
+            and bottom >= self.config.success.min_box_support_normal_force_n
+        )
+        return not placed
 
     # ---------------------------------------------------------------- success
     def _update_success(
@@ -818,7 +1061,11 @@ class HandoverTaskRuntime:
             or not self._plan.steps
             or self._step_index >= len(self._plan.steps) - 1
         )
-        all_passed = at_final_step and all(condition.passed for condition in conditions)
+        all_passed = (
+            at_final_step
+            and self._sequence_phase == "complete"
+            and all(condition.passed for condition in conditions)
+        )
         if not all_passed:
             self._success_since_ns = None
             self._success_position_reference = None
@@ -918,6 +1165,7 @@ class HandoverTaskRuntime:
             else _containment(self.layout, observation)
         )
         vertices = [] if observation is None else _vertices(self.layout, observation)
+        sequence = self._sequence_fact()
         metrics: dict[str, Any] = {
             "reason": self._reason,
             "failure": self._failure,
@@ -977,14 +1225,33 @@ class HandoverTaskRuntime:
             "table_support_force_n": 0.0
             if observation is None
             else observation.support_force(self.binding.support_body_names[0]),
-            "box_support_force_n": 0.0
+            "box_bottom_support_force_n": 0.0
             if observation is None
-            else observation.support_force(self.binding.support_body_names[1]),
+            else observation.support_upward_force(
+                self.binding.box_bottom_geom_names
+            ),
             "external_support_force_n": 0.0
             if observation is None
             else observation.external_support_force(self._allowed_support()),
             "handover_window": self._handover_window,
             "handover_window_violation": self._window_violation,
+            "handover_sequence": {
+                "phase": sequence.phase,
+                "left_airborne_stable": sequence.left_airborne_stable,
+                "dual_airborne_stable": sequence.dual_airborne_stable,
+                "left_release_observed": sequence.left_release_observed,
+                "right_airborne_stable": sequence.right_airborne_stable,
+                "complete": sequence.complete,
+                "left_stable_sim_time_ns": sequence.left_stable_sim_time_ns,
+                "dual_stable_sim_time_ns": sequence.dual_stable_sim_time_ns,
+                "left_release_sim_time_ns": sequence.left_release_sim_time_ns,
+                "right_stable_sim_time_ns": sequence.right_stable_sim_time_ns,
+                "left_hold_elapsed_s": sequence.left_hold_elapsed_s,
+                "dual_hold_elapsed_s": sequence.dual_hold_elapsed_s,
+                "right_hold_elapsed_s": sequence.right_hold_elapsed_s,
+                "left_min_force_n": sequence.left_min_force_n,
+                "right_min_force_n": sequence.right_min_force_n,
+            },
             "robot_robot_force_n": 0.0 if observation is None else observation.robot_robot_force_n,
             "robot_box_force_n": 0.0 if observation is None else observation.robot_box_force_n,
             "block_contained": contained,

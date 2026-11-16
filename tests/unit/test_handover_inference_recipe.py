@@ -128,5 +128,17 @@ def test_marvin_binding_declares_learning_and_policy_recipes():
         (SCENARIO / recipes["policy_service"]).read_text(encoding="utf-8")
     )
     assert policy_service["service"]["test_only"] is False
-    assert policy_service["model"]["gripper_max_correction_m"] == 0.005
     assert policy_service["model"]["temporal_ensemble_coeff"] is None
+
+
+def test_marvin_learning_recipe_declares_per_axis_correction_quotas():
+    document = yaml.safe_load((SCENARIO / "binding.yaml").read_text(encoding="utf-8"))
+    policy_service = yaml.safe_load(
+        (SCENARIO / document["recipes"]["policy_service"]).read_text(encoding="utf-8")
+    )
+    assert policy_service["model"]["max_prediction_corrections"] == {
+        "left_joint7": 0.01,
+        "left_gripper_width": 0.005,
+        "right_gripper_width": 0.005,
+    }
+    assert "gripper_max_correction_m" not in policy_service["model"]

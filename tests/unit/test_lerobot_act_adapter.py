@@ -66,8 +66,13 @@ def settings_for(bundle: Path) -> PolicyServiceConfig:
 
 def plain(config: PolicyServiceConfig) -> PolicyServiceConfig:
     return config.model_copy(
-        update={"gripper_max_correction_m": 0.0, "temporal_ensemble_coeff": None}
+        update={"max_prediction_corrections": {}, "temporal_ensemble_coeff": None}
     )
+
+
+def fused(config: PolicyServiceConfig, coefficient: float = 0.01) -> PolicyServiceConfig:
+    """Enable the provider-side ensemble independently of the recipe default."""
+    return config.model_copy(update={"temporal_ensemble_coeff": coefficient})
 
 
 def profile(bundle: Path) -> dict:
@@ -290,27 +295,20 @@ def test_contract_rejects_wrong_profile_and_tampered_hash(bundle):
 
 
 def test_real_bundle_offline_reload_returns_same_fresh_chunk(bundle):
+    # This tiny random ACT emits values outside the formal profile bounds, so
+    # compare the reloaded adapters directly; admission is covered separately.
     config = plain(settings_for(bundle))
     first_adapter = load_act_adapter(config)
     second_adapter = load_act_adapter(config)
-    first = ChunkedPolicyPipeline(first_adapter, config)
-    second = ChunkedPolicyPipeline(second_adapter, config)
-    one = first.predict(
-        identity="s1:p1",
-        observation_id=1,
-        observation_time_ns=1_000_000_000,
-        cameras=cameras(bundle),
-        joint_positions=tuple(initial_positions(bundle)),
-    )
-    two = second.predict(
-        identity="s2:p2",
-        observation_id=1,
-        observation_time_ns=1_000_000_000,
-        cameras=cameras(bundle),
-        joint_positions=tuple(initial_positions(bundle)),
-    )
-    assert one.targets.shape == two.targets.shape == (60, 16)
-    assert np.allclose(one.targets, two.targets, atol=1e-6)
+    images = {
+        camera.camera_name: decode_rgb(camera.payload, 320, 240)
+        for camera in cameras(bundle)
+    }
+    state = np.asarray(initial_positions(bundle), dtype=np.float32)
+    one = np.asarray(first_adapter.predict_raw_chunk(images, state))
+    two = np.asarray(second_adapter.predict_raw_chunk(images, state))
+    assert one.shape == two.shape == (60, 16)
+    assert np.allclose(one, two, atol=1e-6)
 
 
 def test_rgb_decode_is_chw_float_and_image_order(bundle):
@@ -604,7 +602,7 @@ def test_temporal_ensemble_is_off_by_default(bundle):
 def test_temporal_ensemble_fuses_admitted_history_and_records_npz(bundle, tmp_path):
     model = TemporalChunkModel(bundle, temporal_base(bundle))
     directory = tmp_path / "predictions"
-    config = settings_for(bundle)
+    config = fused(settings_for(bundle))
     pipeline = ChunkedPolicyPipeline(model, config, prediction_directory=directory)
     first = pipeline.predict(
         identity="s1:p1",
@@ -656,7 +654,7 @@ def test_temporal_ensemble_fuses_admitted_history_and_records_npz(bundle, tmp_pa
 def test_temporal_history_is_per_session_and_reset_discards_it(bundle, tmp_path):
     model = TemporalChunkModel(bundle, temporal_base(bundle))
     directory = tmp_path / "predictions"
-    config = settings_for(bundle)
+    config = fused(settings_for(bundle))
     first = ChunkedPolicyPipeline(model, config, prediction_directory=directory)
     second = ChunkedPolicyPipeline(model, config, prediction_directory=directory)
     one = first.predict(
@@ -691,10 +689,270 @@ def test_temporal_history_is_per_session_and_reset_discards_it(bundle, tmp_path)
         assert stored["history_observation_ids"].size == 0
 
 
+class AxisChunkModel(RecordingModel):
+    """Deterministic chunk whose scripted axis values change per call."""
+
+    def __init__(self, bundle: Path, base, overrides):
+        super().__init__(bundle)
+        self.base = np.asarray(base, dtype=np.float64)
+        self.overrides = overrides
+
+    def predict_raw_chunk(self, images, state):
+        del images, state
+        self.calls += 1
+        result = np.tile(self.base, (60, 1))
+        axis, value = self.overrides.get(self.calls, (None, None))
+        if axis is not None:
+            result[:, axis] = value
+        return result.astype(np.float32)
+
+
+def marvin_like_corrections() -> dict[str, float]:
+    return {
+        "left_joint7": 0.01,
+        "left_gripper_width": 0.005,
+        "right_gripper_width": 0.005,
+    }
+
+
+def test_real_recipe_quota_reaches_the_pipeline_and_legal_chunks_are_unchanged(
+    bundle, tmp_path
+):
+    config = settings_for(bundle)
+    assert config.max_prediction_corrections == {
+        "left_gripper_width": 0.03,
+        "right_gripper_width": 0.03,
+    }
+    assert "gripper_max_correction_m" not in config.to_document()
+    directory = tmp_path / "predictions"
+    pipeline = ChunkedPolicyPipeline(
+        AxisChunkModel(bundle, initial_positions(bundle), {}),
+        config,
+        prediction_directory=directory,
+    )
+    legal = pipeline.predict(
+        identity="s1:legal",
+        observation_id=1,
+        observation_time_ns=1_000_000_000,
+        cameras=cameras(bundle, 1),
+        joint_positions=tuple(initial_positions(bundle)),
+    )
+    assert np.array_equal(legal.targets, legal.raw)
+    with np.load(artifact_path(directory, "s1:legal"), allow_pickle=False) as stored:
+        np.testing.assert_array_equal(stored["raw_act"], legal.raw)
+        np.testing.assert_array_equal(stored["admitted"], legal.admitted)
+        assert not stored["correction"].any() and bool(stored["accepted"])
+
+    pipeline = ChunkedPolicyPipeline(
+        AxisChunkModel(bundle, initial_positions(bundle), {1: (7, 0.1)}),
+        config,
+        prediction_directory=tmp_path / "projected",
+    )
+    projected = pipeline.predict(
+        identity="s1:projected",
+        observation_id=1,
+        observation_time_ns=1_000_000_000,
+        cameras=cameras(bundle, 1),
+        joint_positions=tuple(initial_positions(bundle)),
+    )
+    assert np.all(projected.admitted[:, 7] == 0.08)
+    assert projected.raw[0, 7] == pytest.approx(0.1, abs=1e-6)
+    assert projected.correction[0, 7] == pytest.approx(-0.02, abs=1e-6)
+
+
+def test_named_axis_is_projected_in_both_signs_within_its_own_quota(bundle, tmp_path):
+    config = settings_for(bundle).model_copy(
+        update={"max_prediction_corrections": marvin_like_corrections()}
+    )
+    lower, upper = config.joint_lower_bounds, config.joint_upper_bounds
+    axis = config.action_joint_names.index("left_joint7")
+    directory = tmp_path / "predictions"
+    pipeline = ChunkedPolicyPipeline(
+        AxisChunkModel(bundle, initial_positions(bundle), {1: (axis, upper[axis] + 0.0062)}),
+        config,
+        prediction_directory=directory,
+    )
+    positive = pipeline.predict(
+        identity="s1:positive",
+        observation_id=1,
+        observation_time_ns=1_000_000_000,
+        cameras=cameras(bundle, 1),
+        joint_positions=tuple(initial_positions(bundle)),
+    )
+    assert positive.admitted[:, axis].min() == upper[axis]
+    assert positive.correction[0, axis] == pytest.approx(-0.0062, abs=1e-6)
+    with np.load(artifact_path(directory, "s1:positive"), allow_pickle=False) as stored:
+        np.testing.assert_array_equal(stored["raw_act"], positive.raw)
+        np.testing.assert_array_equal(stored["admitted"], positive.admitted)
+        np.testing.assert_array_equal(stored["correction"], positive.admitted - positive.raw)
+
+    pipeline = ChunkedPolicyPipeline(
+        AxisChunkModel(bundle, initial_positions(bundle), {1: (axis, lower[axis] - 0.0062)}),
+        config,
+        prediction_directory=tmp_path / "negative",
+    )
+    negative = pipeline.predict(
+        identity="s1:negative",
+        observation_id=1,
+        observation_time_ns=1_000_000_000,
+        cameras=cameras(bundle, 1),
+        joint_positions=tuple(initial_positions(bundle)),
+    )
+    assert negative.admitted[:, axis].max() == lower[axis]
+    assert negative.correction[0, axis] == pytest.approx(0.0062, abs=1e-6)
+
+
+def test_over_quota_in_the_final_unselected_point_still_rejects_the_chunk(bundle, tmp_path):
+    config = settings_for(bundle).model_copy(
+        update={"max_prediction_corrections": marvin_like_corrections()}
+    )
+    base = initial_positions(bundle)
+    axis = config.action_joint_names.index("left_joint7")
+
+    class TailModel(AxisChunkModel):
+        def predict_raw_chunk(self, images, state):
+            result = super().predict_raw_chunk(images, state)
+            result[-1, axis] = 3.5  # Only the last, normally unselected point overruns.
+            return result
+
+    directory = tmp_path / "predictions"
+    pipeline = ChunkedPolicyPipeline(
+        TailModel(bundle, base, {}), config, prediction_directory=directory
+    )
+    with pytest.raises(PolicyError, match="exceeds 0.01"):
+        pipeline.predict(
+            identity="s1:tail",
+            observation_id=1,
+            observation_time_ns=1_000_000_000,
+            cameras=cameras(bundle, 1),
+            joint_positions=tuple(base),
+        )
+    with np.load(artifact_path(directory, "s1:tail"), allow_pickle=False) as stored:
+        assert not bool(stored["accepted"])
+        assert stored["raw_act"][-1, axis] == pytest.approx(3.5)
+        np.testing.assert_array_equal(
+            stored["correction"], stored["admitted"] - stored["raw_act"]
+        )
+        assert "execution_targets" not in stored.files
+
+
+def test_policy_service_returns_only_profile_bounded_targets_after_projection(bundle, tmp_path):
+    config = settings_for(bundle).model_copy(
+        update={"max_prediction_corrections": marvin_like_corrections()}
+    )
+    axis = config.action_joint_names.index("left_joint7")
+    service = PolicyService(
+        config,
+        AxisChunkModel(bundle, initial_positions(bundle), {1: (axis, 2.9035)}),
+        prediction_directory=tmp_path / "predictions",
+    )
+    ctx = context(config)
+    opened = service.open_session(open_request(config, ctx))
+    reply = service.predict(
+        pb2.PredictRequest(
+            session_id=opened.session_id,
+            request_id="predict-1",
+            context=pb2.RunContext(**dataclasses.asdict(ctx)),
+            observation=pb2_observation(config, bundle),
+        )
+    )
+    assert len(reply.action.targets) == 60
+    for target in reply.action.targets:
+        for index, value in enumerate(target.positions):
+            assert config.joint_lower_bounds[index] <= value <= config.joint_upper_bounds[index]
+    assert reply.action.targets[0].positions[axis] == pytest.approx(
+        config.joint_upper_bounds[axis], abs=1e-6
+    )
+
+
+def test_policy_service_rejects_an_over_quota_axis_without_caching_a_reply(bundle, tmp_path):
+    config = settings_for(bundle).model_copy(
+        update={"max_prediction_corrections": marvin_like_corrections()}
+    )
+    axis = config.action_joint_names.index("left_joint7")
+    model = AxisChunkModel(bundle, initial_positions(bundle), {1: (axis, 2.95)})
+    service = PolicyService(config, model, prediction_directory=tmp_path / "predictions")
+    ctx = context(config)
+    opened = service.open_session(open_request(config, ctx))
+    request = pb2.PredictRequest(
+        session_id=opened.session_id,
+        request_id="predict-1",
+        context=pb2.RunContext(**dataclasses.asdict(ctx)),
+        observation=pb2_observation(config, bundle),
+    )
+    with pytest.raises(PolicyError, match="exceeds 0.01"):
+        service.predict(request)
+    assert model.calls == 1
+    session = service._sessions[opened.session_id]
+    assert "predict-1" not in session.request_cache
+    assert session.last_observation_id == 0 and session.predictions == 0
+
+
+def test_quota_rejection_cannot_be_hidden_by_temporal_averaging(bundle, tmp_path):
+    base = temporal_base(bundle)
+    axis = settings_for(bundle).action_joint_names.index("left_joint7")
+    directory = tmp_path / "predictions"
+    config = fused(settings_for(bundle)).model_copy(
+        update={
+            "max_prediction_corrections": {
+                "left_joint7": 0.01,
+                "left_gripper_width": 0.03,
+                "right_gripper_width": 0.03,
+            }
+        }
+    )
+    pipeline = ChunkedPolicyPipeline(
+        AxisChunkModel(bundle, base, {2: (axis, 4.0)}),
+        config,
+        prediction_directory=directory,
+    )
+    first = pipeline.predict(
+        identity="s1:p1",
+        observation_id=1,
+        observation_time_ns=1_000_000_000,
+        cameras=cameras(bundle, 1),
+        joint_positions=tuple(base),
+    )
+    pipeline.commit(first)
+
+    # The fused value would be inside the profile bounds, but the individual
+    # raw chunk is not: admission must run before fusion on the raw chunk.
+    weight = np.exp(0.01 * 4)
+    averaged = (weight * base[axis] + 4.0) / (1.0 + weight)
+    assert config.joint_lower_bounds[axis] <= averaged <= config.joint_upper_bounds[axis]
+
+    with pytest.raises(PolicyError, match="exceeds 0.01"):
+        pipeline.predict(
+            identity="s1:p2",
+            observation_id=2,
+            observation_time_ns=1_100_000_000,
+            cameras=cameras(bundle, 2),
+            joint_positions=tuple(base),
+        )
+    with np.load(artifact_path(directory, "s1:p2"), allow_pickle=False) as stored:
+        assert not bool(stored["accepted"])
+        assert stored["raw_act"][0, axis] == pytest.approx(4.0)
+        assert "execution_targets" not in stored.files
+
+    third = pipeline.predict(
+        identity="s1:p3",
+        observation_id=3,
+        observation_time_ns=1_200_000_000,
+        cameras=cameras(bundle, 3),
+        joint_positions=tuple(base),
+    )
+    pipeline.commit(third)
+    with np.load(artifact_path(directory, "s1:p3"), allow_pickle=False) as stored:
+        np.testing.assert_array_equal(stored["ensemble_counts"][:56], 2)
+        np.testing.assert_array_equal(stored["ensemble_counts"][56:], 1)
+        np.testing.assert_array_equal(stored["history_observation_ids"], [1])
+        np.testing.assert_array_equal(stored["execution_targets"], third.targets)
+
+
 def test_rejected_raw_is_not_hidden_or_added_to_temporal_history(bundle, tmp_path):
     model = TemporalChunkModel(bundle, temporal_base(bundle), invalid_at=2)
     directory = tmp_path / "predictions"
-    config = settings_for(bundle)
+    config = fused(settings_for(bundle))
     pipeline = ChunkedPolicyPipeline(model, config, prediction_directory=directory)
     first = pipeline.predict(
         identity="s1:p1",

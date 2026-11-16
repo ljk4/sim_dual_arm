@@ -390,6 +390,7 @@ def _apply_task(metric: dict[str, Any], task: dict[str, Any] | None) -> None:
     start_ns = fact.get("task_start_sim_time_ns")
     completed_ns = fact.get("completed_sim_time_ns")
     sample_ns = fact.get("sample_sim_time_ns")
+    stable_elapsed = fact.get("stable_elapsed_s")
     end_ns = completed_ns if isinstance(completed_ns, int) and completed_ns > 0 else sample_ns
     if (
         isinstance(start_ns, int)
@@ -412,8 +413,11 @@ def _apply_task(metric: dict[str, Any], task: dict[str, Any] | None) -> None:
         and completed_ns >= start_ns
         and isinstance(sample_ns, int)
         and sample_ns >= completed_ns
-        and isinstance(fact.get("stable_elapsed_s"), int | float)
-        and float(fact["stable_elapsed_s"]) >= 2.0
+        # The task evaluator applies its configured window; the frozen fact
+        # only records that a positive window was satisfied.
+        and isinstance(stable_elapsed, int | float)
+        and not isinstance(stable_elapsed, bool)
+        and stable_elapsed > 0.0
         and bool(fact.get("task_config_digest"))
         and bool(fact.get("plan_digest"))
     )

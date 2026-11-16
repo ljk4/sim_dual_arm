@@ -25,6 +25,7 @@ __all__ = [
     "GripperPose",
     "ObjectMotion",
     "SupportContact",
+    "SupportGeomContact",
     "build_contact_snapshot",
 ]
 
@@ -61,6 +62,24 @@ class SupportContact:
 
 
 @dataclass(frozen=True, slots=True)
+class SupportGeomContact:
+    """Active contact between a configured object and one non-finger geom.
+
+    ``object_upward_force_n`` is the world-Z force the support geom applies to
+    the object.  It resolves the contact normal direction and the geom1/geom2
+    order, so a vertical wall contact contributes a lateral force while a real
+    floor contributes positive upward support.
+    """
+
+    object_name: str
+    body_name: str
+    geom_name: str
+    normal_force_n: float
+    object_upward_force_n: float
+    contact_count: int
+
+
+@dataclass(frozen=True, slots=True)
 class GripperPose:
     side: str
     opening_m: float
@@ -75,6 +94,7 @@ class ContactSnapshot:
     objects: tuple[ObjectMotion, ...]
     finger_contacts: tuple[FingerObjectContact, ...]
     support_contacts: tuple[SupportContact, ...]
+    support_geom_contacts: tuple[SupportGeomContact, ...]
     grippers: tuple[GripperPose, ...]
 
 
@@ -116,7 +136,17 @@ def _normal_force(model: Any, data: Any, contact_index: int) -> float:
 
     value = np.zeros(6, dtype=float)
     mujoco.mj_contactForce(model, data, contact_index, value)
-    return abs(_finite(value[0], "contact normal force"))
+    return _finite(value[0], "contact normal force")
+
+
+def _active(contact: Any) -> bool:
+    """A contact only constrains the model when it owns an equation row.
+
+    Contacts inside ``margin`` are listed even when they are separated by a
+    positive gap; those have ``efc_address == -1`` and exert no force.  They
+    must not count as holding, support or an unreleased finger.
+    """
+    return int(contact.efc_address) >= 0
 
 
 def _tcp_pose(model: Any, data: Any, site_name: str) -> tuple[tuple[float, ...], tuple[float, ...]]:
@@ -172,10 +202,13 @@ def build_contact_snapshot(
             finger_names[(side, finger_index)] = body_name
 
     finger_totals: dict[tuple[str, int, str], list[float | int]] = {}
-    support_totals: dict[tuple[str, str], list[float | int]] = {}
+    support_geom_totals: dict[tuple[str, str, str], list[float | int]] = {}
     body_names = scene.body_names
+    geom_names = scene.geom_names
     for contact_index in range(int(data.ncon)):
         contact = data.contact[contact_index]
+        if not _active(contact):
+            continue
         body1 = int(model.geom_bodyid[int(contact.geom1)])
         body2 = int(model.geom_bodyid[int(contact.geom2)])
         force = _normal_force(model, data, contact_index)
@@ -184,23 +217,36 @@ def build_contact_snapshot(
         if finger1 is not None and body2 in object_bodies:
             key = (finger1[0], finger1[1], object_bodies[body2])
             total = finger_totals.setdefault(key, [0.0, 0])
-            total[0] = float(total[0]) + force
+            total[0] = float(total[0]) + abs(force)
             total[1] = int(total[1]) + 1
         elif finger2 is not None and body1 in object_bodies:
             key = (finger2[0], finger2[1], object_bodies[body1])
             total = finger_totals.setdefault(key, [0.0, 0])
-            total[0] = float(total[0]) + force
+            total[0] = float(total[0]) + abs(force)
             total[1] = int(total[1]) + 1
         elif body1 in object_bodies and finger2 is None:
-            key = (object_bodies[body1], body_names[body2])
-            total = support_totals.setdefault(key, [0.0, 0])
-            total[0] = float(total[0]) + force
+            key = (
+                object_bodies[body1],
+                body_names[body2],
+                geom_names[int(contact.geom2)],
+            )
+            total = support_geom_totals.setdefault(key, [0.0, 0, 0.0])
+            total[0] = float(total[0]) + abs(force)
             total[1] = int(total[1]) + 1
+            # The normal points from geom1 to geom2 and mj_contactForce
+            # reports the force on geom2, so the object's upward force flips
+            # sign when the object owns geom1.
+            total[2] = float(total[2]) - force * float(contact.frame[2])
         elif body2 in object_bodies and finger1 is None:
-            key = (object_bodies[body2], body_names[body1])
-            total = support_totals.setdefault(key, [0.0, 0])
-            total[0] = float(total[0]) + force
+            key = (
+                object_bodies[body2],
+                body_names[body1],
+                geom_names[int(contact.geom1)],
+            )
+            total = support_geom_totals.setdefault(key, [0.0, 0, 0.0])
+            total[0] = float(total[0]) + abs(force)
             total[1] = int(total[1]) + 1
+            total[2] = float(total[2]) + force * float(contact.frame[2])
 
     objects = tuple(
         _object_motion(model, data, name, int(object_addresses[name])) for name in object_names
@@ -216,6 +262,25 @@ def build_contact_snapshot(
         )
         for (side, finger_index, object_name), total in sorted(finger_totals.items())
     )
+    support_geom_contacts = tuple(
+        SupportGeomContact(
+            object_name=object_name,
+            body_name=body_name,
+            geom_name=geom_name,
+            normal_force_n=float(total[0]),
+            object_upward_force_n=float(total[2]),
+            contact_count=int(total[1]),
+        )
+        for (object_name, body_name, geom_name), total in sorted(
+            support_geom_totals.items()
+        )
+    )
+    support_body_totals: dict[tuple[str, str], list[float | int]] = {}
+    for contact in support_geom_contacts:
+        key = (contact.object_name, contact.body_name)
+        total = support_body_totals.setdefault(key, [0.0, 0])
+        total[0] = float(total[0]) + contact.normal_force_n
+        total[1] = int(total[1]) + contact.contact_count
     support_contacts = tuple(
         SupportContact(
             object_name=object_name,
@@ -223,7 +288,7 @@ def build_contact_snapshot(
             normal_force_n=float(total[0]),
             contact_count=int(total[1]),
         )
-        for (object_name, body_name), total in sorted(support_totals.items())
+        for (object_name, body_name), total in sorted(support_body_totals.items())
     )
     grippers: list[GripperPose] = []
     for side in _SIDES:
@@ -247,5 +312,6 @@ def build_contact_snapshot(
         objects=objects,
         finger_contacts=finger_contacts,
         support_contacts=support_contacts,
+        support_geom_contacts=support_geom_contacts,
         grippers=tuple(grippers),
     )

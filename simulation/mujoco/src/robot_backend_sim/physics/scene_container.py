@@ -32,6 +32,10 @@ class CompiledScene:
             str(model.body(index).name) or f"body[{index}]"
             for index in range(int(model.nbody))
         )
+        self.geom_names: tuple[str, ...] = tuple(
+            str(model.geom(index).name) or f"geom[{index}]"
+            for index in range(int(model.ngeom))
+        )
 
     @property
     def contact_object_names(self) -> tuple[str, ...]:

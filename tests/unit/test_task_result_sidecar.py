@@ -44,6 +44,30 @@ def test_frozen_task_success_and_timeout_are_independent_dimensions():
     assert no_fact.outcome is TaskOutcome.NOT_EVALUATED
 
 
+def test_sidecar_keeps_the_task_owned_one_second_window():
+    fact = _fact("SUCCEEDED", "SUCCESS")
+    metrics = dict(fact.metrics)
+    metrics["stable_elapsed_s"] = 1.0
+    fact = TaskFact(
+        phase=fact.phase,
+        failure_reason=fact.failure_reason,
+        task_type=fact.task_type,
+        task_epoch=fact.task_epoch,
+        state_seq=fact.state_seq,
+        sample_time_ns=fact.sample_time_ns,
+        task_config_digest=fact.task_config_digest,
+        plan_digest=fact.plan_digest,
+        metrics=metrics,
+    )
+    result = task_result_for_runtime("TASK_SUCCEEDED", fact)
+    document = task_fact_document(
+        fact, result, action_source="policy", test_only=False
+    )
+    assert document["task"]["state"] == "SUCCEEDED"
+    assert document["task"]["stable_elapsed_s"] == 1.0
+    assert document["result"]["outcome"] == "succeeded"
+
+
 def test_sidecar_stays_small_and_has_no_images_or_masks():
     document = task_fact_document(
         _fact("SUCCEEDED", "SUCCESS"),

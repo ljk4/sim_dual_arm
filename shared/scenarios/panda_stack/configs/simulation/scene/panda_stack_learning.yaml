@@ -7,7 +7,7 @@ physics:
   timestep: 0.002
   gravity: [0.0, 0.0, -9.81]
   integrator: implicitfast
-  object_friction: [1.0, 0.005, 0.0001]
+  object_friction: [1.0, 0.02, 0.0001]
 
 column:
   radius: 0.12

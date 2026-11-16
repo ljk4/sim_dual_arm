@@ -22,7 +22,7 @@ Marvin 固定根双臂方案：左手抓取物块、空中交接给右手、再�
 | `configs/runtime/policy_eval.yaml` | runtime Policy 执行配方（180 s 任务预算、1 s 停止余量、420 s 墙钟） |
 | `configs/learning/act_dataset.yaml` | 正式数据转换：50 条、45/5 划分、validation `[9,19,29,39,49]`、`diagnostic: false` |
 | `configs/learning/act_training.yaml` | ACT full 5000 步、预算台账与 checkpoint 路径 |
-| `configs/learning/policy.yaml` | ACT Policy 服务；首轮关闭时间融合，按实测限制夹爪修正 |
+| `configs/learning/policy.yaml` | ACT Policy 服务；首轮关闭时间融合，按实测为 `left_joint7` 与两夹爪配置逐轴修正额度 |
 | `configs/runtime/experiments/handover_campaign.yaml` | 正式采集预算（50 条 / 最多 100 次尝试）、种子、台账、阶段质量规则、导出标签上限与独立路径 |
 | `extensions/ros/marvin_handover_api_msgs/` | 60×16 交接 Teacher IDL、能力标识与包构建文件 |
 | `profiles/control/marvin_control_v1.yaml` | 16 维控制轴、实测跟踪容差、停止与接触参数 |

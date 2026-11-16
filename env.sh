@@ -7,9 +7,10 @@ PROJECT_NAME="sim-dual-arm"
 usage() {
   cat <<'EOF'
 用法:
-  ./env.sh <env>                  构建、后台启动并进入容器 (等同于 enter <env>)
-  ./env.sh enter <env>            执行 up -d --build 后进入容器 bash
-  ./env.sh up <env>               构建并后台启动容器 (docker compose up -d --build)
+  ./env.sh <env>                  复用本地镜像、后台启动并进入容器 (等同于 enter <env>)
+  ./env.sh enter <env>            启动已有镜像后进入容器 bash
+  ./env.sh up <env>               后台启动，不构建或拉取镜像
+  ./env.sh build <env>            显式构建指定环境镜像
   ./env.sh exec <env> [cmd...]    进入已运行的容器执行命令 (默认 bash)
   ./env.sh stop <env>             停止指定环境容器
   ./env.sh rm <env>               删除指定环境容器 (先 stop 再 rm -f)
@@ -53,7 +54,12 @@ cmd_up() {
   local env_name="${1:-}"
   resolve_env "$env_name"
   mkdir -p "$ROOT_DIR/build" "$ROOT_DIR/var"
-  docker compose -f "$COMPOSE_FILE" up -d --build
+  docker compose -f "$COMPOSE_FILE" up -d --no-build --pull never "$SERVICE"
+}
+
+cmd_build() {
+  resolve_env "${1:-}"
+  docker compose -f "$COMPOSE_FILE" build "$SERVICE"
 }
 
 cmd_exec() {
@@ -123,6 +129,10 @@ main() {
     up)
       shift
       cmd_up "$@"
+      ;;
+    build)
+      shift
+      cmd_build "$@"
       ;;
     exec)
       shift

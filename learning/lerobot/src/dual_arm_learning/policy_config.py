@@ -24,7 +24,7 @@ WIDTH, HEIGHT = 320, 240
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _MODEL_KEYS = (
     "bundle_dir", "robot_profile_path", "observation_schema_path", "action_schema_path",
-    "device", "require_formal", "gripper_max_correction_m", "temporal_ensemble_coeff",
+    "device", "require_formal", "max_prediction_corrections", "temporal_ensemble_coeff",
 )
 
 
@@ -85,7 +85,7 @@ class PolicyServiceConfig(rv.StrictMappingModel):
     action_schema_path: Path | None = None
     device: rv.NonEmptyStr = "cpu"
     require_formal: bool = True
-    gripper_max_correction_m: rv.NonNegativeFloat = 0.0
+    max_prediction_corrections: dict[str, rv.NonNegativeFloat] = Field(default_factory=dict)
     temporal_ensemble_coeff: rv.StrictFloat | None = None
 
     @field_validator("logging", mode="before")
@@ -103,8 +103,11 @@ class PolicyServiceConfig(rv.StrictMappingModel):
             raise rv.contract_error("action_joint_names", "v1 requires the complete 16-joint order")
         if self.command_space != "joint_position":
             raise rv.contract_error("command_space", "v1 accepts only joint_position")
-        if not 0.0 <= self.gripper_max_correction_m <= 0.03:
-            raise rv.contract_error("gripper_max_correction_m", "must be in [0, 0.03] m")
+        unknown = set(self.max_prediction_corrections) - set(self.joint_names)
+        if unknown:
+            raise rv.contract_error(
+                "max_prediction_corrections", f"unknown axes: {sorted(unknown)}"
+            )
         if self.temporal_ensemble_coeff is not None and not (
             0.0 <= self.temporal_ensemble_coeff <= 1.0
         ):

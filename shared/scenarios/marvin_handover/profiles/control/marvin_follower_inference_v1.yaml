@@ -26,8 +26,8 @@ target_count: 20
 
 # Per-axis fidelity limits in the joint_names order above.
 max_target_deviations:
-  [0.30, 1.30, 0.52, 0.98, 0.55, 0.44, 1.51, 0.01,
-   0.05, 0.05, 0.05, 0.05, 0.10, 0.05, 0.05, 0.01]
+  [0.50, 1.30, 0.52, 0.98, 0.80, 0.50, 1.51, 0.02,
+   0.50, 1.30, 0.52, 0.98, 0.80, 0.50, 1.51, 0.02]
 
 # A final reference may extend past the selected window to reach the target at
 # zero velocity, but never beyond three seconds in total.

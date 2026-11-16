@@ -43,8 +43,9 @@ mkdir -p build var
 仓库根目录提供 [`env.sh`](env.sh) 统一管理 `runtime`、`simulation`、`learning` 三个 Docker 环境：
 
 ```bash
-./env.sh <env>                # 构建、后台启动并进入容器 bash（up -d --build + exec）
-./env.sh up <env>             # 仅构建并后台启动容器
+./env.sh <env>                # 复用本地镜像、后台启动并进入容器 bash
+./env.sh up <env>             # 后台启动；不构建、不拉取镜像
+./env.sh build <env>          # 首次使用或依赖变化时显式构建镜像
 ./env.sh exec <env> [cmd...]  # 进入已运行的容器执行命令（默认 bash）
 ./env.sh stop <env>           # 停止指定环境容器
 ./env.sh rm <env>             # 停止并删除指定环境容器
@@ -80,9 +81,10 @@ var/<scenario-id>/
 
 ### 2.1 启动 Runtime 容器并构建 SDK
 
-构建、后台启动并进入 `runtime` 容器：
+首次使用先显式构建镜像，再启动并进入 `runtime` 容器：
 
 ```bash
+./env.sh build runtime
 ./env.sh runtime
 ```
 
@@ -371,4 +373,15 @@ scripts/batch_policy.sh --scenario marvin_handover \
 
 ---
 
-目录导航：[文档索引](docs/README.md) · [公共层与方案绑定](shared/README.md) · [实施规则](RULES.md)
+## 5. 已发现的待后续改进问题
+
+在完成闭环主链路修复并达到 80%（10 次测试 8 次成功：Panda 5/5、Marvin 3/5）闭环成功率后，排查过程中已定位但留待后续迭代优化的事项如下（详细排查记录见 [`docs/experiments/2026-11-16-closed-loop-triage-and-repair.md`](docs/experiments/2026-11-16-closed-loop-triage-and-repair.md)）：
+
+1. **多轴协同过渡重定时（Coordinated Multi-Axis Retiming）**：当前 `transition_retiming.py` 按单轴独立判断偏差预算并裁剪末点（例如 Marvin 种子 `4155` 中仅 `right_joint3` 略超预算触发裁剪，同臂其余关节未按相同比例缩放），会导致单臂 7 轴运动不完全同步并偏离笛卡尔接近路径；后续应改为按同侧手臂最受限轴等比例协同缩放。
+2. **空中交接双持到右独持的持物移交边界细化**：在 Marvin 种子 `5103` 中，`dual_airborne_stable` 刚满 `0.5 s` 但左手尚未张开释放（左手仍以 `>9 N` 稳定持物）时，右手在微调夹紧过程中短暂减力超过 `0.25 s` 即被 `_holder_required(right)` 判为 `HOLD_LOST`；后续应在左手仍稳定持物期间允许右手完成夹紧微调，待左手开始释放后再严格锁定右手失持守卫。
+3. **示教阶段末静止帧与预取提前量协同优化**：当前正式示教中存在 32%–47% 的阶段末门控等待静止帧（以及 Marvin `left_joint7` 贴近 `-1.5708 rad` 硬限位），推理侧依靠 `target_count=20`（1.0 s 窗口）与等待死锁推进跨过静止区；后续可在 Teacher 示教侧配置 IK 限位余量、精简冗余等待时长，并在训练侧启用视觉骨干与头部参数分组学习率（`1e-5` / `1e-4`）。
+4. **冷启动首块提前量余量**：当仿真倍速 `realtime_speed > 1.0` 且首次启动服务时，首块 `initial_lead_ns = 250 ms` 的墙钟余量较紧；后续可在策略会话 `Open` 或 `startup_settle` 阶段预热完整推理链路。
+
+---
+
+目录导航：[文档索引](docs/README.md) · [重要实践与经验](docs/experiments/README.md) · [公共层与方案绑定](shared/README.md) · [实施规则](RULES.md)

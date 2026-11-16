@@ -16,6 +16,7 @@ from robot_contracts.models import ContractError
 
 from robot_backend_sim.physics.contact_snapshot import build_contact_snapshot
 from robot_backend_sim.physics.marvin.assembly import MarvinBinding
+from robot_backend_sim.physics.marvin.environment import BOX_BOTTOM_GEOM
 from robot_backend_sim.physics.marvin.scene import gripper_opening
 
 __all__ = [
@@ -38,7 +39,9 @@ class FingerContact:
 @dataclass(frozen=True, slots=True)
 class SupportContact:
     body_name: str
+    geom_name: str
     normal_force_n: float
+    upward_force_n: float
     contact_count: int
 
 
@@ -54,6 +57,7 @@ class HandoverBinding:
     table_body_id: int
     box_body_id: int
     support_body_names: tuple[str, ...]
+    box_bottom_geom_names: tuple[str, ...]
     left_finger_dof_addresses: tuple[int, int]
     right_finger_dof_addresses: tuple[int, int]
     left_body_ids: frozenset[int]
@@ -121,6 +125,15 @@ class HandoverObservation:
             if contact.body_name == body_name
         )
 
+    def support_upward_force(self, geom_names: tuple[str, ...]) -> float:
+        """Signed upward support applied to the block by the named support geoms."""
+        allowed = set(geom_names)
+        return sum(
+            contact.upward_force_n
+            for contact in self.support_contacts
+            if contact.geom_name in allowed
+        )
+
     def external_support_force(self, allowed: tuple[str, ...]) -> float:
         return sum(
             contact.normal_force_n
@@ -174,6 +187,16 @@ def make_handover_binding(
     left, right, everything = _robot_groups(scene)
     if not left or not right:
         raise ContractError("MODEL_MISMATCH", "robot body prefixes do not split into sides")
+    environment = scene.indices.environment
+    box_bottom_geom_names = tuple(
+        str(model.geom(geom_id).name)
+        for name, geom_id in environment.box_geom_ids.items()
+        if name == BOX_BOTTOM_GEOM
+    )
+    if len(box_bottom_geom_names) != 1:
+        raise ContractError(
+            "MODEL_MISMATCH", "the handover box must own exactly one bottom geom"
+        )
     return HandoverBinding(
         block_name=block.name,
         block_body_id=block_body_id,
@@ -183,6 +206,7 @@ def make_handover_binding(
         table_body_id=table_body_id,
         box_body_id=box_body_id,
         support_body_names=tuple(scene.support_body_names),
+        box_bottom_geom_names=box_bottom_geom_names,
         left_finger_dof_addresses=tuple(
             int(value) for value in robot.finger_joint_dof["left"]
         ),
@@ -262,8 +286,14 @@ def capture_handover_observation(
         )
         (left_contacts if contact.side == "left" else right_contacts).append(item)
     supports = tuple(
-        SupportContact(contact.body_name, contact.normal_force_n, contact.contact_count)
-        for contact in snapshot.support_contacts
+        SupportContact(
+            contact.body_name,
+            contact.geom_name,
+            contact.normal_force_n,
+            contact.object_upward_force_n,
+            contact.contact_count,
+        )
+        for contact in snapshot.support_geom_contacts
         if contact.object_name == binding.block_name
     )
     grippers = {gripper.side: gripper for gripper in snapshot.grippers}

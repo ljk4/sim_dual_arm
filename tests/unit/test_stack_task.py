@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import sys
 from pathlib import Path
 
@@ -131,6 +132,79 @@ def test_tilt_and_velocity_are_not_ignored(config):
     spinning = replace(observation().target, angular_velocity=(0.0, 0.0, 0.3))
     evaluation = evaluate_task(observation(target=spinning), binding(), config)
     assert not evaluation.condition("target_angular_speed").passed
+
+
+def _yaw_quaternion(degrees: float) -> tuple[float, float, float, float]:
+    half = math.radians(degrees) / 2.0
+    return (math.cos(half), 0.0, 0.0, math.sin(half))
+
+
+def _world_delta(local: tuple[float, float, float], yaw_degrees: float):
+    """Rotate a target-local offset into the world with plain planar geometry."""
+    angle = math.radians(yaw_degrees)
+    x, y, z = local
+    return (
+        x * math.cos(angle) - y * math.sin(angle),
+        x * math.sin(angle) + y * math.cos(angle),
+        z,
+    )
+
+
+def _place_at_target_local(yaw_degrees: float, local) -> TaskObservation:
+    rotated = replace(
+        observation().target, quaternion_wxyz=_yaw_quaternion(yaw_degrees)
+    )
+    delta = _world_delta(local, yaw_degrees)
+    source = replace(
+        observation().source,
+        center=tuple(rotated.center[index] + delta[index] for index in range(3)),
+    )
+    return observation(source=source, target=rotated)
+
+
+@pytest.mark.parametrize("yaw_degrees", [-10.0, 0.0, 10.0])
+def test_xy_support_projection_uses_the_target_local_frame(config, yaw_degrees):
+    evaluation = evaluate_task(
+        _place_at_target_local(yaw_degrees, (0.027, 0.027, 0.05)),
+        binding(),
+        config,
+    )
+    condition = evaluation.condition("source_xy_inside_target")
+    assert condition.actual == pytest.approx(-0.001, abs=1e-9)
+    assert condition.passed
+    assert evaluation.all_passed
+
+
+@pytest.mark.parametrize("yaw_degrees", [-10.0, 10.0])
+@pytest.mark.parametrize(
+    ("local", "expected", "passed"),
+    [
+        ((0.027, 0.027, 0.05), -0.001, True),
+        ((0.027999, 0.027, 0.05), -1e-6, True),
+        ((0.028001, 0.027, 0.05), 1e-6, False),
+    ],
+)
+def test_xy_support_margin_boundary_rotates_with_the_target(
+    config, yaw_degrees, local, expected, passed
+):
+    evaluation = evaluate_task(
+        _place_at_target_local(yaw_degrees, local), binding(), config
+    )
+    condition = evaluation.condition("source_xy_inside_target")
+    assert condition.actual == pytest.approx(expected, abs=1e-9)
+    assert condition.passed is passed
+
+
+@pytest.mark.parametrize("name", ["source_tilt", "target_tilt"])
+def test_ninety_degree_block_flip_is_rejected(config, name):
+    flipped = (math.cos(math.pi / 4.0), math.sin(math.pi / 4.0), 0.0, 0.0)
+    changes = {
+        "source": replace(observation().source, quaternion_wxyz=flipped),
+        "target": replace(observation().target, quaternion_wxyz=flipped),
+    }
+    evaluation = evaluate_task(observation(**changes), binding(), config)
+    assert not evaluation.condition(name).passed
+    assert not evaluation.all_passed
 
 
 def _runtime(config) -> tuple[StackTaskRuntime, RunContext]:

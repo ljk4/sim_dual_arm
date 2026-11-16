@@ -366,6 +366,72 @@ def test_outcome_string_without_physical_task_facts_is_not_success(tmp_path):
     assert row["failure_type"] == "TASK_NOT_EVALUATED"
 
 
+def _task_document(attempt: Path) -> dict:
+    return json.loads((attempt / "raw" / "task_result.json").read_text())
+
+
+def _write_task_document(attempt: Path, document: dict) -> None:
+    _write(attempt / "raw" / "task_result.json", document)
+
+
+@pytest.mark.parametrize("task_type", ["handover", "stack"])
+def test_policy_success_with_one_second_window_is_offline_success(tmp_path, task_type):
+    root, config_path = campaign_config(tmp_path)
+    attempt = make_attempt(root)
+    document = _task_document(attempt)
+    document["task"].update(
+        task_type=task_type,
+        stable_elapsed_s=1.0,
+        first_satisfied_sim_time_ns=2_000_000_000,
+        completed_sim_time_ns=3_000_000_000,
+        sample_sim_time_ns=3_000_000_000,
+    )
+    _write_task_document(attempt, document)
+    _reserve(root, attempt)
+    row = _report(root, config_path, f"one-second-{task_type}")["attempts"][0]
+    assert row["task_success"] is True
+    assert row["success"] is True
+    assert row["run_success"] is True
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda document: document["task"].update(state="RUNNING"),
+        lambda document: document["task"].update(conditions_passed=False),
+        lambda document: document["task"].pop("stable_elapsed_s"),
+        lambda document: document["task"].update(stable_elapsed_s=0.0),
+        lambda document: document.update(evaluated=False),
+        lambda document: document.update(test_only=True),
+        lambda document: document.update(action_source="teacher"),
+        lambda document: document.update(
+            result={"outcome": "failed", "reason": "TASK_FAILED"}
+        ),
+    ],
+    ids=[
+        "running-state",
+        "conditions-false",
+        "no-stable-window",
+        "zero-stable-window",
+        "not-evaluated",
+        "test-only",
+        "teacher",
+        "failed-result",
+    ],
+)
+def test_one_second_success_still_requires_the_complete_frozen_fact(tmp_path, mutate):
+    root, config_path = campaign_config(tmp_path)
+    attempt = make_attempt(root)
+    document = _task_document(attempt)
+    document["task"].update(stable_elapsed_s=1.0)
+    mutate(document)
+    _write_task_document(attempt, document)
+    _reserve(root, attempt)
+    row = _report(root, config_path, "incomplete-fact")["attempts"][0]
+    assert row["task_success"] is False
+    assert row["success"] is False
+
+
 def test_time_resolution_separates_started_and_20hz_exported_label(tmp_path):
     root, config_path = campaign_config(tmp_path)
     attempt = make_attempt(root)

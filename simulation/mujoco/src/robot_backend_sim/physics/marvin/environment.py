@@ -17,6 +17,7 @@ from robot_backend_sim.config.marvin_scene_config import TaskConfig
 from robot_backend_sim.physics.scene_container import SceneBuildError
 
 __all__ = [
+    "BOX_BOTTOM_GEOM",
     "BOX_GEOM_NAMES",
     "HandoverBinding",
     "add_handover_environment",
@@ -25,8 +26,9 @@ __all__ = [
     "combined_yaw_quaternion",
 ]
 
+BOX_BOTTOM_GEOM = "box_bottom"
 BOX_GEOM_NAMES = (
-    "box_bottom",
+    BOX_BOTTOM_GEOM,
     "box_wall_x_pos",
     "box_wall_x_neg",
     "box_wall_y_pos",

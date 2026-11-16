@@ -18,6 +18,8 @@
 
 | 日期 | 主题 | 核心内容与适用边界 |
 | --- | --- | --- |
+| 2026-11-16 | [全链路逐级排查与闭环修复经验](2026-11-16-closed-loop-triage-and-repair.md) | 按“采集与回放 → 模型离线输出 → 推理侧执行 → 仿真摩擦与评价器”逐环排除：6/6 数据回放通过、16 轴可刹停重定时与等待死锁推进、Marvin 右臂预算对称化与空中参考位姿修复、Panda `condim=4` 扭转摩擦修复；10 次闭环测试达 8/10（80%，Panda 5/5、Marvin 3/5）成功 |
+| 2026-11-15 | [修复任务书](2026-11-15-inference-repair-taskbook.md) · [P1 提示词](2026-11-15-stage1-repair-prompt.md) · [P2 提示词](2026-11-15-stage2-repair-prompt.md) · [P2 补修](2026-11-15-stage2-followup-prompt.md) · [P3-B 提示词](2026-11-15-stage3-admission-prompt.md) · [P3-C 补修](2026-11-15-stage3c-followup-prompt.md) · [P3-D 提示词](2026-11-15-stage3d-blocker-analysis-prompt.md) · [P3-E 提示词](2026-11-15-stage3e-anchor-replan-prompt.md) · [P3-F 提示词](2026-11-15-stage3f-contract-freeze-prompt.md) · [P3-G 提示词](2026-11-15-stage3g-replan-implementation-prompt.md) | P3-F 已获确认并冻结 R2-F1（任务书§13）；29项离线状态模型通过，现有接口1项预期红测，11个双门数学候选通过真实制动检查。R2暂缓；§14优先数据回放，已发现并修复Marvin合法释放误判，原8次闭环保留，P3总体未通过 |
 | 2026-11-11 | [ACT 推理工程故障排查](2026-11-11-inference-execution-failures.md) | 修复导出和误停；后续出现一次同种子任务成功。数据逐行检查未发现转换错误，新增诊断确认模型过渡误差、融合关闭延迟及执行参考净空不足，尚未验证稳定成功 |
 | 2026-11-10 | [并行录制](2026-11-10-parallel-recording.md) | 隔离 worker、正式采集预算、录制与导出流程的历史验证 |
 | 2026-11-03 | [ACT 推理停滞、执行误停与首次堆叠成功的修复经验](2026-11-03-act-inference-execution-repair.md) | 诊断短执行窗口推进不足、预测切换跳变、复位后非稳态、加权融合浮点舍入、Ruckig 极小制动前缀及静止速度容差不一致问题；在种子 30600 同场景修复回归中完成真实物理堆叠 |
