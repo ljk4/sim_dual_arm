@@ -7,7 +7,7 @@ git log -- docs/history/
 git show <commit>:docs/history/dsh-048.md
 ```
 
-> **注意**：历史条目中提及的旧模块名（如 `Native*`、`SubmitNative`、`v2`～`v4` Schema）仅反映当时的演进状态。当前使用入口与模块结构请以[根 README](../../README.md)、[公共层说明](../../shared/README.md)和[实施规则](../../RULES.md)为准。
+> **注意**：历史条目中提及的旧模块名（如 `Native*`、`SubmitNative`、`v2`～`v4` Schema）仅反映当时的演进状态。当前使用入口与模块结构请以[根 README](../../README.md)、[公共层说明](../../shared/README.md)和[Agent 指导与规范](../../AGENTS.md)为准。
 
 ---
 
@@ -121,4 +121,4 @@ git show <commit>:docs/history/dsh-048.md
 | <a id="dsh-059"></a>DSH-059 | 统一容器构建上下文为各端 `docker/` 本地目录，依赖文件挂载至 `/opt/dependencies`。 |
 | <a id="dsh-060"></a>DSH-060 | 精简 `container.env` 运行时变量，补充 `runtime` 交互式 `interactive` 命令与 `simulation` 独立只读 `viewer`。 |
 
-目录导航：[文档索引](../README.md) · [项目说明](../../README.md) · [实施规则](../../RULES.md)
+目录导航：[文档索引](../README.md) · [项目说明](../../README.md) · [Agent 指导与规范](../../AGENTS.md)

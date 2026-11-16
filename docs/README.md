@@ -1,6 +1,6 @@
 # 文档索引
 
-本目录维护当前任务、功能说明与实验记录。项目操作见[根 README](../README.md)，工程实施遵守仓库 [RULES.md](../RULES.md)。
+本目录维护当前任务、功能说明与实验记录。项目操作见[根 README](../README.md)，工程实施与闭环开发流程遵守仓库 [AGENTS.md](../AGENTS.md)。
 
 ## 专题与归档目录
 
@@ -14,5 +14,5 @@
 
 1. 首次使用或运行闭环：阅读根目录 [README.md](../README.md)。
 2. 了解公共协议、方案绑定与四端实现的归属：阅读 [shared/README.md](../shared/README.md)。
-3. 参与开发或修改配置：阅读仓库 [RULES.md](../RULES.md) 及相关目录的 `README.md`。
+3. 参与开发或修改配置：阅读仓库 [AGENTS.md](../AGENTS.md) 及相关目录的 `README.md`。
 4. 排查推理执行问题或查阅历史决策：参阅 [experiments/](experiments/README.md) 与 [history/](history/README.md)。

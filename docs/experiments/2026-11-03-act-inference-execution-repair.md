@@ -96,4 +96,4 @@
 3. **逐层比对动作数据**：在同一观测时间戳下依次核对 `raw_act`（原始预测）→ `admitted`（准入值）→ `execution_targets`（时间融合目标）→ `FollowerReference`（Ruckig 样条参考）→ `ExecutionFeedback`（实测反馈）。
 4. **最小化离线复现**：从 MCAP 提取故障时刻的 16 维请求与 Anchor 状态进行单元测试重建，修复后再通过容器公共入口执行完整物理闭环回归。
 
-目录导航：[实践索引](README.md) · [实施规则](../../RULES.md) · [项目说明](../../README.md)
+目录导航：[实践索引](README.md) · [Agent 指导与规范](../../AGENTS.md) · [项目说明](../../README.md)

@@ -40,4 +40,4 @@ shared/
 
 `build/` 和 `var/` 是运行时输出目录，由使用者初始化、由命令创建子目录，均不纳入 Git。初始化步骤见[根 README](../README.md)。
 
-目录导航：[上级目录](../README.md) · [实施规则](../RULES.md) · [方案模板](scenarios/_template/README.md)
+目录导航：[上级目录](../README.md) · [Agent 指导与规范](../AGENTS.md) · [方案模板](scenarios/_template/README.md)

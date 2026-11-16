@@ -384,4 +384,4 @@ scripts/batch_policy.sh --scenario marvin_handover \
 
 ---
 
-目录导航：[文档索引](docs/README.md) · [重要实践与经验](docs/experiments/README.md) · [公共层与方案绑定](shared/README.md) · [实施规则](RULES.md)
+目录导航：[文档索引](docs/README.md) · [重要实践与经验](docs/experiments/README.md) · [公共层与方案绑定](shared/README.md) · [Agent 指导与规范](AGENTS.md)
