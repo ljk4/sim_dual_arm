@@ -3,9 +3,11 @@
 
 Examples:
   python3 shared/common/tools/scenario.py validate \
-      --binding shared/scenarios/<scenario-id>/binding.yaml --stage collection
+      --robot panda_sim --task stack --stage collection
   python3 shared/common/tools/scenario.py show \
-      --binding shared/scenarios/<scenario-id>/binding.yaml
+      --scenario panda_sim/stack
+  python3 shared/common/tools/scenario.py show \
+      --binding shared/scenarios/panda_sim/stack/binding.yaml
 
 The tool never imports ROS, MuJoCo, PyTorch or a scenario implementation, never
 starts a process and never writes campaign ledgers, seeds or other state.
@@ -29,6 +31,7 @@ from robot_contracts.binding import (  # noqa: E402
     BindingStage,
     ResolvedBinding,
     load_binding,
+    resolve_binding_path,
 )
 from robot_contracts.models import ContractError  # noqa: E402
 
@@ -40,6 +43,45 @@ def _shared_root(value: str | None) -> Path:
     if environment:
         return Path(environment)
     return _LAYOUT_ROOT
+
+
+def _add_selection(subparser: argparse.ArgumentParser) -> None:
+    subparser.add_argument("--binding", help="path to binding.yaml")
+    subparser.add_argument(
+        "--scenario", help="scenario as <robot>/<task> below the shared scenarios tree"
+    )
+    subparser.add_argument("--robot", help="robot id below <shared-root>/scenarios")
+    subparser.add_argument("--task", help="task id below <shared-root>/scenarios/<robot>")
+
+
+def _binding_path(arguments: argparse.Namespace, shared_root: Path) -> Path:
+    direct = arguments.binding
+    scenario = arguments.scenario
+    robot = arguments.robot
+    task = arguments.task
+    if direct is not None:
+        if scenario is not None or robot is not None or task is not None:
+            raise BindingError(
+                "BINDING_REFERENCE",
+                "--binding cannot be combined with --scenario/--robot/--task",
+            )
+        return Path(direct)
+    if scenario is not None:
+        if robot is not None or task is not None:
+            raise BindingError(
+                "BINDING_REFERENCE", "--scenario cannot be combined with --robot/--task"
+            )
+        parts = scenario.split("/")
+        if len(parts) != 2 or not all(parts):
+            raise BindingError(
+                "BINDING_REFERENCE", f"--scenario {scenario!r}: expected <robot>/<task>"
+            )
+        robot, task = parts
+    elif robot is None or task is None:
+        raise BindingError(
+            "BINDING_REFERENCE", "select a binding with --binding, --scenario or --robot/--task"
+        )
+    return resolve_binding_path(shared_root, robot, task)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -56,7 +98,7 @@ def _parser() -> argparse.ArgumentParser:
     validate = commands.add_parser(
         "validate", parents=[common], help="check structure, references and a stage"
     )
-    validate.add_argument("--binding", required=True, help="path to binding.yaml")
+    _add_selection(validate)
     validate.add_argument(
         "--stage",
         required=True,
@@ -69,7 +111,7 @@ def _parser() -> argparse.ArgumentParser:
     )
 
     show = commands.add_parser("show", parents=[common], help="print the effective binding as JSON")
-    show.add_argument("--binding", required=True, help="path to binding.yaml")
+    _add_selection(show)
     return parser
 
 
@@ -85,10 +127,11 @@ def _failed(error: Exception) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     arguments = _parser().parse_args(argv)
+    shared_root = _shared_root(arguments.shared_root)
     try:
         resolved: ResolvedBinding = load_binding(
-            arguments.binding,
-            shared_root=_shared_root(arguments.shared_root),
+            _binding_path(arguments, shared_root),
+            shared_root=shared_root,
             bundle=getattr(arguments, "bundle", None),
         )
         if arguments.command == "validate":

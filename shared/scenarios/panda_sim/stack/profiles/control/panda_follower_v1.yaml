@@ -1,0 +1,47 @@
+# 中文参数说明（维护时优先阅读本段）
+# joint_names：16 个控制轴固定顺序。
+# target_count：每次执行窗口选用的预测点数；50 ms/点。
+# max_target_deviations：参考轨迹与分段线性策略目标之间允许的最大偏差。
+#   臂关节单位 rad，夹爪单位 m；这是跟随预算，不是放宽硬限位。
+# max_terminal_tail_duration_s：最后一段参考允许延伸到目标的最长时间，单位 s。
+
+# Bounded target-follower parameters.  This is a following budget, not a
+# relaxation of the robot profile's joint position/velocity hard limits.
+# Joint names follow robot_backend_sim.config.motion_config.CONTROL_JOINT_NAMES.
+joint_names:
+  - left_joint1
+  - left_joint2
+  - left_joint3
+  - left_joint4
+  - left_joint5
+  - left_joint6
+  - left_joint7
+  - left_gripper_width
+  - right_joint1
+  - right_joint2
+  - right_joint3
+  - right_joint4
+  - right_joint5
+  - right_joint6
+  - right_joint7
+  - right_gripper_width
+
+# Five selected predictions per execution window (0.25 s at 20 Hz).
+# The ACT policy still predicts a complete 3 s (60 point) chunk; overlapping
+# windows hand off as soon as a successor starts, so predictions that are
+# already stale are dropped; the selected points need not be points 0..4 of a
+# fresh complete chunk.
+target_count: 20
+
+# Continuous maximum distance between the actual reference and the
+# piecewise-linear policy target: 0.30 rad for arm joints except joint7 at
+# 0.40 rad, and 0.06 m for each gripper over a 20-point (1.0 s) window.
+# These are reference-fidelity budgets; physical limits and measured tracking
+# thresholds remain in the unchanged robot profile and panda_control_v1.yaml.
+max_target_deviations:
+  [0.50, 0.50, 0.50, 0.50, 0.50, 0.50, 0.50, 0.06,
+   0.50, 0.50, 0.50, 0.50, 0.50, 0.50, 0.50, 0.06]
+
+# A final reference may extend past the last selected prediction to reach the
+# target at zero velocity, but never beyond three seconds in total.
+max_terminal_tail_duration_s: 3.0

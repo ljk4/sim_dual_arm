@@ -20,8 +20,8 @@ from robot_backend_sim.render import rendering, visibility  # noqa: E402
 from robot_backend_sim.render.rendering import SceneRenderer, SceneRenderError  # noqa: E402
 from robot_backend_sim.tools import check_scene  # noqa: E402
 
-CONFIG_PATH = ROOT / "shared/scenarios/panda_stack/configs/simulation/scene/panda_stack.yaml"
-CHECK_PATH = ROOT / "shared/scenarios/panda_stack/configs/simulation/checks/scene_check.yaml"
+CONFIG_PATH = ROOT / "shared/scenarios/panda_sim/stack/configs/simulation/scene/panda_stack.yaml"
+CHECK_PATH = ROOT / "shared/scenarios/panda_sim/stack/configs/simulation/checks/scene_check.yaml"
 
 
 @pytest.fixture(scope="module")

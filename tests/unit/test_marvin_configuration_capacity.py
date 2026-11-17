@@ -15,7 +15,7 @@ from robot_backend_sim.tasks.handover.task_config import load_handover_task_conf
 def test_marvin_backend_covers_real_task_capacity(role):
     shared = Path(os.environ.get("SHARED_ROOT", Path(__file__).resolve().parents[2] / "shared"))
     recipe = shared / (
-        f"scenarios/marvin_handover/configs/simulation/backend/backend_marvin_{role}.yaml"
+        f"scenarios/marvin_sim/handover/configs/simulation/backend/backend_marvin_{role}.yaml"
     )
     backend = load_backend_config(recipe)
     task = load_handover_task_config(backend.task_path)

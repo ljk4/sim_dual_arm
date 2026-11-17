@@ -22,8 +22,8 @@ from robot_backend_sim.config.panda_scene_config import (  # noqa: E402
 )
 from robot_contracts.profiles import load_profile, semantic_hash  # noqa: E402
 
-CONFIG_PATH = ROOT / "shared/scenarios/panda_stack/configs/simulation/scene/panda_stack.yaml"
-PROFILE_PATH = ROOT / "shared/scenarios/panda_stack/profiles/robots/panda_stack_v1/profile.json"
+CONFIG_PATH = ROOT / "shared/scenarios/panda_sim/stack/configs/simulation/scene/panda_stack.yaml"
+PROFILE_PATH = ROOT / "shared/scenarios/panda_sim/stack/profiles/robots/panda_stack_v1/profile.json"
 SCHEMAS = ROOT / "shared/common/interfaces/schemas"
 DEFAULT_DOCUMENT = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
 
@@ -70,7 +70,7 @@ def test_default_config_loads_frozen_typed_values():
         0.0,
         0.0,
         -1.57079,
-        0.0,
+        0.3,
         1.57079,
         -0.7853,
     )

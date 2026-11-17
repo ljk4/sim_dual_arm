@@ -1,20 +1,17 @@
-"""Scenario binding selection for the learning entry points.
+"""Robot/task binding selection for the learning entry points.
 
-This module is the only place where learning resolves ``--scenario``.  It uses
-the public :mod:`robot_contracts.binding` loader, so path resolution, schema
-checks and stage requirements stay identical to the simulation and runtime
-side.  It never imports ROS, MuJoCo, Torch or a scenario implementation, never
-loads model weights and never writes a file.
-
-The selected recipe is the *actual* recipe handed to the existing learning
-configuration loaders.  A binding only selects files; numeric values remain in
-the recipe that the producing end owns.
+This module is the only place where learning resolves ``--robot``/``--task``.
+A scenario is the ``(robot, task)`` pair that owns
+``<shared-root>/scenarios/<robot>/<task>/binding.yaml``.  It uses the public
+:mod:`robot_contracts.binding` loader, so path resolution, schema checks and
+stage requirements stay identical to the simulation and runtime side.  It
+never imports ROS, MuJoCo, Torch or a scenario implementation, never loads
+model weights and never writes a file.
 """
 
 from __future__ import annotations
 
 import os
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -25,25 +22,34 @@ from robot_contracts.binding import (
     ResolvedBinding,
     ResolvedReference,
     load_binding,
+    resolve_binding_path,
 )
 from robot_contracts.models import ContractError
+from robot_contracts.project_paths import project_path
 
-SCENARIO_ID = re.compile(r"^[A-Za-z_][A-Za-z0-9_.:-]{0,127}$")
 SUPPORTED_IMPLEMENTATION = "lerobot"
 SUPPORTED_ADAPTER = "act"
 
 
 class ScenarioSelectionError(ValueError):
-    """The requested scenario cannot be used by this learning component."""
+    """The requested robot/task cannot be used by this learning component."""
 
 
 @dataclass(frozen=True)
 class LearningScenario:
-    """One validated scenario selection with its real recipe reference."""
+    """One validated robot/task selection with its real recipe reference."""
 
     resolved: ResolvedBinding
     recipe_field: str
     stage: BindingStage
+
+    @property
+    def robot(self) -> str:
+        return self.resolved.binding.robot_id
+
+    @property
+    def task(self) -> str:
+        return self.resolved.binding.task_id
 
     @property
     def scenario_id(self) -> str:
@@ -72,13 +78,14 @@ class LearningScenario:
         *,
         recipe_field: str | None = None,
         include_dataset_recipe: bool = False,
-        include_bundle: bool = False,
     ) -> dict[str, Any]:
         """Deterministic provenance record for manifests and snapshots."""
         field = recipe_field or self.recipe_field
         recipe = self.recipe_record(field)
         record: dict[str, Any] = {
             "mode": "scenario",
+            "robot": self.robot,
+            "task": self.task,
             "scenario_id": self.scenario_id,
             "stage": self.stage.value,
             "binding": {
@@ -89,8 +96,6 @@ class LearningScenario:
         }
         if include_dataset_recipe and field != "dataset":
             record["dataset_recipe"] = self.recipe_record("dataset")
-        if include_bundle:
-            record["bundle"] = self.resolved.effective_bundle()
         return record
 
 
@@ -107,39 +112,62 @@ def resolve_shared_root(explicit: Path | None, project_root: Path) -> Path:
     return Path("/shared")
 
 
-def _binding_path(shared_root: Path, scenario: str) -> Path:
-    if SCENARIO_ID.fullmatch(scenario) is None or ".." in scenario:
-        raise ScenarioSelectionError(
-            "scenario id must contain 1..128 safe characters and no path traversal"
-        )
-    path = Path(shared_root) / "scenarios" / scenario / "binding.yaml"
-    if not path.is_file():
-        raise ScenarioSelectionError(f"scenario {scenario!r} has no binding file: {path}")
-    return path
+def artifact_paths(robot: str, task: str, project_root: Path) -> dict[str, Path]:
+    """Canonical runtime artifact roots for one robot/task pair."""
+    base = project_path(Path("var") / robot / task, project_root)
+    return {
+        "select": base / "datasets" / "raw" / "formal-select.json",
+        "dataset": base / "datasets" / "lerobot",
+        "cache": base / "datasets" / ".cache",
+        "models": base / "models",
+        "logs": base / "logs",
+        "training_logs": base / "logs" / "training",
+    }
+
+
+def latest_model(robot: str, task: str, project_root: Path) -> Path | None:
+    """Return the newest ``act_<timestamp>`` model directory, if any."""
+    models = artifact_paths(robot, task, project_root)["models"]
+    if not models.is_dir():
+        return None
+    candidates = sorted(
+        (path for path in models.iterdir() if path.is_dir() and path.name.startswith("act_")),
+        key=lambda path: path.name,
+        reverse=True,
+    )
+    return candidates[0] if candidates else None
 
 
 def select_scenario(
     *,
-    scenario: str,
+    robot: str,
+    task: str,
     recipe_field: str,
     stage: BindingStage | str,
     project_root: Path,
     shared_root: Path | None = None,
-    bundle: Path | None = None,
+    model: Path | None = None,
 ) -> LearningScenario:
     """Load one binding, verify this end supports it and select a recipe.
 
-    ``stage`` controls the binding requirements: conversion/training/export use
+    ``stage`` controls the binding requirements: conversion/training use
     ``learning`` (no model needed), inference preparation and serving use
-    ``inference`` (a real model source is mandatory).  ``bundle`` is an explicit
+    ``inference`` (a real model source is mandatory).  ``model`` is an explicit
     model override; it is resolved by the binding loader against the declared
     roots and recorded as the effective source.
     """
-    stage_value = BindingStage(stage)
     root = resolve_shared_root(shared_root, project_root)
-    binding_path = _binding_path(root, scenario)
     try:
-        resolved = load_binding(binding_path, shared_root=root, bundle=bundle)
+        binding_path = resolve_binding_path(root, robot, task)
+    except BindingError as error:
+        raise ScenarioSelectionError(str(error)) from error
+    if not binding_path.is_file():
+        raise ScenarioSelectionError(
+            f"scenario {robot}/{task} has no binding file: {binding_path}"
+        )
+    stage_value = BindingStage(stage)
+    try:
+        resolved = load_binding(binding_path, shared_root=root, model=model)
     except (BindingError, ContractError, OSError) as error:
         raise ScenarioSelectionError(str(error)) from error
 
@@ -155,15 +183,6 @@ def select_scenario(
         raise ScenarioSelectionError(
             f"scenario {resolved.binding.scenario_id!r} declares no recipes.{recipe_field}"
         )
-    try:
-        resolved.validate_stage(stage_value)
-    except BindingError as error:
-        hint = (
-            " (pass --bundle with a verified model directory)"
-            if stage_value is BindingStage.inference
-            else ""
-        )
-        raise ScenarioSelectionError(f"{error}{hint}") from error
     adapter = resolved.binding.learning.adapter
     if adapter != SUPPORTED_ADAPTER:
         raise ScenarioSelectionError(
@@ -171,6 +190,15 @@ def select_scenario(
             f"{resolved.binding.scenario_id!r}; this learning component only "
             f"implements {SUPPORTED_ADAPTER!r}"
         )
+    try:
+        resolved.validate_stage(stage_value)
+    except BindingError as error:
+        hint = (
+            " (pass --model with a trained model directory)"
+            if stage_value is BindingStage.inference
+            else ""
+        )
+        raise ScenarioSelectionError(f"{error}{hint}") from error
     return LearningScenario(resolved=resolved, recipe_field=recipe_field, stage=stage_value)
 
 

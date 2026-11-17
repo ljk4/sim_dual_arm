@@ -6,7 +6,7 @@ import yaml
 from dual_arm_runtime.offline.campaign_ledger import CampaignError  # noqa: E402
 from dual_arm_runtime.offline.record_workers import prepare_workers  # noqa: E402
 
-PROFILE_REL = "shared/scenarios/panda_stack/profiles/profile.json"
+PROFILE_REL = "shared/scenarios/panda_sim/stack/profiles/profile.json"
 
 
 @pytest.fixture

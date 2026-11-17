@@ -1,4 +1,4 @@
-"""All learning entry points print the real scenario selection interface."""
+"""All learning entry points print the real robot/task selection interface."""
 
 import os
 from pathlib import Path
@@ -9,18 +9,22 @@ from dual_arm_learning.config import load_dataset_config, load_training_config
 from dual_arm_learning.scenario import select_scenario
 
 
-@pytest.mark.parametrize("scenario", ["panda_stack", "marvin_handover"])
+@pytest.mark.parametrize(("robot", "task"), [("panda_sim", "stack"), ("marvin_sim", "handover")])
 @pytest.mark.parametrize("field", ["dataset", "training"])
-def test_learning_startup_prints_real_loaded_selection(scenario, field, capsys):
+def test_learning_startup_prints_real_loaded_selection(robot, task, field, capsys):
     root = Path(os.environ.get("PROJECT_ROOT", Path(__file__).resolve().parents[2]))
     selection = select_scenario(
-        scenario=scenario, recipe_field=field, stage="learning", project_root=root
+        robot=robot,
+        task=task,
+        recipe_field=field,
+        stage="learning",
+        project_root=root,
     )
     load = load_dataset_config if field == "dataset" else load_training_config
     config = load(selection.recipe_path, root)
     _print_effective_config("配置", selection.recipe_path, selection, config)
     output = capsys.readouterr().out
-    assert scenario in output
+    assert f"{robot}/{task}" in output
     assert str(selection.resolved.path) in output
     assert str(selection.recipe_path) in output
 
@@ -60,16 +64,20 @@ def test_training_data_root_override_uses_data_mount(monkeypatch):
     monkeypatch.setenv("PROJECT_CONTAINER", "1")
     monkeypatch.setenv("PROJECT_ROOT", str(root))
     selection = select_scenario(
-        scenario="panda_stack", recipe_field="training", stage="learning", project_root=root
+        robot="panda_sim",
+        task="stack",
+        recipe_field="training",
+        stage="learning",
+        project_root=root,
     )
     args = argparse.Namespace(
         project_root=root,
         overrides=[],
         mode=None,
-        data_root=Path("var/synthetic_stack/datasets/override"),
+        data_root=Path("var/panda_sim/stack/datasets/override"),
     )
     config = cli._training_config(args, selection.recipe_path)
     assert (
         config.data_root
-        == Path(os.environ.get("DATA_ROOT", "/data")) / "synthetic_stack/datasets/override"
+        == Path(os.environ.get("DATA_ROOT", "/data")) / "panda_sim/stack/datasets/override"
     )

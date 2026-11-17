@@ -28,6 +28,7 @@ from dual_arm_runtime.offline.campaign_execution import (
     LaunchInterrupted,
     acquire_run_lock,
     classify,
+    discard_unqualified_attempt,
     episode_manifest,
     episode_task_result,
     handle_sigterm,
@@ -221,6 +222,9 @@ def _finish_attempt(
                 **classification,
             }
         )
+    # The ledger keeps the failure reason and size; the dataset keeps only
+    # qualified episodes.
+    discard_unqualified_attempt(attempt.directory, classification)
     return event, classification, raw_bytes
 
 
@@ -498,12 +502,13 @@ def command_backfill_terminal(args: argparse.Namespace) -> int:
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     result.add_argument("--project-root", type=Path, default=Path.cwd())
-    result.add_argument("--scenario")
+    result.add_argument("--robot")
+    result.add_argument("--task")
     result.add_argument("--shared-root", type=Path)
     result.add_argument(
         "--config",
         default=None,
-        help="direct campaign recipe (conflicts with --scenario)",
+        help="direct campaign recipe (conflicts with --robot/--task)",
     )
     result.add_argument(
         "--set",
@@ -525,7 +530,7 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--runtime-config",
         default=None,
-        help="direct runtime teacher recipe (conflicts with --scenario)",
+        help="direct runtime teacher recipe (conflicts with --robot/--task)",
     )
     run.add_argument("launch_command", nargs=argparse.REMAINDER)
     status = sub.add_parser("status", help="show budgets and consumed raw bytes")
@@ -546,15 +551,18 @@ def parser() -> argparse.ArgumentParser:
 
 
 def _resolve_selection(args: argparse.Namespace, cli: argparse.ArgumentParser) -> None:
-    if args.scenario is not None:
+    if args.robot is not None:
+        if args.task is None:
+            cli.error("--robot requires --task")
         if args.config is not None:
-            cli.error("--scenario cannot be combined with --config")
+            cli.error("--robot/--task cannot be combined with --config")
         if args.action == "run" and args.runtime_config is not None:
-            cli.error("--scenario cannot be combined with --runtime-config")
+            cli.error("--robot/--task cannot be combined with --runtime-config")
         from dual_arm_runtime.offline.scenario_selection import select_collection
 
         selection = select_collection(
-            scenario=args.scenario,
+            robot=args.robot,
+            task=args.task,
             shared_root=args.shared_root,
             project_root=args.project_root.resolve(),
             require_parallel=False,
@@ -563,10 +571,12 @@ def _resolve_selection(args: argparse.Namespace, cli: argparse.ArgumentParser) -
         if args.action == "run":
             args.runtime_config = selection["recipes"]["runtime_teacher"]["path"]
     else:
+        if args.task is not None:
+            cli.error("--task requires --robot")
         if args.shared_root is not None:
-            cli.error("--shared-root requires --scenario")
+            cli.error("--shared-root requires --robot/--task")
         if args.config is None:
-            cli.error("one of --scenario or --config is required")
+            cli.error("one of --robot/--task or --config is required")
         if args.action == "run" and args.runtime_config is None:
             cli.error("--runtime-config is required for a direct run")
 

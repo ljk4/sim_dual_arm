@@ -20,8 +20,8 @@ from robot_backend_sim.config.panda_scene_config import load_scene_config  # noq
 from robot_backend_sim.render import visibility  # noqa: E402
 from robot_backend_sim.tools import check_scene  # noqa: E402
 
-SCENE_CONFIG = ROOT / "shared/scenarios/panda_stack/configs/simulation/scene/panda_stack.yaml"
-CHECK_CONFIG = ROOT / "shared/scenarios/panda_stack/configs/simulation/checks/scene_check.yaml"
+SCENE_CONFIG = ROOT / "shared/scenarios/panda_sim/stack/configs/simulation/scene/panda_stack.yaml"
+CHECK_CONFIG = ROOT / "shared/scenarios/panda_sim/stack/configs/simulation/checks/scene_check.yaml"
 
 
 def write_yaml(tmp_path: Path, document: dict) -> Path:

@@ -13,7 +13,7 @@
 ./env.sh enter simulation
 
 # 容器内：启动 ROS 2 仿真后端（需先在 runtime 容器运行过 scripts/build_sdk.sh）
-scripts/backend.sh --scenario panda_stack --role teacher --seed 0 --run-id teacher-backend
+scripts/backend.sh --robot panda_sim --task stack --role teacher --seed 0 --run-id teacher-backend
 ```
 
 ### 实时可视化（Viewer）
@@ -21,7 +21,7 @@ scripts/backend.sh --scenario panda_stack --role teacher --seed 0 --run-id teach
 仿真后端默认无窗口离屏渲染。如需查看实时画面，在宿主机执行：
 
 ```bash
-./env.sh viewer --scenario panda_stack --role teacher
+./env.sh viewer --robot panda_sim --task stack --role teacher
 ```
 
 > 若遇到 X11 权限报错，先在宿主机执行 `xhost +SI:localuser:$(id -un)`。

@@ -20,7 +20,7 @@
 ./env.sh enter simulation
 
 # 宿主机：打开实时只读 3D 视图（需先启动 backend）
-./env.sh viewer --scenario panda_stack --role teacher
+./env.sh viewer --robot panda_sim --task stack --role teacher
 ```
 
 详细操作见 [`docker/README.md`](docker/README.md) 与 [`scripts/README.md`](scripts/README.md)。

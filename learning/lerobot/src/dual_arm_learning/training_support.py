@@ -15,8 +15,6 @@ from .config import TrainingConfig
 from .dataset import configure_local_caches, file_sha256
 from .sample_filter import SampleFilterMask
 
-BUNDLE_FORMAT = "dual-arm-act-bundle-v1"
-
 
 class TrainingError(RuntimeError):
     """Training cannot continue without violating an explicit contract."""
@@ -259,7 +257,6 @@ METRIC_FIELDS = (
     "elapsed_seconds",
     "vram_allocated_mb",
     "vram_reserved_mb",
-    "budget_remaining_s",
     "val_l1",
     "val_batches",
     "val_valid_scalars",
@@ -286,17 +283,17 @@ class MetricsWriter:
             csv.DictWriter(stream, fieldnames=METRIC_FIELDS, extrasaction="ignore").writerow(row)
 
 
-def make_logger(config: TrainingConfig, run_id: str, segment_id: str) -> tuple[Any, Path]:
+def make_logger(config: TrainingConfig, model_name: str) -> tuple[Any, Path]:
     from robot_run_logging import EventLogger, LogSettings
 
-    root = config.logging.root / run_id
+    root = config.logging.root / model_name
     root.mkdir(parents=True, exist_ok=True)
-    logger_dir = root / f"events-{segment_id}"
+    logger_dir = root / "events"
     if logger_dir.exists():
         raise TrainingError(f"{logger_dir}: event log directory already exists")
     logger = EventLogger(
         logger_dir,
-        run_id=run_id,
+        run_id=model_name,
         component=config.logging.component,
         settings=LogSettings(
             queue_capacity=config.logging.queue_capacity,
@@ -320,22 +317,14 @@ def emit(logger: Any, event: str, **fields: Any) -> None:
     logger.emit(event, fields=scalars)
 
 
-def new_run_id(config: TrainingConfig) -> str:
-    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-    return f"{config.mode}-{stamp}-{os.getpid()}"
-
-
-def prepare_dir(path: Path) -> None:
-    if path.exists():
-        raise TrainingError(f"{path}: run directory already exists; use --resume-run")
-    path.mkdir(parents=True, exist_ok=False)
-
-
-def new_segment_id(run_id: str) -> str:
-    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-    import uuid
-
-    return f"{run_id}.segment.{stamp}.{os.getpid()}.{uuid.uuid4().hex[:8]}"
+def new_model_name(*roots: Path) -> str:
+    base = time.strftime("act_%Y%m%d_%H%M%S")
+    if not roots or not any((root / base).exists() for root in roots):
+        return base
+    suffix = 2
+    while any((root / f"{base}_{suffix}").exists() for root in roots):
+        suffix += 1
+    return f"{base}_{suffix}"
 
 
 class TrainingInterrupted(TrainingError):
@@ -350,9 +339,8 @@ def build_report(
     *,
     config: TrainingConfig,
     audit: DatasetAudit,
-    run_id: str,
-    segment_id: str,
-    instance_id: str,
+    model_name: str,
+    model_dir: Path,
     reason: str,
     step: int,
     steps_total: int,
@@ -360,8 +348,8 @@ def build_report(
     policy: Any,
     loaded_backbone: int,
     started: float,
+    best_step: int | None,
     best_val: Any,
-    save_records: list[dict[str, Any]],
     errors: list[str],
     peak_alloc: float,
     peak_reserved: float,
@@ -371,11 +359,9 @@ def build_report(
     overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     report = {
-        "format": "dual-arm-act-training-report-v1",
-        "run_id": run_id,
-        "budget_run_id": run_id,
-        "budget_segment_id": segment_id,
-        "budget_instance_id": instance_id,
+        "format": "dual-arm-act-training-report-v2",
+        "model_name": model_name,
+        "model_dir": str(model_dir),
         "mode": config.mode,
         "diagnostic": bool(config.dataset.diagnostic),
         "reason": reason,
@@ -387,13 +373,13 @@ def build_report(
         "duration_seconds": time.monotonic() - started,
         "peak_vram_allocated_mb": peak_alloc,
         "peak_vram_reserved_mb": peak_reserved,
+        "best_step": best_step,
         "best_val_l1": best_val,
         "dataset": asdict(audit)
         | {
             "train_root": str(audit.train_root),
             "validation_root": str(audit.validation_root),
         },
-        "checkpoints": save_records,
         "errors": errors,
         "sample_filter": None if sample_filter is None else sample_filter.summary(),
         "input_sha256": {
@@ -416,7 +402,6 @@ def build_report(
 
 
 __all__ = [
-    "BUNDLE_FORMAT",
     "DatasetAudit",
     "METRIC_FIELDS",
     "MetricsWriter",
@@ -431,9 +416,7 @@ __all__ = [
     "loader",
     "make_logger",
     "masked_l1",
-    "new_run_id",
-    "new_segment_id",
-    "prepare_dir",
+    "new_model_name",
     "process_batch",
     "sample_keys",
     "validation_loss",

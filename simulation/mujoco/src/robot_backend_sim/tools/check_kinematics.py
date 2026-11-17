@@ -68,7 +68,7 @@ KIND = "kinematics"
 REPORT_SCHEMA_VERSION = 1
 _SHARED_ROOT = Path(os.environ.get("SHARED_ROOT", "/shared"))
 _SHARED_RECIPES = (
-    _SHARED_ROOT / "scenarios/panda_stack/configs/simulation"
+    _SHARED_ROOT / "scenarios/panda_sim/stack/configs/simulation"
 )
 DEFAULT_SCENE_CONFIG = _SHARED_RECIPES / "scene/panda_stack.yaml"
 DEFAULT_CHECK_CONFIG = _SHARED_RECIPES / "checks/scene_check.yaml"
@@ -114,18 +114,27 @@ def _parser() -> argparse.ArgumentParser:
         "--kinematics-config", type=Path, required=True, help="kinematics check parameters"
     )
     parser.add_argument("--report-root", type=Path, required=True, help="report parent directory")
-    parser.add_argument("--run-id", required=True, help="fresh report run identity")
+    parser.add_argument(
+        "--run-id",
+        default=None,
+        help="fresh report run identity (default: kinematics-check-<UTC>-<pid>)",
+    )
     return parser
 
 
 def parse_arguments(argv: list[str] | None = None) -> KinematicsCheckArguments:
     parsed = _parser().parse_args(argv)
+    run_id = (
+        f"kinematics-check-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{os.getpid()}"
+        if parsed.run_id is None
+        else parsed.run_id
+    )
     return KinematicsCheckArguments(
         scene_config=parsed.scene_config.resolve(),
         check_config=parsed.check_config.resolve(),
         kinematics_config=parsed.kinematics_config.resolve(),
         report_root=_validate_report_root(parsed.report_root),
-        run_id=_validate_run_id(parsed.run_id),
+        run_id=_validate_run_id(run_id),
     )
 
 
@@ -171,6 +180,7 @@ def _kinematics_config_document(config: KinematicsCheckConfig) -> dict[str, obje
             "position_cost": config.ik.position_cost,
             "orientation_cost": config.ik.orientation_cost,
             "lm_damping": config.ik.lm_damping,
+            "limit_margin_rad": config.ik.limit_margin_rad,
             "solver": config.ik.solver,
             "initial_right_joint_positions": list(config.ik.initial_right_joint_positions),
         },

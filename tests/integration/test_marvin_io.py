@@ -24,7 +24,7 @@ from robot_backend_sim.physics.marvin.scene import build_marvin_scene  # noqa: E
 from robot_contracts.models import ContractError  # noqa: E402
 from robot_contracts.profiles import load_profile  # noqa: E402
 
-SCENARIO = ROOT / "shared/scenarios/marvin_handover"
+SCENARIO = ROOT / "shared/scenarios/marvin_sim/handover"
 CONFIG_PATH = SCENARIO / "configs/simulation/scene/marvin_handover.yaml"
 PROFILE_PATH = SCENARIO / "profiles/robots/marvin_handover_v1/profile.json"
 SCHEMAS = ROOT / "shared/common/interfaces/schemas"

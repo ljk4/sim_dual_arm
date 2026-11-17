@@ -32,10 +32,10 @@ from robot_backend_sim.physics.marvin.scene import build_marvin_scene, gripper_o
 from robot_backend_sim.render.rendering import SceneRenderer
 from robot_backend_sim.render.visibility import count_visible_pixels
 
-__all__ = ["main", "run"]
+__all__ = ["main", "parse_arguments", "run"]
 
 _SHARED_ROOT = Path(os.environ.get("SHARED_ROOT", "/shared"))
-_SCENARIO = _SHARED_ROOT / "scenarios/marvin_handover"
+_SCENARIO = _SHARED_ROOT / "scenarios/marvin_sim/handover"
 DEFAULT_SCENE_CONFIG = _SCENARIO / "configs/simulation/scene/marvin_handover.yaml"
 DEFAULT_PROFILE = _SCENARIO / "profiles/robots/marvin_handover_v1/profile.json"
 DEFAULT_SCHEMAS = _SHARED_ROOT / "common/interfaces/schemas"
@@ -104,8 +104,21 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--profile", type=Path, default=DEFAULT_PROFILE)
     parser.add_argument("--schemas", type=Path, default=DEFAULT_SCHEMAS)
     parser.add_argument("--report-root", type=Path, required=True)
-    parser.add_argument("--run-id", required=True)
+    parser.add_argument(
+        "--run-id",
+        default=None,
+        help="fresh report run identity (default: marvin-scene-check-<UTC>-<pid>)",
+    )
     return parser
+
+
+def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
+    parsed = _parser().parse_args(argv)
+    if not parsed.run_id:
+        parsed.run_id = (
+            f"marvin-scene-check-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{os.getpid()}"
+        )
+    return parsed
 
 
 def _semantics_check(scene, semantics) -> dict[str, object]:
@@ -1025,7 +1038,7 @@ def run(arguments) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    arguments = _parser().parse_args(argv)
+    arguments = parse_arguments(argv)
     try:
         return run(arguments)
     except FileExistsError as error:

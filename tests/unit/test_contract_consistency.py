@@ -180,7 +180,7 @@ def test_profile_schema_matches_models():
 
 
 def test_all_profile_documents_validate():
-    documents = sorted((ROOT / "shared/scenarios/panda_stack/profiles").rglob("*.json"))
+    documents = sorted((ROOT / "shared/scenarios/panda_sim/stack/profiles").rglob("*.json"))
     assert documents
     for path in documents:
         document = json.loads(path.read_text())
@@ -252,7 +252,7 @@ def test_teacher_service_is_a_scenario_extension_not_a_common_package():
     common = ROOT / "shared/common/interfaces/ros/sim_api_msgs"
     extension = (
         ROOT
-        / "shared/scenarios/panda_stack/extensions/ros/panda_stack_api_msgs"
+        / "shared/scenarios/panda_sim/stack/extensions/ros/panda_stack_api_msgs"
     )
     assert not (common / "srv/GetTeacherChunk.srv").exists()
     assert "GetTeacherChunk" not in (common / "CMakeLists.txt").read_text()

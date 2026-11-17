@@ -115,11 +115,13 @@ class FollowerConstraints(StrictMappingModel):
 
 
 class PolicyConfig(StrictMappingModel):
-    """Policy RPC identity, bounds and the finite diagnostic stream budget."""
+    """Policy RPC identity, bounds and the finite diagnostic stream budget.
+
+    Model and processor digests are not configured here: the runtime learns
+    them from the Policy Service handshake and never loads a model itself.
+    """
 
     endpoint: Annotated[NonEmptyStr, Field(pattern=r"^[^:\s]+:\d+$")]
-    model_bundle_digest: Sha256HexStr
-    processor_digest: Sha256HexStr
     observation_schema_hash: Sha256HexStr
     action_schema_hash: Sha256HexStr
     robot_profile_hash: Sha256HexStr

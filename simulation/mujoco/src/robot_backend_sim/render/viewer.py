@@ -43,14 +43,15 @@ _VIEWER_QOS = QoSProfile(
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    selection = parser.add_mutually_exclusive_group(required=True)
-    selection.add_argument("--config", type=Path, help="direct backend recipe path")
-    selection.add_argument(
-        "--scenario", help="scenario id under <shared-root>/scenarios/<id>/binding.yaml"
+    parser.add_argument("--config", type=Path, help="direct backend recipe path")
+    parser.add_argument(
+        "--robot", help="robot id under <shared-root>/scenarios/<robot>/<task>/"
+    )
+    parser.add_argument(
+        "--task", help="task id under <shared-root>/scenarios/<robot>/<task>/"
     )
     parser.add_argument("--role", choices=("teacher", "policy"), default="teacher")
     parser.add_argument("--shared-root", type=Path)
-    parser.add_argument("--bundle", type=Path)
     parser.add_argument(
         "--set", dest="overrides", action="append", default=[], metavar="PATH=VALUE"
     )
@@ -75,15 +76,17 @@ def _resolve_config_path(config: Path) -> Path:
 
 
 def _load_backend(args: argparse.Namespace):
-    if args.scenario is None:
-        if args.role != "teacher" or args.shared_root is not None or args.bundle is not None:
-            raise ScenarioError("--role/--shared-root/--bundle require --scenario")
+    if args.config is not None:
+        if args.robot is not None or args.task is not None:
+            raise ScenarioError("--config cannot be combined with --robot/--task")
+        if args.role != "teacher" or args.shared_root is not None:
+            raise ScenarioError("--role/--shared-root require --robot/--task")
         return load_backend_config(_resolve_config_path(args.config))
     resolved = resolve_scenario_backend(
-        scenario=args.scenario,
+        robot=args.robot,
+        task=args.task,
         role=args.role,
         shared_root=args.shared_root,
-        bundle=args.bundle,
         overrides=args.overrides,
     )
     return load_backend_document(resolved.document, resolved.source)

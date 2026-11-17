@@ -15,19 +15,25 @@ for argument in "$@"; do
   fi
 done
 
-scenario_segment() {
-  local previous="" argument
+target_segment() {
+  local robot="" task="" previous="" argument
   for argument in "$@"; do
-    if [[ "$previous" == "--scenario" ]]; then
-      printf '%s\n' "$argument"
-      return 0
+    if [[ "$previous" == "--robot" && "$argument" != --* ]]; then
+      robot="$argument"
+    elif [[ "$previous" == "--task" && "$argument" != --* ]]; then
+      task="$argument"
     fi
     case "$argument" in
-      --scenario=*) printf '%s\n' "${argument#*=}"; return 0 ;;
+      --robot=*) robot="${argument#*=}" ;;
+      --task=*) task="${argument#*=}" ;;
     esac
     previous="$argument"
   done
-  printf '_direct\n'
+  if [[ -n "$robot" && -n "$task" ]]; then
+    printf '%s/%s\n' "$robot" "$task"
+  else
+    printf '_direct\n'
+  fi
 }
 
 if [[ "$has_help" != "true" ]]; then
@@ -37,5 +43,5 @@ if [[ "$has_help" != "true" ]]; then
 fi
 
 exec python3 -m robot_backend_sim.ros.node \
-  --run-root "$DATA_ROOT/$(scenario_segment "$@")/logs/backend" \
+  --run-root "$DATA_ROOT/$(target_segment "$@")/logs/backend" \
   "$@"

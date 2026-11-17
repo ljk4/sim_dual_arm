@@ -4,35 +4,34 @@
 
 | 脚本 | 功能说明 | 默认输出路径 |
 | --- | --- | --- |
-| `backend.sh` | 按 `--scenario` 或 `--config` 加载配方，校验 `/opt/ros-dev` SDK 后启动 MuJoCo ROS 2 物理仿真后端 | `/data/<scenario-id>/logs/backend/<run-id>/`（direct 模式 `_direct`） |
-| `teacher_backend.sh` | 显式指定 `--scenario <id>`，启动 Teacher 后端并展示完整生效参数 | `/data/<scenario-id>/logs/backend/<run-id>/` |
-| `policy_backend.sh` | 显式指定 `--scenario <id>`，使用已验证 Bundle 启动推理后端 | `/data/<scenario-id>/logs/backend/<run-id>/` |
-| `viewer.sh` | 订阅 `/robot/visualization/mujoco_state` 快照，通过宿主机 X11 打开只读实时 GUI；支持 `--scenario` | 实时窗口显示 |
+| `backend.sh` | 按 `--robot/--task` 或 `--config` 加载配方，校验 `/opt/ros-dev` SDK 后启动 MuJoCo ROS 2 物理仿真后端 | `/data/<robot>/<task>/logs/backend/<run-id>/`（direct 模式 `_direct`） |
+| `teacher_backend.sh` | 显式指定 `--robot <id> --task <id>`，启动 Teacher 后端并展示完整生效参数 | `/data/<robot>/<task>/logs/backend/<run-id>/` |
+| `policy_backend.sh` | 显式指定 `--robot <id> --task <id>`，启动推理后端（仿真端不加载模型权重，无需 Bundle） | `/data/<robot>/<task>/logs/backend/<run-id>/` |
+| `viewer.sh` | 订阅 `/robot/visualization/mujoco_state` 快照，通过宿主机 X11 打开只读实时 GUI；支持 `--robot/--task` | 实时窗口显示 |
 | `test.sh` | 运行固定禁用自动插件收集的 `pytest` 测试套件 | 终端输出 |
 
-`backend.sh` / `viewer.sh` 必须且只能指定 `--scenario <id>` 或 `--config <recipe>` 之一：
+`backend.sh` / `viewer.sh` 必须且只能指定 `--robot <id> --task <id>` 或 `--config <recipe>` 之一：
 
-- 方案模式额外接受 `--role teacher|policy`、`--shared-root`、`--bundle`（仅 policy）与 `--seed`；
+- `--robot/--task` 模式额外接受 `--role teacher|policy`、`--shared-root` 与 `--seed`；
 - 后端在内存中解析并展开配方，把本次实际生效的快照写到 `<run-root>/<run-id>/backend.yaml`，日志写到同目录 `log/`；
 - 所有入口支持重复 `--set dot.path=value`，只覆盖配方中已存在的键；
 - 不生成 `/data/prepared/` 等中间目录。
 
 ```bash
-# 直接以方案启动示教后端
-scripts/backend.sh --scenario panda_stack --role teacher \
+# 按机器人/任务启动示教后端
+scripts/backend.sh --robot panda_sim --task stack --role teacher \
   --seed 0 --run-id teacher-backend
 
-# 直接以方案启动推理后端
-scripts/backend.sh --scenario panda_stack --role policy \
-  --bundle /data/panda_stack/models/bundles/stack-act \
+# 按机器人/任务启动推理后端
+scripts/backend.sh --robot panda_sim --task stack --role policy \
   --seed 20000 --run-id policy-backend --set run.realtime_speed=0.4
 
 # 直接配置模式
 scripts/backend.sh \
-  --config /shared/scenarios/panda_stack/configs/simulation/backend/backend_stack_teacher.yaml
+  --config /shared/scenarios/panda_sim/stack/configs/simulation/backend/backend_stack_teacher.yaml
 
-# 只读 viewer（宿主机用 ./env.sh viewer --scenario panda_stack --role teacher）
-scripts/viewer.sh --scenario panda_stack --role teacher
+# 只读 viewer（宿主机用 ./env.sh viewer --robot panda_sim --task stack --role teacher）
+scripts/viewer.sh --robot panda_sim --task stack --role teacher
 ```
 
 - 所有后端运行目录均禁止覆盖已存在路径。

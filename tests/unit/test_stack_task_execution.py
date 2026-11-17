@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-SCENARIO = ROOT / "shared/scenarios/panda_stack"
+SCENARIO = ROOT / "shared/scenarios/panda_sim/stack"
 SIM_SRC = ROOT / "simulation/mujoco/src"
 CONTRACTS = ROOT / "shared/common/python/contracts/src"
 for source in (SIM_SRC, CONTRACTS):

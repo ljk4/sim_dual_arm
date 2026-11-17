@@ -158,12 +158,45 @@ def _right_addresses(model: object, joint_ids: tuple[int, ...]) -> tuple[int, ..
     return tuple(int(model.jnt_qposadr[joint_id]) for joint_id in joint_ids)
 
 
-def _mink_limits(model: object, pair_set: CollisionPairSet, clearance: ClearanceConfig):
+def _configuration_limit(model: object, joint_ids: tuple[int, ...], margin_rad: float):
+    """Configuration limit with an interior margin on the solved arm hinges.
+
+    ``mink.ConfigurationLimit`` clamps at the exact hard limits.  Shrinking just
+    the active arm joints keeps every solved key pose at least ``margin_rad``
+    away from a hard limit while leaving free/finger joints untouched.
+    """
+    import mink
+
+    limit = mink.ConfigurationLimit(model)
+    if margin_rad <= 0.0:
+        return limit
+    for joint_id in joint_ids:
+        if not int(model.jnt_limited[joint_id]):
+            continue
+        lower = float(model.jnt_range[joint_id][0]) + margin_rad
+        upper = float(model.jnt_range[joint_id][1]) - margin_rad
+        if lower >= upper:
+            raise KinematicsError(
+                "ik_limit_margin_invalid",
+                f"joint margin {margin_rad:g} rad collapses joint {joint_id}",
+            )
+        limit.lower[int(model.jnt_qposadr[joint_id])] = lower
+        limit.upper[int(model.jnt_qposadr[joint_id])] = upper
+    return limit
+
+
+def _mink_limits(
+    model: object,
+    joint_ids: tuple[int, ...],
+    pair_set: CollisionPairSet,
+    clearance: ClearanceConfig,
+    limit_margin_rad: float,
+):
     import mink
 
     try:
         limits = [
-            mink.ConfigurationLimit(model),
+            _configuration_limit(model, joint_ids, limit_margin_rad),
             mink.CollisionAvoidanceLimit(
                 model,
                 [((pair.geom1,), (pair.geom2,)) for pair in pair_set.pairs],
@@ -342,7 +375,20 @@ def solve_key_poses(
     initial = np.asarray(initial_qpos, dtype=np.float64)
     if initial.shape != (model.nq,) or not np.isfinite(initial).all():
         raise KinematicsError("initial_state_invalid", "initial qpos is not finite")
-    limits = _mink_limits(model, pair_set, clearance)
+    if ik_config.limit_margin_rad > 0.0:
+        for index, joint_id in enumerate(joint_ids):
+            angle = ik_config.initial_right_joint_positions[index]
+            lower = float(model.jnt_range[joint_id][0]) + ik_config.limit_margin_rad
+            upper = float(model.jnt_range[joint_id][1]) - ik_config.limit_margin_rad
+            if not lower <= angle <= upper:
+                raise KinematicsError(
+                    "ik_seed_outside_margin",
+                    f"initial_right_joint_positions[{index}] is outside the IK "
+                    f"margin bounds [{lower:.6f}, {upper:.6f}]",
+                )
+    limits = _mink_limits(
+        model, joint_ids, pair_set, clearance, ik_config.limit_margin_rad
+    )
     constraints = [mink.DofFreezingTask(model, frozen_dofs)]
     # The supervisor's numeric reach seed is only an IK initial value.  The
     # actual path start remains the layout's Scene home qpos, which is still

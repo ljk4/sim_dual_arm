@@ -32,7 +32,7 @@ from robot_contracts.profiles import (  # noqa: E402
     validate_bindings,
 )
 
-SCENARIO = ROOT / "shared/scenarios/marvin_handover"
+SCENARIO = ROOT / "shared/scenarios/marvin_sim/handover"
 CONFIG_PATH = SCENARIO / "configs/simulation/scene/marvin_handover.yaml"
 PROFILE_PATH = SCENARIO / "profiles/robots/marvin_handover_v1/profile.json"
 SCHEMAS = ROOT / "shared/common/interfaces/schemas"

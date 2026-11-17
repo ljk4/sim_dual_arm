@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start the MuJoCo policy backend for a scenario inside the simulation container,
+# Start the MuJoCo policy backend for a robot/task inside the simulation container,
 # printing the resolved config file paths and full effective parameters.
 set -euo pipefail
 
@@ -17,10 +17,10 @@ Start the MuJoCo policy backend (--role policy) inside the simulation
 container and print the resolved configuration file paths and parameters.
 
 options:
-  --scenario <id>       scenario id (required)
-  --bundle <dir>        verified ACT bundle directory (optional if declared in binding)
+  --robot <id>          robot id (required)
+  --task <id>           task id (required)
   --seed <int>          initial simulation seed (default: 20000)
-  --run-id <id>         backend run id (default: policy-backend)
+  --run-id <id>         backend run id (default: policy-backend-<UTC>-<pid>)
   --shared-root <path>  override shared scenarios root
   --run-root <path>     override backend run root
   --set PATH=VALUE      override one existing configuration path (repeatable)
@@ -28,30 +28,30 @@ options:
 EOF
 }
 
-scenario=""
-bundle=""
+robot=""
+task=""
 seed="20000"
-run_id="policy-backend"
+run_id="policy-backend-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 shared_root=""
 run_root=""
 overrides=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --scenario)
-      scenario="${2:?missing value for --scenario}"
+    --robot)
+      robot="${2:?missing value for --robot}"
       shift 2
       ;;
-    --scenario=*)
-      scenario="${1#*=}"
+    --robot=*)
+      robot="${1#*=}"
       shift
       ;;
-    --bundle)
-      bundle="${2:?missing value for --bundle}"
+    --task)
+      task="${2:?missing value for --task}"
       shift 2
       ;;
-    --bundle=*)
-      bundle="${1#*=}"
+    --task=*)
+      task="${1#*=}"
       shift
       ;;
     --seed)
@@ -106,42 +106,40 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$scenario" ]]; then
-  printf 'scripts/policy_backend.sh: --scenario is required\n' >&2
+if [[ -z "$robot" || -z "$task" ]]; then
+  printf 'scripts/policy_backend.sh: --robot and --task are required\n' >&2
   exit 2
 fi
 
 if [[ -z "$run_root" ]]; then
-  run_root="$DATA_ROOT/$scenario/logs/backend"
+  run_root="$DATA_ROOT/$robot/$task/logs/backend"
 fi
 
 python3 "${SHARED_ROOT:-/shared}/common/tools/scripts/dev_workspace.py" check \
   --project-root / \
   --build-root "$ROS_SDK" 1>&2
 
-python3 - "$scenario" "$seed" "$run_id" "$run_root" "$shared_root" "$bundle" "${overrides[@]}" <<'PY'
+python3 - "$robot" "$task" "$seed" "$run_id" "$run_root" "$shared_root" "${overrides[@]}" <<'PY'
 import sys
 from pathlib import Path
 import yaml
 from robot_backend_sim.config.scenario_config import resolve_scenario_backend
 
-scenario, seed_str, run_id, run_root, shared_root, bundle, *overrides = sys.argv[1:]
+robot, task, seed_str, run_id, run_root, shared_root, *overrides = sys.argv[1:]
 resolved = resolve_scenario_backend(
-    scenario=scenario,
+    robot=robot,
+    task=task,
     role="policy",
     shared_root=Path(shared_root) if shared_root else None,
-    bundle=Path(bundle) if bundle else None,
     seed=int(seed_str),
     overrides=overrides,
 )
 run_dir = Path(run_root) / run_id
 print("=== Policy Backend 配置摘要 ===")
-print(f"方案 (scenario):   {scenario}")
+print(f"机器人/任务:       {robot}/{task}")
 print(f"角色 (role):       policy")
 print(f"Binding 文件:      {resolved.selection['binding']['path']}")
 print(f"后端配方文件:      {resolved.selection['recipe']['path']}")
-if "bundle" in resolved.selection:
-    print(f"Bundle 路径:       {resolved.selection['bundle'].get('path')}")
 print(f"生效快照路径:      {run_dir / 'backend.yaml'}")
 print(f"运行日志目录:      {run_dir / 'log'}")
 print("--- 详细参数 ---")
@@ -151,15 +149,13 @@ PY
 
 cmd=(
   python3 -m robot_backend_sim.ros.node
-  --scenario "$scenario"
+  --robot "$robot"
+  --task "$task"
   --role policy
   --seed "$seed"
   --run-id "$run_id"
   --run-root "$run_root"
 )
-if [[ -n "$bundle" ]]; then
-  cmd+=(--bundle "$bundle")
-fi
 if [[ -n "$shared_root" ]]; then
   cmd+=(--shared-root "$shared_root")
 fi

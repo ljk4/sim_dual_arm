@@ -47,6 +47,9 @@ class IKConfig(StrictMappingModel):
     position_cost: Annotated[PositiveFloat, Field(gt=0.0, le=100.0)]
     orientation_cost: Annotated[PositiveFloat, Field(gt=0.0, le=100.0)]
     lm_damping: Annotated[StrictFloat, Field(ge=0.0, le=1.0)]
+    # Interior margin (rad) reserved by the IK configuration limit on every
+    # solved arm hinge, so a key pose can never land on a hard joint limit.
+    limit_margin_rad: Annotated[StrictFloat, Field(ge=0.0, le=0.2)]
     solver: Literal["daqp"]
     initial_right_joint_positions: Annotated[
         tuple[StrictFloat, ...], BeforeValidator(as_tuple), Field(min_length=7, max_length=7)]

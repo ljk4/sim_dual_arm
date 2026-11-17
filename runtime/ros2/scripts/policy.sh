@@ -10,21 +10,6 @@ DATA_ROOT="${DATA_ROOT:-/data}"
 ROS_SDK="${ROS_SDK_ROOT:-/build/ros-dev}"
 POLICY_SDK="${POLICY_SDK_ROOT:-/build/generated/policy-sdk}"
 
-has_help=false
-segment="_direct"
-previous=""
-for argument in "$@"; do
-  if [[ "$argument" == "-h" || "$argument" == "--help" ]]; then
-    has_help=true
-  fi
-  if [[ "$previous" == "--scenario" ]]; then
-    segment="$argument"
-  elif [[ "$argument" == --scenario=* ]]; then
-    segment="${argument#*=}"
-  fi
-  previous="$argument"
-done
-
 option_value() {
   local name="$1"
   shift
@@ -41,6 +26,21 @@ option_value() {
   done
   return 1
 }
+
+has_help=false
+for argument in "$@"; do
+  if [[ "$argument" == "-h" || "$argument" == "--help" ]]; then
+    has_help=true
+  fi
+done
+
+robot="$(option_value --robot "$@" || true)"
+task="$(option_value --task "$@" || true)"
+if [[ -n "$robot" && -n "$task" ]]; then
+  segment="$robot/$task"
+else
+  segment="_direct"
+fi
 
 if [[ "$has_help" != "true" ]]; then
   python3 "${SHARED_ROOT:-$ROOT/shared}/common/tools/scripts/dev_workspace.py" check \

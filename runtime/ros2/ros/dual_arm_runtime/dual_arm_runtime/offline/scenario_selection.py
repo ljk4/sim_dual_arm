@@ -18,7 +18,12 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from robot_contracts.binding import BindingError, ResolvedBinding, load_binding
+from robot_contracts.binding import (
+    BindingError,
+    ResolvedBinding,
+    load_binding,
+    resolve_binding_path,
+)
 from robot_contracts.models import ContractError
 from robot_contracts.project_paths import project_path
 
@@ -26,7 +31,6 @@ from dual_arm_runtime.offline.campaign_ledger import CampaignError
 from dual_arm_runtime.offline.campaign_ledger import load as load_campaign
 from dual_arm_runtime.offline.collect_attempt import REFERENCES as RUNTIME_REFERENCES
 
-SCENARIO_ID = re.compile(r"[A-Za-z_][A-Za-z0-9_.:-]{0,127}")
 COLLECTION_RECIPES = ("runtime_teacher", "simulation_teacher", "campaign")
 PROFILE_FIELDS = ("robot", "observation", "action")
 RUNTIME_PROFILE_FIELDS = {
@@ -64,12 +68,13 @@ def shared_root_path(explicit: Path | None, project_root: Path) -> Path:
     return Path("/shared")
 
 
-def scenario_binding_path(shared_root: Path, scenario: str) -> Path:
-    if SCENARIO_ID.fullmatch(scenario) is None or ".." in scenario:
-        raise CampaignError("scenario id must contain 1..128 safe characters and no path traversal")
-    path = Path(shared_root) / "scenarios" / scenario / "binding.yaml"
+def scenario_binding_path(shared_root: Path, robot: str, task: str) -> Path:
+    try:
+        path = resolve_binding_path(shared_root, robot, task)
+    except BindingError as error:
+        raise CampaignError(str(error)) from error
     if not path.is_file():
-        raise CampaignError(f"scenario {scenario!r} has no binding file: {path}")
+        raise CampaignError(f"scenario {robot}/{task} has no binding file: {path}")
     return path
 
 
@@ -327,7 +332,8 @@ def _profile_records(resolved: ResolvedBinding) -> dict[str, dict[str, Any]]:
 
 def select_collection(
     *,
-    scenario: str,
+    robot: str,
+    task: str,
     shared_root: Path | None,
     project_root: Path,
     binding_sha256: str | None = None,
@@ -335,7 +341,7 @@ def select_collection(
 ) -> dict[str, Any]:
     """Resolve the collection recipes, profiles and capabilities from a binding."""
     root = shared_root_path(shared_root, project_root)
-    binding_path = scenario_binding_path(root, scenario)
+    binding_path = scenario_binding_path(root, robot, task)
     try:
         resolved = load_binding(binding_path, shared_root=root)
     except (BindingError, ContractError, OSError) as error:
@@ -381,6 +387,8 @@ def select_collection(
 
     return {
         "mode": "scenario",
+        "robot": robot,
+        "task": task,
         "scenario_id": resolved.binding.scenario_id,
         "binding": {"path": str(resolved.path), "sha256": resolved.sha256},
         "recipes": recipes,
@@ -429,6 +437,8 @@ def direct_selection(
         recipes["simulation_teacher"] = record("simulation_teacher", simulation_teacher)
     return {
         "mode": "direct",
+        "robot": None,
+        "task": None,
         "scenario_id": None,
         "binding": None,
         "recipes": recipes,
@@ -442,19 +452,27 @@ def direct_selection(
 def campaign_config_path(
     *,
     campaign_config: Path | None,
-    scenario: str | None,
+    robot: str | None,
+    task: str | None,
     shared_root: Path | None,
     project_root: Path,
     default: Path | None = None,
 ) -> Path:
     """Resolve the campaign recipe for export, evaluation and campaign commands."""
-    if scenario is not None:
+    if robot is not None:
+        if task is None:
+            raise CampaignError("--robot requires --task")
         if campaign_config is not None:
-            raise CampaignError("--scenario cannot be combined with --campaign-config")
+            raise CampaignError("--robot/--task cannot be combined with --campaign-config")
         selection = select_collection(
-            scenario=scenario, shared_root=shared_root, project_root=project_root
+            robot=robot,
+            task=task,
+            shared_root=shared_root,
+            project_root=project_root,
         )
         return Path(selection["recipes"]["campaign"]["path"])
+    if task is not None:
+        raise CampaignError("--task requires --robot")
     if campaign_config is None:
         if default is None:
             raise CampaignError("a campaign recipe is required")

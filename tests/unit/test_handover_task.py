@@ -44,7 +44,7 @@ from robot_backend_sim.tasks.handover.teacher import (  # noqa: E402
     sample_handover_chunk,
 )
 
-SCENARIO = ROOT / "shared/scenarios/marvin_handover"
+SCENARIO = ROOT / "shared/scenarios/marvin_sim/handover"
 OPEN = 0.0814
 CLOSE = 0.05
 AIRBORNE_CENTER = (0.55, 0.12, 0.93)

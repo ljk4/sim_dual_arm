@@ -37,7 +37,7 @@ from robot_backend_sim.tasks.handover.task_config import (  # noqa: E402
 )
 from robot_contracts.models import RunContext  # noqa: E402
 
-SCENARIO = ROOT / "shared/scenarios/marvin_handover"
+SCENARIO = ROOT / "shared/scenarios/marvin_sim/handover"
 TASK = load_handover_task_config(
     SCENARIO / "configs/simulation/scene/marvin_handover_task.yaml"
 )

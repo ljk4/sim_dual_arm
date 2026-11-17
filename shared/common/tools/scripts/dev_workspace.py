@@ -65,9 +65,17 @@ def resolve_selection(
     *,
     shared_root: Path | None = None,
     scenario: str | None = None,
+    robot: str | None = None,
+    task: str | None = None,
     packages: list[str] | None = None,
 ) -> PackageSelection:
     shared = shared_root_path(project_root, shared_root)
+    if robot is not None or task is not None:
+        if robot is None or task is None:
+            raise DevWorkspaceError("--robot and --task must be given together")
+        if scenario is not None:
+            raise DevWorkspaceError("--scenario and --robot/--task are mutually exclusive")
+        scenario = f"{robot}/{task}"
     if scenario is not None and packages:
         raise DevWorkspaceError("--scenario and --package are mutually exclusive")
     try:
@@ -207,8 +215,10 @@ def _parser() -> argparse.ArgumentParser:
         subparser.add_argument("--project-root", type=Path, default=ROOT)
         subparser.add_argument("--shared-root", type=Path)
         subparser.add_argument(
-            "--scenario", help="select the package set declared by this scenario binding"
+            "--scenario", help="scenario as <robot>/<task> selecting its binding package set"
         )
+        subparser.add_argument("--robot", help="robot id below <shared-root>/scenarios")
+        subparser.add_argument("--task", help="task id below <shared-root>/scenarios/<robot>")
         subparser.add_argument(
             "--package",
             action="append",
@@ -245,7 +255,12 @@ def main(argv: list[str] | None = None) -> int:
     arguments = _parser().parse_args(argv)
     project = Path(arguments.project_root).resolve()
     try:
-        explicit = arguments.scenario is not None or bool(arguments.package)
+        explicit = (
+            arguments.scenario is not None
+            or arguments.robot is not None
+            or arguments.task is not None
+            or bool(arguments.package)
+        )
         selection: PackageSelection | None
         if arguments.command in {"check", "status"} and not explicit:
             # A service-side check verifies whatever package set was recorded.
@@ -259,6 +274,8 @@ def main(argv: list[str] | None = None) -> int:
                 project,
                 shared_root=arguments.shared_root,
                 scenario=arguments.scenario,
+                robot=arguments.robot,
+                task=arguments.task,
                 packages=arguments.package,
             )
         shared = (

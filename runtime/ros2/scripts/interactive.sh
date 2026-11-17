@@ -11,10 +11,10 @@ ROS_SDK="${ROS_SDK_ROOT:-/build/ros-dev}"
 POLICY_SDK="${POLICY_SDK_ROOT:-/build/generated/policy-sdk}"
 
 config=""
-scenario=""
+robot=""
+task=""
 role="policy"
 shared_root=""
-bundle=""
 run_id=""
 seed=""
 output_root=""
@@ -30,12 +30,20 @@ while [[ $# -gt 0 ]]; do
       config="${1#*=}"
       shift
       ;;
-    --scenario)
-      scenario="${2:-}"
+    --robot)
+      robot="${2:-}"
       shift 2
       ;;
-    --scenario=*)
-      scenario="${1#*=}"
+    --robot=*)
+      robot="${1#*=}"
+      shift
+      ;;
+    --task)
+      task="${2:-}"
+      shift 2
+      ;;
+    --task=*)
+      task="${1#*=}"
       shift
       ;;
     --role)
@@ -52,14 +60,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --shared-root=*)
       shared_root="${1#*=}"
-      shift
-      ;;
-    --bundle)
-      bundle="${2:-}"
-      shift 2
-      ;;
-    --bundle=*)
-      bundle="${1#*=}"
       shift
       ;;
     --set)
@@ -96,7 +96,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     -h|--help)
       printf '%s\n' \
-        'usage: scripts/interactive.sh (--scenario <id> [--role policy|teacher] [--shared-root <dir>] [--bundle <dir>] | --config <runtime.yaml>) [--run-id <id>] [--seed <int>] [--output-root <dir>] [--set path=value ...]'
+        'usage: scripts/interactive.sh (--robot <id> --task <id> [--role policy|teacher] [--shared-root <dir>] | --config <runtime.yaml>) [--run-id <id>] [--seed <int>] [--output-root <dir>] [--set path=value ...]'
       exit 0
       ;;
     *)
@@ -106,28 +106,32 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -n "$config" && -n "$scenario" ]]; then
-  printf 'interactive: --config and --scenario are mutually exclusive\n' >&2
-  exit 2
+scenario=false
+if [[ -n "$robot" || -n "$task" ]]; then
+  scenario=true
 fi
-if [[ -z "$config" && -z "$scenario" ]]; then
-  printf 'interactive: one of --scenario or --config is required\n' >&2
+if [[ -n "$config" && "$scenario" == "true" ]]; then
+  printf 'interactive: --config and --robot/--task are mutually exclusive\n' >&2
   exit 2
 fi
 if [[ -n "$config" ]]; then
+  segment="_direct"
+elif [[ -n "$robot" && -n "$task" ]]; then
+  segment="$robot/$task"
+else
+  printf 'interactive: one of --robot/--task or --config is required\n' >&2
+  exit 2
+fi
+
+if [[ -n "$config" ]]; then
   selection_args=(--config "$config" "${selection_args[@]}")
   display="$config"
-  segment="_direct"
 else
-  selection_args=(--scenario "$scenario" --role "$role" "${selection_args[@]}")
+  selection_args=(--robot "$robot" --task "$task" --role "$role" "${selection_args[@]}")
   if [[ -n "$shared_root" ]]; then
     selection_args+=(--shared-root "$shared_root")
   fi
-  if [[ -n "$bundle" ]]; then
-    selection_args+=(--bundle "$bundle")
-  fi
-  display="scenario:$scenario/$role"
-  segment="$scenario"
+  display="scenario:$robot/$task/$role"
 fi
 if [[ -z "$output_root" ]]; then
   output_root="$DATA_ROOT/$segment/logs/recordings"

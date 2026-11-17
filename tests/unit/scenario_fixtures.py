@@ -16,7 +16,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 SHARED = ROOT / "shared"
-PANDA_PROFILES = SHARED / "scenarios/panda_stack/profiles"
+PANDA_PROFILES = SHARED / "scenarios/panda_sim/stack/profiles"
 
 
 def sha(path: Path) -> str:
@@ -55,7 +55,8 @@ class ScenarioTree:
 def base_binding() -> dict[str, Any]:
     return {
         "schema_version": 1,
-        "scenario_id": "synthetic_stack",
+        "robot_id": "synthetic_sim",
+        "task_id": "stack",
         "description": "Synthetic phase-02 binding",
         "backend": {"kind": "simulation", "implementation": "mujoco", "task_type": "stack"},
         "runtime": {"implementation": "ros2"},
@@ -72,7 +73,6 @@ def base_binding() -> dict[str, Any]:
             "teacher_api": "panda_stack_api_msgs.teacher_chunk.v1",
             "policy_api": "bimanual.policy.v1",
         },
-        "models": {"bundle": "bundles/act"},
         "source_roots": [],
         "artifact_roots": [],
         "references": [],
@@ -113,9 +113,6 @@ def build_scenario(root: Path, document: dict[str, Any] | None = None) -> Scenar
         "string ID=panda_stack_api_msgs.teacher_chunk.v1\n", encoding="utf-8"
     )
     (extension / "srv/GetTeacherChunk.srv").write_text("---\n", encoding="utf-8")
-    bundle = root / "bundles/act"
-    bundle.mkdir(parents=True, exist_ok=True)
-    (bundle / "README.md").write_text("synthetic bundle placeholder\n", encoding="utf-8")
     tree = ScenarioTree(root, root / "binding.yaml", document or base_binding())
     tree.write()
     return tree

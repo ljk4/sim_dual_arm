@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-PROFILES = ROOT / "shared/scenarios/panda_stack/profiles"
+PROFILES = ROOT / "shared/scenarios/panda_sim/stack/profiles"
 pytest.importorskip("grpc")
 pb2 = pytest.importorskip("dual_arm_policy.v1.policy_pb2")
 from dual_arm_learning.policy_service import PolicyService  # noqa: E402

@@ -20,6 +20,7 @@ from dual_arm_runtime.offline import campaign
 from dual_arm_runtime.offline.campaign_execution import (
     _environment,
     acquire_run_lock,
+    attempt_log_directory,
     handle_sigterm,
     shutil_disk_free,
 )
@@ -194,7 +195,6 @@ class RecordingPool:
                 **vars(self.args),
                 "runtime_config": Path(worker["runtime_config"]),
                 "backend_log": Path(worker["backend_log"]),
-                "no_previews": True,
                 "overrides": [
                     *getattr(self.args, "overrides", []),
                     f"robot_namespace={worker['namespace']}",
@@ -216,13 +216,17 @@ class RecordingPool:
         binding = worker.get("binding") or {}
         if binding:
             environment["CAMPAIGN_SCENARIO_ID"] = str(binding.get("scenario_id") or "")
+            environment["CAMPAIGN_ROBOT"] = str(binding.get("robot") or "")
+            environment["CAMPAIGN_TASK"] = str(binding.get("task") or "")
             environment["CAMPAIGN_BINDING_PATH"] = str(binding.get("path") or "")
             environment["CAMPAIGN_BINDING_SHA256"] = str(binding.get("sha256") or "")
         if worker.get("teacher_api"):
             environment["CAMPAIGN_TEACHER_API"] = str(worker["teacher_api"])
         for name in ("DISPLAY", "WAYLAND_DISPLAY"):
             environment.pop(name, None)
-        console = (attempt.directory / "console.log").open("w")
+        log_directory = attempt_log_directory(self.config, self.args.project_root, attempt)
+        log_directory.mkdir(parents=True, exist_ok=True)
+        console = (log_directory / "console.log").open("w")
         try:
             process = subprocess.Popen(
                 _collector_command(collect_args),
@@ -404,12 +408,13 @@ def record_parallel(args: argparse.Namespace, config: dict[str, Any]) -> int:
     expected = args.selection
     if expected is not None:
         if selection is None:
-            raise CampaignError("worker manifest has no selection but --scenario was used")
+            raise CampaignError("worker manifest has no selection but --robot/--task was used")
         if expected.get("binding", {}).get("sha256") != selection.get("binding", {}).get("sha256"):
             raise CampaignError("worker manifest binding differs from the record selection")
     code = check_ros_sdk(
         args.project_root,
-        scenario=args.scenario,
+        robot=args.robot,
+        task=args.task,
         shared_root=args.shared_root,
     )
     if code:

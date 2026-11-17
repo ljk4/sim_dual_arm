@@ -10,7 +10,7 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-SCENARIO = ROOT / "shared/scenarios/panda_stack"
+SCENARIO = ROOT / "shared/scenarios/panda_sim/stack"
 PROFILES = SCENARIO / "profiles"
 SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
@@ -55,7 +55,7 @@ def test_follower_config_resolves_relative_follower_file_and_queue():
     config = load_backend_config(FOLLOWER)
     assert config.follower_path == FOLLOWER_PARAMS.resolve()
     assert config.follower_reference_queue_capacity == 64
-    assert load_follower_config(config.follower_path).target_count == 10
+    assert load_follower_config(config.follower_path).target_count == 20
     expected_scene = SCENARIO / "configs/simulation/scene/panda_stack.yaml"
     assert config.scene_path == expected_scene.resolve()
 

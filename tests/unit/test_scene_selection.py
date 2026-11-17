@@ -18,10 +18,10 @@ from robot_backend_sim.config.scene_loader import load_scene_config_for  # noqa:
 from robot_contracts.validation import StrictMappingError  # noqa: E402
 
 PANDA_SCENE = (
-    ROOT / "shared/scenarios/panda_stack/configs/simulation/scene/panda_stack.yaml"
+    ROOT / "shared/scenarios/panda_sim/stack/configs/simulation/scene/panda_stack.yaml"
 )
 MARVIN_SCENE = (
-    ROOT / "shared/scenarios/marvin_handover/configs/simulation/scene/marvin_handover.yaml"
+    ROOT / "shared/scenarios/marvin_sim/handover/configs/simulation/scene/marvin_handover.yaml"
 )
 
 

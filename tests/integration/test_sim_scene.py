@@ -21,7 +21,7 @@ from robot_backend_sim.config.panda_scene_config import (  # noqa: E402
 )
 from robot_backend_sim.physics.panda.scene import Scene, build_scene  # noqa: E402
 
-CONFIG_PATH = ROOT / "shared/scenarios/panda_stack/configs/simulation/scene/panda_stack.yaml"
+CONFIG_PATH = ROOT / "shared/scenarios/panda_sim/stack/configs/simulation/scene/panda_stack.yaml"
 
 
 @pytest.fixture(scope="module")

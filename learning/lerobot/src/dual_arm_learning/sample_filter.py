@@ -2,8 +2,13 @@
 
 The filter only chooses which *query* frames enter the training sampler.  It
 never rewrites a source Parquet, video, clock or 60-step future action.  The
-result is one JSON mask that binds the source dataset manifest, Parquet hashes,
-rule hash, phase/gate event hashes and every episode's original index list.
+result is an in-memory mask that binds the source dataset manifest, Parquet
+hashes, rule hash and every episode's original index list.
+
+A frame is static only when every arm joint on both arms and both grippers hold
+still.  Phase/gate values are used solely to protect the transition boundaries;
+long physics-confirmation and terminal holds are thinned like any other static
+run.
 """
 
 from __future__ import annotations
@@ -22,16 +27,15 @@ from .sample_filter_mask import (  # noqa: F401 - public re-exports
     SampleFilterMask,
     load_filter_mask,
     mask_digest,
+    mask_from_document,
     read_filter_json,
-    write_filter_manifest,
 )
 from .sample_filter_rules import (  # noqa: F401 - public re-exports
+    ARM_INDICES,
     GRIPPERS,
-    KNOWN_PHASES,
     LEAD_NS,
     PERIOD_NS,
     REASON_REDUNDANT,
-    RIGHT_ARM,
     STATE_DIM,
     FilterError,
     FilterRule,
@@ -76,7 +80,6 @@ def _split(
     *,
     root: Path,
     manifest: dict[str, Any],
-    select: dict[str, Any],
     name: str,
 ) -> dict[str, Any]:
     split = manifest.get("splits", {}).get(name)
@@ -111,7 +114,6 @@ def _split(
         )
     if sum(int(episode.get("frame_count", 0)) for episode in episodes) != int(split["frame_count"]):
         raise FilterError(f"{name}: manifest episode frame counts disagree with the split")
-    selected = _selected_attempts(select.get(name), name, episodes)
     return {
         "split": split,
         "root": split_root,
@@ -120,33 +122,7 @@ def _split(
         "parquet_sha256": parquet_sha,
         "rows": rows,
         "episodes": episodes,
-        "selected": selected,
     }
-
-
-def _selected_attempts(
-    entries: object, name: str, episodes: list[dict[str, Any]]
-) -> dict[str, dict[str, Any]]:
-    if not isinstance(entries, list) or len(entries) != len(episodes):
-        raise FilterError(f"{name}: select split does not contain {len(episodes)} attempts")
-    selected: dict[str, dict[str, Any]] = {}
-    for entry in entries:
-        attempt_id = text(entry.get("attempt_id"), f"{name}.attempt_id")
-        if attempt_id in selected:
-            raise FilterError(f"{name}: duplicate attempt_id {attempt_id}")
-        attempt_dir = Path(text(entry.get("attempt_dir"), f"{name}.attempt_dir"))
-        if not attempt_dir.is_dir():
-            raise FilterError(f"{attempt_dir}: selected attempt directory is missing")
-        selected[attempt_id] = {
-            "seed": integer(entry.get("seed"), f"{name}.seed", 0, 2**63 - 1),
-            "attempt_dir": attempt_dir.resolve(),
-        }
-    manifest_ids = {
-        text(episode.get("attempt_id"), f"{name}.episodes.attempt_id") for episode in episodes
-    }
-    if set(selected) != manifest_ids:
-        raise FilterError(f"{name}: select and manifest attempt ids disagree")
-    return selected
 
 
 def _source_paths(attempt_dir: Path) -> tuple[Path, list[Path]]:
@@ -156,6 +132,11 @@ def _source_paths(attempt_dir: Path) -> tuple[Path, list[Path]]:
             f"{attempt_dir}: expected exactly one export labels.json, got {len(labels)}"
         )
     events = sorted(attempt_dir.glob("logs/*/logs/runtime/*/events.*.jsonl"))
+    for ancestor in attempt_dir.parents[:3]:
+        if events:
+            break
+        collection_logs = ancestor / "logs" / "collection" / "attempts" / attempt_dir.name
+        events = sorted(collection_logs.glob("logs/*/logs/runtime/*/events.*.jsonl"))
     return labels[0], events
 
 
@@ -283,30 +264,31 @@ def _static_edges(
     applied_velocity: np.ndarray,
     rule: FilterRule,
 ) -> np.ndarray:
-    right, grip = list(rule.right_arm_indices), list(rule.gripper_indices)
-    measured_step = np.abs(np.diff(measured[:, right], axis=0))
-    applied_step = np.abs(np.diff(applied[:, right], axis=0))
-    grip_measured_step = np.abs(np.diff(measured[:, grip], axis=0))
-    grip_applied_step = np.abs(np.diff(applied[:, grip], axis=0))
+    arms = list(rule.arm_indices)
+    grippers = list(rule.gripper_indices)
+    measured_step = np.abs(np.diff(measured[:, arms], axis=0))
+    applied_step = np.abs(np.diff(applied[:, arms], axis=0))
+    grip_measured_step = np.abs(np.diff(measured[:, grippers], axis=0))
+    grip_applied_step = np.abs(np.diff(applied[:, grippers], axis=0))
     measured_speed = np.maximum(
-        np.abs(measured_velocity[:-1, right]), np.abs(measured_velocity[1:, right])
+        np.abs(measured_velocity[:-1, arms]), np.abs(measured_velocity[1:, arms])
     )
     applied_speed = np.maximum(
-        np.abs(applied_velocity[:-1, right]), np.abs(applied_velocity[1:, right])
+        np.abs(applied_velocity[:-1, arms]), np.abs(applied_velocity[1:, arms])
     )
     grip_measured_speed = np.maximum(
-        np.abs(measured_velocity[:-1, grip]), np.abs(measured_velocity[1:, grip])
+        np.abs(measured_velocity[:-1, grippers]), np.abs(measured_velocity[1:, grippers])
     )
     grip_applied_speed = np.maximum(
-        np.abs(applied_velocity[:-1, grip]), np.abs(applied_velocity[1:, grip])
+        np.abs(applied_velocity[:-1, grippers]), np.abs(applied_velocity[1:, grippers])
     )
     return (
-        (measured_step <= rule.max_right_step_rad).all(axis=1)
-        & (applied_step <= rule.max_right_step_rad).all(axis=1)
+        (measured_step <= rule.max_arm_step_rad).all(axis=1)
+        & (applied_step <= rule.max_arm_step_rad).all(axis=1)
         & (grip_measured_step <= rule.max_gripper_step_m).all(axis=1)
         & (grip_applied_step <= rule.max_gripper_step_m).all(axis=1)
-        & (measured_speed <= rule.max_right_velocity_rad_s).all(axis=1)
-        & (applied_speed <= rule.max_right_velocity_rad_s).all(axis=1)
+        & (measured_speed <= rule.max_arm_velocity_rad_s).all(axis=1)
+        & (applied_speed <= rule.max_arm_velocity_rad_s).all(axis=1)
         & (grip_measured_speed <= rule.max_gripper_velocity_m_s).all(axis=1)
         & (grip_applied_speed <= rule.max_gripper_velocity_m_s).all(axis=1)
     )
@@ -327,6 +309,7 @@ def _static_runs(edges: np.ndarray) -> list[tuple[int, int]]:
 
 
 def _protections(phase: list[str | None], gate: list[str | None], rule: FilterRule) -> np.ndarray:
+    """Protect episode edges and phase/gate transitions, never whole holds."""
     count = len(phase)
     protected = np.zeros(count, dtype=bool)
     edge = rule.episode_boundary_frames
@@ -336,11 +319,8 @@ def _protections(phase: list[str | None], gate: list[str | None], rule: FilterRu
     window = rule.phase_boundary_frames
     if window:
         for index in range(1, count):
-            if phase[index] != phase[index - 1]:
+            if phase[index] != phase[index - 1] or gate[index] != gate[index - 1]:
                 protected[max(0, index - window) : min(count, index + window + 1)] = True
-    for index, (phase_name, gate_name) in enumerate(zip(phase, gate, strict=True)):
-        if phase_name not in rule.known_phases or gate_name != rule.tracking_gate:
-            protected[index] = True
     return protected
 
 
@@ -371,11 +351,11 @@ def _choose_anchors(
     return keep, reasons, runs
 
 
-def _counts(values: list[str | None], keys: list[str]) -> dict[str, int]:
-    result = {key: 0 for key in keys}
-    result["unknown"] = 0
+def _counts(values: list[str | None]) -> dict[str, int]:
+    result: dict[str, int] = {}
     for value in values:
-        result[value if value in result else "unknown"] += 1
+        key = "unknown" if value is None else value
+        result[key] = result.get(key, 0) + 1
     return result
 
 
@@ -383,7 +363,6 @@ def _episode_inputs(
     *,
     episode: dict[str, Any],
     split: dict[str, Any],
-    selected: dict[str, Any],
     lead_ns: int,
     rule: FilterRule,
 ) -> dict[str, Any]:
@@ -391,10 +370,10 @@ def _episode_inputs(
     global_index = int(episode["global_success_index"])
     attempt_id = text(episode.get("attempt_id"), "episode.attempt_id")
     seed = integer(episode.get("seed"), "episode.seed", 0, 2**63 - 1)
-    selection = selected[attempt_id]
-    if selection["seed"] != seed:
-        raise FilterError(f"{attempt_id}: select seed disagrees with the manifest")
-    labels_path, event_paths = _source_paths(selection["attempt_dir"])
+    attempt_dir = Path(text(episode.get("attempt_dir"), "episode.attempt_dir"))
+    if not attempt_dir.is_dir():
+        raise FilterError(f"{attempt_dir}: source attempt directory is missing")
+    labels_path, event_paths = _source_paths(attempt_dir)
     labels_document = read_filter_json(labels_path)
     if labels_document.get("seed") != seed:
         raise FilterError(f"{labels_path}: label seed disagrees with the manifest")
@@ -472,8 +451,6 @@ def _episode_report(inputs: dict[str, Any], rule: FilterRule) -> dict[str, Any]:
     kept_flags = [index for index, saved in enumerate(keep) if saved]
     excluded_flags = [index for index, saved in enumerate(keep) if not saved]
     long_runs = [run for run in runs if run[1] - run[0] + 1 >= rule.min_static_run_frames]
-    phase_keys = list(rule.known_phases)
-    gate_keys = [rule.tracking_gate, "WAITING_FOR_FEEDBACK", "HOLDING"]
     return {
         "dataset_episode_index": inputs["episode_index"],
         "global_success_index": inputs["global_index"],
@@ -487,14 +464,14 @@ def _episode_report(inputs: dict[str, Any], rule: FilterRule) -> dict[str, Any]:
         "excluded_indices": excluded_indices,
         "excluded_reasons": {REASON_REDUNDANT: len(excluded_indices)} if excluded_indices else {},
         "phase_counts": {
-            "source": _counts(inputs["phase"], phase_keys),
-            "kept": _counts([inputs["phase"][i] for i in kept_flags], phase_keys),
-            "excluded": _counts([inputs["phase"][i] for i in excluded_flags], phase_keys),
+            "source": _counts(inputs["phase"]),
+            "kept": _counts([inputs["phase"][i] for i in kept_flags]),
+            "excluded": _counts([inputs["phase"][i] for i in excluded_flags]),
         },
         "gate_counts": {
-            "source": _counts(inputs["gate"], gate_keys),
-            "kept": _counts([inputs["gate"][i] for i in kept_flags], gate_keys),
-            "excluded": _counts([inputs["gate"][i] for i in excluded_flags], gate_keys),
+            "source": _counts(inputs["gate"]),
+            "kept": _counts([inputs["gate"][i] for i in kept_flags]),
+            "excluded": _counts([inputs["gate"][i] for i in excluded_flags]),
         },
         "static_runs": {
             "total": len(runs),
@@ -516,36 +493,32 @@ def _filter_episode(
     *,
     episode: dict[str, Any],
     split: dict[str, Any],
-    selected: dict[str, Any],
     lead_ns: int,
     rule: FilterRule,
 ) -> dict[str, Any]:
     inputs = _episode_inputs(
-        episode=episode, split=split, selected=selected, lead_ns=lead_ns, rule=rule
+        episode=episode, split=split, lead_ns=lead_ns, rule=rule
     )
     return _episode_report(inputs, rule)
 
 
-def _total_counts(
-    episodes: list[dict[str, Any]], section: str, keys: list[str]
-) -> dict[str, dict[str, int]]:
+def _total_counts(episodes: list[dict[str, Any]], section: str) -> dict[str, dict[str, int]]:
     buckets = ("source", "kept", "excluded")
-    result = {bucket: {key: 0 for key in [*keys, "unknown"]} for bucket in buckets}
+    result: dict[str, dict[str, int]] = {bucket: {} for bucket in buckets}
     for episode in episodes:
         counts = episode[f"{section}_counts"]
         for bucket in buckets:
             for key, value in counts[bucket].items():
-                result[bucket][key] += value
+                result[bucket][key] = result[bucket].get(key, 0) + value
     return result
 
 
 def _source_document(
-    root: Path, manifest_path: Path, select_source: Path, rule: FilterRule
+    root: Path, manifest_path: Path, rule: FilterRule
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     dataset = {
         "root": str(root),
         "manifest": {"path": str(manifest_path), "sha256": file_sha256(manifest_path)},
-        "select": {"path": str(select_source), "sha256": file_sha256(select_source)},
     }
     rule_document = {
         "path": str(rule.source),
@@ -554,10 +527,10 @@ def _source_document(
             "schema_version": rule.schema_version,
             "fps": rule.fps,
             "chunk_size": rule.chunk_size,
-            "right_arm_indices": list(rule.right_arm_indices),
+            "arm_indices": list(rule.arm_indices),
             "gripper_indices": list(rule.gripper_indices),
-            "max_right_step_rad": rule.max_right_step_rad,
-            "max_right_velocity_rad_s": rule.max_right_velocity_rad_s,
+            "max_arm_step_rad": rule.max_arm_step_rad,
+            "max_arm_velocity_rad_s": rule.max_arm_velocity_rad_s,
             "max_gripper_step_m": rule.max_gripper_step_m,
             "max_gripper_velocity_m_s": rule.max_gripper_velocity_m_s,
             "min_static_run_frames": rule.min_static_run_frames,
@@ -566,8 +539,6 @@ def _source_document(
             "phase_boundary_frames": rule.phase_boundary_frames,
             "episode_boundary_frames": rule.episode_boundary_frames,
             "min_episode_kept_frames": rule.min_episode_kept_frames,
-            "known_phases": list(rule.known_phases),
-            "tracking_gate": rule.tracking_gate,
             "reason": rule.reason,
         },
     }
@@ -575,26 +546,22 @@ def _source_document(
 
 
 def _filter_inputs(
-    rule_path: str | Path, dataset_root: str | Path, select_path: str | Path
-) -> tuple[Path, FilterRule, Path, Path, dict, dict, int, str]:
+    rule_path: str | Path, dataset_root: str | Path
+) -> tuple[Path, FilterRule, Path, dict, dict, int, str]:
     root = Path(dataset_root).resolve()
     rule = load_filter_rule(rule_path)
     manifest_path = root / "manifest.json"
     manifest = read_filter_json(manifest_path)
     if manifest.get("status") != "complete" or manifest.get("synthetic"):
         raise FilterError("source dataset manifest is not a complete formal dataset")
-    select_source = Path(select_path).resolve()
-    select = read_filter_json(select_source)
-    if select.get("status") != "SELECTED":
-        raise FilterError("formal select file is not SELECTED")
     lead_ns = int(manifest.get("lerobot", {}).get("action_lead_ns", -1))
     if lead_ns != LEAD_NS:
         raise FilterError("source dataset does not use the fixed 50 ms action lead")
     profile_hash = manifest.get("profile", {}).get("semantic_sha256")
     if not isinstance(profile_hash, str):
         raise FilterError("source manifest has no profile semantic hash")
-    training = _split(root=root, manifest=manifest, select=select, name="training")
-    validation = _split(root=root, manifest=manifest, select=select, name="validation")
+    training = _split(root=root, manifest=manifest, name="training")
+    validation = _split(root=root, manifest=manifest, name="validation")
     train_globals = {int(episode["global_success_index"]) for episode in training["episodes"]}
     validation_globals = {
         int(episode["global_success_index"]) for episode in validation["episodes"]
@@ -602,16 +569,7 @@ def _filter_inputs(
     if train_globals & validation_globals:
         raise FilterError("training and validation episodes overlap")
     training["manifest_profile_sha256"] = profile_hash
-    return (
-        root,
-        rule,
-        manifest_path,
-        select_source,
-        training,
-        validation,
-        lead_ns,
-        profile_hash,
-    )
+    return root, rule, manifest_path, training, validation, lead_ns, profile_hash
 
 
 def _filter_document(
@@ -619,7 +577,6 @@ def _filter_document(
     root: Path,
     rule: FilterRule,
     manifest_path: Path,
-    select_source: Path,
     training: dict,
     validation: dict,
     episodes: list[dict[str, Any]],
@@ -629,11 +586,7 @@ def _filter_document(
         raise FilterError("filtered episodes do not cover the training Parquet frame count")
     eligible = sum(episode["kept_count"] for episode in episodes)
     excluded = source_frames - eligible
-    phase_keys = list(rule.known_phases)
-    gate_keys = [rule.tracking_gate, "WAITING_FOR_FEEDBACK", "HOLDING"]
-    dataset_document, rule_document = _source_document(
-        root, manifest_path, select_source, rule
-    )
+    dataset_document, rule_document = _source_document(root, manifest_path, rule)
     document: dict[str, Any] = {
         "format": FILTER_FORMAT,
         "created_wall_time_ns": time.time_ns(),
@@ -648,8 +601,8 @@ def _filter_document(
                 "path": str(training["parquet_path"]),
                 "sha256": training["parquet_sha256"],
             },
-            "phase_counts": _total_counts(episodes, "phase", phase_keys),
-            "gate_counts": _total_counts(episodes, "gate", gate_keys),
+            "phase_counts": _total_counts(episodes, "phase"),
+            "gate_counts": _total_counts(episodes, "gate"),
             "fallback_episodes": [
                 episode["dataset_episode_index"]
                 for episode in episodes
@@ -676,23 +629,21 @@ def _filter_document(
 
 
 def build_filter_manifest(
-    *, rule_path: str | Path, dataset_root: str | Path, select_path: str | Path
+    *, rule_path: str | Path, dataset_root: str | Path
 ) -> dict[str, Any]:
     (
         root,
         rule,
         manifest_path,
-        select_source,
         training,
         validation,
         lead_ns,
         _profile_hash,
-    ) = _filter_inputs(rule_path, dataset_root, select_path)
+    ) = _filter_inputs(rule_path, dataset_root)
     episodes = [
         _filter_episode(
             episode=episode,
             split=training,
-            selected=training["selected"],
             lead_ns=lead_ns,
             rule=rule,
         )
@@ -702,11 +653,24 @@ def build_filter_manifest(
         root=root,
         rule=rule,
         manifest_path=manifest_path,
-        select_source=select_source,
         training=training,
         validation=validation,
         episodes=episodes,
     )
+
+
+def build_filter_mask(
+    *, rule_path: str | Path, dataset_root: str | Path
+) -> SampleFilterMask:
+    """Compute the training anchor mask in memory from the dataset and its labels."""
+    document = build_filter_manifest(rule_path=rule_path, dataset_root=dataset_root)
+    return mask_from_document(
+        document,
+        source=Path(document["rule"]["path"]),
+        source_sha256=str(document["rule"]["sha256"]),
+        verify_source=False,
+    )
+
 
 __all__ = [
     "FILTER_FORMAT",
@@ -714,7 +678,7 @@ __all__ = [
     "FilterRule",
     "SampleFilterMask",
     "build_filter_manifest",
+    "build_filter_mask",
     "load_filter_mask",
     "load_filter_rule",
-    "write_filter_manifest",
 ]

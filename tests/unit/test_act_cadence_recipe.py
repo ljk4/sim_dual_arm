@@ -10,7 +10,7 @@ from robot_backend_sim.config.backend_config import load_backend_config
 from robot_backend_sim.config.follower_config import load_follower_config
 
 ROOT = Path(__file__).resolve().parents[2]
-SCENARIO = ROOT / "shared/scenarios/panda_stack"
+SCENARIO = ROOT / "shared/scenarios/panda_sim/stack"
 FOLLOWER = SCENARIO / "profiles/control/panda_follower_v1.yaml"
 BACKEND_CHUNKED = SCENARIO / "configs/simulation/backend/backend_stack_act_chunked.yaml"
 RUNTIME_CHUNKED = SCENARIO / "configs/runtime/policy_rollout.yaml"
@@ -26,13 +26,10 @@ _REFERENCED_FILES = (
 
 
 def materialize_runtime(template: Path, directory: Path) -> Path:
-    """Apply absolute paths and verified-identity placeholders used by prepare_run."""
+    """Apply absolute paths used by the runtime recipe loader."""
     document = yaml.safe_load(template.read_text(encoding="utf-8"))
     for field in _REFERENCED_FILES:
         document[field] = str((template.parent / document[field]).resolve())
-    policy = document["policy"]
-    policy["model_bundle_digest"] = "a" * 64
-    policy["processor_digest"] = "b" * 64
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / template.name
     path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
@@ -46,8 +43,8 @@ def load_runtime(template: Path, directory: Path):
 
 def test_single_follower_source_owns_target_count_and_deviation_budget():
     config = load_follower_config(FOLLOWER)
-    assert config.target_count == 5
-    assert config.target_count * 50_000_000 == 250_000_000
+    assert config.target_count == 20
+    assert config.target_count * 50_000_000 == 1_000_000_000
     assert config.max_target_deviations == ((0.30,) * 6 + (0.40, 0.04) + (0.30,) * 6 + (0.40, 0.04))
     assert config.max_terminal_tail_duration_s == 3.0
 
@@ -78,15 +75,15 @@ def test_chunked_runtime_keeps_the_60x16_interface_and_covers_the_task(tmp_path)
     assert runtime.recipe.teacher is None
 
     loaded_follower = load_follower_config(FOLLOWER)
-    assert follower.target_count == loaded_follower.target_count == 5
+    assert follower.target_count == loaded_follower.target_count == 20
     assert policy.chunk_size == 60
     assert policy.action_period_ns == 50_000_000
     assert follower.duration_grid_ns == 2_000_000
 
     window_ns = follower.target_count * policy.action_period_ns
-    assert window_ns == 250_000_000
+    assert window_ns == 1_000_000_000
     assert policy.max_chunks == 256
-    assert policy.max_chunks * window_ns == 64_000_000_000
+    assert policy.max_chunks * window_ns == 256_000_000_000
     assert policy.startup_settle_sim_ns == 2_000_000_000
     assert policy.max_chunks * window_ns >= policy.task_sim_budget_ns
     assert policy.total_sim_deadline_ns == policy.task_sim_budget_ns == 30_000_000_000

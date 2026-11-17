@@ -41,7 +41,7 @@ except ImportError as error:  # pragma: no cover - host without ROS
     pytest.skip(f"ROS unavailable: {error}", allow_module_level=True)
 
 ROOT = Path(__file__).resolve().parents[2]
-PROFILES = ROOT / "shared/scenarios/panda_stack/profiles"
+PROFILES = ROOT / "shared/scenarios/panda_sim/stack/profiles"
 for source in (
     ROOT / "simulation/mujoco/src",
     ROOT / "shared/common/python/contracts/src",

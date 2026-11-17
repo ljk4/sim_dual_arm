@@ -59,7 +59,7 @@ KIND = "scene"
 REPORT_SCHEMA_VERSION = 1
 _SHARED_ROOT = Path(os.environ.get("SHARED_ROOT", "/shared"))
 _SHARED_RECIPES = (
-    _SHARED_ROOT / "scenarios/panda_stack/configs/simulation"
+    _SHARED_ROOT / "scenarios/panda_sim/stack/configs/simulation"
 )
 DEFAULT_SCENE_CONFIG = _SHARED_RECIPES / "scene/panda_stack.yaml"
 DEFAULT_CHECK_CONFIG = _SHARED_RECIPES / "checks/scene_check.yaml"
@@ -105,17 +105,26 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--scene-config", type=Path, required=True, help="scene parameters")
     parser.add_argument("--check-config", type=Path, required=True, help="check parameters")
     parser.add_argument("--report-root", type=Path, required=True, help="report parent directory")
-    parser.add_argument("--run-id", required=True, help="fresh report run identity")
+    parser.add_argument(
+        "--run-id",
+        default=None,
+        help="fresh report run identity (default: scene-check-<UTC>-<pid>)",
+    )
     return parser
 
 
 def parse_arguments(argv: list[str] | None = None) -> SceneCheckArguments:
     parsed = _parser().parse_args(argv)
+    run_id = (
+        f"scene-check-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{os.getpid()}"
+        if parsed.run_id is None
+        else parsed.run_id
+    )
     return SceneCheckArguments(
         scene_config=parsed.scene_config.resolve(),
         check_config=parsed.check_config.resolve(),
         report_root=_validate_report_root(parsed.report_root),
-        run_id=_validate_run_id(parsed.run_id),
+        run_id=_validate_run_id(run_id),
     )
 
 

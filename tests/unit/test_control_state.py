@@ -11,7 +11,7 @@ from robot_contracts.trajectory.spline import ReferenceSample
 from robot_trajectory.follower import PreparedFollowerPlan
 
 ROOT = Path(__file__).resolve().parents[2]
-PROFILES = ROOT / "shared/scenarios/panda_stack/profiles"
+PROFILES = ROOT / "shared/scenarios/panda_sim/stack/profiles"
 SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))

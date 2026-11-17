@@ -14,7 +14,7 @@ from robot_contracts.trajectory.spline import ReferenceSample
 from robot_trajectory.follower import PreparedFollowerPlan, normalize_follower_positions
 
 ROOT = Path(__file__).resolve().parents[2]
-PROFILES = ROOT / "shared/scenarios/panda_stack/profiles"
+PROFILES = ROOT / "shared/scenarios/panda_sim/stack/profiles"
 for source in (ROOT / "simulation/mujoco/src", ROOT / "shared/common/python/contracts/src"):
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))

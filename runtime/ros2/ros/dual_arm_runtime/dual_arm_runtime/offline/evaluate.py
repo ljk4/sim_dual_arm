@@ -22,7 +22,7 @@ from typing import Any
 
 from robot_contracts.project_paths import project_path
 
-from dual_arm_runtime.artifact_paths import diagnostics_root
+from dual_arm_runtime.artifact_paths import debug_root
 from dual_arm_runtime.offline import campaign
 from dual_arm_runtime.offline.evaluation_media import (  # noqa: E402
     keyframes,
@@ -244,22 +244,27 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
         "--config",
         type=Path,
         default=None,
-        help="direct campaign recipe (conflicts with --scenario)",
+        help="direct campaign recipe (conflicts with --robot/--task)",
     )
-    parser.add_argument("--scenario")
+    parser.add_argument("--robot")
+    parser.add_argument("--task")
     parser.add_argument("--shared-root", type=Path)
     parser.add_argument("--purpose", choices=("all", "test", "evaluation"), default="all")
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--no-media", action="store_true")
     args = parser.parse_args(argv)
-    if args.scenario is not None and args.config is not None:
-        parser.error("--scenario cannot be combined with --config")
-    if args.scenario is None and args.config is None:
-        parser.error("one of --scenario or --config is required")
-    if args.shared_root is not None and args.scenario is None:
-        parser.error("--shared-root requires --scenario")
+    if args.robot is not None and args.config is not None:
+        parser.error("--robot/--task cannot be combined with --config")
+    if args.robot is None and args.config is None:
+        parser.error("one of --robot/--task or --config is required")
+    if args.robot is not None and args.task is None:
+        parser.error("--robot requires --task")
+    if args.task is not None and args.robot is None:
+        parser.error("--task requires --robot")
+    if args.shared_root is not None and args.robot is None:
+        parser.error("--shared-root requires --robot/--task")
     if args.output is None:
-        args.output = diagnostics_root(Path("var"), args.scenario) / "evaluation"
+        args.output = debug_root(Path("var"), args.robot, args.task) / "evaluation"
     return args
 
 
@@ -274,7 +279,8 @@ def main(argv: list[str] | None = None) -> int:
             project_root=project_root,
             config_path=campaign_config_path(
                 campaign_config=args.config,
-                scenario=args.scenario,
+                robot=args.robot,
+                task=args.task,
                 shared_root=args.shared_root,
                 project_root=project_root,
                 default=None,

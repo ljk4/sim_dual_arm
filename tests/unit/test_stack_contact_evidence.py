@@ -32,7 +32,7 @@ from robot_backend_sim.tasks.stack.evaluator import (  # noqa: E402
 )
 
 TASK = load_task_config(
-    ROOT / "shared/scenarios/panda_stack/configs/simulation/scene/panda_stack_task.yaml"
+    ROOT / "shared/scenarios/panda_sim/stack/configs/simulation/scene/panda_stack_task.yaml"
 )
 
 

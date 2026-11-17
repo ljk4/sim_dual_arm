@@ -34,13 +34,13 @@ from robot_backend_sim.tasks.handover.plan import plan_document, plan_handover
 __all__ = ["main", "run"]
 
 _SHARED_ROOT = Path(os.environ.get("SHARED_ROOT", "/shared"))
-_SCENARIO = _SHARED_ROOT / "scenarios/marvin_handover"
+_SCENARIO = _SHARED_ROOT / "scenarios/marvin_sim/handover"
 DEFAULT_SCENE_CONFIG = _SCENARIO / "configs/simulation/scene/marvin_handover.yaml"
 DEFAULT_PLANNING_CONFIG = _SCENARIO / "configs/simulation/planning/handover_paths.yaml"
 DEFAULT_PROFILE = _SCENARIO / "profiles/robots/marvin_handover_v1/profile.json"
 DEFAULT_SCHEMAS = _SHARED_ROOT / "common/interfaces/schemas"
 DEFAULT_REPORT_ROOT = (
-    Path(os.environ.get("DATA_ROOT", "/data")) / "marvin_handover/diagnostics/handover"
+    Path(os.environ.get("DATA_ROOT", "/data")) / "marvin_sim/handover/debug/handover"
 )
 
 
@@ -61,13 +61,22 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--profile", type=Path, default=DEFAULT_PROFILE)
     parser.add_argument("--schemas", type=Path, default=DEFAULT_SCHEMAS)
     parser.add_argument("--report-root", type=Path, default=DEFAULT_REPORT_ROOT)
-    parser.add_argument("--run-id", required=True)
+    parser.add_argument(
+        "--run-id",
+        default=None,
+        help="fresh report run identity (default: handover-check-<UTC>-<pid>)",
+    )
     return parser
 
 
 def parse_arguments(argv: list[str] | None = None) -> HandoverCheckArguments:
     parsed = _parser().parse_args(argv)
-    if not parsed.run_id or "/" in parsed.run_id or parsed.run_id in {".", ".."}:
+    run_id = (
+        f"handover-check-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{os.getpid()}"
+        if parsed.run_id is None
+        else parsed.run_id
+    )
+    if not run_id or "/" in run_id or run_id in {".", ".."}:
         raise SystemExit("error: --run-id must be a simple path component")
     return HandoverCheckArguments(
         scene_config=parsed.scene_config.resolve(),
@@ -75,7 +84,7 @@ def parse_arguments(argv: list[str] | None = None) -> HandoverCheckArguments:
         profile=parsed.profile.resolve(),
         schemas=parsed.schemas.resolve(),
         report_root=parsed.report_root.resolve(),
-        run_id=parsed.run_id,
+        run_id=run_id,
     )
 
 

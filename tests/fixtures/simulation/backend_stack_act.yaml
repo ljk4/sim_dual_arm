@@ -3,13 +3,13 @@
 # plan is constructed and GetTeacherChunk is rejected.
 robot:
   namespace: /robot
-  profile: ../../../shared/scenarios/panda_stack/profiles/robots/panda_stack_learning_v1/profile.json
+  profile: ../../../shared/scenarios/panda_sim/stack/profiles/robots/panda_stack_learning_v1/profile.json
   schemas: ../../../shared/common/interfaces/schemas
-  scene: ../../../shared/scenarios/panda_stack/configs/simulation/scene/panda_stack_learning.yaml
-  control: ../../../shared/scenarios/panda_stack/profiles/control/panda_control_v1.yaml
-  stream: ../../../shared/scenarios/panda_stack/profiles/control/panda_stream_v1.yaml
-  follower: ../../../shared/scenarios/panda_stack/profiles/control/panda_follower_v1.yaml
-  task: ../../../shared/scenarios/panda_stack/configs/simulation/scene/panda_stack_task.yaml
+  scene: ../../../shared/scenarios/panda_sim/stack/configs/simulation/scene/panda_stack_learning.yaml
+  control: ../../../shared/scenarios/panda_sim/stack/profiles/control/panda_control_v1.yaml
+  stream: ../../../shared/scenarios/panda_sim/stack/profiles/control/panda_stream_v1.yaml
+  follower: ../../../shared/scenarios/panda_sim/stack/profiles/control/panda_follower_v1.yaml
+  task: ../../../shared/scenarios/panda_sim/stack/configs/simulation/scene/panda_stack_task.yaml
   # Optional read-only segmentation counts on the same render snapshot.
   render_quality:
     enabled: true

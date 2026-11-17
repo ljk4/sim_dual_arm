@@ -1,4 +1,4 @@
-"""Focused tests for DSH-040 static-anchor sampling."""
+"""Focused tests for static-anchor sampling and scenario-agnostic dual-arm motion."""
 
 from __future__ import annotations
 
@@ -7,28 +7,23 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-import yaml
-from dual_arm_learning.checkpoints import (
-    CheckpointError,
-    training_binding,
-    validate_checkpoint_binding,
-)
+from model_helpers import replace
+
 from dual_arm_learning.config import load_training_config
 from dual_arm_learning.dataset import canonical_hash, file_sha256
 from dual_arm_learning.sample_filter import (
     FilterError,
     build_filter_manifest,
+    build_filter_mask,
     load_filter_mask,
     load_filter_rule,
-    write_filter_manifest,
 )
 from dual_arm_learning.training import TrainingError, _sample_filter
-from model_helpers import replace
 
 pa = pytest.importorskip("pyarrow")
 pq = pytest.importorskip("pyarrow.parquet")
 ROOT = Path(__file__).resolve().parents[2]
-SCENARIO = ROOT / "shared/scenarios/panda_stack"
+SCENARIO = ROOT / "shared/scenarios/panda_sim/stack"
 RULE = SCENARIO / "configs/learning/act_sample_filter.yaml"
 PROFILE = "a" * 64
 LEAD_NS = 50_000_000
@@ -91,7 +86,7 @@ def _write_split(
     specs: list[dict[str, object]],
     *,
     first_global: int,
-) -> tuple[dict[str, object], list[dict[str, object]], list[dict[str, object]]]:
+) -> tuple[dict[str, object], list[dict[str, object]]]:
     split_root = root / name
     parquet_path = split_root / "data/chunk-000/file-000.parquet"
     parquet_path.parent.mkdir(parents=True, exist_ok=True)
@@ -107,7 +102,6 @@ def _write_split(
         "action.sim_time_ns": [],
     }
     manifest_episodes: list[dict[str, object]] = []
-    select_entries: list[dict[str, object]] = []
     next_index = 0
     for local, spec in enumerate(specs):
         attempt_id = f"{name}-{local:03d}"
@@ -179,11 +173,9 @@ def _write_split(
                 "global_success_index": global_index,
                 "attempt_id": attempt_id,
                 "seed": seed,
+                "attempt_dir": str(attempt_dir),
                 "frame_count": frames,
             }
-        )
-        select_entries.append(
-            {"attempt_id": attempt_id, "seed": seed, "attempt_dir": str(attempt_dir)}
         )
     table = pa.table({key: pa.array(value) for key, value in columns.items()})
     pq.write_table(table, parquet_path)
@@ -200,7 +192,7 @@ def _write_split(
             }
         },
     }
-    return split, select_entries, manifest_episodes
+    return split, manifest_episodes
 
 
 def _make_source(
@@ -208,14 +200,12 @@ def _make_source(
     *,
     training: list[dict[str, object]] | None = None,
     validation: list[dict[str, object]] | None = None,
-) -> tuple[Path, Path]:
+) -> Path:
     training = training or [_spec(80)]
     validation = validation or [_spec(20)]
     root.mkdir(parents=True)
-    train_split, train_select, _ = _write_split(root, "train", training, first_global=0)
-    validation_split, validation_select, _ = _write_split(
-        root, "validation", validation, first_global=1000
-    )
+    train_split, _ = _write_split(root, "train", training, first_global=0)
+    validation_split, _ = _write_split(root, "validation", validation, first_global=1000)
     manifest = {
         "schema_version": 1,
         "status": "complete",
@@ -224,19 +214,8 @@ def _make_source(
         "lerobot": {"action_lead_ns": LEAD_NS, "fps": 20, "chunk_size": 60},
         "splits": {"training": train_split, "validation": validation_split},
     }
-    manifest_path = root / "manifest.json"
-    _write_json(manifest_path, manifest)
-    select_path = root.parent / "select.json"
-    _write_json(
-        select_path,
-        {
-            "status": "SELECTED",
-            "qualified": len(training) + len(validation),
-            "training": train_select,
-            "validation": validation_select,
-        },
-    )
-    return root, select_path
+    _write_json(root / "manifest.json", manifest)
+    return root
 
 
 def _build(
@@ -245,12 +224,9 @@ def _build(
     training: list[dict[str, object]] | None = None,
     validation: list[dict[str, object]] | None = None,
 ) -> tuple[dict[str, object], Path]:
-    dataset_root, select_path = _make_source(root, training=training, validation=validation)
-    document = build_filter_manifest(
-        rule_path=RULE, dataset_root=dataset_root, select_path=select_path
-    )
-    mask_path = write_filter_manifest(document, root.parent / f"{root.name}-filter.json")
-    return document, mask_path
+    dataset_root = _make_source(root, training=training, validation=validation)
+    document = build_filter_manifest(rule_path=RULE, dataset_root=dataset_root)
+    return document, dataset_root
 
 
 def _refresh_parquet_hash(root: Path, split_name: str) -> None:
@@ -268,11 +244,10 @@ def _refresh_parquet_hash(root: Path, split_name: str) -> None:
 
 def test_real_filter_rule_loads():
     rule = load_filter_rule(RULE)
-    assert rule.right_arm_indices == (8, 9, 10, 11, 12, 13, 14)
+    assert rule.arm_indices == (0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14)
     assert rule.gripper_indices == (7, 15)
     assert rule.min_static_run_frames == 15
-    assert rule.tracking_gate == "TRACKING"
-    assert rule.known_phases[-1] == "stable"
+    assert rule.max_arm_step_rad == 0.001
 
 
 def test_left_arm_idle_but_right_arm_motion_is_not_filtered(tmp_path):
@@ -282,6 +257,19 @@ def test_left_arm_idle_but_right_arm_motion_is_not_filtered(tmp_path):
     spec["applied"][:, 8:15] = step
     spec["measured_velocity"][:, 8:15] = 0.2
     spec["applied_velocity"][:, 8:15] = 0.2
+    document, _ = _build(tmp_path / "data", training=[spec])
+    assert document["training"]["excluded_frames"] == 0
+    assert document["training"]["episodes"][0]["kept_count"] == 80
+
+
+def test_right_arm_idle_but_left_arm_motion_is_not_filtered(tmp_path):
+    """The old right-arm-only rule mistakenly treated a moving left arm as static."""
+    spec = _spec(80)
+    step = np.arange(80, dtype=np.float64)[:, None] * 0.01
+    spec["measured"][:, 0:7] = step
+    spec["applied"][:, 0:7] = step
+    spec["measured_velocity"][:, 0:7] = 0.2
+    spec["applied_velocity"][:, 0:7] = 0.2
     document, _ = _build(tmp_path / "data", training=[spec])
     assert document["training"]["excluded_frames"] == 0
     assert document["training"]["episodes"][0]["kept_count"] == 80
@@ -322,7 +310,8 @@ def test_long_static_run_keeps_edges_and_every_fifth_anchor(tmp_path):
     assert episode["fallback"] is None
 
 
-def test_phase_gate_and_unknown_boundaries_are_protected(tmp_path):
+def test_long_static_holds_are_thinned_while_transitions_are_kept(tmp_path):
+    """WAITING_FOR_FEEDBACK/HOLDING holds and unknown phases are no longer blanket-kept."""
     phases = (
         ["stable"] * 60 + ["transport"] * 60 + ["open"] * 60 + ["stable"] * 60 + ["mystery"] * 60
     )
@@ -334,67 +323,67 @@ def test_phase_gate_and_unknown_boundaries_are_protected(tmp_path):
         + ["TRACKING"] * 60
     )
     document, _ = _build(tmp_path / "data", training=[_spec(300, phases=phases, gates=gates)])
-    kept = set(document["training"]["episodes"][0]["kept_indices"])
-    for start, end in ((55, 65), (115, 125), (175, 185), (235, 245), (120, 179), (240, 299)):
+    episode = document["training"]["episodes"][0]
+    kept = set(episode["kept_indices"])
+    excluded = set(episode["excluded_indices"])
+    for start, end in ((55, 65), (115, 125), (175, 185), (235, 245)):
         assert set(range(start, end + 1)) <= kept
+    # The 60-frame physics wait and the unknown-phase hold must lose interior frames.
+    assert excluded & set(range(126, 174))
+    assert excluded & set(range(246, 294))
     assert document["training"]["excluded_frames"] > 0
     assert document["training"]["gate_counts"]["source"]["WAITING_FOR_FEEDBACK"] == 60
-    assert document["training"]["gate_counts"]["source"]["unknown"] == 0
+    assert document["training"]["gate_counts"]["source"].get("unknown", 0) == 0
+    assert document["training"]["phase_counts"]["source"]["mystery"] == 60
 
 
 def test_validation_split_is_never_filtered(tmp_path):
-    document, mask_path = _build(tmp_path / "data", training=[_spec(300)])
+    document, dataset_root = _build(tmp_path / "data", training=[_spec(300)])
+    mask = build_filter_mask(rule_path=RULE, dataset_root=dataset_root)
     assert document["validation"]["filtered"] is False
     assert document["validation"]["excluded_frames"] == 0
     assert document["validation"]["kept_frames"] == document["validation"]["source_frames"]
     assert document["training"]["excluded_frames"] > 0
     assert document["validation"]["kept_frames"] == 20
-    assert (
-        len(load_filter_mask(mask_path).eligible_indices) == document["training"]["eligible_frames"]
-    )
-    mask = load_filter_mask(mask_path)
+    assert len(mask.eligible_indices) == document["training"]["eligible_frames"]
     assert max(mask.eligible_indices) < document["training"]["source_frames"]
+    assert mask.source == RULE.resolve()
 
 
 def test_source_manifest_hash_and_duplicate_index_are_rejected(tmp_path):
     bad_manifest = tmp_path / "bad-manifest"
-    root, _ = _make_source(bad_manifest)
+    root = _make_source(bad_manifest)
     manifest_path = root / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     relative = next(iter(manifest["splits"]["training"]["files"]))
     manifest["splits"]["training"]["files"][relative]["sha256"] = "0" * 64
     _write_json(manifest_path, manifest)
     with pytest.raises(FilterError, match="hash"):
-        build_filter_manifest(
-            rule_path=RULE,
-            dataset_root=root,
-            select_path=bad_manifest.parent / "select.json",
-        )
+        build_filter_manifest(rule_path=RULE, dataset_root=root)
 
     duplicate = tmp_path / "duplicate-index"
-    root, select = _make_source(duplicate)
+    root = _make_source(duplicate)
     parquet_path = root / "train/data/chunk-000/file-000.parquet"
     rows = pq.read_table(parquet_path).to_pydict()
     rows["index"][1] = rows["index"][0]
     pq.write_table(pa.table({key: pa.array(value) for key, value in rows.items()}), parquet_path)
     _refresh_parquet_hash(root, "training")
     with pytest.raises(FilterError, match="duplicate"):
-        build_filter_manifest(rule_path=RULE, dataset_root=root, select_path=select)
+        build_filter_manifest(rule_path=RULE, dataset_root=root)
 
     out_of_range = tmp_path / "out-of-range"
-    root, select = _make_source(out_of_range)
+    root = _make_source(out_of_range)
     parquet_path = root / "train/data/chunk-000/file-000.parquet"
     rows = pq.read_table(parquet_path).to_pydict()
     rows["index"][0] = len(rows["index"])
     pq.write_table(pa.table({key: pa.array(value) for key, value in rows.items()}), parquet_path)
     _refresh_parquet_hash(root, "training")
     with pytest.raises(FilterError, match="out of range"):
-        build_filter_manifest(rule_path=RULE, dataset_root=root, select_path=select)
+        build_filter_manifest(rule_path=RULE, dataset_root=root)
 
 
-def test_mask_tamper_and_index_structure_are_rejected(tmp_path):
-    _, mask_path = _build(tmp_path / "data")
-    document = json.loads(mask_path.read_text(encoding="utf-8"))
+def test_mask_digest_and_index_structure_are_rejected(tmp_path):
+    document, _ = _build(tmp_path / "data")
     document["training"]["episodes"][0]["kept_indices"][-1] = 999_999
     payload = {
         key: value
@@ -402,13 +391,14 @@ def test_mask_tamper_and_index_structure_are_rejected(tmp_path):
         if key not in {"filter_digest", "created_wall_time_ns"}
     }
     document["filter_digest"] = canonical_hash(payload)
+    mask_path = tmp_path / "tampered.json"
     _write_json(mask_path, document)
     with pytest.raises(FilterError, match="partition"):
         load_filter_mask(mask_path)
 
-    _, clean_path = _build(tmp_path / "clean")
-    clean = json.loads(clean_path.read_text(encoding="utf-8"))
+    clean, _ = _build(tmp_path / "clean")
     clean["filter_digest"] = "0" * 64
+    clean_path = tmp_path / "clean.json"
     _write_json(clean_path, clean)
     with pytest.raises(FilterError, match="digest"):
         load_filter_mask(clean_path)
@@ -449,56 +439,22 @@ def test_future_action_chunks_keep_their_original_interval_and_validation_is_unf
     ] == list(range(20))
 
 
-def test_old_unfiltered_binding_is_byte_for_byte_compatible(tmp_path):
-    _write_json(tmp_path / "manifest.json", {"dataset": "accepted"})
-    config = replace(
-        load_training_config(SCENARIO / "configs/learning/act_training.yaml", ROOT),
-        data_root=tmp_path,
+def test_sample_filter_is_configured_for_full_mode_only(tmp_path):
+    config = load_training_config(SCENARIO / "configs/learning/act_training.yaml", ROOT)
+    assert config.sample_filter == RULE.resolve()
+    assert _sample_filter(config, None) is None
+    unsupported = config.model_copy(
+        update={"mode": "full", "sample_filter": tmp_path / "filter.txt"}
     )
-    assert config.sample_filter is None
-    binding = training_binding(config)
-    assert set(binding) == {
-        "effective_configuration",
-        "effective_configuration_sha256",
-        "dataset_manifest_sha256",
-    }
-    effective = config.to_document()
-    effective.pop("sample_filter")
-    assert binding["effective_configuration"] == effective
-    assert "sample_filter" not in binding["effective_configuration"]
+    with pytest.raises(TrainingError, match="rule YAML or a mask JSON"):
+        _sample_filter(unsupported, None)
 
 
-def test_changed_sample_filter_cannot_resume(tmp_path):
-    _, mask_path = _build(tmp_path / "data")
-    dataset_root = tmp_path / "data"
-    config = replace(
-        load_training_config(SCENARIO / "configs/learning/act_training.yaml", ROOT),
-        mode="full",
-        data_root=dataset_root,
-        sample_filter=mask_path,
-    )
-    checkpoint = {"training_binding": training_binding(config)}
-    validate_checkpoint_binding(checkpoint, config)
-    with mask_path.open("a", encoding="utf-8") as stream:
-        stream.write("\n")
-    with pytest.raises(CheckpointError, match="effective configuration"):
-        validate_checkpoint_binding(checkpoint, config)
-
-
-def test_sample_filter_config_is_optional_and_rejected_outside_full(tmp_path):
-    document = yaml.safe_load(
-        (SCENARIO / "configs/learning/act_training.yaml").read_text(encoding="utf-8")
-    )
-    document["data"]["sample_filter"] = "filter.json"
-    path = tmp_path / "training.yaml"
-    path.write_text(yaml.safe_dump(document), encoding="utf-8")
-    config = load_training_config(path, ROOT)
-    assert config.sample_filter == ROOT / "filter.json"
-    with pytest.raises(TrainingError, match="full"):
-        _sample_filter(config, None)
-
-
-def test_existing_mask_output_is_never_overwritten(tmp_path):
-    document, mask_path = _build(tmp_path / "data")
-    with pytest.raises(FilterError, match="already exists"):
-        write_filter_manifest(document, mask_path)
+def test_mask_json_can_be_loaded_directly(tmp_path):
+    document, _ = _build(tmp_path / "data")
+    path = tmp_path / "mask.json"
+    _write_json(path, document)
+    mask = load_filter_mask(path, verify_source=False)
+    assert mask.source == path.resolve()
+    assert len(mask.eligible_indices) == document["training"]["eligible_frames"]
+    assert mask.source_sha256 == file_sha256(path)

@@ -13,6 +13,7 @@ process or writes a file.
 from __future__ import annotations
 
 import hashlib
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
@@ -44,6 +45,7 @@ __all__ = [
     "ResolvedReference",
     "ScenarioBinding",
     "load_binding",
+    "resolve_binding_path",
     "stage_requirements",
 ]
 
@@ -60,6 +62,7 @@ ScenarioId = Annotated[
         pattern=r"^[A-Za-z_][A-Za-z0-9_.:-]{0,127}$",
     ),
 ]
+_SCENARIO_ID_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.:-]{0,127}$")
 BackendKind = Literal["simulation", "hardware"]
 ReferenceKind = Literal["file", "directory"]
 BundleSource = Literal["binding", "override", "none"]
@@ -84,7 +87,6 @@ _STAGE_REQUIREMENTS: dict[str, tuple[str, ...]] = {
         "recipes.runtime_policy",
         "recipes.policy_service",
         "interfaces.policy_api",
-        "models.bundle",
     ),
 }
 _SIMULATION_REQUIREMENTS: dict[str, tuple[str, ...]] = {
@@ -151,10 +153,17 @@ class ModelsSpec(StrictContractModel):
 
 
 class ScenarioBinding(StrictContractModel):
-    """The strict v1 binding document.  Unknown fields are rejected."""
+    """The strict v1 binding document.  Unknown fields are rejected.
+
+    A scenario is the ``(robot_id, task_id)`` pair that owns
+    ``<shared>/scenarios/<robot_id>/<task_id>/binding.yaml``.  ``scenario_id``
+    remains a derived display identifier (``"<robot_id>/<task_id>"``) so
+    summaries and logs keep a single canonical name.
+    """
 
     schema_version: SchemaVersion
-    scenario_id: ScenarioId
+    robot_id: ScenarioId
+    task_id: ScenarioId
     description: NonEmptyStr | None = None
     backend: BackendSpec
     runtime: RuntimeSpec
@@ -166,6 +175,10 @@ class ScenarioBinding(StrictContractModel):
     source_roots: PathList = ()
     artifact_roots: PathList = ()
     references: PathList = ()
+
+    @property
+    def scenario_id(self) -> str:
+        return f"{self.robot_id}/{self.task_id}"
 
     @model_validator(mode="before")
     @classmethod
@@ -276,8 +289,6 @@ class ResolvedBinding:
             )
 
     def _satisfied(self, field: str) -> bool:
-        if field == "models.bundle":
-            return self.bundle.path is not None
         section, name = field.split(".", 1)
         return getattr(getattr(self.binding, section), name) is not None
 
@@ -640,10 +651,28 @@ def _load(
     )
 
 
+def resolve_binding_path(
+    shared_root: Path | str, robot_id: str, task_id: str
+) -> Path:
+    """Return ``<shared_root>/scenarios/<robot_id>/<task_id>/binding.yaml``.
+
+    Both ids are validated before any path is built, so a caller cannot escape
+    the scenarios tree with a crafted robot or task name.
+    """
+    for field, value in (("robot_id", robot_id), ("task_id", task_id)):
+        if not isinstance(value, str) or _SCENARIO_ID_PATTERN.fullmatch(value) is None:
+            raise BindingError(
+                "BINDING_REFERENCE",
+                f"{field}: invalid scenario id {value!r}; expected 1..128 safe characters",
+            )
+    return Path(shared_root) / "scenarios" / robot_id / task_id / "binding.yaml"
+
+
 def load_binding(
     path: Path | str,
     *,
     shared_root: Path | str,
+    model: Path | str | None = None,
     bundle: Path | str | None = None,
 ) -> ResolvedBinding:
     """Load and fully validate one binding without executing any scenario code.
@@ -652,8 +681,9 @@ def load_binding(
     repository's ``shared/``); profile schemas are read from
     ``common/interfaces/schemas`` below it.  All binding-internal paths resolve
     against the binding directory and declared roots, never the current working
-    directory.  ``bundle`` is an explicit caller path resolved against the
-    current working directory and overrides ``models.bundle``.
+    directory.  ``bundle`` (or its alias ``model``) is an explicit caller path
+    resolved against the current working directory and overrides a declared
+    ``models.bundle``; it is never required by stage validation.
     """
     shared_root = Path(shared_root)
     schema_root = shared_root / "common" / "interfaces" / "schemas"
@@ -662,5 +692,11 @@ def load_binding(
             "BINDING_REFERENCE",
             f"{shared_root}: shared schema directory does not exist: {schema_root}",
         )
-    override = None if bundle is None else _resolved(Path(bundle))
+    if model is not None and bundle is not None and Path(model) != Path(bundle):
+        raise BindingError(
+            "BINDING_REFERENCE",
+            f"model {model} and bundle {bundle} name different overrides",
+        )
+    declared_override = bundle if bundle is not None else model
+    override = None if declared_override is None else _resolved(Path(declared_override))
     return _load(Path(path), schema_root=schema_root, bundle=override, stack=())

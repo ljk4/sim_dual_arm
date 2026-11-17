@@ -278,7 +278,6 @@ def _code_hashes(project_root: Path) -> dict[str, str]:
         "learning/lerobot/src/dual_arm_learning/dataset_common.py",
         "learning/lerobot/src/dual_arm_learning/dataset_export.py",
         "learning/lerobot/src/dual_arm_learning/dataset_manifest.py",
-        "learning/lerobot/src/dual_arm_learning/budget.py",
         "learning/lerobot/src/dual_arm_learning/training.py",
         "learning/lerobot/src/dual_arm_learning/training_support.py",
         "learning/lerobot/src/dual_arm_learning/bundle.py",

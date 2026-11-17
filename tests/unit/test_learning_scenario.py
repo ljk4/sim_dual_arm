@@ -1,10 +1,4 @@
-"""Learning-side scenario selection: provenance, conflicts and real dispatch.
-
-Conversion and training are exercised through test doubles that receive the
-real configuration object; the full data pipeline is deliberately not rerun.
-prepare-policy was removed; policy loading uses a real, verifiable synthetic
-ACT bundle instead.
-"""
+"""Learning-side robot/task selection: provenance, conflicts and real dispatch."""
 
 from __future__ import annotations
 
@@ -14,28 +8,12 @@ import pytest
 import yaml
 from dual_arm_learning import cli, policy_service_cli
 from learning_scenario_fixtures import (
-    ROOT,
-    SHA,
-)
-from learning_scenario_fixtures import (
     Audit as _Audit,
-)
-from learning_scenario_fixtures import (
     convert_args as _convert_args,
-)
-from learning_scenario_fixtures import (
     fake_convert as _fake_convert,
-)
-from learning_scenario_fixtures import (
     fake_train as _fake_train,
-)
-from learning_scenario_fixtures import (
     make_tree as _make_tree,
-)
-from learning_scenario_fixtures import (
     run_dispatcher as _run_dispatcher,
-)
-from learning_scenario_fixtures import (
     scenario_args as _scenario_args,
 )
 from learning_scenario_fixtures import (
@@ -53,6 +31,8 @@ def test_convert_uses_selected_dataset_recipe(tmp_path, monkeypatch):
     assert captured["config"].task_text == "scenario dataset task"
     assert captured["config"].profile_path == (tree.scenario.root / "profiles/robot.json")
     assert captured["selection"]["mode"] == "scenario"
+    assert captured["selection"]["robot"] == "synthetic_sim"
+    assert captured["selection"]["task"] == "stack"
     assert captured["selection"]["recipe"]["field"] == "recipes.dataset"
     assert captured["selection"]["recipe"]["path"] == str(tree.dataset_recipe.resolve())
     assert captured["selection"]["binding"]["sha256"] == _sha(tree.scenario.binding_path)
@@ -61,14 +41,14 @@ def test_convert_uses_selected_dataset_recipe(tmp_path, monkeypatch):
     assert captured["overrides"]["synthetic"]["value"] is True
 
 
-def test_convert_requires_explicit_config_or_scenario(tmp_path, monkeypatch):
+def test_convert_requires_explicit_config_or_robot_task(tmp_path, monkeypatch):
     captured: dict = {}
     monkeypatch.setattr(cli, "convert", _fake_convert(captured))
     assert (
         cli.main(
             [
                 "--project-root",
-                str(ROOT),
+                str(tmp_path),
                 "convert",
                 "--select",
                 str(tmp_path / "select.json"),
@@ -76,7 +56,7 @@ def test_convert_requires_explicit_config_or_scenario(tmp_path, monkeypatch):
                 str(tmp_path / "out"),
             ]
         )
-        == 2
+        == 1
     )
     assert captured == {}
 
@@ -107,7 +87,7 @@ def test_convert_requires_explicit_config_or_scenario(tmp_path, monkeypatch):
     assert captured["selection"] is None
 
 
-def test_train_uses_selected_training_recipe_and_checkpoint_provenance(tmp_path, monkeypatch):
+def test_train_uses_selected_training_recipe_and_canonical_roots(tmp_path, monkeypatch):
     tree = _make_tree(tmp_path)
     captured: dict = {}
     monkeypatch.setattr(cli, "train", _fake_train(captured))
@@ -117,13 +97,15 @@ def test_train_uses_selected_training_recipe_and_checkpoint_provenance(tmp_path,
     assert config.source == tree.training_recipe.resolve()
     assert config.dataset_config_path == tree.dataset_recipe.resolve()
     assert config.dataset.task_text == "scenario dataset task"
-    assert config.data_root == (tmp_path / "data").resolve()
+    assert config.data_root == (tree.repo / "var/synthetic_sim/stack/datasets/lerobot").resolve()
+    assert config.checkpoint.root == (tree.repo / "var/synthetic_sim/stack/models").resolve()
+    assert config.logging.root == (
+        tree.repo / "var/synthetic_sim/stack/logs/training"
+    ).resolve()
     selection = captured["kwargs"]["selection"]
     assert selection["recipe"]["field"] == "recipes.training"
     assert selection["dataset_recipe"]["path"] == str(tree.dataset_recipe.resolve())
     assert captured["kwargs"]["overrides"]["mode"]["value"] == "smoke"
-    # learning stage never requires a pre-existing model
-    assert selection.get("bundle") is None
 
 
 def test_train_rejects_training_recipe_with_another_dataset(tmp_path, monkeypatch, capsys):
@@ -141,42 +123,9 @@ def test_train_rejects_training_recipe_with_another_dataset(tmp_path, monkeypatc
     assert code == 1
     assert captured == {}
     assert "differs from the selected dataset recipe" in capsys.readouterr().err
-    assert not (tmp_path / "runs").exists()
 
 
-def test_bundle_uses_selected_training_recipe_without_a_model(tmp_path, monkeypatch):
-    tree = _make_tree(tmp_path)
-    captured: dict = {}
-
-    def export_bundle(**kwargs):
-        captured.update(kwargs)
-        return {
-            "bundle_digest": SHA,
-            "files": {},
-            "checkpoint": {"step": 1},
-            "synthetic": True,
-        }
-
-    monkeypatch.setattr(cli, "export_bundle", export_bundle)
-    code = cli.main(
-        _scenario_args(
-            tree,
-            "bundle",
-            "--run",
-            str(tmp_path / "runs/run-scenario"),
-            "--output",
-            str(tmp_path / "bundle-out"),
-            "--mode",
-            "overfit",
-        )
-    )
-    assert code == 0
-    assert captured["config"].source == tree.training_recipe.resolve()
-    assert captured["selection"]["recipe"]["field"] == "recipes.training"
-    assert captured["overrides"]["mode"]["value"] == "overfit"
-
-
-def test_verify_data_and_budget_use_selected_training_recipe(tmp_path, monkeypatch):
+def test_verify_data_uses_selected_training_recipe(tmp_path, monkeypatch):
     tree = _make_tree(tmp_path)
     captured: dict = {}
 
@@ -189,10 +138,6 @@ def test_verify_data_and_budget_use_selected_training_recipe(tmp_path, monkeypat
     assert cli.main(_scenario_args(tree, "verify-data", "--allow-synthetic")) == 0
     assert captured["config"].source == tree.training_recipe.resolve()
     assert captured["verify"]["allow_synthetic"] is True
-
-    assert cli.main(_scenario_args(tree, "budget-status")) == 0
-    assert (tmp_path / "budget.jsonl").parent.is_dir()
-    assert not (tmp_path / "runs").exists()
 
 
 @pytest.mark.parametrize(
@@ -217,14 +162,12 @@ def test_unsupported_learning_implementation_is_rejected_before_dispatch(
     assert not (tmp_path / "out").exists()
 
 
-def test_scenario_conflicts_and_missing_arguments_are_explicit(tmp_path, monkeypatch):
+def test_selection_conflicts_and_missing_arguments_are_explicit(tmp_path, monkeypatch):
     tree = _make_tree(tmp_path)
     captured: dict = {}
     monkeypatch.setattr(cli, "convert", _fake_convert(captured))
-    # argparse mutually exclusive group: exit code 2, no dispatch
-    assert cli.main(_scenario_args(tree, "convert", "--config", str(tree.dataset_recipe))) == 2
+    assert cli.main(_scenario_args(tree, "convert", "--config", str(tree.dataset_recipe))) == 1
     assert captured == {}
-    # --shared-root without --scenario: the required selection group rejects it
     assert (
         cli.main(
             [
@@ -235,18 +178,19 @@ def test_scenario_conflicts_and_missing_arguments_are_explicit(tmp_path, monkeyp
                 str(tree.shared),
             ]
         )
-        == 2
+        == 1
     )
     assert captured == {}
-    # unknown scenario
     assert (
         cli.main(
             [
                 "--project-root",
                 str(tree.repo),
                 "train",
-                "--scenario",
+                "--robot",
                 "missing",
+                "--task",
+                "stack",
                 "--shared-root",
                 str(tree.shared),
             ]
@@ -256,7 +200,7 @@ def test_scenario_conflicts_and_missing_arguments_are_explicit(tmp_path, monkeyp
     assert captured == {}
 
 
-def test_scenario_selection_is_cwd_independent(tmp_path, monkeypatch):
+def test_selection_is_cwd_independent(tmp_path, monkeypatch):
     tree = _make_tree(tmp_path)
     captured: dict = {}
     monkeypatch.setattr(cli, "convert", _fake_convert(captured))
@@ -268,14 +212,15 @@ def test_scenario_selection_is_cwd_independent(tmp_path, monkeypatch):
     assert captured["selection"]["recipe"]["path"] == str(tree.dataset_recipe.resolve())
 
 
-def test_help_and_parse_do_not_load_scenario(tmp_path):
-    # argparse exits before binding selection or model loading.
-    assert cli.main(["convert", "--scenario", "missing", "--help"]) == 0
+def test_help_and_parse_do_not_load_selection(tmp_path):
+    assert cli.main(["convert", "--robot", "missing", "--task", "stack", "--help"]) == 0
     with pytest.raises(SystemExit) as error:
         policy_service_cli.main(
             [
-                "--scenario",
+                "--robot",
                 "missing",
+                "--task",
+                "stack",
                 "--shared-root",
                 str(tmp_path / "nowhere"),
                 "--help",
@@ -285,32 +230,34 @@ def test_help_and_parse_do_not_load_scenario(tmp_path):
 
 
 def test_scripts_forward_selection_without_implicit_defaults(tmp_path):
-    scenario = [
-        "--scenario",
-        "synthetic_stack",
+    selection = [
+        "--robot",
+        "synthetic_sim",
+        "--task",
+        "stack",
         "--shared-root",
         str(tmp_path / "shared"),
     ]
-    arguments = _run_dispatcher(tmp_path, "convert.sh", *scenario)
-    assert "--scenario" in arguments
+    arguments = _run_dispatcher(tmp_path, "convert.sh", *selection)
+    assert "--robot" in arguments
+    assert "--task" in arguments
     assert "--config" not in arguments
 
     arguments = _run_dispatcher(tmp_path, "convert.sh", "--config", "/custom/dataset.yaml")
     assert arguments.count("--config") == 1
     assert "/custom/dataset.yaml" in arguments
 
-    arguments = _run_dispatcher(tmp_path, "convert.sh")
-    assert "--config" not in arguments
-
     arguments = _run_dispatcher(
         tmp_path,
         "policy.sh",
-        "--scenario",
-        "synthetic_stack",
+        "--robot",
+        "synthetic_sim",
+        "--task",
+        "stack",
         "--shared-root",
         str(tmp_path / "shared"),
     )
-    assert "--scenario" in arguments
+    assert "--robot" in arguments
     assert "--config" not in arguments
 
 
@@ -320,50 +267,55 @@ def test_learning_help_does_not_require_a_container():
     assert error.value.code == 0
 
 
-# --------------------------------------------------------------------------
-# policy service: scenario recipe plus a real verified bundle
-# --------------------------------------------------------------------------
-
-
 @pytest.fixture
-def torch_fixtures(tmp_path):
+def model_fixtures(tmp_path):
     pytest.importorskip("torch")
-    from act_fixtures import make_act_bundle
+    pytest.importorskip("lerobot")
+    from act_fixtures import make_act_model
 
-    return make_act_bundle
+    def make(path, *, synthetic=False):
+        return make_act_model(path, synthetic=synthetic)
+
+    return make
 
 
-def test_policy_service_scenario_uses_recipe_and_effective_bundle(
-    tmp_path, torch_fixtures, monkeypatch
-):
-    tree = _make_tree(tmp_path)
-    bundle = torch_fixtures(tree.scenario.root / "bundles/verified", synthetic=False)
-    tree.scenario.document["models"]["bundle"] = "bundles/verified"
-    tree.scenario.write()
-    captured: dict = {}
-
+def _serve_patches(monkeypatch, captured: dict):
     class Adapter:
         def summary(self):
             return {}
 
-    def fake_serve(config, adapter, **kwargs):
-        captured["config"] = config
-        captured["snapshot"] = kwargs["snapshot"]
-        return 0
-
     monkeypatch.setattr(policy_service_cli, "load_act_adapter", lambda config: Adapter())
-    monkeypatch.setattr(policy_service_cli, "serve_forever", fake_serve)
-    log_dir = tmp_path / "logs"
+    monkeypatch.setattr(
+        policy_service_cli,
+        "serve_forever",
+        lambda config, adapter, **kwargs: captured.update(
+            config=config, snapshot=kwargs["snapshot"]
+        )
+        or 0,
+    )
+    return Adapter
+
+
+def test_policy_service_uses_recipe_and_explicit_model(
+    tmp_path, model_fixtures, monkeypatch
+):
+    tree = _make_tree(tmp_path)
+    model = model_fixtures(tmp_path / "model", synthetic=False)
+    monkeypatch.setenv("PROJECT_ROOT", str(tree.repo))
+    captured: dict = {}
+    _serve_patches(monkeypatch, captured)
     code = policy_service_cli.main(
         [
-            "--scenario",
-            "synthetic_stack",
+            "--robot",
+            "synthetic_sim",
+            "--task",
+            "stack",
             "--shared-root",
             str(tree.shared),
-            "--bundle-dir",
-            str(bundle),
+            "--model",
+            str(model),
             "--log-directory",
-            str(log_dir),
+            str(tmp_path / "logs"),
             "--run-id",
             "scenario-serve",
         ]
@@ -371,22 +323,47 @@ def test_policy_service_scenario_uses_recipe_and_effective_bundle(
     assert code == 0
     config = captured["config"]
     assert config.task_text == "scenario service task"
-    assert config.bundle_dir == bundle.resolve()
+    assert config.model_path == model.resolve()
     assert config.robot_profile_path == (tree.scenario.root / "profiles/robot.json").resolve()
     snapshot = captured["snapshot"]
     assert snapshot["config"]["path"] == str(tree.service_recipe.resolve())
     assert snapshot["selection"]["mode"] == "scenario"
     assert snapshot["selection"]["recipe"]["path"] == str(tree.service_recipe.resolve())
     assert snapshot["model_source"]["source"] == "override"
-    assert snapshot["source"]["bundle_root"] == str(bundle.resolve())
+    assert snapshot["source"]["model"] == str(config.model_path)
 
-
-def test_policy_service_scenario_missing_model_fails_before_serving(
-    tmp_path, torch_fixtures, monkeypatch
+def test_policy_service_auto_picks_latest_model(
+    tmp_path, model_fixtures, monkeypatch
 ):
     tree = _make_tree(tmp_path)
-    tree.scenario.document["models"]["bundle"] = None
-    tree.scenario.write()
+    monkeypatch.setenv("PROJECT_ROOT", str(tree.repo))
+    models = tree.repo / "var/synthetic_sim/stack/models"
+    older = model_fixtures(models / "act_20260101_000000", synthetic=False)
+    latest = model_fixtures(models / "act_20260102_000000", synthetic=False)
+    assert older.is_dir()
+    captured: dict = {}
+    _serve_patches(monkeypatch, captured)
+    code = policy_service_cli.main(
+        [
+            "--robot",
+            "synthetic_sim",
+            "--task",
+            "stack",
+            "--shared-root",
+            str(tree.shared),
+            "--log-directory",
+            str(tmp_path / "logs"),
+            "--run-id",
+            "auto-model",
+        ]
+    )
+    assert code == 0
+    assert captured["config"].model_path == latest.resolve()
+
+
+def test_policy_service_missing_model_fails_before_serving(tmp_path, monkeypatch):
+    tree = _make_tree(tmp_path)
+    monkeypatch.setenv("PROJECT_ROOT", str(tree.repo))
     called = {"serve": False}
     monkeypatch.setattr(
         policy_service_cli, "serve_forever", lambda *a, **k: called.update(serve=True)
@@ -394,8 +371,10 @@ def test_policy_service_scenario_missing_model_fails_before_serving(
     log_dir = tmp_path / "logs"
     code = policy_service_cli.main(
         [
-            "--scenario",
-            "synthetic_stack",
+            "--robot",
+            "synthetic_sim",
+            "--task",
+            "stack",
             "--shared-root",
             str(tree.shared),
             "--log-directory",
@@ -408,16 +387,18 @@ def test_policy_service_scenario_missing_model_fails_before_serving(
     assert called["serve"] is False
     failure = json.loads((log_dir / "startup_failure.json").read_text())
     assert failure["stage"] == "config"
-    assert "models.bundle" in failure["error"]
+    assert "no act_* model found" in failure["error"]
 
 
-def test_policy_service_scenario_rejects_direct_profile_inputs(tmp_path):
+def test_policy_service_rejects_direct_profile_inputs(tmp_path):
     tree = _make_tree(tmp_path)
     with pytest.raises(SystemExit) as error:
         policy_service_cli.main(
             [
-                "--scenario",
-                "synthetic_stack",
+                "--robot",
+                "synthetic_sim",
+                "--task",
+                "stack",
                 "--shared-root",
                 str(tree.shared),
                 "--robot-profile",
@@ -433,39 +414,30 @@ def test_train_applies_set_overrides_and_records_them(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "train", _fake_train(captured))
     assert (
         cli.main(
-            _scenario_args(tree, "train", "--mode", "smoke", "--set", "budget.limit_seconds=123")
+            _scenario_args(tree, "train", "--mode", "smoke", "--set", "modes.smoke.steps=64")
         )
         == 0
     )
-    assert captured["config"].budget.limit_seconds == 123.0
-    assert captured["kwargs"]["overrides"]["set"]["value"] == ["budget.limit_seconds=123"]
+    assert captured["config"].modes["smoke"].steps == 64
+    assert captured["kwargs"]["overrides"]["set"]["value"] == ["modes.smoke.steps=64"]
 
 
-def test_policy_service_scenario_applies_set_overrides(tmp_path, torch_fixtures, monkeypatch):
+def test_policy_service_applies_set_overrides(tmp_path, model_fixtures, monkeypatch):
     tree = _make_tree(tmp_path)
-    torch_fixtures(tree.scenario.root / "bundles/verified", synthetic=False)
-    tree.scenario.document["models"]["bundle"] = "bundles/verified"
-    tree.scenario.write()
+    model = model_fixtures(tmp_path / "model", synthetic=False)
+    monkeypatch.setenv("PROJECT_ROOT", str(tree.repo))
     captured: dict = {}
-
-    class Adapter:
-        def summary(self):
-            return {}
-
-    monkeypatch.setattr(policy_service_cli, "load_act_adapter", lambda config: Adapter())
-
-    def fake_serve(config, adapter, **kwargs):
-        captured["config"] = config
-        captured["snapshot"] = kwargs["snapshot"]
-        return 0
-
-    monkeypatch.setattr(policy_service_cli, "serve_forever", fake_serve)
+    _serve_patches(monkeypatch, captured)
     code = policy_service_cli.main(
         [
-            "--scenario",
-            "synthetic_stack",
+            "--robot",
+            "synthetic_sim",
+            "--task",
+            "stack",
             "--shared-root",
             str(tree.shared),
+            "--model",
+            str(model),
             "--set",
             "service.task_text=overridden task",
             "--log-directory",

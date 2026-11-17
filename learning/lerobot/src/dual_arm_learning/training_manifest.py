@@ -8,7 +8,7 @@ from typing import Any
 
 from .config import TrainingConfig
 from .dataset import canonical_hash, file_sha256, tree_hashes
-from .sample_filter import SampleFilterMask, load_filter_mask
+from .sample_filter import SampleFilterMask, build_filter_mask, load_filter_mask
 from .training_support import DatasetAudit, TrainingError
 
 
@@ -60,8 +60,17 @@ def _manifest_splits(
     validation = splits.get("validation")
     if not isinstance(training, dict) or not isinstance(validation, dict):
         raise TrainingError("manifest.splits must contain training and validation")
-    expected_training = config.dataset.expected_training_episodes
-    expected_validation = config.dataset.expected_validation_episodes
+    expected_meta = manifest.get("expected")
+    if manifest.get("diagnostic") is True and isinstance(expected_meta, dict):
+        expected_formal = int(expected_meta.get("formal_episodes", 0))
+        expected_training = int(expected_meta.get("training_episodes", 0))
+        expected_validation = int(expected_meta.get("validation_episodes", 0))
+        val_positions = tuple(int(pos) for pos in expected_meta.get("validation_positions", []))
+    else:
+        expected_formal = config.dataset.expected_formal_episodes
+        val_positions = config.dataset.validation_positions
+        expected_training = config.dataset.expected_training_episodes
+        expected_validation = config.dataset.expected_validation_episodes
     if training.get("episode_count") != expected_training:
         raise TrainingError(
             f"training split does not contain exactly {expected_training} episodes"
@@ -74,11 +83,9 @@ def _manifest_splits(
     validation_indices = _episode_indices(validation)
     if set(train_indices) & set(validation_indices):
         raise TrainingError("training and validation splits overlap")
-    if set(validation_indices) != set(config.dataset.validation_positions):
+    if set(validation_indices) != set(val_positions):
         raise TrainingError("validation split is not at the configured success positions")
-    if set(train_indices) | set(validation_indices) != set(
-        range(config.dataset.expected_formal_episodes)
-    ):
+    if set(train_indices) | set(validation_indices) != set(range(expected_formal)):
         raise TrainingError("splits do not partition the configured success range")
     if len(train_indices) != expected_training or len(validation_indices) != expected_validation:
         raise TrainingError(
@@ -288,11 +295,16 @@ def verify_dataset_manifest(
 
 
 def sample_filter(config: TrainingConfig, audit: DatasetAudit) -> SampleFilterMask | None:
-    if config.sample_filter is None:
+    """Return the full-mode anchor mask, computing it in memory from the rule YAML."""
+    if config.sample_filter is None or config.mode != "full":
         return None
-    if config.mode != "full":
-        raise TrainingError("data.sample_filter is only supported by full training")
-    mask = load_filter_mask(config.sample_filter)
+    suffix = config.sample_filter.suffix.lower()
+    if suffix == ".json":
+        mask = load_filter_mask(config.sample_filter)
+    elif suffix in {".yaml", ".yml"}:
+        mask = build_filter_mask(rule_path=config.sample_filter, dataset_root=config.data_root)
+    else:
+        raise TrainingError("data.sample_filter must be a rule YAML or a mask JSON")
     if mask.document["dataset"]["manifest"]["sha256"] != audit.manifest_sha256:
         raise TrainingError("sample filter was generated from a different dataset manifest")
     if mask.source_frames != audit.train_frames:

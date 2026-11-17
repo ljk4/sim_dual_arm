@@ -116,22 +116,23 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--max-consecutive-failures", type=positive_int, default=3)
     result.add_argument("--purpose", choices=("formal", "pilot"), default="formal")
     result.add_argument("--project-root", type=Path, default=ROOT)
-    result.add_argument("--scenario")
+    result.add_argument("--robot")
+    result.add_argument("--task")
     result.add_argument(
         "--shared-root", type=Path,
         help="host path of the scenario shared tree (default: <project>/shared)",
     )
     result.add_argument(
         "--config", default=None,
-        help="direct campaign recipe (conflicts with --scenario)",
+        help="direct campaign recipe (conflicts with --robot/--task)",
     )
     result.add_argument(
         "--runtime-config", default=None,
-        help="direct runtime teacher recipe (conflicts with --scenario)",
+        help="direct runtime teacher recipe (conflicts with --robot/--task)",
     )
     result.add_argument(
         "--backend-template", default=None,
-        help="direct simulation teacher recipe (conflicts with --scenario)",
+        help="direct simulation teacher recipe (conflicts with --robot/--task)",
     )
     result.add_argument(
         "--set",
@@ -194,9 +195,10 @@ class DockerWorkers:
             "python3", "-m", "dual_arm_runtime.offline.record_preflight",
             "--project-root", "/app", "--purpose", self.args.purpose, "--parallel",
         ]
-        if getattr(self.args, "scenario", None) is not None:
+        if getattr(self.args, "robot", None) is not None:
             command += [
-                "--scenario", self.args.scenario,
+                "--robot", self.args.robot,
+                "--task", self.args.task,
                 "--shared-root", shared_root_to_container(
                     getattr(self.args, "shared_root", None), self.args.project_root
                 ),
@@ -259,7 +261,8 @@ class DockerWorkers:
         if plan is None or plan["selection"]["mode"] != "scenario":
             return None
         return [
-            "--scenario", plan["selection"]["scenario_id"],
+            "--robot", plan["selection"]["robot"],
+            "--task", plan["selection"]["task"],
             "--shared-root", shared_root_to_container(
                 getattr(self.args, "shared_root", None), self.args.project_root
             ),
@@ -272,8 +275,8 @@ class DockerWorkers:
             for override in self.args.overrides:
                 scenario += ["--set", override]
             return scenario
-        if getattr(self.args, "scenario", None) is not None:
-            raise RuntimeError("scenario preflight did not return a scenario selection")
+        if getattr(self.args, "robot", None) is not None:
+            raise RuntimeError("binding preflight did not return a scenario selection")
         arguments = [
             "--runtime-config",
             host_path_to_container(self.args.runtime_config, self.args.project_root),
@@ -405,7 +408,10 @@ def _print_startup_info(
     print("=== Parallel Record 配置与参数摘要 ===", flush=True)
     selection = plan.get("selection") or {}
     if selection.get("mode") == "scenario":
-        print(f"方案 (scenario):   {selection.get('scenario_id')}", flush=True)
+        print(
+            f"方案 (scenario):   {selection.get('robot')}/{selection.get('task')}",
+            flush=True,
+        )
         binding = selection.get("binding") or {}
         if binding.get("path"):
             print(f"Binding 文件:      {binding['path']}", flush=True)
@@ -441,7 +447,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.count is None and args.target_total is None:
         args.count = 1
     try:
-        if args.scenario is not None:
+        if args.robot is not None:
+            if args.task is None:
+                cli.error("--robot requires --task")
             explicit = [
                 name
                 for name in ("config", "runtime_config", "backend_template")
@@ -449,19 +457,21 @@ def main(argv: list[str] | None = None) -> int:
             ]
             if explicit:
                 cli.error(
-                    "--scenario cannot be combined with "
+                    "--robot/--task cannot be combined with "
                     + ", ".join("--" + name.replace("_", "-") for name in explicit)
                 )
         else:
+            if args.task is not None:
+                cli.error("--task requires --robot")
             if args.shared_root is not None:
-                cli.error("--shared-root requires --scenario")
+                cli.error("--shared-root requires --robot/--task")
             missing = [
                 name for name in ("config", "runtime_config", "backend_template")
                 if getattr(args, name) is None
             ]
             if missing:
                 cli.error(
-                    "one of --scenario or all of --config/--runtime-config/"
+                    "one of --robot/--task or all of --config/--runtime-config/"
                     "--backend-template is required"
                 )
         args.workers = automatic_workers() if args.workers == "auto" else int(args.workers)
@@ -477,8 +487,9 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as error:
         cli.error(str(error))
     directory = (
-        scenario_root(args.project_root / "var", args.scenario)
+        scenario_root(args.project_root / "var", args.robot, args.task)
         / "logs"
+        / "collection"
         / "record-pools"
         / f"pool-{time.time_ns()}"
     )

@@ -14,7 +14,9 @@ from typing import Any
 import yaml
 from scenario_fixtures import ROOT, build_scenario, sha  # noqa: F401 - re-exported
 
-SCENARIO_ID = "synthetic_stack"
+ROBOT = "synthetic_sim"
+TASK = "stack"
+SCENARIO_ID = f"{ROBOT}/{TASK}"
 
 
 @dataclass
@@ -53,11 +55,11 @@ def campaign_document(repo: Path, recipe_paths: list[Path]) -> dict[str, Any]:
             "min_free_bytes": 0,
         },
         "paths": {
-            "attempts_root": "var/synthetic_stack/logs/campaign/attempts",
-            "ledger": "var/synthetic_stack/logs/campaign/attempts.jsonl",
-            "lock": "var/synthetic_stack/logs/campaign/.ledger.lock",
-            "run_lock": "var/synthetic_stack/logs/campaign/.run.lock",
-            "formal_select": "var/synthetic_stack/datasets/formal-select.json",
+            "attempts_root": "var/synthetic_sim/stack/datasets/raw",
+            "ledger": "var/synthetic_sim/stack/logs/collection/attempts.jsonl",
+            "lock": "var/synthetic_sim/stack/logs/collection/.ledger.lock",
+            "run_lock": "var/synthetic_sim/stack/logs/collection/.run.lock",
+            "formal_select": "var/synthetic_sim/stack/datasets/raw/formal-select.json",
             "required_paths": [str(path.relative_to(repo)) for path in recipe_paths],
             "sdk_marker": "build/ros-dev/contracts.json",
         },
@@ -93,7 +95,7 @@ def _write_backend_recipe(root: Path) -> Path:
         "robot": {
             "namespace": "/robot",
             "profile": "../profiles/robot.json",
-            "schemas": "../../../common/interfaces/schemas",
+            "schemas": "../../../../common/interfaces/schemas",
             "scene": "scene.yaml",
             "control": "control.yaml",
             "stream": "stream.yaml",

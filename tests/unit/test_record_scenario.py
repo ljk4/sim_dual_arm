@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from collection_fixtures import SCENARIO_ID, build_collection_tree, sha
+from collection_fixtures import ROBOT, SCENARIO_ID, TASK, build_collection_tree, sha
 from dual_arm_runtime.offline import campaign, export_episode, record, record_preflight
 from dual_arm_runtime.offline.campaign_ledger import CampaignError
 from dual_arm_runtime.offline.scenario_selection import (
@@ -18,7 +18,8 @@ from scenario_fixtures import ROOT
 
 def _select(tree, *, require_parallel: bool = True, **kwargs):
     return select_collection(
-        scenario=SCENARIO_ID,
+        robot=ROBOT,
+        task=TASK,
         shared_root=tree.shared,
         project_root=tree.repo,
         require_parallel=require_parallel,
@@ -154,8 +155,10 @@ def _preflight_args(tree, *extra):
         [
             "--project-root",
             str(tree.repo),
-            "--scenario",
-            SCENARIO_ID,
+            "--robot",
+            ROBOT,
+            "--task",
+            TASK,
             "--shared-root",
             str(tree.shared),
             "--parallel",
@@ -173,8 +176,8 @@ def test_preflight_plan_is_read_only(tmp_path):
     assert plan["runtime_config"] == str(tree.runtime_recipe.resolve())
     assert plan["simulation_template"] == str(tree.backend_recipe.resolve())
     assert plan["campaign_status"]["formal_target_qualified"] == 50
-    assert not (tree.repo / "var/synthetic_stack").exists()
-    assert not (tree.repo / "var/synthetic_stack/logs/record-pools").exists()
+    assert not (tree.repo / "var/synthetic_sim/stack").exists()
+    assert not (tree.repo / "var/synthetic_sim/stack/logs/collection/record-pools").exists()
 
 
 def test_preflight_rejects_unmounted_or_conflicting_selection(tmp_path):
@@ -190,7 +193,7 @@ def test_preflight_rejects_unmounted_or_conflicting_selection(tmp_path):
     tree.campaign_recipe.write_text(yaml.safe_dump(document, sort_keys=False))
     with pytest.raises(CampaignError, match="required path is missing"):
         record_preflight.build_plan(_preflight_args(tree))
-    assert not (tree.repo / "var/synthetic_stack").exists()
+    assert not (tree.repo / "var/synthetic_sim/stack").exists()
 
 
 def test_preflight_target_cannot_exceed_formal_target(tmp_path):
@@ -206,8 +209,10 @@ def test_record_selection_uses_binding_recipes_for_runner_and_exporter(tmp_path)
         [
             "--project-root",
             str(tree.repo),
-            "--scenario",
-            SCENARIO_ID,
+            "--robot",
+            ROBOT,
+            "--task",
+            TASK,
             "--shared-root",
             str(tree.shared),
         ]
@@ -253,8 +258,10 @@ def test_record_scenario_conflicts_fail_before_any_ledger(tmp_path):
     base = [
         "--project-root",
         str(tree.repo),
-        "--scenario",
-        SCENARIO_ID,
+        "--robot",
+        ROBOT,
+        "--task",
+        TASK,
         "--shared-root",
         str(tree.shared),
     ]
@@ -268,7 +275,7 @@ def test_record_scenario_conflicts_fail_before_any_ledger(tmp_path):
     with pytest.raises(SystemExit) as error:
         record.main(["--project-root", str(tree.repo), "--shared-root", str(tree.shared)])
     assert error.value.code == 2
-    assert not (tree.repo / "var/synthetic_stack").exists()
+    assert not (tree.repo / "var/synthetic_sim/stack").exists()
 
 
 def test_campaign_scenario_uses_binding_and_rejects_conflicts(tmp_path, monkeypatch):
@@ -276,8 +283,10 @@ def test_campaign_scenario_uses_binding_and_rejects_conflicts(tmp_path, monkeypa
     base = [
         "--project-root",
         str(tree.repo),
-        "--scenario",
-        SCENARIO_ID,
+        "--robot",
+        ROBOT,
+        "--task",
+        TASK,
         "--shared-root",
         str(tree.shared),
     ]
@@ -293,7 +302,7 @@ def test_campaign_scenario_uses_binding_and_rejects_conflicts(tmp_path, monkeypa
     with pytest.raises(SystemExit) as error:
         campaign.main([*base, "run", "--purpose", "pilot", "--runtime-config", "explicit.yaml"])
     assert error.value.code == 2
-    assert not (tree.repo / "var/synthetic_stack/logs/campaign/attempts.jsonl").exists()
+    assert not (tree.repo / "var/synthetic_sim/stack/logs/collection/attempts.jsonl").exists()
 
 
 def test_campaign_rejects_unsupported_binding_before_reserving(tmp_path, capsys):
@@ -304,8 +313,10 @@ def test_campaign_rejects_unsupported_binding_before_reserving(tmp_path, capsys)
         [
             "--project-root",
             str(tree.repo),
-            "--scenario",
-            SCENARIO_ID,
+            "--robot",
+            ROBOT,
+            "--task",
+            TASK,
             "--shared-root",
             str(tree.shared),
             "run",
@@ -315,14 +326,15 @@ def test_campaign_rejects_unsupported_binding_before_reserving(tmp_path, capsys)
     )
     assert code == 2
     assert "unsupported Teacher capability" in capsys.readouterr().err
-    assert not (tree.repo / "var/synthetic_stack").exists()
+    assert not (tree.repo / "var/synthetic_sim/stack").exists()
 
 
 def test_export_campaign_config_selection_and_conflict(tmp_path):
     tree = build_collection_tree(tmp_path)
     path = campaign_config_path(
         campaign_config=None,
-        scenario=SCENARIO_ID,
+        robot=ROBOT,
+        task=TASK,
         shared_root=tree.shared,
         project_root=tree.repo,
         default=tree.campaign_recipe,
@@ -331,7 +343,8 @@ def test_export_campaign_config_selection_and_conflict(tmp_path):
     with pytest.raises(CampaignError, match="cannot be combined"):
         campaign_config_path(
             campaign_config=tree.campaign_recipe,
-            scenario=SCENARIO_ID,
+            robot=ROBOT,
+            task=TASK,
             shared_root=tree.shared,
             project_root=tree.repo,
             default=tree.campaign_recipe,
@@ -344,8 +357,10 @@ def test_export_campaign_config_selection_and_conflict(tmp_path):
             str(episode),
             "--out",
             str(tmp_path / "export"),
-            "--scenario",
-            SCENARIO_ID,
+            "--robot",
+            ROBOT,
+            "--task",
+            TASK,
             "--shared-root",
             str(tree.shared),
             "--campaign-config",
@@ -356,12 +371,12 @@ def test_export_campaign_config_selection_and_conflict(tmp_path):
 
 
 def test_real_campaign_required_paths_use_the_actual_teacher_package():
-    path = ROOT / "shared/scenarios/panda_stack/configs/runtime/experiments/stack_campaign.yaml"
+    path = ROOT / "shared/scenarios/panda_sim/stack/configs/runtime/experiments/stack_campaign.yaml"
     document = yaml.safe_load(path.read_text())
     required = document["paths"]["required_paths"]
     teacher = [item for item in required if item.endswith("GetTeacherChunk.srv")]
     assert teacher == [
-        "shared/scenarios/panda_stack/extensions/ros/panda_stack_api_msgs/srv/GetTeacherChunk.srv"
+        "shared/scenarios/panda_sim/stack/extensions/ros/panda_stack_api_msgs/srv/GetTeacherChunk.srv"
     ]
     for item in required:
         assert (ROOT / item).exists(), item

@@ -40,7 +40,7 @@ def _yaw(angle):
 
 def test_layout_block_yaw_includes_the_robot_base_yaw():
     config = load_marvin_scene_config(
-        ROOT / "shared/scenarios/marvin_handover/configs/simulation/scene/marvin_handover.yaml"
+        ROOT / "shared/scenarios/marvin_sim/handover/configs/simulation/scene/marvin_handover.yaml"
     )
     config = config.model_copy(update={
         "robot": config.robot.model_copy(update={"base_yaw_deg": 45.0}),
@@ -84,7 +84,7 @@ def test_relative_block_pose_preserves_full_world_rotation():
 
 def test_handover_and_place_keep_the_edge_grasp_and_distinct_lift_height():
     config = load_handover_plan_config(
-        ROOT / "shared/scenarios/marvin_handover/configs/simulation/planning/handover_paths.yaml"
+        ROOT / "shared/scenarios/marvin_sim/handover/configs/simulation/planning/handover_paths.yaml"
     )
     config = config.model_copy(update={"grasp": config.grasp.model_copy(update={
         "right_cohold": config.grasp.right_cohold.model_copy(update={"approach_yaw_deg": 12.0})

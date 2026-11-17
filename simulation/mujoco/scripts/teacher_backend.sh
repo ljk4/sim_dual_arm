@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start the MuJoCo teacher backend for a scenario inside the simulation container,
+# Start the MuJoCo teacher backend for a robot/task inside the simulation container,
 # printing the resolved config file paths and full effective parameters.
 set -euo pipefail
 
@@ -17,9 +17,10 @@ Start the MuJoCo teacher backend (--role teacher) inside the simulation
 container and print the resolved configuration file paths and parameters.
 
 options:
-  --scenario <id>       scenario id (required)
+  --robot <id>          robot id (required)
+  --task <id>           task id (required)
   --seed <int>          initial simulation seed (default: 0)
-  --run-id <id>         backend run id (default: teacher-backend)
+  --run-id <id>         backend run id (default: teacher-backend-<UTC>-<pid>)
   --shared-root <path>  override shared scenarios root
   --run-root <path>     override backend run root
   --set PATH=VALUE      override one existing configuration path (repeatable)
@@ -27,21 +28,30 @@ options:
 EOF
 }
 
-scenario=""
+robot=""
+task=""
 seed="0"
-run_id="teacher-backend"
+run_id="teacher-backend-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 shared_root=""
 run_root=""
 overrides=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --scenario)
-      scenario="${2:?missing value for --scenario}"
+    --robot)
+      robot="${2:?missing value for --robot}"
       shift 2
       ;;
-    --scenario=*)
-      scenario="${1#*=}"
+    --robot=*)
+      robot="${1#*=}"
+      shift
+      ;;
+    --task)
+      task="${2:?missing value for --task}"
+      shift 2
+      ;;
+    --task=*)
+      task="${1#*=}"
       shift
       ;;
     --seed)
@@ -96,28 +106,29 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$scenario" ]]; then
-  printf 'scripts/teacher_backend.sh: --scenario is required\n' >&2
+if [[ -z "$robot" || -z "$task" ]]; then
+  printf 'scripts/teacher_backend.sh: --robot and --task are required\n' >&2
   exit 2
 fi
 
 if [[ -z "$run_root" ]]; then
-  run_root="$DATA_ROOT/$scenario/logs/backend"
+  run_root="$DATA_ROOT/$robot/$task/logs/backend"
 fi
 
 python3 "${SHARED_ROOT:-/shared}/common/tools/scripts/dev_workspace.py" check \
   --project-root / \
   --build-root "$ROS_SDK" 1>&2
 
-python3 - "$scenario" "$seed" "$run_id" "$run_root" "$shared_root" "${overrides[@]}" <<'PY'
+python3 - "$robot" "$task" "$seed" "$run_id" "$run_root" "$shared_root" "${overrides[@]}" <<'PY'
 import sys
 from pathlib import Path
 import yaml
 from robot_backend_sim.config.scenario_config import resolve_scenario_backend
 
-scenario, seed_str, run_id, run_root, shared_root, *overrides = sys.argv[1:]
+robot, task, seed_str, run_id, run_root, shared_root, *overrides = sys.argv[1:]
 resolved = resolve_scenario_backend(
-    scenario=scenario,
+    robot=robot,
+    task=task,
     role="teacher",
     shared_root=Path(shared_root) if shared_root else None,
     seed=int(seed_str),
@@ -125,7 +136,7 @@ resolved = resolve_scenario_backend(
 )
 run_dir = Path(run_root) / run_id
 print("=== Teacher Backend 配置摘要 ===")
-print(f"方案 (scenario):   {scenario}")
+print(f"机器人/任务:       {robot}/{task}")
 print(f"角色 (role):       teacher")
 print(f"Binding 文件:      {resolved.selection['binding']['path']}")
 print(f"后端配方文件:      {resolved.selection['recipe']['path']}")
@@ -138,7 +149,8 @@ PY
 
 cmd=(
   python3 -m robot_backend_sim.ros.node
-  --scenario "$scenario"
+  --robot "$robot"
+  --task "$task"
   --role teacher
   --seed "$seed"
   --run-id "$run_id"

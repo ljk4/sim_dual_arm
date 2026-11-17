@@ -9,7 +9,7 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-SCENARIO = ROOT / "shared/scenarios/panda_stack"
+SCENARIO = ROOT / "shared/scenarios/panda_sim/stack"
 SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
@@ -52,7 +52,7 @@ def test_config_records_all_mandated_initial_values(config):
     assert config.ik.max_iterations == 250
     assert config.ik.position_tolerance_m == 0.0005
     assert config.ik.orientation_tolerance_rad == 0.005
-    assert config.ik.posture_cost == 0.0005
+    assert config.ik.posture_cost == 0.01
     assert config.ik.position_cost == 1.0
     assert config.ik.orientation_cost == 1.0
     assert config.ik.lm_damping == 0.001

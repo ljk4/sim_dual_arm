@@ -7,7 +7,7 @@ import yaml
 from robot_contracts.profiles import semantic_hash
 
 ROOT = Path(__file__).resolve().parents[2]
-SCENARIO = ROOT / "shared/scenarios/panda_stack"
+SCENARIO = ROOT / "shared/scenarios/panda_sim/stack"
 PROFILES = SCENARIO / "profiles"
 
 
