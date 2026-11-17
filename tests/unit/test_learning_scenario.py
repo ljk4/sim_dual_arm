@@ -337,6 +337,7 @@ def test_policy_service_auto_picks_latest_model(
 ):
     tree = _make_tree(tmp_path)
     monkeypatch.setenv("PROJECT_ROOT", str(tree.repo))
+    monkeypatch.setenv("DATA_ROOT", str(tree.repo / "var"))
     models = tree.repo / "var/synthetic_sim/stack/models"
     older = model_fixtures(models / "act_20260101_000000", synthetic=False)
     latest = model_fixtures(models / "act_20260102_000000", synthetic=False)
