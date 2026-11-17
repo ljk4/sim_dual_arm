@@ -375,7 +375,7 @@ scripts/batch_policy.sh --scenario marvin_handover \
 
 ## 5. 已发现的待后续改进问题
 
-在完成闭环主链路修复并达到 80%（10 次测试 8 次成功：Panda 5/5、Marvin 3/5）闭环成功率后，排查过程中已定位但留待后续迭代优化的事项如下（详细排查记录见 [`docs/experiments/2026-11-16-closed-loop-triage-and-repair.md`](docs/experiments/2026-11-16-closed-loop-triage-and-repair.md)）：
+在完成闭环主链路修复并达到 80%（10 次测试 8 次成功：Panda 5/5、Marvin 3/5）闭环成功率后，排查过程中已定位但留待后续迭代优化的事项如下（详细排查总结见 [`docs/experiments/closed-loop-triage.md`](docs/experiments/closed-loop-triage.md)）：
 
 1. **多轴协同过渡重定时（Coordinated Multi-Axis Retiming）**：当前 `transition_retiming.py` 按单轴独立判断偏差预算并裁剪末点（例如 Marvin 种子 `4155` 中仅 `right_joint3` 略超预算触发裁剪，同臂其余关节未按相同比例缩放），会导致单臂 7 轴运动不完全同步并偏离笛卡尔接近路径；后续应改为按同侧手臂最受限轴等比例协同缩放。
 2. **空中交接双持到右独持的持物移交边界细化**：在 Marvin 种子 `5103` 中，`dual_airborne_stable` 刚满 `0.5 s` 但左手尚未张开释放（左手仍以 `>9 N` 稳定持物）时，右手在微调夹紧过程中短暂减力超过 `0.25 s` 即被 `_holder_required(right)` 判为 `HOLD_LOST`；后续应在左手仍稳定持物期间允许右手完成夹紧微调，待左手开始释放后再严格锁定右手失持守卫。
