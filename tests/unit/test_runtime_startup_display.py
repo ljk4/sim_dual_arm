@@ -25,11 +25,16 @@ def test_teacher_startup_prints_real_loaded_configuration(robot, task, capsys):
         project_root=root,
         selection=resolved.selection,
     )
-    _print_configuration_summary(configuration, argparse.Namespace(output="/tmp/recording"))
+    _print_configuration_summary(
+        configuration,
+        argparse.Namespace(output="/tmp/recording"),
+        Path("/tmp/runs/run-1"),
+    )
     output = capsys.readouterr().out
     assert configuration.configuration_source in output
-    assert '"recipe"' in output
     assert configuration.recipe.robot_namespace in output
+    assert "/tmp/runs/run-1/resolved/runtime.json" in output
+    assert '"recipe"' not in output
 
 
 def test_direct_runtime_config_uses_declared_shared_mount(monkeypatch):

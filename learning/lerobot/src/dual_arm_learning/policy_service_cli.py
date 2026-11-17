@@ -341,15 +341,27 @@ def main(argv: list[str] | None = None) -> int:
         if config.model_path is None and not config.test_only:
             raise ModelError("--model is required for a non-test policy service")
         stage = "load_warm"
-        print("=== Policy 服务配置与详细参数 ===", flush=True)
+        # The service owns its log directory (exclusive creation), so the
+        # detailed startup parameters live in a sibling file.
+        configuration_path = Path(f"{args.log_directory}.configuration.json")
+        configuration_path.parent.mkdir(parents=True, exist_ok=True)
+        configuration_path.write_text(
+            json.dumps(config.to_document(), indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
         if selection is not None:
-            print(f"机器人/任务:     {selection.robot}/{selection.task}", flush=True)
-            print(f"Binding 文件:    {selection.resolved.path}", flush=True)
-        print(f"配置文件路径:    {config_path.resolve()}", flush=True)
-        print(f"模型路径:        {config.model_path}", flush=True)
-        print("--- 详细参数 ---", flush=True)
-        print(json.dumps(config.to_document(), indent=2, ensure_ascii=False), flush=True)
-        print("================================", flush=True)
+            print(
+                f"机器人/任务: {selection.robot}/{selection.task} | "
+                f"Binding: {selection.resolved.path}",
+                flush=True,
+            )
+        print(f"模型: {config.model_path}", flush=True)
+        print(
+            f"服务: {config.bind_address}:{config.port} | "
+            f"设备: {config.device} | 日志: {args.log_directory}",
+            flush=True,
+        )
+        print(f"详细参数: {configuration_path}", flush=True)
         adapter = load_act_adapter(config)
         summary = deployment_summary(config)
         startup = _scalar_fields(

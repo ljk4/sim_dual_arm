@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Prompt, reset via episode start, run one policy episode, and hold until Ctrl-C.
-set -euo pipefail
+# Prompt, reset via episode start, run one policy episode, and hold until Ctrl-C.set -euo pipefail
 
 APP_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${PROJECT_SETUP:-${SHARED_ROOT:-$APP_ROOT/../../shared}/common/tools/docker/setup.sh}"
@@ -96,7 +95,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     -h|--help)
       printf '%s\n' \
-        'usage: scripts/interactive.sh (--robot <id> --task <id> [--role policy|teacher] [--shared-root <dir>] | --config <runtime.yaml>) [--run-id <id>] [--seed <int>] [--output-root <dir>] [--set path=value ...]'
+        'usage: scripts/client_interactive.sh (--robot <id> --task <id> [--role policy|teacher] [--shared-root <dir>] | --config <runtime.yaml>) [--run-id <id>] [--seed <int>] [--output-root <dir>] [--set path=value ...]'
       exit 0
       ;;
     *)
@@ -138,6 +137,9 @@ if [[ -z "$output_root" ]]; then
 fi
 if [[ -z "$run_id" ]]; then
   run_id="interactive-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+else
+  # An explicit base id is kept as a prefix so repeated runs never collide.
+  run_id="${run_id}-$(date -u +%Y%m%dT%H%M%SZ)"
 fi
 if [[ -n "$seed" && ! "$seed" =~ ^[0-9]+$ ]]; then
   printf 'interactive: --seed must be a non-negative integer\n' >&2
@@ -166,7 +168,7 @@ esac
 
 python3 "${SHARED_ROOT:-$ROOT/shared}/common/tools/scripts/dev_workspace.py" check \
   --project-root "$ROOT" \
-  --build-root "$ROS_SDK" 1>&2
+  --build-root "$ROS_SDK" 1>/dev/null
 python3 "${SHARED_ROOT:-$ROOT/shared}/common/tools/scripts/policy_sdk.py" check \
   --project-root "$ROOT" \
   --sdk-root "$POLICY_SDK" 1>&2 >/dev/null

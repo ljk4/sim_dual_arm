@@ -59,7 +59,7 @@ class SuccessThresholds(StrictMappingModel):
     min_gripper_opening_m: Annotated[PositiveFloat, Field(gt=1e-6, le=0.08)]
     min_tcp_clearance_m: Annotated[PositiveFloat, Field(gt=1e-6, le=1.0)]
     stable_duration_s: Annotated[PositiveFloat, Field(ge=2.0, le=10.0)]
-    max_task_sim_duration_s: Annotated[PositiveFloat, Field(gt=3.0, le=30.0)]
+    max_task_sim_duration_s: Annotated[PositiveFloat, Field(gt=3.0, le=300.0)]
     max_task_wall_duration_s: Annotated[PositiveFloat, Field(gt=1.0, le=300.0)]
 
     @model_validator(mode="after")
@@ -79,7 +79,7 @@ class TeacherPlanConfig(StrictMappingModel):
     action_period_ns: Annotated[int, Field(strict=True, ge=50_000_000, le=50_000_000)]
     ik_wall_timeout_s: Annotated[PositiveFloat, Field(gt=0.1, le=60.0)]
     plan_wall_timeout_s: Annotated[PositiveFloat, Field(gt=0.1, le=60.0)]
-    max_plan_duration_s: Annotated[PositiveFloat, Field(gt=1.0, le=29.9)]
+    max_plan_duration_s: Annotated[PositiveFloat, Field(gt=1.0, le=600.0)]
     max_joint_velocity_fraction: Annotated[PositiveFloat, Field(gt=0.05, le=1.0)]
     max_joint_acceleration_fraction: Annotated[PositiveFloat, Field(gt=0.05, le=1.0)]
     gripper_velocity_m_s: Annotated[PositiveFloat, Field(gt=1e-4, le=0.04)]

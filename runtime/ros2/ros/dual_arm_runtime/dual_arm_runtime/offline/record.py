@@ -231,7 +231,31 @@ def record(args: argparse.Namespace, config: dict, ledger: Ledger) -> int:
         )
         if destination is not None:
             summary["formal_select"] = str(destination)
-    print(json.dumps(summary, sort_keys=True), flush=True)
+    summary_path = (
+        project_path(config["paths"]["ledger"], args.project_root).parent
+        / "summaries"
+        / f"record-{time.time_ns()}.json"
+    )
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(
+        json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    reason_text = {
+        "target_reached": "目标达成",
+        "consecutive_failures": "连续失败达到上限",
+        "interrupted": "已中断",
+        "campaign_stopped": "采集停止",
+        "attempt_incomplete": "本次尝试未完整结束",
+    }.get(stop_reason, stop_reason)
+    print(
+        f"采集结束：{reason_text} | 合格 {qualified}/{args.count} | "
+        f"已尝试 {attempted} | 连续失败 {consecutive_failures}/"
+        f"{args.max_consecutive_failures}",
+        flush=True,
+    )
+    if "formal_select" in summary:
+        print(f"训练/验证清单: {summary['formal_select']}", flush=True)
+    print(f"运行摘要: {summary_path}", flush=True)
     return exit_code
 
 
@@ -284,26 +308,45 @@ def _print_status(args: argparse.Namespace, config: dict, ledger: Ledger) -> Non
 
 
 def _print_startup_info(args: argparse.Namespace, config: dict, ledger: Ledger) -> None:
-    print("=== Record 配置与状态摘要 ===", flush=True)
+    ledger_path = project_path(config["paths"]["ledger"], args.project_root)
+    detail_path = ledger_path.parent / f"startup-{time.time_ns()}.yaml"
+    detail_path.parent.mkdir(parents=True, exist_ok=True)
+    detail_path.write_text(
+        "# 采集配方与运行参数\n"
+        + yaml.safe_dump(
+            {
+                "selection": {
+                    key: args.selection[key]
+                    for key in ("mode", "scenario_id", "binding")
+                    if args.selection is not None and key in args.selection
+                }
+                if args.selection is not None
+                else None,
+                "campaign_config": str(project_path(args.config, args.project_root)),
+                "runtime_config": str(project_path(args.runtime_config, args.project_root)),
+                "backend_log": str(args.backend_log),
+                "purpose": args.purpose,
+                "count": args.count,
+                "max_consecutive_failures": args.max_consecutive_failures,
+                "overrides": list(args.overrides),
+                "campaign": config,
+            },
+            sort_keys=False,
+            allow_unicode=True,
+        ),
+        encoding="utf-8",
+    )
+    print("=== 采集启动 ===", flush=True)
     if args.selection is not None:
-        print(f"方案 (scenario):   {args.selection['scenario_id']}", flush=True)
-        print(f"Binding 文件:      {args.selection['binding']['path']}", flush=True)
+        print(f"方案: {args.selection['scenario_id']}", flush=True)
+        print(f"Binding: {args.selection['binding']['path']}", flush=True)
     print(
-        f"Campaign 配置:     {(project_path(args.config, args.project_root)).resolve()}", flush=True
-    )
-    print(
-        f"Runtime 配置:      {(project_path(args.runtime_config, args.project_root)).resolve()}",
+        f"用途: {args.purpose} | 目标: 合格 {args.count} 条 | "
+        f"连败上限: {args.max_consecutive_failures}",
         flush=True,
     )
-    print(f"Backend 日志目录:  {args.backend_log}", flush=True)
-    print(
-        f"采集参数:          purpose={args.purpose}, count={args.count}, "
-        f"max_consecutive_failures={args.max_consecutive_failures}, "
-        f"overrides={args.overrides}",
-        flush=True,
-    )
-    print("--- Campaign 详细参数 ---", flush=True)
-    print(yaml.safe_dump(config, sort_keys=False, allow_unicode=True), end="", flush=True)
+    print(f"Backend 日志: {args.backend_log}", flush=True)
+    print(f"详细参数: {detail_path}", flush=True)
     _print_status(args, config, ledger)
 
 

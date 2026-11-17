@@ -11,7 +11,7 @@ ROS_SDK="${ROS_SDK_ROOT:-/opt/ros-dev}"
 
 usage() {
   cat <<'EOF'
-usage: scripts/policy_backend.sh [options]
+usage: scripts/inference_backend.sh [options]
 
 Start the MuJoCo policy backend (--role policy) inside the simulation
 container and print the resolved configuration file paths and parameters.
@@ -99,7 +99,7 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     *)
-      printf 'scripts/policy_backend.sh: unknown argument %q\n' "$1" >&2
+      printf 'scripts/inference_backend.sh: unknown argument %q\n' "$1" >&2
       usage >&2
       exit 2
       ;;
@@ -107,7 +107,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$robot" || -z "$task" ]]; then
-  printf 'scripts/policy_backend.sh: --robot and --task are required\n' >&2
+  printf 'scripts/inference_backend.sh: --robot and --task are required\n' >&2
   exit 2
 fi
 
@@ -135,15 +135,17 @@ resolved = resolve_scenario_backend(
     overrides=overrides,
 )
 run_dir = Path(run_root) / run_id
-print("=== Policy Backend 配置摘要 ===")
-print(f"机器人/任务:       {robot}/{task}")
-print(f"角色 (role):       policy")
-print(f"Binding 文件:      {resolved.selection['binding']['path']}")
-print(f"后端配方文件:      {resolved.selection['recipe']['path']}")
-print(f"生效快照路径:      {run_dir / 'backend.yaml'}")
-print(f"运行日志目录:      {run_dir / 'log'}")
-print("--- 详细参数 ---")
-print(yaml.safe_dump(resolved.document, sort_keys=False, allow_unicode=True), end="")
+Path(run_root).mkdir(parents=True, exist_ok=True)
+parameters_path = Path(run_root) / f"{run_id}-startup-parameters.yaml"
+parameters_path.write_text(
+    yaml.safe_dump(resolved.document, sort_keys=False, allow_unicode=True),
+    encoding="utf-8",
+)
+print(f"方案: {robot}/{task} | 角色: policy | seed: {seed_str}")
+print(f"Binding: {resolved.selection['binding']['path']}")
+print(f"后端配方: {resolved.selection['recipe']['path']}")
+print(f"运行日志: {run_dir / 'log'}")
+print(f"详细参数: {parameters_path}")
 print("================================", flush=True)
 PY
 

@@ -222,25 +222,14 @@ def _print_summary(
     recording_failure: str,
 ) -> None:
     runtime = runner.current_runtime_result()
+    task = runner.task_result
+    recording = "完整" if recording_complete else f"不完整（{recording_failure}）"
     print(
-        json.dumps(
-            {
-                "episode_id": episode_id,
-                "directory": runner.record_directory,
-                "recording": {
-                    "complete": recording_complete,
-                    "failure_reason": recording_failure or None,
-                },
-                "runtime": {
-                    "outcome": runtime.outcome.value,
-                    "reason": runtime.reason or None,
-                },
-                "task": {
-                    "outcome": runner.task_result.outcome.value,
-                    "reason": runner.task_result.reason or None,
-                },
-            }
-        ),
+        f"本局结束：任务 {task.outcome.value}"
+        f"{'' if not task.reason else f'（{task.reason}）'} | "
+        f"运行 {runtime.outcome.value}"
+        f"{'' if not runtime.reason else f'（{runtime.reason}）'} | "
+        f"录制 {recording} | 目录 {runner.record_directory}",
         flush=True,
     )
 

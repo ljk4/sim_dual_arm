@@ -46,15 +46,15 @@ policy:
   # provider still returns a complete 3 s (60 point) chunk and the interface
   # remains 60x16; overlapping windows drop predictions that are already stale
   # at handoff, so a window is not always points 0..4 of a fresh chunk.
-  # Settle before task prepare/start; the 30 s task budget starts afterwards.
+  # Settle before task prepare/start; the 90 s task budget starts afterwards.
   # ACT still consumes only subsequent fresh RGB and measured state.
   startup_settle_sim_ns: 2000000000
   initial_lead_ns: 250000000
   max_chunks: 256
-  total_sim_deadline_ns: 30000000000
-  # Half-speed simulation needs 60s wall time for the 30s physical task.
+  total_sim_deadline_ns: 90000000000
+  # Half-speed simulation needs 180s wall time for the 90s physical task.
   # Leave bounded room for startup, RGB delivery, RPC and the final stop.
-  total_wall_deadline_s: 120.0
+  total_wall_deadline_s: 360.0
   connect_timeout_s: 2.0
   open_deadline_s: 2.0
   predict_deadline_s: 2.0
@@ -63,7 +63,7 @@ policy:
   poll_interval_s: 0.02
   termination_mode: task
   task_stop_margin_s: 1.0
-  task_sim_budget_ns: 30000000000
+  task_sim_budget_ns: 90000000000
 
 motions: []
 

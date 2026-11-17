@@ -337,14 +337,8 @@ class _RuntimeProcess:
         if not self.hold_announced:
             details = node.shutdown_details()
             print(
-                json.dumps(
-                    {
-                        "episode_finished": True,
-                        "episode_id": details.get("episode_id", ""),
-                        "record_directory": details.get("directory", ""),
-                        "hint": "Ctrl-C to exit",
-                    }
-                ),
+                "本局已结束；录制目录 "
+                f"{details.get('directory', '')}；按 Ctrl-C 退出",
                 flush=True,
             )
             self.hold_announced = True
@@ -571,23 +565,30 @@ class _RuntimeProcess:
         return logging_closed, process_outcome
 
 
-def _print_configuration_summary(configuration: object, args: argparse.Namespace) -> None:
-    print("=== Runtime 配置与详细参数 ===", flush=True)
+def _print_configuration_summary(
+    configuration: object, args: argparse.Namespace, run_directory: Path
+) -> None:
+    """Print only the operator-relevant parameters; the full snapshot is on disk."""
     selection = getattr(configuration, "selection", None)
     if isinstance(selection, dict) and selection.get("mode") == "scenario":
         print(
-            f"方案 (scenario): {selection.get('robot')}/{selection.get('task')} "
+            f"方案: {selection.get('robot')}/{selection.get('task')} "
             f"({selection.get('role')})",
             flush=True,
         )
         binding = selection.get("binding") or {}
         if binding.get("path"):
-            print(f"Binding 文件:    {binding['path']}", flush=True)
-    print(f"配置文件路径:    {configuration.configuration_source}", flush=True)
-    print(f"输出目录:        {args.output}", flush=True)
-    print("--- 详细参数 ---", flush=True)
-    print(json.dumps(configuration.snapshot, indent=2, ensure_ascii=False), flush=True)
-    print("================================", flush=True)
+            print(f"Binding: {binding['path']}", flush=True)
+    recipe = configuration.recipe
+    stream = recipe.policy if recipe.action_source == "policy" else recipe.teacher
+    print(f"配置: {configuration.configuration_source}", flush=True)
+    print(
+        f"动作来源: {recipe.action_source} | 命名空间: {recipe.robot_namespace} | "
+        f"终止模式: {getattr(stream, 'termination_mode', '-')}",
+        flush=True,
+    )
+    print(f"输出目录: {args.output}", flush=True)
+    print(f"详细参数: {run_directory / 'resolved' / 'runtime.json'}", flush=True)
 
 
 def main() -> None:
@@ -606,13 +607,13 @@ def main() -> None:
         else runs_root(args.robot, args.task)
     )
     configuration = _load_configuration(args, run_id)
-    _print_configuration_summary(configuration, args)
     try:
         session = initialize_run(
             configuration, run_id=run_id, runs_output=runs_output, output=args.output
         )
     except Exception as error:
         _initialization_error(error)
+    _print_configuration_summary(configuration, args, session.run_directory)
     signal_state = ShutdownSignal()
     process = _RuntimeProcess(
         args,
@@ -628,16 +629,20 @@ def main() -> None:
         process.execute()
     finally:
         logging_closed, process_outcome = process.finalize()
+    summary = runtime_summary(
+        session,
+        record_directory=process.record_directory,
+        exit_code=process.exit_code,
+        process_outcome=process_outcome,
+        logging_closed=logging_closed,
+    )
+    summary_path = session.run_directory / "summary.json"
+    summary_path.write_text(
+        json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     print(
-        json.dumps(
-            runtime_summary(
-                session,
-                record_directory=process.record_directory,
-                exit_code=process.exit_code,
-                process_outcome=process_outcome,
-                logging_closed=logging_closed,
-            )
-        ),
+        f"运行结束：{process_outcome} | 退出码 {process.exit_code} | "
+        f"日志 {session.run_directory}",
         flush=True,
     )
     if process.exit_code:

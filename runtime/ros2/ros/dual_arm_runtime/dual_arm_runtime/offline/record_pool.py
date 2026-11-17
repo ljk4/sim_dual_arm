@@ -128,10 +128,18 @@ class RecordingPool:
         self.selection = selection
         self.output = project_path(config["paths"]["attempts_root"], args.project_root)
         self.active: list[ActiveRecording] = []
-        self.qualified = self.attempted = self.consecutive_failures = self.cancelled = 0
+        self.qualified = self.attempted = self.cancelled = 0
+        self.worker_failures: dict[str, int] = {
+            worker["id"]: 0 for worker in workers
+        }
         self.started = time.monotonic()
         self.reason, self.exit_code = "target_reached", 0
         self.allocation_error = ""
+
+    @property
+    def consecutive_failures(self) -> int:
+        """Largest current failure streak across the independent worker processes."""
+        return max(self.worker_failures.values(), default=0)
 
     def campaign_qualified(self) -> int:
         with self.ledger.locked():
@@ -241,7 +249,7 @@ class RecordingPool:
             _, result, _ = campaign._finish_attempt(
                 self.ledger, attempt, self.config, 127, 0.0, str(error)
             )
-            self.completed(result)
+            self.completed(result, worker["id"])
             return
         self.active.append(ActiveRecording(attempt, worker, process, console, time.monotonic()))
         self._render_progress()
@@ -265,16 +273,11 @@ class RecordingPool:
         filled = int(width * ratio)
         bar = "█" * filled + "░" * (width - filled)
         elapsed = time.monotonic() - self.started
-        eta = (
-            self._format_duration(elapsed * (total - self.qualified) / self.qualified)
-            if self.qualified > 0 and self.qualified < total
-            else "--:--"
-        )
         line = (
-            f"并行采集 [{bar}] {self.qualified}/{self.args.count} ({int(ratio * 100)}%) "
-            f"| 在途 {len(self.active)} | 已尝试 {self.attempted} "
-            f"| 连败 {self.consecutive_failures}/{self.args.max_consecutive_failures} "
-            f"| 用时 {self._format_duration(elapsed)} | 预计剩余 {eta}"
+            f"并行采集 [{bar}] {self.qualified}/{self.args.count} "
+            f"| 在途 {len(self.active)} "
+            f"| 最大连败 {self.consecutive_failures}/{self.args.max_consecutive_failures} "
+            f"| {self._format_duration(elapsed)}"
         )
         if is_tty:
             sys.stdout.write(f"\r\033[K{line}")
@@ -282,12 +285,12 @@ class RecordingPool:
         else:
             print(line, flush=True)
 
-    def completed(self, result: dict[str, Any]) -> None:
+    def completed(self, result: dict[str, Any], worker_id: str) -> None:
         if result["qualified"]:
             self.qualified += 1
-            self.consecutive_failures = 0
+            self.worker_failures[worker_id] = 0
         else:
-            self.consecutive_failures += 1
+            self.worker_failures[worker_id] = self.worker_failures.get(worker_id, 0) + 1
         self._render_progress()
         if self.consecutive_failures >= self.args.max_consecutive_failures:
             self.reason, self.exit_code = "consecutive_failures", 1
@@ -303,7 +306,7 @@ class RecordingPool:
             time.monotonic() - active.started,
             failure,
         )
-        self.completed(result)
+        self.completed(result, active.worker["id"])
 
     def cancel_active(self) -> None:
         if self.active:
@@ -398,7 +401,23 @@ class RecordingPool:
         self.args.worker_manifest.with_name("summary.json").write_text(
             json.dumps(summary, indent=2) + "\n"
         )
-        print(json.dumps(summary, sort_keys=True), flush=True)
+        reason_text = {
+            "target_reached": "目标达成",
+            "consecutive_failures": "最大连败达到上限",
+            "interrupted": "已中断",
+            "disk_full": "磁盘空间不足",
+            "campaign_stopped": "采集停止",
+        }.get(self.reason, self.reason)
+        print(
+            f"并行采集结束：{reason_text} | 合格 {self.qualified}/{self.args.count} | "
+            f"已尝试 {self.attempted} | 取消 {self.cancelled} | "
+            f"用时 {self._format_duration(elapsed)} | "
+            f"合格速率 {summary['qualified_per_hour']}/小时",
+            flush=True,
+        )
+        if "formal_select" in summary:
+            print(f"训练/验证清单: {summary['formal_select']}", flush=True)
+        print(f"运行摘要: {self.args.worker_manifest.with_name('summary.json')}", flush=True)
         return self.exit_code
 
 

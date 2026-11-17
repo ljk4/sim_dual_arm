@@ -249,7 +249,7 @@ def test_scripts_forward_selection_without_implicit_defaults(tmp_path):
 
     arguments = _run_dispatcher(
         tmp_path,
-        "policy.sh",
+        "server_policy.sh",
         "--robot",
         "synthetic_sim",
         "--task",

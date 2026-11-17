@@ -5,8 +5,8 @@
 | 脚本 | 功能说明 | 默认输出路径 |
 | --- | --- | --- |
 | `backend.sh` | 按 `--robot/--task` 或 `--config` 加载配方，校验 `/opt/ros-dev` SDK 后启动 MuJoCo ROS 2 物理仿真后端 | `/data/<robot>/<task>/logs/backend/<run-id>/`（direct 模式 `_direct`） |
-| `teacher_backend.sh` | 显式指定 `--robot <id> --task <id>`，启动 Teacher 后端并展示完整生效参数 | `/data/<robot>/<task>/logs/backend/<run-id>/` |
-| `policy_backend.sh` | 显式指定 `--robot <id> --task <id>`，启动推理后端（仿真端不加载模型权重，无需 Bundle） | `/data/<robot>/<task>/logs/backend/<run-id>/` |
+| `teacher_backend.sh` | 显式指定 `--robot <id> --task <id>`，启动 Teacher 后端；终端只显示关键参数，详细参数写入 `<run-root>/<run-id>-startup-parameters.yaml` | `/data/<robot>/<task>/logs/backend/<run-id>/` |
+| `inference_backend.sh` | 显式指定 `--robot <id> --task <id>`，启动推理后端（仿真端不加载模型权重，无需 Bundle）；详细参数写入 `<run-root>/<run-id>-startup-parameters.yaml` | `/data/<robot>/<task>/logs/backend/<run-id>/` |
 | `viewer.sh` | 订阅 `/robot/visualization/mujoco_state` 快照，通过宿主机 X11 打开只读实时 GUI；支持 `--robot/--task` | 实时窗口显示 |
 | `test.sh` | 运行固定禁用自动插件收集的 `pytest` 测试套件 | 终端输出 |
 

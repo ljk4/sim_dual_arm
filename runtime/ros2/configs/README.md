@@ -15,11 +15,11 @@
 
 ```bash
 # 直接以方案执行一局策略
-scripts/policy.sh --robot panda_sim --task stack \
+scripts/server_policy.sh --robot panda_sim --task stack \
   --reset-seed 20000 --run-id policy-run
 
 # 交互式执行
-scripts/interactive.sh --robot panda_sim --task stack \
+scripts/client_interactive.sh --robot panda_sim --task stack \
   --seed 20000 --run-id policy-interactive
 ```
 

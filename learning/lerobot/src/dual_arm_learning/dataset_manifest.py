@@ -110,6 +110,7 @@ def _write_split(
     joint_names: tuple[str, ...],
     profile_id: str,
     progress: ConsoleProgress | None = None,
+    progress_label: str = "",
 ) -> None:
     from lerobot.configs.video import RGBEncoderConfig
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
@@ -143,7 +144,8 @@ def _write_split(
             for _index, row in enumerate(episode.rows):
                 if progress is not None and _index % 10 == 0:
                     progress.detail(
-                        f"第 {episode_index + 1} 条 · {_index + 1}/{len(episode.rows)} 帧"
+                        f"{progress_label}第 {episode_index + 1} 条 · "
+                        f"{_index + 1}/{len(episode.rows)} 帧"
                     )
                 frame: dict[str, Any] = {
                     "observation.state": row["_vectors"]["measured"].astype(np.float32),
@@ -169,8 +171,8 @@ def _write_split(
                         frame[f"observation.images.{camera}"] = np.asarray(image, dtype=np.uint8)
                 dataset.add_frame(frame)
             if progress is not None:
-                progress.detail(f"第 {episode_index + 1} 条 · 编码视频")
-            dataset.save_episode(parallel_encoding=False)
+                progress.detail(f"{progress_label}第 {episode_index + 1} 条 · 编码视频")
+            dataset.save_episode(parallel_encoding=True)
             if progress is not None:
                 progress.advance()
     finally:

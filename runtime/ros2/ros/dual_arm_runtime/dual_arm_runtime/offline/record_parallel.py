@@ -289,7 +289,7 @@ class DockerWorkers:
 
     def prepare(self, plan: dict | None = None) -> list[dict]:
         self.ensure_runtime()
-        subprocess.run(
+        result = subprocess.run(
             self.runtime_command(
                 [
                     "python3", "-m", "dual_arm_runtime.offline.record_workers",
@@ -299,8 +299,10 @@ class DockerWorkers:
                     "--realtime-speed", str(self.args.realtime_speed),
                     *self._worker_selection_arguments(plan),
                 ]
-            ), check=True, timeout=30,
+            ), capture_output=True, text=True, timeout=60,
         )
+        if result.returncode:
+            raise RuntimeError(result.stderr.strip() or result.stdout.strip())
         return json.loads((self.directory / "workers.json").read_text())["workers"]
 
     def start_backend(self, worker: dict) -> str:
@@ -405,40 +407,39 @@ class DockerWorkers:
 def _print_startup_info(
     args: argparse.Namespace, plan: dict, directory: Path
 ) -> None:
-    print("=== Parallel Record 配置与参数摘要 ===", flush=True)
+    print("=== 并行采集启动 ===", flush=True)
     selection = plan.get("selection") or {}
     if selection.get("mode") == "scenario":
         print(
-            f"方案 (scenario):   {selection.get('robot')}/{selection.get('task')}",
+            f"方案: {selection.get('robot')}/{selection.get('task')} | "
+            f"Binding: {(selection.get('binding') or {}).get('path', '-')}",
             flush=True,
         )
-        binding = selection.get("binding") or {}
-        if binding.get("path"):
-            print(f"Binding 文件:      {binding['path']}", flush=True)
-        for name, recipe in (selection.get("recipes") or {}).items():
-            if isinstance(recipe, dict) and recipe.get("path"):
-                print(f"配方 ({name}): {recipe['path']}", flush=True)
     else:
-        print(f"Campaign 配置:     {args.config}", flush=True)
-        print(f"Runtime 配置:      {args.runtime_config}", flush=True)
-        print(f"Backend 模板:      {args.backend_template}", flush=True)
-    params = {
-        "purpose": args.purpose,
-        "count": args.count,
-        "target_total": args.target_total,
-        "workers": args.workers,
-        "max_consecutive_failures": args.max_consecutive_failures,
-        "realtime_speed": args.realtime_speed,
-        "domain_base": args.domain_base,
-        "overrides": args.overrides,
-        "pool_directory": str(directory),
-    }
-    print("--- 运行参数 ---", flush=True)
-    print(json.dumps(params, indent=2, ensure_ascii=False), flush=True)
-    if "campaign_status" in plan:
-        print("--- 当前 Campaign 状态 ---", flush=True)
-        print(json.dumps(plan["campaign_status"], indent=2, ensure_ascii=False), flush=True)
-    print("========================================", flush=True)
+        print(f"Campaign 配置: {args.config}", flush=True)
+        print(f"Runtime 配置: {args.runtime_config}", flush=True)
+        print(f"Backend 模板: {args.backend_template}", flush=True)
+    target = (
+        f"目标总数 {args.target_total}"
+        if args.target_total is not None
+        else f"本次 {args.count} 条"
+    )
+    print(
+        f"用途: {args.purpose} | {target} | worker: {args.workers} | "
+        f"最大连败: {args.max_consecutive_failures} | 实时倍速: {args.realtime_speed}",
+        flush=True,
+    )
+    if args.overrides:
+        print(f"参数覆盖: {'; '.join(args.overrides)}", flush=True)
+    print(f"批次目录: {directory}", flush=True)
+    status = plan.get("campaign_status")
+    if isinstance(status, dict):
+        formal = (status.get("purposes") or {}).get("formal", {})
+        print(
+            f"当前台账: 正式合格 {formal.get('qualified', 0)}/"
+            f"{status.get('formal_target_qualified', '-')}",
+            flush=True,
+        )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -507,7 +508,7 @@ def main(argv: list[str] | None = None) -> int:
         directory.parent.mkdir(parents=True, exist_ok=True)
         args.workers = min(args.workers, args.count)
         workers = docker.prepare(plan)
-        print(f"并行 worker：{args.workers}；可视化与预览已禁用；日志：{directory}", flush=True)
+        print(f"并行 worker: {args.workers}（无可视化） | 批次日志: {directory}", flush=True)
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as executor:
             list(executor.map(docker.start_backend, workers))
         docker.wait_ready(workers)

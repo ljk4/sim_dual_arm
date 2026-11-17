@@ -17,7 +17,7 @@ def test_teacher_config_is_task_terminated_and_policy_free():
     assert teacher is not None
     assert teacher.termination_mode == "task"
     assert teacher.max_chunks >= 120
-    assert configuration.snapshot["recipe"]["teacher"]["task_sim_budget_ns"] == 30_000_000_000
+    assert configuration.snapshot["recipe"]["teacher"]["task_sim_budget_ns"] == 90_000_000_000
 
 
 def test_teacher_and_policy_sections_are_mutually_exclusive(tmp_path):
