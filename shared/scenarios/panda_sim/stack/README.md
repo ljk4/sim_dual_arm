@@ -93,7 +93,7 @@ binding 与直接 `--config` 入口共用 `act_dataset.yaml`、`act_training.yam
 
 ```bash
 # learning 容器：直接启动 gRPC Policy 服务
-scripts/policy.sh --scenario panda_sim/stack \
+scripts/server_policy.sh --scenario panda_sim/stack \
   --bundle /data/panda_sim/stack/models/bundles/<verified-bundle>
 
 # simulation 容器：直接启动 Policy 推理后端
@@ -102,14 +102,14 @@ scripts/backend.sh --scenario panda_sim/stack --role policy \
   --seed 20000 --run-id policy-backend
 
 # runtime 容器：交互式执行一局；非交互式单局或批量测试（需保持上方 policy.sh 与 backend.sh 在线）
-scripts/interactive.sh --scenario panda_sim/stack \
+scripts/client_interactive.sh --scenario panda_sim/stack \
   --bundle /data/panda_sim/stack/models/bundles/<verified-bundle> \
   --seed 20000 --run-id policy-interactive
-scripts/policy.sh --scenario panda_sim/stack \
+scripts/server_policy.sh --scenario panda_sim/stack \
   --bundle /data/panda_sim/stack/models/bundles/<verified-bundle> \
   --reset-seed 20000 --run-id policy-run
-scripts/batch_policy.sh --scenario panda_sim/stack \
-  --bundle /data/panda_sim/stack/models/bundles/<verified-bundle> \
+# 本机项目根目录（需保持 learning 策略服务在线）
+./inference_parallel.sh --robot panda_sim --task stack \
   --count 10 --seed-start 20000
 ```
 

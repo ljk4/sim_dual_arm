@@ -9,7 +9,7 @@ import signal
 import subprocess
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 from robot_contracts.project_paths import project_path
 
@@ -124,12 +124,19 @@ def run_command(
     disk_root: Path,
     *,
     stop_grace_s: float = 10.0,
+    console: TextIO | None = None,
 ) -> tuple[int, float, str]:
     started = time.monotonic()
     deadline = started + timeout_s
+    output = subprocess.DEVNULL if console is None else console
     try:
         process = subprocess.Popen(
-            command, cwd=project_root, env=_environment(attempt), start_new_session=True
+            command,
+            cwd=project_root,
+            env=_environment(attempt),
+            start_new_session=True,
+            stdout=output,
+            stderr=subprocess.STDOUT,
         )
     except OSError as error:
         return 127, time.monotonic() - started, f"launch failed: {error}"

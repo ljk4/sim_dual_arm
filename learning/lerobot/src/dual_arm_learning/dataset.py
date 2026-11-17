@@ -128,8 +128,11 @@ def _write_datasets(
         or len(validation_eps) != config.expected_validation_episodes
     ):
         raise ExportError("select: split cardinality is inconsistent")
+    # One continuous phase covers both splits so the bar never restarts at zero.
     if progress is not None:
-        progress.phase("转换训练集", len(train_eps), unit="条")
+        progress.phase(
+            "转换数据集", len(train_eps) + len(validation_eps), unit="条"
+        )
     _write_split(
         root=temp / "train",
         repo_id=f"local/{output_name}-train",
@@ -138,9 +141,10 @@ def _write_datasets(
         joint_names=joint_names,
         profile_id=profile_id,
         progress=progress,
+        progress_label="训练集 ",
     )
-    if progress is not None:
-        progress.phase("转换验证集", len(validation_eps), unit="条")
+    if progress is not None and validation_eps:
+        progress.detail(f"训练集完成，编码验证集 {len(validation_eps)} 条")
     _write_split(
         root=temp / "validation",
         repo_id=f"local/{output_name}-validation",
@@ -149,6 +153,7 @@ def _write_datasets(
         joint_names=joint_names,
         profile_id=profile_id,
         progress=progress,
+        progress_label="验证集 ",
     )
     return train_eps, validation_eps
 

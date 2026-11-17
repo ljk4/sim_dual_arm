@@ -45,7 +45,7 @@ def test_single_follower_source_owns_target_count_and_deviation_budget():
     config = load_follower_config(FOLLOWER)
     assert config.target_count == 20
     assert config.target_count * 50_000_000 == 1_000_000_000
-    assert config.max_target_deviations == ((0.30,) * 6 + (0.40, 0.04) + (0.30,) * 6 + (0.40, 0.04))
+    assert config.max_target_deviations == ((0.50,) * 7 + (0.06,) + (0.50,) * 7 + (0.06,))
     assert config.max_terminal_tail_duration_s == 3.0
 
 
@@ -86,8 +86,8 @@ def test_chunked_runtime_keeps_the_60x16_interface_and_covers_the_task(tmp_path)
     assert policy.max_chunks * window_ns == 256_000_000_000
     assert policy.startup_settle_sim_ns == 2_000_000_000
     assert policy.max_chunks * window_ns >= policy.task_sim_budget_ns
-    assert policy.total_sim_deadline_ns == policy.task_sim_budget_ns == 30_000_000_000
-    assert policy.total_wall_deadline_s == 120.0
+    assert policy.total_sim_deadline_ns == policy.task_sim_budget_ns == 90_000_000_000
+    assert policy.total_wall_deadline_s == 360.0
 
     assert follower.max_target_deviations == loaded_follower.max_target_deviations
     assert follower.max_terminal_tail_duration_ns == loaded_follower.max_terminal_tail_duration_ns

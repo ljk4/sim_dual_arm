@@ -32,6 +32,7 @@ from dual_arm_runtime.offline.campaign_ledger import load as load_campaign
 from dual_arm_runtime.offline.collect_attempt import REFERENCES as RUNTIME_REFERENCES
 
 COLLECTION_RECIPES = ("runtime_teacher", "simulation_teacher", "campaign")
+INFERENCE_RECIPES = ("runtime_policy", "simulation_policy")
 PROFILE_FIELDS = ("robot", "observation", "action")
 RUNTIME_PROFILE_FIELDS = {
     "robot": "robot_profile",
@@ -405,6 +406,76 @@ def select_collection(
             **teacher_capability,
         },
         "overrides": [],
+    }
+
+
+def select_inference(
+    *,
+    robot: str,
+    task: str,
+    shared_root: Path | None,
+    project_root: Path,
+    binding_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Resolve the inference recipes and profiles from a binding."""
+    root = shared_root_path(shared_root, project_root)
+    binding_path = scenario_binding_path(root, robot, task)
+    try:
+        resolved = load_binding(binding_path, shared_root=root)
+    except (BindingError, ContractError, OSError) as error:
+        raise CampaignError(str(error)) from error
+    if binding_sha256 is not None and resolved.sha256 != binding_sha256:
+        raise CampaignError(
+            f"binding changed after preflight: {resolved.path} "
+            f"sha256 {resolved.sha256} != {binding_sha256}"
+        )
+    try:
+        resolved.validate_stage("inference")
+    except BindingError as error:
+        raise CampaignError(str(error)) from error
+    recipes: dict[str, dict[str, Any]] = {}
+    for field in INFERENCE_RECIPES:
+        declared = getattr(resolved.binding.recipes, field)
+        if declared is None:
+            raise CampaignError(
+                f"scenario {resolved.binding.scenario_id!r} declares no recipes.{field}"
+            )
+        recipes[field] = resolved.references[f"recipes.{field}"].record()
+    runtime_path = Path(recipes["runtime_policy"]["path"])
+    backend_path = Path(recipes["simulation_policy"]["path"])
+    runtime_document = _load_yaml(runtime_path, "runtime policy recipe")
+    backend_document = _load_yaml(backend_path, "simulation policy recipe")
+    if runtime_document.get("action_source") != "policy":
+        raise CampaignError(
+            f"runtime policy recipe must declare action_source: policy ({runtime_path})"
+        )
+    _check_runtime_references(runtime_path, runtime_document)
+    robot_section = backend_document.get("robot")
+    if not isinstance(robot_section, dict):
+        raise CampaignError(
+            f"simulation policy recipe has no robot object: {backend_path}"
+        )
+    for name in SIMULATION_REFERENCE_FIELDS:
+        declared = robot_section.get(name)
+        if isinstance(declared, str):
+            path = (backend_path.parent / declared).resolve()
+            if not path.exists():
+                raise CampaignError(
+                    f"simulation policy recipe robot.{name} is missing: {path}"
+                )
+    return {
+        "mode": "scenario",
+        "robot": robot,
+        "task": task,
+        "scenario_id": resolved.binding.scenario_id,
+        "binding": {"path": str(resolved.path), "sha256": resolved.sha256},
+        "recipes": recipes,
+        "profiles": _profile_records(resolved),
+        "interfaces": {
+            "common_ros": list(resolved.binding.interfaces.common_ros),
+            "extension_ros": list(resolved.binding.interfaces.extension_ros),
+            "policy_api": resolved.binding.interfaces.policy_api,
+        },
     }
 
 

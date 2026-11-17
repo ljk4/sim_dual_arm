@@ -45,7 +45,7 @@ fi
 if [[ "$has_help" != "true" ]]; then
   python3 "${SHARED_ROOT:-$ROOT/shared}/common/tools/scripts/dev_workspace.py" check \
     --project-root "$ROOT" \
-    --build-root "$ROS_SDK" 1>&2
+    --build-root "$ROS_SDK" 1>/dev/null
   python3 "${SHARED_ROOT:-$ROOT/shared}/common/tools/scripts/policy_sdk.py" check \
     --project-root "$ROOT" \
     --sdk-root "$POLICY_SDK" 1>&2 >/dev/null

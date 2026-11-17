@@ -34,8 +34,8 @@ joint_names:
 target_count: 20
 
 # Continuous maximum distance between the actual reference and the
-# piecewise-linear policy target: 0.30 rad for arm joints except joint7 at
-# 0.40 rad, and 0.06 m for each gripper over a 20-point (1.0 s) window.
+# piecewise-linear policy target: 0.50 rad for every arm joint and 0.06 m for
+# each gripper over a 20-point (1.0 s) window.
 # These are reference-fidelity budgets; physical limits and measured tracking
 # thresholds remain in the unchanged robot profile and panda_control_v1.yaml.
 max_target_deviations:

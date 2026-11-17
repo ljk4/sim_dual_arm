@@ -60,7 +60,11 @@ def check_ros_sdk(
     shared_root: Path | None = None,
 ) -> int:
     command = sdk_check_command(project_root, robot=robot, task=task, shared_root=shared_root)
-    return subprocess.run(command, check=False).returncode
+    result = subprocess.run(command, check=False, capture_output=True, text=True)
+    if result.returncode:
+        print(result.stdout.strip(), file=sys.stderr)
+        print(result.stderr.strip(), file=sys.stderr)
+    return result.returncode
 
 
 def main(argv: list[str] | None = None) -> int:

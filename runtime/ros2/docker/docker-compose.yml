@@ -5,6 +5,8 @@ services:
   runtime:
     image: sim-dual-arm/runtime:current
     build: .
+    container_name: sim-dual-arm-runtime
+    hostname: runtime
     user: "1000:1000"
     working_dir: /app
     init: true
@@ -12,11 +14,14 @@ services:
     stop_grace_period: 20s
     pull_policy: never
     env_file: ../configs/container.env
+    extra_hosts:
+      - host.docker.internal:host-gateway
     volumes:
       - ../:/app:ro
       - ../../../shared:/shared:ro
       - ../../../build:/build
       - ../../../var:/data
+      - ../../../shared/common/tools/docker/container_bashrc.sh:/etc/bash.bashrc:ro
     networks: [ros, learning]
 
 networks:

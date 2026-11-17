@@ -25,7 +25,7 @@ VALID = {
     "initial_lead_s": 0.25,
     "min_lead_s": 0.05,
     "max_observation_age_s": 0.5,
-    "stream_wall_timeout_s": 120.0,
+    "stream_wall_timeout_s": 240.0,
     "progress_wall_timeout_s": 3.0,
     "tracking_timeout_s": 2.0,
     "contact_unload_timeout_s": 2.0,
@@ -45,7 +45,7 @@ def test_candidate_config_converts_to_exact_bounded_integer_nanoseconds():
     assert config.initial_lead_ns == 250_000_000
     assert config.min_lead_ns == 50_000_000
     assert config.max_observation_age_ns == 500_000_000
-    assert config.stream_wall_timeout_ns == 120_000_000_000
+    assert config.stream_wall_timeout_ns == 240_000_000_000
     assert config.progress_wall_timeout_ns == 3_000_000_000
     assert config.tracking_timeout_ns == 2_000_000_000
     assert config.initial_lead_ns >= config.min_lead_ns
@@ -138,7 +138,7 @@ def test_rounding_uses_nearest_nanosecond_not_truncation():
             "initial_lead_s": 0.250_000_000_6,
             "min_lead_s": 0.05,
             "max_observation_age_s": 0.5,
-            "stream_wall_timeout_s": 120.0,
+            "stream_wall_timeout_s": 240.0,
             "progress_wall_timeout_s": 3.0,
             "tracking_timeout_s": 2.0,
         }

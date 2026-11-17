@@ -122,7 +122,7 @@ scripts/bundle.sh --scenario marvin_sim/handover --mode full \
 
 ```bash
 # learning 容器：启动 Policy 服务（binding 不声明模型，须由 --bundle 提供）
-scripts/policy.sh --scenario marvin_sim/handover \
+scripts/server_policy.sh --scenario marvin_sim/handover \
   --bundle /data/marvin_sim/handover/models/bundles/<bundle>
 
 # simulation 容器：推理后端（不使用 Teacher）
@@ -131,16 +131,16 @@ scripts/backend.sh --scenario marvin_sim/handover --role policy \
   --seed 5100 --run-id policy-backend
 
 # runtime 容器：交互式一局或非交互式单局
-scripts/interactive.sh --scenario marvin_sim/handover \
+scripts/client_interactive.sh --scenario marvin_sim/handover \
   --bundle /data/marvin_sim/handover/models/bundles/<bundle> \
   --seed 5100 --run-id policy-interactive
-scripts/policy.sh --scenario marvin_sim/handover \
+scripts/server_policy.sh --scenario marvin_sim/handover \
   --bundle /data/marvin_sim/handover/models/bundles/<bundle> \
   --reset-seed 5100 --run-id policy-run
 
 # runtime 容器：批量推理，每批最多 10 次（需保持上方 policy.sh 与 backend.sh 在线）
-scripts/batch_policy.sh --scenario marvin_sim/handover \
-  --bundle /data/marvin_sim/handover/models/bundles/<bundle> \
+# 本机项目根目录（需保持 learning 策略服务在线）
+./inference_parallel.sh --robot marvin_sim --task handover \
   --count 10 --seed-start 5100
 ```
 

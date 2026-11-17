@@ -42,7 +42,7 @@ def write_config(tmp_path: Path, value: dict) -> Path:
 def test_repository_task_config_has_all_thresholds_and_capacity():
     config = load_task_config(CONFIG_PATH)
     assert config.success.stable_duration_s == 2.0
-    assert config.success.max_task_sim_duration_s == 30.0
+    assert config.success.max_task_sim_duration_s == 90.0
     assert config.success.support_xy_margin_m == 0.002
     assert config.success.support_height_tolerance_m == 0.005
     assert config.teacher.chunk_size == 60
@@ -58,7 +58,7 @@ def test_repository_task_config_has_all_thresholds_and_capacity():
     ("field", "value", "message"),
     [
         ("stable_duration_s", 1.0, "stable_duration_s"),
-        ("max_task_sim_duration_s", 31.0, "max_task_sim_duration_s"),
+        ("max_task_sim_duration_s", 301.0, "max_task_sim_duration_s"),
         ("support_xy_margin_m", -0.001, "support_xy_margin_m"),
         ("min_support_normal_force_n", 0.0, "min_support_normal_force_n"),
         ("min_gripper_opening_m", 0.081, "min_gripper_opening_m"),

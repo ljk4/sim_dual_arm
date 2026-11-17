@@ -60,9 +60,8 @@ runtime/ros2/scripts/record.sh --robot panda_sim --task stack --purpose pilot --
 | --- | --- |
 | `build_sdk.sh` | 构建 ROS 接口 SDK（`/build/ros-dev/install`）与 Policy Protobuf/gRPC SDK（`/build/generated/policy-sdk`） |
 | `record.sh` | 单路示教录制；也支持 `record.sh status --robot <robot> --task <task>` 查看采集与筛选状态 |
-| `policy.sh` | 执行单局非交互式 Policy 推理闭环；接受 `--robot ... --task ...` 或 `--config ...` |
-| `batch_policy.sh` | 无人工干预批量仿真推理测试（仅仿真后端可用，自动禁用可视化；需保持 learning `policy.sh` 与 simulation 推理后端在线）。录制/日志写入 `/data/<robot>/<task>/logs/batch-policy/<batch-id>/`，报告写入 `/data/<robot>/<task>/debug/batch-policy/<batch-id>/report.json` |
-| `interactive.sh` | 交互式执行单局 Policy 推理：`--robot/--task` 或 `--config` 二选一，输入 `y` 复位并开始，结束后保持 IDLE 直至 `Ctrl-C` |
+| `client_policy.sh` | 执行单局非交互式 Policy 推理闭环（gRPC 客户端）；接受 `--robot ... --task ...` 或 `--config ...` |
+| `client_interactive.sh` | 交互式执行单局 Policy 推理：`--robot/--task` 或 `--config` 二选一，输入 `y` 复位并开始，结束后保持 IDLE 直至 `Ctrl-C`；显式 `--run-id` 会自动追加 UTC 时间戳 |
 | `test.sh` | 运行固定禁用自动插件收集的 `pytest` 测试套件 |
 
 常用示例：
@@ -72,14 +71,14 @@ runtime/ros2/scripts/record.sh --robot panda_sim --task stack --purpose pilot --
 scripts/record.sh status --robot panda_sim --task stack
 
 # 直接以方案执行一局策略
-scripts/policy.sh --robot panda_sim --task stack \
+scripts/client_policy.sh --robot panda_sim --task stack \
   --reset-seed 20000 --run-id policy-run
 
 # 交互式执行
-scripts/interactive.sh --robot panda_sim --task stack \
+scripts/client_interactive.sh --robot panda_sim --task stack \
   --seed 20000 --run-id policy-interactive
 ```
 
-> 容器内脚本在宿主机直接运行会报错退出（返回码 2）；请先通过 `./env.sh enter runtime` 进入容器（`./record_parallel.sh` 在宿主机执行）。
+> 容器内脚本在宿主机直接运行会报错退出（返回码 2）；请先通过 `./env.sh enter runtime` 进入容器（`./record_parallel.sh`、`./inference_parallel.sh` 在宿主机执行）。
 
 目录导航：[上级目录](../README.md)

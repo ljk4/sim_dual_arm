@@ -107,14 +107,14 @@ scripts/backend.sh --scenario <robot>/<task> --role policy \
 scripts/build_sdk.sh
 scripts/record.sh --scenario <robot>/<task> \
   --purpose pilot --count 1 --max-consecutive-failures 1
-scripts/interactive.sh --scenario <robot>/<task> \
+scripts/client_interactive.sh --scenario <robot>/<task> \
   --bundle /data/<robot>/<task>/models/bundles/<verified-bundle> --seed 0 --run-id policy-interactive
-scripts/policy.sh --scenario <robot>/<task> \
+scripts/server_policy.sh --scenario <robot>/<task> \
   --bundle /data/<robot>/<task>/models/bundles/<verified-bundle> \
   --reset-seed 0 --run-id policy-run
 
 # learning 容器（工作目录 /app）
-scripts/policy.sh --scenario <robot>/<task> \
+scripts/server_policy.sh --scenario <robot>/<task> \
   --bundle /data/<robot>/<task>/models/bundles/<verified-bundle>
 scripts/train.sh --scenario <robot>/<task> --mode smoke
 ```

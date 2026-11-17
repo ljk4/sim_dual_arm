@@ -20,7 +20,7 @@ import signal
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 from robot_contracts.project_paths import project_path
 
@@ -162,6 +162,8 @@ def _execute(
     config: dict[str, Any],
     project_root: Path,
     output: Path,
+    *,
+    console: TextIO | None = None,
 ) -> tuple[int, float, str]:
     try:
         code, wall_s, failure = run_command(
@@ -172,6 +174,7 @@ def _execute(
             int(config["budget"]["min_free_bytes"]),
             output,
             stop_grace_s=float(config["launch"].get("stop_grace_s", 10.0)),
+            console=console,
         )
     except LaunchInterrupted as interrupted:
         code, wall_s, failure = interrupted.code, interrupted.wall_s, interrupted.failure
@@ -270,23 +273,27 @@ def command_run(args: argparse.Namespace) -> int:
                 }
             )
         resolved = _resolved_command(command, attempt)
-        code, wall_s, failure = _execute(resolved, attempt, config, project_root, output)
+        log_directory = attempt_log_directory(config, project_root, attempt)
+        log_directory.mkdir(parents=True, exist_ok=True)
+        console = (log_directory / "console.log").open("w", encoding="utf-8")
+        try:
+            code, wall_s, failure = _execute(
+                resolved, attempt, config, project_root, output, console=console
+            )
+        finally:
+            console.close()
         event, classification, raw_bytes = _finish_attempt(
             ledger, attempt, config, code, wall_s, failure
         )
+        runtime_reason = classification.get("runtime_reason") or ""
+        reason_text = f"（{runtime_reason}）" if runtime_reason else ""
+        verdict = "合格" if classification["qualified"] else "不合格"
         print(
-            json.dumps(
-                {
-                    "attempt_id": attempt.attempt_id,
-                    "seed": attempt.seed,
-                    "event": event,
-                    "exit_code": code,
-                    "wall_s": round(wall_s, 3),
-                    "raw_bytes": raw_bytes,
-                    **classification,
-                },
-                sort_keys=True,
-            )
+            f"本次尝试：{attempt.attempt_id} | {event} | 退出码 {code} | "
+            f"用时 {wall_s:.1f}s | 任务 "
+            f"{classification.get('task_outcome') or '-'}{reason_text} | "
+            f"{verdict} | 日志 {log_directory / 'console.log'}",
+            flush=True,
         )
         return 1 if code else 0
     finally:

@@ -266,11 +266,11 @@ def test_any_failed_condition_resets_the_window(config):
 
 def test_timeout_and_wall_watchdog_are_independent_reasons(config):
     runtime, _context = _runtime(config)
-    state = runtime.tick(observation(sim_time_ns=30_000_000_001), 10)
+    state = runtime.tick(observation(sim_time_ns=90_000_000_001), 10)
     assert state.phase == "FAILED"
     assert state.metric("reason").startswith("TIMEOUT")
     runtime, _context = _runtime(config)
-    state = runtime.tick(observation(sim_time_ns=1_000_000_000), 60_000_000_001)
+    state = runtime.tick(observation(sim_time_ns=1_000_000_000), 300_000_000_001)
     assert state.phase == "FAILED"
     assert state.metric("reason").startswith("WALL_TIMEOUT")
 

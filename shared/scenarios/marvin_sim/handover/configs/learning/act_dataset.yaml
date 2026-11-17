@@ -36,5 +36,5 @@ lerobot:
   video_backend: pyav
   video_files_size_mb: 256
   data_files_size_mb: 256
-  encoder_threads: 1
-  image_writer_threads: 0
+  encoder_threads: 4
+  image_writer_threads: 4

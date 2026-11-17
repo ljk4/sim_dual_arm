@@ -16,4 +16,4 @@
 scripts/test.sh -q tests/unit
 ```
 
-> 启动 `scripts/policy.sh` 前，须先在 `runtime` 容器运行过 `scripts/build_sdk.sh` 生成 `/build/generated/policy-sdk`。
+> 启动 `scripts/server_policy.sh` 前，须先在 `runtime` 容器运行过 `scripts/build_sdk.sh` 生成 `/build/generated/policy-sdk`。
