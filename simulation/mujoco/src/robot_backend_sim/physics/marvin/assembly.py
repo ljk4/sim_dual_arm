@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import math
 import struct
-import warnings
+import sys
 import xml.etree.ElementTree as ET
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -411,14 +411,23 @@ def add_marvin_robot(spec: mujoco.MjSpec, config: MarvinRobotConfig, urdf_path: 
     _add_self_exclusions(child)
     frame = spec.worldbody.add_frame(name="marvin_root")
     # Source names must stay unprefixed; this spec is compiled in memory and
-    # never saved, so the empty-prefix save warning does not apply.
-    with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore",
-            message="Attaching a spec with an empty prefix.*",
-            category=UserWarning,
-        )
+    # never saved.  MuJoCo raises this save warning from C++, so it is filtered
+    # through the native warning handler, not the Python warnings module.
+    previous_warning = mujoco.get_mju_user_warning()
+
+    def _warning(message: str) -> None:
+        if message.startswith("Attaching a spec with an empty prefix"):
+            return
+        if previous_warning is not None:
+            previous_warning(message)
+        else:
+            print(message, file=sys.stderr)
+
+    mujoco.set_mju_user_warning(_warning)
+    try:
         spec.attach(child, prefix="", frame=frame)
+    finally:
+        mujoco.set_mju_user_warning(previous_warning)
     spec.meshdir = str(mesh_dir)
     spec.compiler.fusestatic = False
     spec.compiler.discardvisual = False
