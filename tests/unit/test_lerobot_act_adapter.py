@@ -16,9 +16,9 @@ pytest.importorskip("lerobot")
 pb2 = pytest.importorskip("dual_arm_policy.v1.policy_pb2")
 grpc = pytest.importorskip("grpc")
 
-from act_fixtures import ACTION, OBSERVATION, PROFILE, make_act_bundle  # noqa: E402
+from act_fixtures import ACTION, OBSERVATION, PROFILE, make_act_model  # noqa: E402
 from dual_arm_learning.adapters.lerobot_act import (  # noqa: E402
-    BundleActModel,
+    ActModelAdapter,
     load_act_adapter,
 )
 from dual_arm_learning.bundle import deployment_summary  # noqa: E402
@@ -40,22 +40,21 @@ from dual_arm_learning.policy_types import (  # noqa: E402
 from dual_arm_learning.temporal_ensemble import PERIOD_NS  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
-PROFILES = ROOT / "shared/scenarios/panda_stack/profiles"
-CONFIG = ROOT / "shared/scenarios/panda_stack/configs/learning/policy_temporal.yaml"
+CONFIG = ROOT / "shared/scenarios/panda_sim/stack/configs/learning/policy_temporal.yaml"
 
 
 @pytest.fixture(scope="module")
 def bundle(tmp_path_factory):
-    root = tmp_path_factory.mktemp("act-bundle")
-    path = root / "bundle"
-    make_act_bundle(path)
+    root = tmp_path_factory.mktemp("act-model")
+    path = root / "act_20260101_000000"
+    make_act_model(path)
     return path
 
 
 def settings_for(bundle: Path) -> PolicyServiceConfig:
     return load_policy_config(
         CONFIG,
-        bundle_dir=bundle,
+        model_path=bundle,
         robot_profile_path=PROFILE,
         observation_schema_path=OBSERVATION,
         action_schema_path=ACTION,
@@ -76,7 +75,8 @@ def fused(config: PolicyServiceConfig, coefficient: float = 0.01) -> PolicyServi
 
 
 def profile(bundle: Path) -> dict:
-    return json.loads((bundle / "metadata/profile.json").read_text())
+    del bundle
+    return json.loads(PROFILE.read_text())
 
 
 def initial_positions(bundle: Path) -> np.ndarray:
@@ -147,7 +147,7 @@ class TemporalChunkModel(RecordingModel):
         return result.astype(np.float32)
 
 
-class BadWarmModel(BundleActModel):
+class BadWarmModel(ActModelAdapter):
     mode = "shape"
 
     def __init__(self, mode):
@@ -266,7 +266,7 @@ def test_contract_is_reloaded_identically_and_formal_rejects_synthetic(bundle):
     with pytest.raises(PolicyConfigError, match="synthetic"):
         load_policy_config(
             CONFIG,
-            bundle_dir=bundle,
+            model_path=bundle,
             robot_profile_path=PROFILE,
             observation_schema_path=OBSERVATION,
             action_schema_path=ACTION,
@@ -274,24 +274,33 @@ def test_contract_is_reloaded_identically_and_formal_rejects_synthetic(bundle):
         )
 
 
-def test_contract_rejects_wrong_profile_and_tampered_hash(bundle):
-    with pytest.raises(PolicyConfigError, match="profile"):
+def test_contract_rejects_wrong_profile_and_corrupt_model(bundle, tmp_path):
+    broken_profile = tmp_path / "profile.json"
+    document = json.loads(PROFILE.read_text())
+    document["joints"] = document["joints"][:-1]
+    broken_profile.write_text(json.dumps(document) + "\n", encoding="utf-8")
+    with pytest.raises(PolicyConfigError, match="joint|profile"):
         load_policy_config(
             CONFIG,
-            bundle_dir=bundle,
-            robot_profile_path=PROFILES / "robots/panda_stack_v1/profile.json",
+            model_path=bundle,
+            robot_profile_path=broken_profile,
             observation_schema_path=OBSERVATION,
             action_schema_path=ACTION,
             require_formal=False,
         )
-    model = bundle / "model.safetensors"
-    original = model.read_bytes()
-    try:
-        model.write_bytes(original + b"tamper")
-        with pytest.raises(PolicyConfigError, match="hash mismatch"):
-            settings_for(bundle)
-    finally:
-        model.write_bytes(original)
+    broken = bundle.parent / "act_20260101_000001"
+    broken.mkdir()
+    (broken / "model.safetensors").write_bytes(b"not a safetensors file")
+    (broken / "training_args.yaml").write_text("", encoding="utf-8")
+    with pytest.raises(PolicyConfigError, match="model"):
+        load_policy_config(
+            CONFIG,
+            model_path=broken,
+            robot_profile_path=PROFILE,
+            observation_schema_path=OBSERVATION,
+            action_schema_path=ACTION,
+            require_formal=False,
+        )
 
 
 def test_real_bundle_offline_reload_returns_same_fresh_chunk(bundle):
@@ -479,7 +488,7 @@ def test_act_entry_loads_warms_logs_and_shuts_down_cleanly(bundle, tmp_path):
     document = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
     document["model"].update(
         {
-            "bundle_dir": str(bundle),
+            "model_path": str(bundle),
             "robot_profile_path": str(PROFILE),
             "observation_schema_path": str(OBSERVATION),
             "action_schema_path": str(ACTION),
@@ -556,7 +565,7 @@ def test_act_entry_loads_warms_logs_and_shuts_down_cleanly(bundle, tmp_path):
         assert "policy.closed" in events
         snapshot = json.loads((log_dir / "resolved_contract.json").read_text())
         summary = deployment_summary(settings_for(bundle))
-        assert snapshot["bundle"]["bundle_digest"] == summary["bundle_digest"]
+        assert snapshot["model"]["model_bundle_digest"] == summary["model_bundle_digest"]
     finally:
         if process.poll() is None:
             process.kill()
@@ -577,8 +586,8 @@ def test_startup_failure_leaves_structured_artifact(tmp_path):
         [
             "--config",
             str(CONFIG),
-            "--bundle-dir",
-            str(tmp_path / "missing-bundle"),
+            "--model",
+            str(tmp_path / "missing-model"),
             "--log-directory",
             str(log_dir),
             "--run-id",
@@ -590,7 +599,7 @@ def test_startup_failure_leaves_structured_artifact(tmp_path):
     assert payload["status"] == "failed"
     assert payload["stage"] == "config"
     assert payload["error_type"] == "PolicyConfigError"
-    assert payload["bundle"].endswith("missing-bundle")
+    assert payload["model"].endswith("missing-model")
 
 
 def test_temporal_ensemble_is_off_by_default(bundle):

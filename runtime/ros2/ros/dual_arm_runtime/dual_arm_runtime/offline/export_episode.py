@@ -511,9 +511,10 @@ def main(argv: list[str] | None = None) -> int:
         "--campaign-config",
         type=Path,
         default=None,
-        help="campaign recipe used for quality rules (conflicts with --scenario)",
+        help="campaign recipe used for quality rules (conflicts with --robot/--task)",
     )
-    parser.add_argument("--scenario")
+    parser.add_argument("--robot")
+    parser.add_argument("--task")
     parser.add_argument("--shared-root", type=Path)
     parser.add_argument("--runtime-log", type=Path, action="append", default=[])
     parser.add_argument("--backend-log", type=Path, action="append", default=[])
@@ -530,22 +531,29 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     from dual_arm_runtime.offline.scenario_selection import campaign_config_path
 
-    if args.scenario is not None and args.campaign_config is not None:
+    if args.robot is not None and args.campaign_config is not None:
         print(
-            json.dumps({"error": "--scenario cannot be combined with --campaign-config"}),
+            json.dumps({"error": "--robot/--task cannot be combined with --campaign-config"}),
             file=sys.stderr,
         )
         return 2
-    if args.scenario is None and args.campaign_config is None:
+    if args.robot is None and args.campaign_config is None:
         print(
-            json.dumps({"error": "one of --scenario or --campaign-config is required"}),
+            json.dumps({"error": "one of --robot/--task or --campaign-config is required"}),
             file=sys.stderr,
         )
+        return 2
+    if args.robot is not None and args.task is None:
+        print(json.dumps({"error": "--robot requires --task"}), file=sys.stderr)
+        return 2
+    if args.task is not None and args.robot is None:
+        print(json.dumps({"error": "--task requires --robot"}), file=sys.stderr)
         return 2
     try:
         args.campaign_config = campaign_config_path(
             campaign_config=args.campaign_config,
-            scenario=args.scenario,
+            robot=args.robot,
+            task=args.task,
             shared_root=args.shared_root,
             project_root=_PROJECT,
         )

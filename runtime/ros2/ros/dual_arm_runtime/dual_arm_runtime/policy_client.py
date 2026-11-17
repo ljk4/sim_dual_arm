@@ -203,6 +203,10 @@ class PolicyClient:
         self._channel: Any | None = None
         self._stub: Any | None = None
         self.session_id = ""
+        # The service owns model identity; the runtime adopts it from the
+        # handshake and never reads a bundle or model file itself.
+        self.model_bundle_digest = ""
+        self.processor_digest = ""
         self.info_checked = False
         self.requests = 0
 
@@ -248,8 +252,8 @@ class PolicyClient:
             reason="POLICY_INFO_VERIFIED",
             fields={
                 "endpoint": self.policy.endpoint,
-                "model_bundle_digest": self.policy.model_bundle_digest,
-                "processor_digest": self.policy.processor_digest,
+                "model_bundle_digest": self.model_bundle_digest,
+                "processor_digest": self.processor_digest,
                 "test_only": bool(info.test_only),
                 "chunk_size": int(info.chunk_size),
                 "action_period_ns": int(info.action_period_ns),
@@ -259,12 +263,20 @@ class PolicyClient:
     def _info_request(self) -> object:
         from dual_arm_policy.v1 import policy_pb2
 
-        return policy_pb2.GetPolicyInfoRequest(model_bundle_digest=self.policy.model_bundle_digest)
+        return policy_pb2.GetPolicyInfoRequest()
 
     def _validate_info(self, info: object) -> None:
+        model_digest = str(info.model_bundle_digest)  # type: ignore[attr-defined]
+        processor_digest = str(info.processor_digest)  # type: ignore[attr-defined]
+        if not model_digest or not processor_digest:
+            raise ContractError("POLICY_INFO_MISMATCH", "info has no model identity")
+        if self.model_bundle_digest and model_digest != self.model_bundle_digest:
+            raise ContractError("POLICY_INFO_MISMATCH", "info.model_bundle_digest differs")
+        if self.processor_digest and processor_digest != self.processor_digest:
+            raise ContractError("POLICY_INFO_MISMATCH", "info.processor_digest differs")
+        self.model_bundle_digest = model_digest
+        self.processor_digest = processor_digest
         expected = (
-            ("model_bundle_digest", self.policy.model_bundle_digest),
-            ("processor_digest", self.policy.processor_digest),
             ("observation_schema_hash", self.policy.observation_schema_hash),
             ("action_schema_hash", self.policy.action_schema_hash),
             ("robot_profile_hash", self.policy.robot_profile_hash),
@@ -355,7 +367,7 @@ class PolicyClient:
 
         request = policy_pb2.OpenSessionRequest(
             context=_context_message(context),
-            model_bundle_digest=self.policy.model_bundle_digest,
+            model_bundle_digest=self.model_bundle_digest,
             observation_schema_hash=self.policy.observation_schema_hash,
             action_schema_hash=self.policy.action_schema_hash,
             robot_profile_json=self._profile_json,
@@ -474,7 +486,7 @@ class PolicyClient:
             raise ContractError("POLICY_CONTEXT_MISMATCH", "reply context differs")
         if int(reply.observation_id) != observation.observation_id:  # type: ignore[attr-defined]
             raise ContractError("POLICY_OBSERVATION_MISMATCH", "reply observation id differs")
-        if str(reply.model_bundle_digest) != self.policy.model_bundle_digest:  # type: ignore[attr-defined]
+        if str(reply.model_bundle_digest) != self.model_bundle_digest:  # type: ignore[attr-defined]
             raise ContractError("POLICY_MODEL_MISMATCH", "reply model digest differs")
         action = reply.action  # type: ignore[attr-defined]
         if tuple(action.joint_names) != self.profile.joint_names:
@@ -528,7 +540,7 @@ class PolicyClient:
             request_id,
             context,
             observation.observation_id,
-            self.policy.model_bundle_digest,
+            self.model_bundle_digest,
             tuple(action.joint_names),
             tuple(times),
             tuple(positions),

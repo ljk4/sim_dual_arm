@@ -1,0 +1,24 @@
+# 静止冗余锚点筛选：同一帧仅在双臂 14 个关节与双夹爪都静止时才算静止。
+# 训练 full 模式按本规则在内存中计算采样锚点，不写额外掩码文件。
+schema_version: 1
+fps: 20
+chunk_size: 60
+arms:
+  # 左臂 0..6 与右臂 8..14；缺省即全部臂关节。
+  joint_indices: [0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14]
+  max_step_rad: 0.001
+  max_velocity_rad_s: 0.01
+grippers:
+  # 夹爪宽度以米为单位，与臂关节弧度相互独立。
+  joint_indices: [7, 15]
+  max_step_m: 0.0005
+  max_velocity_m_s: 0.002
+static_runs:
+  min_frames: 15
+  edge_frames: 5
+  interior_stride: 5
+  # 仅保护阶段/门控切换与首尾边界，长静止保持会被抽稀。
+  phase_boundary_frames: 5
+  episode_boundary_frames: 5
+  min_episode_kept_frames: 60
+  reason: redundant_static_anchor

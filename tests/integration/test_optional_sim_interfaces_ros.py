@@ -31,7 +31,7 @@ from dual_arm_runtime.runtime_config import load_runtime_configuration
 from dual_arm_runtime.runtime_node import RuntimeNode
 root = Path(sys.argv[1])
 configuration = load_runtime_configuration(
-    root / "shared/scenarios/panda_stack/configs/runtime/teacher_collect.yaml", root
+    root / "shared/scenarios/panda_sim/stack/configs/runtime/teacher_collect.yaml", root
 )
 created = []
 node = SimpleNamespace(create_client=lambda service, name, **kwargs: created.append(name))

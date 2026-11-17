@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -16,8 +15,8 @@ FILTER_FORMAT = "dual-arm-act-sample-filter-v1"
 
 @dataclass(frozen=True, slots=True)
 class SampleFilterMask:
-    path: Path
-    file_sha256: str
+    source: Path
+    source_sha256: str
     digest: str
     eligible_indices: tuple[int, ...]
     source_frames: int
@@ -26,8 +25,8 @@ class SampleFilterMask:
 
     def summary(self) -> dict[str, Any]:
         return {
-            "path": str(self.path),
-            "sha256": self.file_sha256,
+            "source": str(self.source),
+            "source_sha256": self.source_sha256,
             "digest": self.digest,
             "source_frames": self.source_frames,
             "eligible_frames": len(self.eligible_indices),
@@ -55,25 +54,12 @@ def mask_digest(document: dict[str, Any]) -> str:
     return canonical_hash(payload)
 
 
-def write_filter_manifest(document: dict[str, Any], output: str | Path) -> Path:
-    target = Path(output)
-    if target.exists():
-        raise FilterError(f"{target}: output already exists; refusing to overwrite")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = target.with_suffix(target.suffix + ".tmp")
-    payload = json.dumps(document, indent=2, allow_nan=False) + "\n"
-    temporary.write_text(payload, encoding="utf-8")
-    os.replace(temporary, target)
-    return target
-
-
 def _verify_sources(document: dict[str, Any]) -> None:
     dataset = document.get("dataset", {})
-    for key in ("manifest", "select"):
-        record = dataset.get(key, {})
-        path = Path(str(record.get("path", "")))
-        if not path.is_file() or file_sha256(path) != record.get("sha256"):
-            raise FilterError(f"{path}: bound source hash changed")
+    manifest = dataset.get("manifest", {})
+    path = Path(str(manifest.get("path", "")))
+    if not path.is_file() or file_sha256(path) != manifest.get("sha256"):
+        raise FilterError(f"{path}: bound source hash changed")
     rule = document.get("rule", {})
     rule_path = Path(str(rule.get("path", "")))
     if not rule_path.is_file() or file_sha256(rule_path) != rule.get("sha256"):
@@ -186,23 +172,29 @@ def _training_section(
     return eligible, source_total
 
 
-def load_filter_mask(path: str | Path, *, verify_source: bool = True) -> SampleFilterMask:
-    source = Path(path).resolve()
-    document = read_filter_json(source)
+def mask_from_document(
+    document: dict[str, Any],
+    *,
+    source: Path | None = None,
+    source_sha256: str = "",
+    verify_source: bool = True,
+) -> SampleFilterMask:
+    """Validate one filter document that was either loaded or just computed."""
+    label = source if source is not None else Path("<in-memory>")
     if document.get("format") != FILTER_FORMAT:
-        raise FilterError(f"{source}: unknown sample filter format")
+        raise FilterError(f"{label}: unknown sample filter format")
     if document.get("filter_digest") != mask_digest(document):
-        raise FilterError(f"{source}: filter digest does not match its contents")
+        raise FilterError(f"{label}: filter digest does not match its contents")
     training = document.get("training")
     if not isinstance(training, dict):
-        raise FilterError(f"{source}: training/validation sections are missing")
-    _validation_section(source, document.get("validation"))
-    eligible, source_total = _training_section(source, training)
+        raise FilterError(f"{label}: training/validation sections are missing")
+    _validation_section(label, document.get("validation"))
+    eligible, source_total = _training_section(label, training)
     if verify_source:
         _verify_sources(document)
     return SampleFilterMask(
-        path=source,
-        file_sha256=file_sha256(source),
+        source=label,
+        source_sha256=source_sha256,
         digest=str(document["filter_digest"]),
         eligible_indices=tuple(eligible),
         source_frames=source_total,
@@ -211,11 +203,22 @@ def load_filter_mask(path: str | Path, *, verify_source: bool = True) -> SampleF
     )
 
 
+def load_filter_mask(path: str | Path, *, verify_source: bool = True) -> SampleFilterMask:
+    source = Path(path).resolve()
+    document = read_filter_json(source)
+    return mask_from_document(
+        document,
+        source=source,
+        source_sha256=file_sha256(source),
+        verify_source=verify_source,
+    )
+
+
 __all__ = [
     "FILTER_FORMAT",
     "SampleFilterMask",
     "load_filter_mask",
     "mask_digest",
+    "mask_from_document",
     "read_filter_json",
-    "write_filter_manifest",
 ]

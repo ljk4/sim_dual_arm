@@ -145,7 +145,8 @@ def test_scenario_conflicts_with_explicit_recipes_before_docker(tmp_path, monkey
         record_parallel.main(
             [
                 "--project-root", str(tmp_path),
-                "--scenario", "synthetic_stack",
+                "--robot", "synthetic_sim",
+                "--task", "stack",
                 "--config", "campaign.yaml",
             ]
         )
@@ -198,10 +199,13 @@ def test_preflight_failure_starts_no_worker_or_pool_directory(tmp_path, monkeypa
         ),
     )
     assert record_parallel.main(
-        ["--project-root", str(tmp_path), "--scenario", "synthetic_stack"]
+        [
+            "--project-root", str(tmp_path),
+            "--robot", "synthetic_sim", "--task", "stack",
+        ]
     ) == 2
     assert events == ["preflight", "cleanup"]
-    assert not (tmp_path / "var/synthetic_stack/logs/record-pools").exists()
+    assert not (tmp_path / "var/synthetic_sim/stack/logs/collection/record-pools").exists()
 
 
 def test_preflight_runs_before_worker_preparation_and_backends(tmp_path, monkeypatch):
@@ -212,19 +216,23 @@ def test_preflight_runs_before_worker_preparation_and_backends(tmp_path, monkeyp
         lambda args, directory: _FakeDocker(args, directory, events),
     )
     assert record_parallel.main(
-        ["--project-root", str(tmp_path), "--scenario", "synthetic_stack", "--workers", "1"]
+        [
+            "--project-root", str(tmp_path),
+            "--robot", "synthetic_sim", "--task", "stack", "--workers", "1",
+        ]
     ) == 0
     assert events[:2] == ["preflight", "prepare"]
     assert events.index("backend") > events.index("prepare")
 
 
 def test_worker_preparation_receives_binding_identity(tmp_path, monkeypatch):
-    directory = tmp_path / "var/synthetic_stack/logs/record-pools/pool-test"
+    directory = tmp_path / "var/synthetic_sim/stack/logs/collection/record-pools/pool-test"
     directory.mkdir(parents=True)
     (directory / "workers.json").write_text('{"workers": []}\n')
     args = SimpleNamespace(
         project_root=tmp_path,
-        scenario="synthetic_stack",
+        robot="synthetic_sim",
+        task="stack",
         shared_root=tmp_path / "shared",
         config=None,
         runtime_config=None,
@@ -246,13 +254,16 @@ def test_worker_preparation_receives_binding_identity(tmp_path, monkeypatch):
     plan = {
         "selection": {
             "mode": "scenario",
-            "scenario_id": "synthetic_stack",
+            "robot": "synthetic_sim",
+            "task": "stack",
+            "scenario_id": "synthetic_sim/stack",
             "binding": {"sha256": "a" * 64, "path": "/shared/scenarios/x/binding.yaml"},
         }
     }
     docker.prepare(plan)
     command = calls[-1]
-    assert "--scenario" in command and "synthetic_stack" in command
+    assert "--robot" in command and "synthetic_sim" in command
+    assert "--task" in command and "stack" in command
     assert "--shared-root" in command and "/shared" in command
     assert "--binding-sha256" in command and "a" * 64 in command
     assert "--runtime-config" not in command
@@ -262,7 +273,8 @@ def test_worker_preparation_receives_binding_identity(tmp_path, monkeypatch):
 def test_preflight_command_converts_host_paths(tmp_path):
     args = SimpleNamespace(
         project_root=tmp_path,
-        scenario=None,
+        robot=None,
+        task=None,
         shared_root=None,
         config="shared/scenarios/x/campaign.yaml",
         runtime_config="shared/scenarios/x/runtime.yaml",
@@ -277,9 +289,11 @@ def test_preflight_command_converts_host_paths(tmp_path):
     assert "/shared/scenarios/x/backend.yaml" in command
     assert "--parallel" in command
 
-    args.scenario = "synthetic_stack"
+    args.robot = "synthetic_sim"
+    args.task = "stack"
     args.shared_root = tmp_path / "shared"
     command = record_parallel.DockerWorkers(args, tmp_path / "pool").preflight_command()
-    assert "--scenario" in command and "synthetic_stack" in command
+    assert "--robot" in command and "synthetic_sim" in command
+    assert "--task" in command and "stack" in command
     assert "/shared" in command
     assert "--config" not in command

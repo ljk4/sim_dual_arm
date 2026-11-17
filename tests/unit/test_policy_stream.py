@@ -19,7 +19,8 @@ from robot_contracts.trajectory.spline import ReferenceSample
 
 ROOT = Path(__file__).resolve().parents[2]
 POLICY_CONFIG = ROOT / "tests/fixtures/simulation/policy_unit.yaml"
-TEACHER_CONFIG = ROOT / "shared/scenarios/panda_stack/configs/runtime/teacher_collect.yaml"
+TEACHER_CONFIG = ROOT / "shared/scenarios/panda_sim/stack/configs/runtime/teacher_collect.yaml"
+MODEL_DIGEST = "a" * 64
 
 
 class _Image:
@@ -140,7 +141,7 @@ class _Client:
             request_id,
             context,
             observation.observation_id,
-            self.policy.model_bundle_digest,
+            MODEL_DIGEST,
             self.profile.joint_names,
             times,
             positions,
@@ -558,7 +559,7 @@ def test_gripper_transition_is_retimed_before_submission(tmp_path):
                 request_id,
                 context,
                 observation.observation_id,
-                self.policy.model_bundle_digest,
+                MODEL_DIGEST,
                 self.profile.joint_names,
                 times,
                 tuple(positions),

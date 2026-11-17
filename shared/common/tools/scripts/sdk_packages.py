@@ -1,11 +1,11 @@
 """Package selection, dependency closure and source digests for the ROS SDK.
 
 The default set is every package under ``common/interfaces/ros`` plus every
-scenario extension under ``scenarios/*/extensions/ros``, so one build serves all
-scenarios.  A scenario or explicit selection can still narrow a check to the
-packages it requires.  README files are deliberately excluded from digests so
-documentation edits do not invalidate generated code, while IDL files and
-package build metadata do.
+scenario extension under ``scenarios/<robot>/<task>/extensions/ros``, so one
+build serves all scenarios.  A scenario (``<robot>/<task>``) or explicit
+selection can still narrow a check to the packages it requires.  README files
+are deliberately excluded from digests so documentation edits do not invalidate
+generated code, while IDL files and package build metadata do.
 """
 
 from __future__ import annotations
@@ -191,7 +191,7 @@ def full_selection(shared_root: Path) -> PackageSelection:
             packages.append(
                 package_source(directory, shared, role, expected_name=directory.name)
             )
-    for directory in sorted(shared.glob("scenarios/*/extensions/ros/*")):
+    for directory in sorted(shared.glob("scenarios/*/*/extensions/ros/*")):
         if (directory / "package.xml").is_file():
             packages.append(package_source(directory, shared, "extension"))
     selection_packages = _deduplicate(packages)
@@ -216,7 +216,7 @@ def _workspace_package_directory(name: str, shared_root: Path) -> Path | None:
     common = Path(shared_root) / COMMON_ROS_ROUTE / name
     if common.is_dir():
         return common
-    for candidate in sorted(Path(shared_root).glob(f"scenarios/*/extensions/ros/{name}")):
+    for candidate in sorted(Path(shared_root).glob(f"scenarios/*/*/extensions/ros/{name}")):
         if candidate.is_dir():
             return candidate
     return None
@@ -237,21 +237,30 @@ def check_dependency_closure(packages: tuple[PackageSource, ...], shared_root: P
 
 
 def binding_selection(shared_root: Path, scenario: str) -> PackageSelection:
-    if SCENARIO_ID.fullmatch(scenario) is None or ".." in scenario:
+    parts = scenario.split("/")
+    if len(parts) != 2 or not all(SCENARIO_ID.fullmatch(item) for item in parts):
         raise PackageSelectionError(
-            "scenario id must contain 1..128 safe characters and no path traversal"
+            "scenario must be '<robot>/<task>' with 1..128 safe characters per id "
+            "and no path traversal"
         )
+    robot_id, task_id = parts
     shared = Path(shared_root).resolve()
-    binding = shared / "scenarios" / scenario / "binding.yaml"
-    if not binding.is_file():
-        raise PackageSelectionError(f"scenario {scenario!r} has no binding file: {binding}")
     try:
-        from robot_contracts.binding import BindingError, load_binding
+        from robot_contracts.binding import (
+            BindingError,
+            load_binding,
+            resolve_binding_path,
+        )
     except ImportError as error:
         raise PackageSelectionError(
             "scenario SDK selection requires robot_contracts on PYTHONPATH"
         ) from error
     try:
+        binding = resolve_binding_path(shared, robot_id, task_id)
+        if not binding.is_file():
+            raise PackageSelectionError(
+                f"scenario {scenario!r} has no binding file: {binding}"
+            )
         resolved = load_binding(binding, shared_root=shared)
     except BindingError as error:
         raise PackageSelectionError(str(error)) from error

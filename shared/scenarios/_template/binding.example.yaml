@@ -1,19 +1,20 @@
 # 方案 binding 示例（v1）。本文件不是可运行方案。
 #
-# 使用方式：复制到 shared/scenarios/<scenario-id>/binding.yaml，替换所有
-# REPLACE_ME / replace_me 占位值。入口只读取 binding.yaml；本文件名为
-# binding.example.yaml，不会被 --scenario 选中，也不会回退到任何已有方案。
+# 使用方式：复制到 shared/scenarios/<robot-id>/<task-id>/binding.yaml，替换
+# 所有 REPLACE_ME / replace_me 占位值。入口只读取 binding.yaml；本文件名为
+# binding.example.yaml，不会被方案选择选中，也不会回退到任何已有方案。
 #
 # 路径规则：
 #   - 本文件内的所有路径相对本文件所在目录解析，与调用者 cwd 无关。
 #   - source_roots 必须写成相对本文件目录的路径；profiles、recipes 与
 #     extension_ros 必须位于本文件目录或某个 source_root 之内。
 #   - artifact_roots 可写绝对路径（容器内通常是 /data），也可写相对路径。
-#   - models.bundle 可以是 null（collection 阶段不需要模型），推理准备时
-#     必须用 models.bundle 或 --bundle 提供 learning 已验证的 bundle 目录。
+#   - 模型 bundle 不写进 binding；推理启动时用 --bundle 显式提供 learning
+#     已验证的 bundle 目录。
 #   - 数值配方不写进 binding；这里只记录被选中文件的路径。
 schema_version: 1
-scenario_id: replace_me
+robot_id: replace_me
+task_id: replace_me
 description: "REPLACE_ME: one-line task description"
 
 backend:
@@ -58,11 +59,8 @@ interfaces:
   # teacher_api: REPLACE_ME.teacher_chunk.v1
   # policy_api: REPLACE_ME.policy.v1
 
-models:
-  bundle: null
-
-# 复用其他方案的档案或配方时声明相对根，例如 [".."]；不使用 references
-# 做继承，references 只加载并记录独立依赖，不会合并字段。
+# 复用其他方案的档案或配方时声明相对根，例如 ["../../.."] 指向 shared/；
+# 不使用 references 做继承，references 只加载并记录独立依赖，不会合并字段。
 source_roots: []
 artifact_roots: []
 

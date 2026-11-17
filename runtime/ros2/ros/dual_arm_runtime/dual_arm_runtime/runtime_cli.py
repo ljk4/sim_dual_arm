@@ -78,11 +78,11 @@ def _parse_arguments() -> tuple[argparse.Namespace, list[str]]:
     selection = parser.add_mutually_exclusive_group(required=True)
     selection.add_argument("--config", type=Path, help="direct runtime recipe path")
     selection.add_argument(
-        "--scenario", help="scenario id under <shared-root>/scenarios/<id>/binding.yaml"
+        "--robot", help="robot id under <shared-root>/scenarios/<robot>/<task>/binding.yaml"
     )
+    parser.add_argument("--task", help="task id for --robot")
     parser.add_argument("--role", choices=("policy", "teacher"), default="policy")
     parser.add_argument("--shared-root", type=Path)
-    parser.add_argument("--bundle", type=Path)
     parser.add_argument(
         "--set",
         dest="overrides",
@@ -120,6 +120,10 @@ def _parse_arguments() -> tuple[argparse.Namespace, list[str]]:
         help="bounded seconds to wait for episode cleanup after a signal",
     )
     args, ros_args = parser.parse_known_args()
+    if args.robot is not None and args.task is None:
+        parser.error("--robot requires --task")
+    if args.task is not None and args.robot is None:
+        parser.error("--task requires --robot")
     if args.hold_after_episode and not args.once:
         parser.error("--hold-after-episode requires --once")
     if args.reset_seed is not None and not 0 <= args.reset_seed <= 2**63 - 1:
@@ -139,17 +143,15 @@ def _initialization_error(error: BaseException) -> None:
 def _load_configuration(args: argparse.Namespace, run_id: str):
     del run_id
     try:
-        if args.scenario is not None:
+        if args.robot is not None:
             if args.config is not None:
-                raise ValueError("--scenario and --config are mutually exclusive")
-            if args.bundle is not None and args.role != "policy":
-                raise ValueError("--bundle applies to the policy role only")
+                raise ValueError("--robot/--task and --config are mutually exclusive")
             resolved = resolve_scenario_runtime(
-                scenario=args.scenario,
+                robot=args.robot,
+                task=args.task,
                 role=args.role,
                 shared_root=args.shared_root,
                 project_root=args.project_root,
-                bundle=args.bundle,
                 seed=args.reset_seed,
                 overrides=args.overrides,
             )
@@ -161,8 +163,8 @@ def _load_configuration(args: argparse.Namespace, run_id: str):
                 overrides=resolved.overrides,
                 selection=resolved.selection,
             )
-        if args.shared_root is not None or args.bundle is not None:
-            raise ValueError("--shared-root/--bundle require --scenario")
+        if args.shared_root is not None:
+            raise ValueError("--shared-root requires --robot/--task")
         return load_runtime_configuration(
             args.config,
             args.project_root,
@@ -301,9 +303,10 @@ class _RuntimeProcess:
                     "config_path": (
                         str(self.args.config)
                         if self.args.config is not None
-                        else f"scenario:{self.args.scenario}/{self.args.role}"
+                        else f"scenario:{self.args.robot}/{self.args.task}/{self.args.role}"
                     ),
-                    "scenario_id": self.args.scenario,
+                    "robot": self.args.robot,
+                    "task": self.args.task,
                     "output_path": str(self.args.output),
                     "runs_output": str(self.runs_output),
                     "run_directory": str(self.session.run_directory),
@@ -573,7 +576,8 @@ def _print_configuration_summary(configuration: object, args: argparse.Namespace
     selection = getattr(configuration, "selection", None)
     if isinstance(selection, dict) and selection.get("mode") == "scenario":
         print(
-            f"方案 (scenario): {selection.get('scenario_id')} ({selection.get('role')})",
+            f"方案 (scenario): {selection.get('robot')}/{selection.get('task')} "
+            f"({selection.get('role')})",
             flush=True,
         )
         binding = selection.get("binding") or {}
@@ -593,10 +597,14 @@ def main() -> None:
         if args.episode_id:
             validate_run_id(args.episode_id)
         if args.output is None:
-            args.output = recordings_root(args.scenario)
+            args.output = recordings_root(args.robot, args.task)
     except ValueError as error:
         raise SystemExit(f"invalid run/episode id: {error}") from error
-    runs_output = args.runs_output if args.runs_output is not None else runs_root(args.scenario)
+    runs_output = (
+        args.runs_output
+        if args.runs_output is not None
+        else runs_root(args.robot, args.task)
+    )
     configuration = _load_configuration(args, run_id)
     _print_configuration_summary(configuration, args)
     try:

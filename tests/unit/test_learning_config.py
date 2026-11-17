@@ -5,7 +5,7 @@ import yaml
 from dual_arm_learning.config import ConfigError, load_dataset_config, load_training_config
 
 ROOT = Path(__file__).resolve().parents[2]
-SCENARIO = ROOT / "shared/scenarios/panda_stack"
+SCENARIO = ROOT / "shared/scenarios/panda_sim/stack"
 
 
 def test_real_learning_configs_load():
@@ -19,16 +19,16 @@ def test_real_learning_configs_load():
     assert training.modes["overfit"].steps == 500
     assert training.modes["full"].steps == 5000
     assert training.model.pretrained_backbone_weights is None
-    assert training.budget.limit_seconds == 172800.0
+    assert training.checkpoint.root == ROOT / "var/panda_sim/stack/models"
     assert training.dataset.camera_names == dataset.camera_names
 
 
-def test_invalid_budget_and_unknown_field_are_rejected(tmp_path):
+def test_unknown_field_and_invalid_mode_are_rejected(tmp_path):
     document = yaml.safe_load((SCENARIO / "configs/learning/act_training.yaml").read_text())
-    document["budget"]["limit_seconds"] = 0.0
+    document["training"]["batch_size"] = 0
     bad = tmp_path / "bad.yaml"
     bad.write_text(yaml.safe_dump(document))
-    with pytest.raises(ConfigError, match="budget.limit_seconds"):
+    with pytest.raises(ConfigError, match="batch_size"):
         load_training_config(bad, ROOT)
 
     document = yaml.safe_load((SCENARIO / "configs/learning/act_training.yaml").read_text())

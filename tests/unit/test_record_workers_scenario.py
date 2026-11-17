@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from collection_fixtures import SCENARIO_ID, build_collection_tree, sha
+from collection_fixtures import ROBOT, SCENARIO_ID, TASK, build_collection_tree, sha
 from dual_arm_runtime.offline import record, record_pool
 from dual_arm_runtime.offline.campaign_ledger import CampaignError
 from dual_arm_runtime.offline.record_workers import prepare_workers
@@ -17,7 +17,8 @@ from dual_arm_runtime.offline.scenario_selection import select_collection
 
 def _selection(tree):
     return select_collection(
-        scenario=SCENARIO_ID,
+        robot=ROBOT,
+        task=TASK,
         shared_root=tree.shared,
         project_root=tree.repo,
         require_parallel=True,
@@ -48,6 +49,8 @@ def test_workers_receive_binding_recipes_independent_identity_and_overrides(tmp_
         assert worker["binding"] == {
             "path": selection["binding"]["path"],
             "sha256": selection["binding"]["sha256"],
+            "robot": ROBOT,
+            "task": TASK,
             "scenario_id": SCENARIO_ID,
         }
         assert worker["recipes"]["runtime_teacher"]["sha256"] == sha(tree.runtime_recipe)
@@ -70,7 +73,7 @@ def test_workers_receive_binding_recipes_independent_identity_and_overrides(tmp_
         assert backend["robot"]["visualization_enabled"] is False
         assert backend["run"]["realtime_speed"] == 1.5
         assert backend["robot"]["profile"] == (
-            "/shared/scenarios/synthetic_stack/profiles/robot.json"
+            "/shared/scenarios/synthetic_sim/stack/profiles/robot.json"
         )
         assert runtime["robot_profile"] == str(
             (tree.scenario.root / "profiles/robot.json").resolve()
@@ -196,8 +199,10 @@ def test_record_worker_mode_passes_scenario_selection_to_pool(tmp_path, monkeypa
         [
             "--project-root",
             str(tree.repo),
-            "--scenario",
-            SCENARIO_ID,
+            "--robot",
+            ROBOT,
+            "--task",
+            TASK,
             "--shared-root",
             str(tree.shared),
             "--worker-manifest",
@@ -209,7 +214,7 @@ def test_record_worker_mode_passes_scenario_selection_to_pool(tmp_path, monkeypa
     assert captured["args"]["runtime_config"] == str(tree.runtime_recipe.resolve())
     assert captured["args"]["selection"]["binding"]["sha256"] == sha(tree.scenario.binding_path)
     assert captured["config"]["paths"]["ledger"] == (
-        "var/synthetic_stack/logs/campaign/attempts.jsonl"
+        "var/synthetic_sim/stack/logs/collection/attempts.jsonl"
     )
 
 
@@ -272,8 +277,10 @@ export.mkdir()
         [
             "--project-root",
             str(tree.repo),
-            "--scenario",
-            SCENARIO_ID,
+            "--robot",
+            ROBOT,
+            "--task",
+            TASK,
             "--shared-root",
             str(tree.shared),
             "--worker-manifest",
@@ -292,7 +299,7 @@ export.mkdir()
     }
     records = [
         json.loads(line)
-        for line in (tree.repo / "var/synthetic_stack/logs/campaign/attempts.jsonl")
+        for line in (tree.repo / "var/synthetic_sim/stack/logs/collection/attempts.jsonl")
         .read_text()
         .splitlines()
     ]

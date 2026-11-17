@@ -1,4 +1,4 @@
-"""Budgeted ACT training context, step loop and checkpoint finalization."""
+"""ACT training context, step loop and single-file model finalization."""
 
 from __future__ import annotations
 
@@ -13,8 +13,7 @@ from typing import Any
 
 import numpy as np
 
-from .budget import BudgetLedger, BudgetTicket
-from .checkpoints import load_checkpoint, save_checkpoint, validate_checkpoint_binding
+from .bundle import build_schema, save_model_package
 from .config import TrainingConfig
 from .console_progress import ConsoleProgress
 from .sample_filter import SampleFilterMask
@@ -28,6 +27,7 @@ from .training_support import (
     build_policy,
     build_processors,
     build_report,
+    new_model_name,
 )
 from .training_support import (
     emit as _emit,
@@ -40,15 +40,6 @@ from .training_support import (
 )
 from .training_support import (
     make_logger as _make_logger,
-)
-from .training_support import (
-    new_run_id as _new_run_id,
-)
-from .training_support import (
-    new_segment_id as _new_segment_id,
-)
-from .training_support import (
-    prepare_dir as _prepare_dir,
 )
 from .training_support import (
     process_batch as _process_batch,
@@ -66,18 +57,13 @@ class _TrainingContext:
     config: TrainingConfig
     audit: DatasetAudit
     sample_filter: SampleFilterMask | None
-    run_id: str
-    run_root: Path
+    model_name: str
+    model_dir: Path
     log_root: Path
-    segment_id: str
-    instance_id: str
     logger: Any
     metrics: MetricsWriter
-    budget: BudgetLedger
-    ticket: BudgetTicket | None
     started: float
     steps_total: int
-    resume: dict[str, Any] | None
     progress: ConsoleProgress | None = None
     selection: dict[str, Any] | None = None
     overrides: dict[str, Any] | None = None
@@ -85,9 +71,9 @@ class _TrainingContext:
     final_reason: str = "completed"
     interrupted: TrainingInterrupted | None = None
     original_error: BaseException | None = None
-    save_records: list[dict[str, Any]] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     policy: Any = None
+    act_config: Any = None
     optimizer: Any = None
     scheduler: Any = None
     pre: Any = None
@@ -97,38 +83,18 @@ class _TrainingContext:
     policy_loader: Any = None
     iterator: Iterator[Any] | None = None
     step: int = 0
+    best_step: int | None = None
     best_val: float | None = None
+    model_saved: bool = False
     loaded_backbone: int = 0
     weights_sha256: str = ""
     previous_sigint: Any = None
     previous_sigterm: Any = None
 
 
-def _resume_state(
-    config: TrainingConfig, resume_run: Path | None
-) -> tuple[str, Path, dict[str, Any] | None]:
-    if resume_run is not None:
-        run_root = resume_run.resolve()
-        if not run_root.is_dir():
-            raise TrainingError(f"resume run directory is missing: {run_root}")
-        latest = run_root / "latest.pt"
-        if not latest.is_file():
-            raise TrainingError(f"resume run has no latest.pt: {run_root}")
-        checkpoint = load_checkpoint(latest)
-        validate_checkpoint_binding(checkpoint, config)
-        if checkpoint.get("mode") != config.mode:
-            raise TrainingError("resume checkpoint mode differs")
-        return run_root.name, run_root, checkpoint
-    run_id = _new_run_id(config)
-    run_root = config.checkpoint.root / run_id
-    _prepare_dir(run_root)
-    return run_id, run_root, None
-
-
 def _create_context(
     config: TrainingConfig,
     allow_synthetic: bool,
-    resume_run: Path | None,
     max_steps: int | None,
     *,
     progress: ConsoleProgress | None = None,
@@ -141,27 +107,22 @@ def _create_context(
         config, allow_synthetic=allow_synthetic, require_full=config.mode == "full"
     )
     sample_filter = _sample_filter(config, audit)
-    run_id, run_root, resume = _resume_state(config, resume_run)
-    segment_id = _new_segment_id(run_id)
-    logger, log_root = _make_logger(config, run_id, segment_id)
+    model_name = new_model_name(config.checkpoint.root, config.logging.root)
+    model_dir = config.checkpoint.root / model_name
+    logger, log_root = _make_logger(config, model_name)
     context = _TrainingContext(
         config=config,
         audit=audit,
         sample_filter=sample_filter,
-        run_id=run_id,
-        run_root=run_root,
+        model_name=model_name,
+        model_dir=model_dir,
         log_root=log_root,
-        segment_id=segment_id,
-        instance_id=segment_id,
         logger=logger,
         metrics=MetricsWriter(log_root),
-        budget=BudgetLedger(config.budget.ledger, config.budget.lock, config.budget.limit_seconds),
-        ticket=None,
         started=time.monotonic(),
         steps_total=(
             config.mode_spec.steps if max_steps is None else min(config.mode_spec.steps, max_steps)
         ),
-        resume=resume,
         progress=progress,
         selection=selection,
         overrides=overrides,
@@ -177,34 +138,6 @@ def _request_stop(context: _TrainingContext):
             context.stop_signal = signum
 
     return request
-
-
-def _begin_budget(context: _TrainingContext) -> None:
-    config = context.config
-    mode = config.mode_spec
-    context.ticket = context.budget.begin(
-        run_id=context.run_id,
-        segment_id=context.segment_id,
-        mode=config.mode,
-        reserved_seconds=mode.reserve_seconds,
-        config_sha256=config.sha256,
-        source=str(config.source),
-        instance_id=context.instance_id,
-    )
-    _emit(
-        context.logger,
-        "training.start",
-        mode=config.mode,
-        seed=config.seed,
-        device=config.device,
-        steps=context.steps_total,
-        budget_run_id=context.run_id,
-        budget_segment_id=context.segment_id,
-        budget_instance_id=context.instance_id,
-        budget_reserved_s=mode.reserve_seconds,
-        budget_used_before_s=context.ticket.used_before,
-        resumed=context.resume is not None,
-    )
 
 
 def _seed_everything(config: TrainingConfig) -> None:
@@ -242,44 +175,22 @@ def _prepare_datasets(context: _TrainingContext) -> None:
         )
 
 
-def _restore_checkpoint(context: _TrainingContext) -> None:
-    import torch
-
-    checkpoint = context.resume
-    if checkpoint is None:
-        return
-    context.policy.load_state_dict(checkpoint["model"], strict=True)
-    context.optimizer.load_state_dict(checkpoint["optimizer"])
-    if checkpoint.get("scheduler") is not None:
-        context.scheduler.load_state_dict(checkpoint["scheduler"])
-    rng = checkpoint.get("rng") or {}
-    if "python" in rng:
-        random.setstate(rng["python"])
-    if "numpy" in rng:
-        np.random.set_state(rng["numpy"])
-    if "torch" in rng:
-        torch.set_rng_state(rng["torch"])
-    if torch.cuda.is_available() and "cuda" in rng:
-        torch.cuda.set_rng_state_all(rng["cuda"])
-    context.step = int(checkpoint.get("step", 0))
-    context.best_val = checkpoint.get("best_val_l1")
-
-
 def _prepare_model(context: _TrainingContext) -> None:
     import torch
 
     config = context.config
-    context.policy, act_config, context.loaded_backbone, context.weights_sha256 = build_policy(
-        config
+    context.policy, context.act_config, context.loaded_backbone, context.weights_sha256 = (
+        build_policy(config)
     )
-    context.pre, context.post = build_processors(config, context.train_dataset, act_config)
+    context.pre, context.post = build_processors(
+        config, context.train_dataset, context.act_config
+    )
     context.optimizer = torch.optim.AdamW(
         context.policy.parameters(), lr=config.lr, weight_decay=config.weight_decay
     )
     context.scheduler = torch.optim.lr_scheduler.ConstantLR(
         context.optimizer, factor=1.0, total_iters=max(1, context.steps_total)
     )
-    _restore_checkpoint(context)
 
 
 def _emit_model_ready(context: _TrainingContext) -> None:
@@ -304,7 +215,7 @@ def _emit_model_ready(context: _TrainingContext) -> None:
         ),
         train_excluded_frames=(0 if sample_filter is None else sample_filter.excluded_frames),
         sample_filter_digest=("" if sample_filter is None else sample_filter.digest),
-        sample_filter_sha256=("" if sample_filter is None else sample_filter.file_sha256),
+        sample_filter_sha256=("" if sample_filter is None else sample_filter.source_sha256),
         validation_frames=(
             0 if context.validation_dataset is None else len(context.validation_dataset)
         ),
@@ -315,15 +226,13 @@ def _emit_model_ready(context: _TrainingContext) -> None:
             0 if context.validation_dataset is None else len(context.audit.validation_episodes)
         ),
         parameters=sum(parameter.numel() for parameter in context.policy.parameters()),
-        resumed=context.resume is not None,
     )
 
 
 def _prepare_training_context(context: _TrainingContext) -> None:
     config = context.config
-    _begin_budget(context)
     if context.progress is not None:
-        context.progress.message(f"训练目录：{context.run_root}")
+        context.progress.message(f"模型目录：{context.model_dir}")
         context.progress.phase("初始化模型和数据")
     _seed_everything(config)
     _prepare_datasets(context)
@@ -363,8 +272,6 @@ def _train_step(context: _TrainingContext, amp: tuple[bool, Any, Any]) -> dict[s
     config = context.config
     if context.stop_signal is not None:
         raise _signal_reason(context)
-    assert context.ticket is not None
-    context.ticket.check(config.budget.stop_margin_seconds)
     try:
         batch = next(context.iterator)
     except StopIteration:
@@ -405,7 +312,6 @@ def _step_row(context: _TrainingContext, metrics: dict[str, Any]) -> dict[str, A
     if torch.cuda.is_available():
         vram_alloc = torch.cuda.max_memory_allocated() / (1024 * 1024)
         vram_reserved = torch.cuda.max_memory_reserved() / (1024 * 1024)
-    assert context.ticket is not None
     return {
         "step": context.step,
         "phase": "train",
@@ -415,36 +321,82 @@ def _step_row(context: _TrainingContext, metrics: dict[str, Any]) -> dict[str, A
         "elapsed_seconds": time.monotonic() - context.started,
         "vram_allocated_mb": vram_alloc,
         "vram_reserved_mb": vram_reserved,
-        "budget_remaining_s": context.ticket.remaining_seconds,
     }
 
 
-def _save_checkpoint(context: _TrainingContext, kind: str, reason: str) -> None:
-    if context.progress is not None:
-        context.progress.detail(f"保存 {kind} 检查点")
-    record = save_checkpoint(
-        context.run_root / f"{kind}.pt",
-        config=context.config,
-        policy=context.policy,
-        optimizer=context.optimizer,
-        scheduler=context.scheduler,
-        step=context.step,
-        best_val=context.best_val,
-        reason=reason,
-        run_id=context.run_id,
-        segment_id=context.segment_id,
-        instance_id=context.instance_id,
-    )
-    context.save_records.append(record)
-    _emit(context.logger, "training.checkpoint", path=record["path"], step=context.step)
-
-
-def _maybe_checkpoint(context: _TrainingContext) -> None:
+def _training_args(context: _TrainingContext) -> dict[str, Any]:
     config = context.config
-    due = context.step % config.save_every_steps == 0 or context.step == context.steps_total
-    if due and config.checkpoint.keep_latest:
-        reason = "periodic" if context.step % config.save_every_steps == 0 else "final"
-        _save_checkpoint(context, "latest", reason)
+    selection = context.selection or {}
+    model_values = config.model.model_dump(mode="json")
+    model_values.pop("weights_path", None)
+    training_values = {
+        "batch_size": config.batch_size,
+        "num_workers": config.num_workers,
+        "pin_memory": config.pin_memory,
+        "prefetch_factor": config.prefetch_factor,
+        "use_amp": config.use_amp,
+        "amp_dtype": config.amp_dtype,
+        "lr": config.lr,
+        "weight_decay": config.weight_decay,
+        "grad_clip_norm": config.grad_clip_norm,
+        "log_every_steps": config.log_every_steps,
+        "val_every_steps": config.val_every_steps,
+        "val_batches": config.val_batches,
+        "deterministic": config.deterministic,
+    }
+    return {
+        "model_name": "act",
+        "trained_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "robot": selection.get("robot", ""),
+        "task": selection.get("task", ""),
+        "mode": config.mode,
+        "seed": config.seed,
+        "steps_completed": context.step,
+        "best_step": context.best_step,
+        "best_val_l1": context.best_val,
+        "elapsed_seconds": time.monotonic() - context.started,
+        "dataset_root": str(config.data_root),
+        "model_hyperparameters": model_values,
+        "training_hyperparameters": training_values,
+    }
+
+
+def _schema(context: _TrainingContext) -> tuple[dict, dict]:
+    profile = json.loads(context.config.dataset.profile_path.read_text(encoding="utf-8"))
+    return build_schema(context.config, profile)
+
+
+def _save_model(context: _TrainingContext, *, step: int) -> None:
+    if context.policy is None or context.act_config is None:
+        return
+    if context.progress is not None:
+        context.progress.detail("保存 model.safetensors")
+    observation, action = _schema(context)
+    save_model_package(
+        context.model_dir,
+        policy=context.policy,
+        act_config=context.act_config,
+        dataset_root=context.config.data_root,
+        step=step,
+        synthetic=context.audit.synthetic,
+        config_sha256=context.config.sha256,
+        observation_schema=observation,
+        action_schema=action,
+        training_args=_training_args(context),
+    )
+    context.model_saved = True
+    _emit(context.logger, "training.model", path=str(context.model_dir), step=step)
+
+
+def _write_training_args(context: _TrainingContext) -> None:
+    if not (context.model_dir / "model.safetensors").is_file():
+        return
+    import yaml
+
+    (context.model_dir / "training_args.yaml").write_text(
+        yaml.safe_dump(_training_args(context), sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
 
 
 def _maybe_validate(context: _TrainingContext) -> None:
@@ -466,8 +418,8 @@ def _maybe_validate(context: _TrainingContext) -> None:
     _emit(context.logger, "training.validation", **validation)
     if context.best_val is None or validation["val_l1"] < context.best_val:
         context.best_val = validation["val_l1"]
-        if config.checkpoint.keep_best:
-            _save_checkpoint(context, "best", "best_validation")
+        context.best_step = context.step
+        _save_model(context, step=context.step)
 
 
 def _run_training_steps(context: _TrainingContext) -> None:
@@ -481,35 +433,14 @@ def _run_training_steps(context: _TrainingContext) -> None:
             row = _step_row(context, metrics)
             context.metrics.write(row)
             _emit(context.logger, "training.step", **row)
-        _maybe_checkpoint(context)
         _maybe_validate(context)
         if context.progress is not None:
             detail = f"loss={metrics['loss']:.5f}"
             if context.best_val is not None:
                 detail += f" · best_val={context.best_val:.5f}"
             context.progress.detail(detail)
-        assert context.ticket is not None
-        if context.ticket.remaining_seconds <= config.budget.stop_margin_seconds:
-            context.final_reason = "budget_near_exhausted"
-            break
     if context.stop_signal is not None and context.final_reason == "completed":
         raise _signal_reason(context)
-
-
-def _save_final_checkpoints(context: _TrainingContext) -> None:
-    config = context.config
-    if context.policy is None or context.optimizer is None or context.scheduler is None:
-        return
-    if config.checkpoint.keep_latest:
-        try:
-            _save_checkpoint(context, "latest", context.final_reason)
-        except BaseException as error:
-            context.errors.append(f"latest checkpoint save failed: {type(error).__name__}: {error}")
-    if config.checkpoint.keep_final:
-        try:
-            _save_checkpoint(context, "final", context.final_reason)
-        except BaseException as error:
-            context.errors.append(f"final checkpoint save failed: {type(error).__name__}: {error}")
 
 
 def _close_logging(context: _TrainingContext) -> None:
@@ -531,8 +462,6 @@ def _close_logging(context: _TrainingContext) -> None:
                 "training.end",
                 reason=event_reason,
                 step=context.step,
-                segment_id=context.segment_id,
-                instance_id=context.instance_id,
             )
         except BaseException as error:
             context.errors.append(f"training.end event failed: {type(error).__name__}: {error}")
@@ -560,9 +489,8 @@ def _report_payload(context: _TrainingContext) -> dict[str, Any]:
     return build_report(
         config=config,
         audit=context.audit,
-        run_id=context.run_id,
-        segment_id=context.segment_id,
-        instance_id=context.instance_id,
+        model_name=context.model_name,
+        model_dir=context.model_dir,
         reason=reason,
         step=context.step,
         steps_total=context.steps_total,
@@ -570,8 +498,8 @@ def _report_payload(context: _TrainingContext) -> dict[str, Any]:
         policy=context.policy,
         loaded_backbone=context.loaded_backbone,
         started=context.started,
+        best_step=context.best_step,
         best_val=context.best_val,
-        save_records=context.save_records,
         errors=context.errors,
         peak_alloc=peak_alloc,
         peak_reserved=peak_reserved,
@@ -590,34 +518,33 @@ def _write_report(context: _TrainingContext, report: dict[str, Any]) -> None:
         context.errors.append(f"training report write failed: {type(error).__name__}: {error}")
 
 
-def _finish_budget(context: _TrainingContext, report: dict[str, Any]) -> None:
-    if context.ticket is None:
-        return
-    reason_for_report = "failed" if context.errors else context.final_reason
-    try:
-        context.ticket.finish(reason_for_report, reason=context.final_reason)
-    except BaseException as error:
-        context.errors.append(f"budget finish failed: {type(error).__name__}: {error}")
-        report["reason"] = "failed"
-        report["errors"] = list(context.errors)
-        try:
-            payload = json.dumps(report, indent=2, allow_nan=False, default=str) + "\n"
-            (context.log_root / "training_report.json").write_text(payload)
-        except OSError as report_error:
-            context.errors.append(f"failure report update failed: {report_error}")
-
-
 def _restore_signals(context: _TrainingContext) -> None:
     signal.signal(signal.SIGINT, context.previous_sigint)
     signal.signal(signal.SIGTERM, context.previous_sigterm)
 
 
+def _save_final_model(context: _TrainingContext) -> None:
+    if (context.model_dir / "model.safetensors").is_file():
+        return
+    if context.final_reason == "failed":
+        return
+    if context.policy is None or context.act_config is None:
+        return
+    try:
+        _save_model(context, step=context.step)
+    except BaseException as error:
+        context.errors.append(f"model save failed: {type(error).__name__}: {error}")
+
+
 def _finalize_training(context: _TrainingContext) -> dict[str, Any]:
-    _save_final_checkpoints(context)
+    _save_final_model(context)
+    try:
+        _write_training_args(context)
+    except BaseException as error:
+        context.errors.append(f"training args write failed: {type(error).__name__}: {error}")
     _close_logging(context)
     report = _report_payload(context)
     _write_report(context, report)
-    _finish_budget(context, report)
     _restore_signals(context)
     return report
 

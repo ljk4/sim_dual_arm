@@ -24,8 +24,6 @@
 # control.stop_timeout_s：停止动作等待超时，单位 s。
 # control.terminal_timeout_s：等待命令进入终态的超时，单位 s。
 # policy.endpoint：gRPC Policy 服务地址。
-# policy.model_bundle_digest：模型 bundle 摘要；模板中的占位符由 prepare 替换。
-# policy.processor_digest：模型预处理/后处理身份摘要。
 # policy.allow_test_policy：是否允许测试策略。
 # policy.expected_test_only：是否要求本次运行必须为 test_only 策略。
 # policy.task_id：任务标识。
@@ -65,11 +63,11 @@
 # seconds.  Three RGB cameras and the full 16-joint order are fixed by the
 # referenced profile and the Policy service configuration.
 schema_version: 1
-robot_profile: ../../../shared/scenarios/panda_stack/profiles/robots/panda_stack_v1/profile.json
-observation_schema: ../../../shared/scenarios/panda_stack/profiles/observations/panda_rgb_joint_v1.json
-action_schema: ../../../shared/scenarios/panda_stack/profiles/actions/panda_joint_position_v1.json
-control_constraints: ../../../shared/scenarios/panda_stack/profiles/control/panda_control_v1.yaml
-follower_config: ../../../shared/scenarios/panda_stack/profiles/control/panda_follower_v1.yaml
+robot_profile: ../../../shared/scenarios/panda_sim/stack/profiles/robots/panda_stack_v1/profile.json
+observation_schema: ../../../shared/scenarios/panda_sim/stack/profiles/observations/panda_rgb_joint_v1.json
+action_schema: ../../../shared/scenarios/panda_sim/stack/profiles/actions/panda_joint_position_v1.json
+control_constraints: ../../../shared/scenarios/panda_sim/stack/profiles/control/panda_control_v1.yaml
+follower_config: ../../../shared/scenarios/panda_sim/stack/profiles/control/panda_follower_v1.yaml
 robot_namespace: /robot
 
 action_source: policy
@@ -103,8 +101,6 @@ control:
 # task success.
 policy:
   endpoint: fake-policy:50051
-  model_bundle_digest: 9f2c67c0c4b0a4f6f5a0d9b6c1f8f0c5c4f3e2d1a0b9c8d7e6f5a4b3c2d1e0f9
-  processor_digest: 1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809
   allow_test_policy: true
   expected_test_only: true
   task_id: diagnostic-policy-stream

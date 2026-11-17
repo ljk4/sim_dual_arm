@@ -60,14 +60,14 @@ from robot_backend_sim.config.scenario_config import ROBOT_REFERENCE_FIELDS  # n
 from robot_contracts.models import Target  # noqa: E402
 from robot_contracts.profiles import load_profile  # noqa: E402
 
-SCENARIO = ROOT / "shared/scenarios/marvin_handover"
+SCENARIO = ROOT / "shared/scenarios/marvin_sim/handover"
 RECIPE = Path(
     os.environ.get(
         "MARVIN_BACKEND_CONFIG",
         str(SCENARIO / "configs/simulation/backend/backend_marvin_control.yaml"),
     )
 )
-EVIDENCE_DIR = Path(os.environ.get("P02A_EVIDENCE_DIR", "/data/marvin_handover/diagnostics/p02a"))
+EVIDENCE_DIR = Path(os.environ.get("P02A_EVIDENCE_DIR", "/data/marvin_sim/handover/diagnostics/p02a"))
 PROFILE_PATH = SCENARIO / "profiles/robots/marvin_handover_v1/profile.json"
 SCHEMAS = ROOT / "shared/common/interfaces/schemas"
 PROFILE = load_profile(PROFILE_PATH, SCHEMAS)

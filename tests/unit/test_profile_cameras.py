@@ -14,7 +14,7 @@ from robot_contracts.profiles import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
-PROFILES = ROOT / "shared/scenarios/panda_stack/profiles"
+PROFILES = ROOT / "shared/scenarios/panda_sim/stack/profiles"
 SCHEMAS = ROOT / "shared/common/interfaces/schemas"
 PANDA_PROFILE = PROFILES / "robots/panda_stack_v1/profile.json"
 PANDA_OBSERVATION = PROFILES / "observations/panda_rgb_joint_v1.json"
@@ -193,7 +193,7 @@ def test_binding_mismatch_is_rejected(change):
 
 
 def test_camera_digest_is_the_scene_description_semantic_hash():
-    scene_path = ROOT / "shared/scenarios/panda_stack/configs/simulation/scene/panda_stack.yaml"
+    scene_path = ROOT / "shared/scenarios/panda_sim/stack/configs/simulation/scene/panda_stack.yaml"
     raw_cameras = load_document(scene_path)["cameras"]
     profile = load_profile(PANDA_PROFILE, SCHEMAS)
     for camera in profile.cameras:

@@ -7,7 +7,7 @@ import pytest
 from model_helpers import replace
 
 ROOT = Path(__file__).resolve().parents[2]
-SCENARIO = ROOT / "shared/scenarios/panda_stack"
+SCENARIO = ROOT / "shared/scenarios/panda_sim/stack"
 PROFILES = SCENARIO / "profiles"
 SIM_SRC = ROOT / "simulation/mujoco/src"
 CONTRACTS = ROOT / "shared/common/python/contracts/src"

@@ -21,7 +21,7 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-CONFIG_PATH = ROOT / "shared/scenarios/panda_stack/profiles/control/panda_follower_v1.yaml"
+CONFIG_PATH = ROOT / "shared/scenarios/panda_sim/stack/profiles/control/panda_follower_v1.yaml"
 PRODUCER = "fixture-producer/v1"
 
 
@@ -276,7 +276,7 @@ def test_follower_config_values_and_round_trip(tmp_path):
     from robot_backend_sim.config.follower_config import load_follower_config, parse_follower_config
 
     config = load_follower_config(CONFIG_PATH)
-    assert config.target_count == 10
+    assert config.target_count == 20
     assert config.max_target_deviations == (
         (0.30,) * 6 + (0.40, 0.04) + (0.30,) * 6 + (0.40, 0.04)
     )

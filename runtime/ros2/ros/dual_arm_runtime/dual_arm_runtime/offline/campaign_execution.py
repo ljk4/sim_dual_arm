@@ -4,13 +4,36 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import signal
 import subprocess
 import time
 from pathlib import Path
 from typing import Any
 
+from robot_contracts.project_paths import project_path
+
 from dual_arm_runtime.offline.campaign_ledger import Attempt, CampaignError
+
+
+def attempt_logs_root(config: dict[str, Any], project_root: Path) -> Path:
+    """Attempt runtime logs live beside the campaign ledger, never in a dataset."""
+    ledger = project_path(str(config["paths"]["ledger"]), project_root)
+    return ledger.parent / "attempts"
+
+
+def attempt_log_directory(
+    config: dict[str, Any], project_root: Path, attempt: Attempt
+) -> Path:
+    return attempt_logs_root(config, project_root) / attempt.directory.name
+
+
+def discard_unqualified_attempt(
+    directory: Path, classification: dict[str, Any]
+) -> None:
+    """Keep ``datasets/raw`` clean: only qualified episodes survive."""
+    if not classification.get("qualified"):
+        shutil.rmtree(directory, ignore_errors=True)
 
 
 def read_json(path: Path) -> dict[str, Any] | None:
@@ -219,7 +242,10 @@ def reject_docker_command(command: list[str], label: str) -> None:
 __all__ = [
     "LaunchInterrupted",
     "acquire_run_lock",
+    "attempt_log_directory",
+    "attempt_logs_root",
     "classify",
+    "discard_unqualified_attempt",
     "episode_manifest",
     "episode_task_result",
     "handle_sigterm",

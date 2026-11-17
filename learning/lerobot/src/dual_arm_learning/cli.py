@@ -1,4 +1,4 @@
-"""Public command line for conversion, training, budget and model bundles."""
+"""Public command line for dataset conversion and ACT training."""
 
 from __future__ import annotations
 
@@ -14,20 +14,13 @@ from pathlib import Path
 
 from robot_contracts.project_paths import project_path
 
-from .budget import BudgetError, BudgetLedger
-from .bundle import BundleError, export_bundle, load_bundle
-from .checkpoints import CheckpointError
 from .config import ConfigError, load_dataset_config, load_training_config
 from .console_progress import OperatorConsole
 from .dataset import ExportError, convert
-from .sample_filter import (
-    FilterError,
-    build_filter_manifest,
-    load_filter_mask,
-    write_filter_manifest,
-)
+from .sample_filter import FilterError
 from .scenario import (
     ScenarioSelectionError,
+    artifact_paths,
     check_dataset_recipe_consistency,
     check_profile_consistency,
     select_scenario,
@@ -46,13 +39,11 @@ def _print(value: object) -> None:
 
 def _add_selection_arguments(parser: argparse.ArgumentParser) -> None:
     """Every command needs one explicit recipe source; there is no default."""
-    selection = parser.add_mutually_exclusive_group(required=True)
-    selection.add_argument(
-        "--config", type=Path, default=None, help="direct dataset/training recipe path"
+    parser.add_argument("--config", type=Path, default=None, help="direct recipe path")
+    parser.add_argument(
+        "--robot", help="robot id under <shared-root>/scenarios/<robot>/<task>/"
     )
-    selection.add_argument(
-        "--scenario", help="scenario id under <shared-root>/scenarios/<id>/binding.yaml"
-    )
+    parser.add_argument("--task", help="task id for --robot")
     parser.add_argument(
         "--shared-root", type=Path, default=None, help="shared tree containing scenarios/"
     )
@@ -90,7 +81,6 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser = sub.add_parser("train", help="run ACT smoke/overfit/full training")
     _add_selection_arguments(train_parser)
     train_parser.add_argument("--mode", choices=("smoke", "overfit", "full"), default=None)
-    train_parser.add_argument("--resume-run", type=Path, default=None)
     train_parser.add_argument("--max-steps", type=int, default=None)
     train_parser.add_argument("--data-root", type=Path, default=None)
     train_parser.add_argument("--allow-synthetic", action="store_true")
@@ -104,14 +94,6 @@ def build_parser() -> argparse.ArgumentParser:
         )
         command_parser.add_argument("--log-file", type=Path, help="detail log with --progress")
 
-    filter_parser = sub.add_parser(
-        "filter-anchors", help="write an auditable static-anchor sampling mask"
-    )
-    filter_parser.add_argument("--config", type=Path, required=True)
-    filter_parser.add_argument("--dataset-root", type=Path, required=True)
-    filter_parser.add_argument("--select", type=Path, required=True)
-    filter_parser.add_argument("--output", type=Path, required=True)
-
     verify_parser = sub.add_parser(
         "verify-data", help="check the configured split, hashes and source files"
     )
@@ -119,57 +101,65 @@ def build_parser() -> argparse.ArgumentParser:
     verify_parser.add_argument("--mode", choices=("smoke", "overfit", "full"), default=None)
     verify_parser.add_argument("--data-root", type=Path, default=None)
     verify_parser.add_argument("--allow-synthetic", action="store_true")
-
-    budget_parser = sub.add_parser("budget-status", help="show the append-only training budget")
-    _add_selection_arguments(budget_parser)
-
-    bundle_parser = sub.add_parser("bundle", help="export a safetensors-only offline ACT bundle")
-    _add_selection_arguments(bundle_parser)
-    bundle_parser.add_argument(
-        "--progress",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help="print resolved config paths and parameters before exporting",
-    )
-    bundle_parser.add_argument("--mode", choices=("smoke", "overfit", "full"), default=None)
-    bundle_parser.add_argument("--run", type=Path, required=True)
-    bundle_parser.add_argument("--output", type=Path, required=True)
-    bundle_parser.add_argument("--checkpoint", default="best.pt")
-    bundle_parser.add_argument("--data-root", type=Path, default=None)
-    bundle_parser.add_argument("--allow-synthetic", action="store_true")
-
-    inspect_parser = sub.add_parser(
-        "verify-bundle", help="verify and load a bundle without predicting"
-    )
-    inspect_parser.add_argument("--bundle", type=Path, required=True)
-    inspect_parser.add_argument("--device", default="cpu")
     return parser
 
 
-def _training_config(args: argparse.Namespace, config_path: Path) -> object:
+def _target(args: argparse.Namespace) -> tuple[str, str] | None:
+    if args.robot is None and args.task is None:
+        return None
+    if args.robot is None or args.task is None:
+        raise ScenarioSelectionError("--robot and --task must be passed together")
+    if args.config is not None:
+        raise ScenarioSelectionError("--config cannot be combined with --robot/--task")
+    return args.robot, args.task
+
+
+def _set_paths(args: argparse.Namespace) -> set[str]:
+    return {
+        item.split("=", 1)[0]
+        for item in getattr(args, "overrides", ())
+        if "=" in item
+    }
+
+
+def _training_config(
+    args: argparse.Namespace, config_path: Path, selection: object | None = None
+) -> object:
     config = load_training_config(config_path, args.project_root, overrides=args.overrides)
+    updates: dict[str, object] = {}
     if getattr(args, "mode", None):
-        config = config.model_copy(update={"mode": args.mode})
+        updates["mode"] = args.mode
     if getattr(args, "data_root", None):
-        data_root = project_path(args.data_root, args.project_root)
-        config = config.model_copy(update={"data_root": data_root})
-    return config
+        updates["data_root"] = project_path(args.data_root, args.project_root)
+    elif selection is not None:
+        set_paths = _set_paths(args)
+        paths = artifact_paths(selection.robot, selection.task, args.project_root)
+        if "data.root" not in set_paths:
+            updates["data_root"] = paths["dataset"]
+        if "cache_root" not in set_paths:
+            updates["cache_root"] = paths["cache"]
+        if "checkpoint.root" not in set_paths:
+            updates["checkpoint"] = config.checkpoint.model_copy(
+                update={"root": paths["models"]}
+            )
+        if "logging.root" not in set_paths:
+            updates["logging"] = config.logging.model_copy(
+                update={"root": paths["training_logs"]}
+            )
+    return config.model_copy(update=updates)
 
 
 def _resolve(path: Path, root: Path) -> Path:
     return project_path(path, root)
 
 
-def _scenario_logs_root(args: argparse.Namespace, root: Path) -> Path:
-    segment = args.scenario or "_direct"
-    return project_path(Path("var") / segment / "logs", root)
-
-
 def _learning_selection(args: argparse.Namespace, root: Path, *, recipe_field: str):
-    """Return the real recipe path and the scenario provenance (or None)."""
-    if args.scenario is not None:
+    """Return the real recipe path and the robot/task provenance (or None)."""
+    target = _target(args)
+    if target is not None:
         selection = select_scenario(
-            scenario=args.scenario,
+            robot=target[0],
+            task=target[1],
             recipe_field=recipe_field,
             stage="learning",
             project_root=root,
@@ -177,7 +167,9 @@ def _learning_selection(args: argparse.Namespace, root: Path, *, recipe_field: s
         )
         return selection.recipe_path, selection
     if args.shared_root is not None:
-        raise ScenarioSelectionError("--shared-root requires --scenario")
+        raise ScenarioSelectionError("--shared-root requires --robot/--task")
+    if args.config is None:
+        raise ScenarioSelectionError("either --robot/--task or --config is required")
     return _resolve(args.config, root), None
 
 
@@ -191,7 +183,7 @@ def _check_selection(
         check_dataset_recipe_consistency(selection, dataset_config_path)
 
 
-def _scenario_manifest(selection, *, dataset_recipe: bool = False) -> dict | None:
+def _selection_manifest(selection, *, dataset_recipe: bool = False) -> dict | None:
     if selection is None:
         return None
     return selection.summary(include_dataset_recipe=dataset_recipe)
@@ -205,12 +197,6 @@ def _training_overrides(args: argparse.Namespace, root: Path) -> dict[str, objec
     max_steps = getattr(args, "max_steps", None)
     if max_steps is not None:
         overrides["max_steps"] = {"value": max_steps, "source": "argument"}
-    resume_run = getattr(args, "resume_run", None)
-    if resume_run is not None:
-        overrides["resume_run"] = {
-            "value": str(_resolve(resume_run, root)),
-            "source": "argument",
-        }
     data_root = getattr(args, "data_root", None)
     if data_root is not None:
         overrides["data_root"] = {
@@ -240,12 +226,19 @@ def _print_effective_config(
 ) -> None:
     print(f"=== {title} ===", flush=True)
     if selection is not None:
-        print(f"方案 (scenario): {selection.scenario_id}", flush=True)
+        print(f"机器人/任务:     {selection.robot}/{selection.task}", flush=True)
         print(f"Binding 文件:    {selection.resolved.path}", flush=True)
     print(f"配置文件路径:    {config_path}", flush=True)
     print("--- 详细参数 ---", flush=True)
     print(json.dumps(config.model_dump(mode="json"), indent=2, ensure_ascii=False), flush=True)
     print("=" * (len(title) + 8), flush=True)
+
+
+def _logs_root(args: argparse.Namespace, root: Path) -> Path:
+    target = _target(args)
+    if target is not None:
+        return artifact_paths(target[0], target[1], root)["logs"]
+    return project_path(Path("var") / "_direct" / "logs", root)
 
 
 def _command_convert(args: argparse.Namespace, root: Path) -> int:
@@ -254,6 +247,15 @@ def _command_convert(args: argparse.Namespace, root: Path) -> int:
     _check_selection(selection, profile_path=config.profile_path)
     changes: dict[str, object] = {}
     overrides: dict[str, object] = {}
+    if selection is not None:
+        set_paths = _set_paths(args)
+        paths = artifact_paths(selection.robot, selection.task, root)
+        if "select" not in set_paths:
+            changes["select_path"] = paths["select"]
+        if "output_root" not in set_paths:
+            changes["output_root"] = paths["dataset"]
+        if "cache_root" not in set_paths:
+            changes["cache_root"] = paths["cache"]
     if args.select is not None:
         changes["select_path"] = _resolve(args.select, root)
         overrides["select"] = {"value": str(changes["select_path"]), "source": "argument"}
@@ -277,7 +279,7 @@ def _command_convert(args: argparse.Namespace, root: Path) -> int:
     ]
     if args.progress:
         _print_effective_config("数据转换配置与详细参数", config_path, selection, config)
-    default_log = _scenario_logs_root(args, root) / "convert" / f"convert-{time.time_ns()}.log"
+    default_log = _logs_root(args, root) / "convert" / f"convert-{time.time_ns()}.log"
     with _operator_console(args, "数据转换配置", settings, default_log) as console:
         manifest = convert(
             select_path=config.select_path,
@@ -286,7 +288,7 @@ def _command_convert(args: argparse.Namespace, root: Path) -> int:
             replace=args.replace,
             synthetic=args.synthetic,
             progress=None if console is None else console.progress,
-            selection=_scenario_manifest(selection),
+            selection=_selection_manifest(selection),
             overrides=overrides or None,
         )
     if args.progress:
@@ -316,7 +318,7 @@ def _command_convert(args: argparse.Namespace, root: Path) -> int:
 
 def _command_train(args: argparse.Namespace, root: Path) -> int:
     config_path, selection = _learning_selection(args, root, recipe_field="training")
-    config = _training_config(args, config_path)
+    config = _training_config(args, config_path, selection)
     _check_selection(
         selection,
         profile_path=config.dataset.profile_path,
@@ -333,7 +335,8 @@ def _command_train(args: argparse.Namespace, root: Path) -> int:
         f"学习率：{config.lr:g}；AMP：{config.amp_dtype if config.use_amp else '关闭'}；"
         f"数据 worker：{config.num_workers}",
         f"数据集：{config.data_root}",
-        f"验证：每 {config.val_every_steps} step；检查点：每 {config.save_every_steps} step",
+        f"模型目录：{config.checkpoint.root}",
+        f"验证：每 {config.val_every_steps} step",
     ]
     if args.progress:
         _print_effective_config("ACT 训练配置与详细参数", config_path, selection, config)
@@ -344,10 +347,9 @@ def _command_train(args: argparse.Namespace, root: Path) -> int:
         report = train(
             config,
             allow_synthetic=args.allow_synthetic,
-            resume_run=None if args.resume_run is None else _resolve(args.resume_run, root),
             max_steps=args.max_steps,
             progress=None if console is None else console.progress,
-            selection=_scenario_manifest(selection, dataset_recipe=True),
+            selection=_selection_manifest(selection, dataset_recipe=True),
             overrides=_training_overrides(args, root) or None,
         )
     if args.progress:
@@ -355,44 +357,19 @@ def _command_train(args: argparse.Namespace, root: Path) -> int:
             f"训练结束：{report['reason']}；{report['steps']}/{steps} step；"
             f"best_val_l1={report['best_val_l1']}；用时 {report['duration_seconds']:.1f}s"
         )
-        print(f"run_dir: {config.checkpoint.root / report['run_id']}")
+        print(f"model_dir: {report['model_dir']}")
         return 0
     _print(
         {
             "status": report["reason"],
-            "run_id": report["run_id"],
+            "model_name": report["model_name"],
             "mode": report["mode"],
             "steps": report["steps"],
             "device": report["device"],
+            "best_step": report["best_step"],
             "best_val_l1": report["best_val_l1"],
             "duration_seconds": report["duration_seconds"],
-            "run_dir": str(config.checkpoint.root / report["run_id"]),
-        }
-    )
-    return 0
-
-
-def _command_filter(args: argparse.Namespace, root: Path) -> int:
-    document = build_filter_manifest(
-        rule_path=_resolve(args.config, root),
-        dataset_root=_resolve(args.dataset_root, root),
-        select_path=_resolve(args.select, root),
-    )
-    target = write_filter_manifest(document, _resolve(args.output, root))
-    mask = load_filter_mask(target)
-    training = document["training"]
-    _print(
-        {
-            "status": "complete",
-            "output": str(target),
-            "filter_digest": mask.digest,
-            "mask_sha256": mask.file_sha256,
-            "training_source_frames": mask.source_frames,
-            "training_eligible_frames": len(mask.eligible_indices),
-            "training_excluded_frames": mask.excluded_frames,
-            "training_reduction_ratio": training["reduction_ratio"],
-            "validation_filtered": document["validation"]["filtered"],
-            "validation_frames": document["validation"]["kept_frames"],
+            "model_dir": report["model_dir"],
         }
     )
     return 0
@@ -400,7 +377,7 @@ def _command_filter(args: argparse.Namespace, root: Path) -> int:
 
 def _command_verify_data(args: argparse.Namespace, root: Path) -> int:
     config_path, selection = _learning_selection(args, root, recipe_field="training")
-    config = _training_config(args, config_path)
+    config = _training_config(args, config_path, selection)
     _check_selection(
         selection,
         profile_path=config.dataset.profile_path,
@@ -415,80 +392,10 @@ def _command_verify_data(args: argparse.Namespace, root: Path) -> int:
     return 0
 
 
-def _command_budget(args: argparse.Namespace, root: Path) -> int:
-    config_path, selection = _learning_selection(args, root, recipe_field="training")
-    config = _training_config(args, config_path)
-    _check_selection(
-        selection,
-        profile_path=config.dataset.profile_path,
-        dataset_config_path=config.dataset_config_path,
-    )
-    ledger = BudgetLedger(config.budget.ledger, config.budget.lock, config.budget.limit_seconds)
-    _print(ledger.status())
-    return 0
-
-
-def _command_bundle(args: argparse.Namespace, root: Path) -> int:
-    config_path, selection = _learning_selection(args, root, recipe_field="training")
-    config = _training_config(args, config_path)
-    _check_selection(
-        selection,
-        profile_path=config.dataset.profile_path,
-        dataset_config_path=config.dataset_config_path,
-    )
-    run = _resolve(args.run, root)
-    output = _resolve(args.output, root)
-    if args.progress:
-        _print_effective_config("Bundle 导出配置与详细参数", config_path, selection, config)
-        print(f"训练目录 (run):  {run}", flush=True)
-        print(f"导出目录 (out):  {output}", flush=True)
-    manifest = export_bundle(
-        config=config,
-        run_dir=run,
-        output_dir=output,
-        checkpoint_name=args.checkpoint,
-        allow_synthetic=args.allow_synthetic,
-        selection=_scenario_manifest(selection, dataset_recipe=True),
-        overrides=_training_overrides(args, root) or None,
-    )
-    _print(
-        {
-            "status": "complete",
-            "bundle": str(output),
-            "bundle_digest": manifest["bundle_digest"],
-            "files": len(manifest["files"]),
-            "checkpoint_step": manifest["checkpoint"]["step"],
-            "synthetic": manifest["synthetic"],
-        }
-    )
-    return 0
-
-
-def _command_verify_bundle(args: argparse.Namespace, root: Path) -> int:
-    del root
-    handle = load_bundle(args.bundle, device=args.device)
-    _print(
-        {
-            "status": "verified",
-            "bundle": str(handle.root),
-            "bundle_digest": handle.manifest.get("bundle_digest"),
-            "chunk_size": handle.manifest["chunk_size"],
-            "state_dim": handle.manifest["state_dim"],
-            "checkpoint_step": handle.manifest.get("checkpoint", {}).get("step"),
-            "deployment": handle.manifest.get("deployment"),
-        }
-    )
-    return 0
-
-
 _COMMANDS = {
     "convert": _command_convert,
     "train": _command_train,
-    "filter-anchors": _command_filter,
     "verify-data": _command_verify_data,
-    "budget-status": _command_budget,
-    "bundle": _command_bundle,
-    "verify-bundle": _command_verify_bundle,
 }
 
 
@@ -509,9 +416,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ExportError,
         FilterError,
         TrainingError,
-        BundleError,
-        BudgetError,
-        CheckpointError,
+        ScenarioSelectionError,
         OSError,
         ValueError,
     ) as error:

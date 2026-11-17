@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SCHEMAS = ROOT / "shared/common/interfaces/schemas"
 
 PANDA = {
-    "profile": ROOT / "shared/scenarios/panda_stack/profiles/robots/panda_stack_v1/profile.json",
+    "profile": ROOT / "shared/scenarios/panda_sim/stack/profiles/robots/panda_stack_v1/profile.json",
     "axis": "right_gripper_width",
     "anchor_position": 0.022205447806916776,
     "anchor_velocity": 0.04,
@@ -33,7 +33,7 @@ PANDA = {
     "original_target_deviation": 0.05565938197175449,
 }
 MARVIN = {
-    "profile": (ROOT / "shared/scenarios/marvin_handover/profiles/robots"
+    "profile": (ROOT / "shared/scenarios/marvin_sim/handover/profiles/robots"
                 / "marvin_handover_v1/profile.json"),
     "axis": "left_gripper_width",
     "anchor_position": 0.062495712249460864,

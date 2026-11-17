@@ -36,7 +36,7 @@ class Tree:
 
 def write_dataset_recipe(scenario, tmp_path: Path, *, task_text: str) -> Path:
     document = yaml.safe_load(
-        (ROOT / "shared/scenarios/panda_stack/configs/learning/act_dataset.yaml").read_text()
+        (ROOT / "shared/scenarios/panda_sim/stack/configs/learning/act_dataset.yaml").read_text()
     )
     document["profile"] = str(scenario.root / "profiles/robot.json")
     document["select"] = str(tmp_path / "select.json")
@@ -52,7 +52,7 @@ def write_training_recipe(
     scenario, tmp_path: Path, dataset_recipe: Path, *, mode: str = "smoke"
 ) -> Path:
     document = yaml.safe_load(
-        (ROOT / "shared/scenarios/panda_stack/configs/learning/act_training.yaml").read_text()
+        (ROOT / "shared/scenarios/panda_sim/stack/configs/learning/act_training.yaml").read_text()
     )
     document["mode"] = mode
     document["cache_root"] = str(tmp_path / "cache")
@@ -65,13 +65,8 @@ def write_training_recipe(
         "verify_hashes": True,
     }
     document["model"]["weights"] = {"path": str(tmp_path / "resnet18.pth"), "sha256": ""}
-    document["budget"] = {
-        **document["budget"],
-        "ledger": str(tmp_path / "budget.jsonl"),
-        "lock": str(tmp_path / "budget.lock"),
-    }
-    document["checkpoint"]["root"] = str(tmp_path / "runs")
-    document["logging"]["root"] = str(tmp_path / "runs")
+    document["checkpoint"] = {"root": str(tmp_path / "models")}
+    document["logging"]["root"] = str(tmp_path / "logs")
     path = scenario.root / "configs/training.yaml"
     path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
     return path
@@ -79,7 +74,7 @@ def write_training_recipe(
 
 def write_service_recipe(scenario, *, task_text: str = "scenario service task") -> Path:
     document = yaml.safe_load(
-        (ROOT / "shared/scenarios/panda_stack/configs/learning/policy_temporal.yaml").read_text()
+        (ROOT / "shared/scenarios/panda_sim/stack/configs/learning/policy_temporal.yaml").read_text()
     )
     document["service"]["task_text"] = task_text
     path = scenario.root / "configs/policy_service.yaml"
@@ -90,12 +85,12 @@ def write_service_recipe(scenario, *, task_text: str = "scenario service task") 
 def make_tree(tmp_path: Path, *, adapter: str = "act") -> Tree:
     repo = tmp_path / "repo"
     shared = repo / "shared"
-    scenario = build_scenario(shared / "scenarios/synthetic_stack")
+    scenario = build_scenario(shared / "scenarios/synthetic_sim/stack")
     shutil.copytree(
         ROOT / "shared/common/interfaces/schemas", shared / "common/interfaces/schemas"
     )
     scenario.document["learning"] = {"implementation": "lerobot", "adapter": adapter}
-    scenario.document["models"]["bundle"] = None
+    scenario.document["artifact_roots"] = [str(tmp_path)]
     scenario.write()
     dataset = write_dataset_recipe(scenario, tmp_path, task_text="scenario dataset task")
     training = write_training_recipe(scenario, tmp_path, dataset)
@@ -124,10 +119,12 @@ def fake_train(capture: dict):
         capture["kwargs"] = kwargs
         return {
             "reason": "completed",
-            "run_id": "run-scenario",
+            "model_name": "act_20260101_000000",
+            "model_dir": str(config.checkpoint.root / "act_20260101_000000"),
             "mode": config.mode,
             "steps": 0,
             "device": config.device,
+            "best_step": None,
             "best_val_l1": None,
             "duration_seconds": 0.0,
         }
@@ -140,8 +137,10 @@ def scenario_args(tree: Tree, command: str, *extra: str) -> list[str]:
         "--project-root",
         str(tree.repo),
         command,
-        "--scenario",
-        "synthetic_stack",
+        "--robot",
+        "synthetic_sim",
+        "--task",
+        "stack",
         "--shared-root",
         str(tree.shared),
         *extra,

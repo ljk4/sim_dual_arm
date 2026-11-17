@@ -64,17 +64,18 @@ Agent 必须严格区分当前处于**开发阶段**还是**规范阶段**，严
 - **`build/` 与 `var/`**：视为可随时重建的运行/构建产物，不做跨版本兼容。
 
 ### 2.2 禁止过度设计与过度防御（Anti-HERO）
-- **No Useless Hashing（禁止无用哈希/留痕）**：不为“证明跑过”生成无人消费的清单或摘要文件。仅当哈希/校验能跳过更昂贵的重复计算，或用于跨进程契约握手（如 Profile / Bundle 一致性）时才允许存在。
+- **No Useless Hashing（禁止无用哈希/留痕）**：不为“证明跑过”生成无人消费的清单或摘要文件。仅当哈希/校验能跳过更昂贵的重复计算，或用于跨进程契约握手（如 Profile / 模型身份一致性）时才允许存在。
 - **No Unnecessary Indirection（禁止多余中间层）**：
-  - 禁止离线生成 `/data/prepared/` 等中间配置目录；三端统一在启动时通过 `--scenario <id>` 或 `--config <path>` 在内存中解析配方，并支持 `--set dot.path=value` 覆盖。
+  - 禁止离线生成 `/data/prepared/` 等中间配置目录；三端统一在启动时通过 `--robot <robot-id> --task <task-id>` 或 `--config <path>` 在内存中解析配方，并支持 `--set dot.path=value` 覆盖。
   - 禁止在同一目录树内复制同一份配置/JSON（`shutil.copy2`）；每份元数据只保留唯一权威文件。
   - 禁止编写纯透传包装类、空壳基类、未使用的插件注册表或 feature flag。
 - **No Fake Edge-Case Scaffolding（禁止假想敌兜底）**：单人本地使用，不写多租户权限、防篡改锁或不可达冷门异常兜底；同一调用链内已通过 Pydantic 校验的数据，禁止重复手写 `isinstance` 二次检查。
 - **SSOT（单一可信源）**：同一参数禁止在多份配置中重复维护。
 
 ### 2.3 架构隔离与端内对称化
-- **通用端 100% 方案无关**：`shared/common/`、`runtime/ros2/`、`learning/lerobot/` 的业务代码与默认配置中，**严禁硬编码 `panda_stack`、`marvin_handover` 等方案/机器人/任务名**，也严禁隐式回退到某一默认方案。
-- **方案配置集中存放**：具体方案只存在于 `shared/scenarios/<scenario-id>/`（`binding.yaml`、`profiles/`、`configs/`、`extensions/`）。
+- **通用端 100% 方案无关**：`shared/common/`、`runtime/ros2/`、`learning/lerobot/` 的业务代码与默认配置中，**严禁硬编码 `panda_sim/stack`、`marvin_sim/handover` 等方案/机器人/任务名**，也严禁隐式回退到某一默认方案。
+- **方案按两级目录集中存放**：具体方案只存在于 `shared/scenarios/<robot-id>/<task-id>/`（如 `shared/scenarios/panda_sim/stack/`、`shared/scenarios/marvin_sim/handover/`），内含 `binding.yaml`、`profiles/`、`configs/`、`extensions/`；机器人 id 与任务 id 分别对应目录层级，不得再使用单层 `<scenario-id>` 扁平命名。
+- **三端统一选择入口**：所有端的 CLI 一律通过 `--robot <robot-id> --task <task-id>` 选择方案（与直接 `--config <recipe>` 互斥）；运行期产物路径也按同一对 `<robot-id>/<task-id>` 展开，确保配置与产物一一对应。
 - **端内插件平级对称（Symmetry）**：在 `simulation/mujoco/` 等包含具体机器人/任务的端内，通用机制（`control/`、`motion/`、`follower/`、`render/`、`ros/`、`runtime/`、`kinematics/common.py`）必须与具体插件彻底分离；不同机器人/任务必须平级对称存放（如 `physics/panda/` 与 `physics/marvin/`、`tasks/stack/` 与 `tasks/handover/`），严禁把先接入的机器人写在顶层公用目录。
 
 ---
@@ -97,16 +98,17 @@ Agent 必须严格区分当前处于**开发阶段**还是**规范阶段**，严
 ## 4. 目录与产物隔离规范
 
 ### 4.1 `var/`（容器 `/data`）四分法（强制隔离）
-所有运行期产物必须按 `<scenario-id>` 归入 `var/<scenario-id>/`（容器内 `/data/<scenario-id>/`），并严格分为以下四个平级目录，**绝对禁止混放或私自在 `var/` 根下新建目录**：
+所有运行期产物必须按 `<robot-id>/<task-id>` 归入 `var/<robot-id>/<task-id>/`（容器内 `/data/<robot-id>/<task-id>/`，如 `var/panda_sim/stack/`、`var/marvin_sim/handover/`），并严格分为以下四个平级目录，**绝对禁止混放或私自在 `var/` 根下新建目录**：
 
 | 目录 | 允许存放 | 严禁混入 |
 | :--- | :--- | :--- |
-| `datasets/` | 经筛选转换后供训练/验证的数据集（LeRobot 分片、manifest、采样掩码、`formal-select.json`） | 原始 MCAP、运行日志、试采/诊断中间文件、模型权重 |
-| `models/` | 训练权重/checkpoints、训练预算台账、导出可部署模型包（`bundles/`） | 原始录制数据、训练数据集、运行日志、评估图 |
-| `logs/` | 三端运行事件日志、采集台账（`ledger.jsonl`）以及**运行时录制内容**（`raw/` MCAP、`manifest.json`、`task_result.json`、随录帧/标签） | 正式 LeRobot 数据集、模型权重/Bundle、离线诊断报告 |
-| `diagnostics/` | 环境探针、场景/运动学检查、离线评估报告、集成/冒烟测试临时产物 | 正式采集录制、正式训练数据集、正式模型包 |
+| `datasets/raw/` | 合格的原始录制数据（`raw/` 内 `manifest.json`、`task_result.json`、`recording/*.mcap`，以及 `export/` 解包帧/标签）与 `formal-select.json` | 不合格尝试、运行日志、模型权重 |
+| `datasets/lerobot/` | 经转换后供训练/验证消费的 LeRobot 数据集（`train/`、`validation/`、`processors/`、`manifest.json`） | 原始 MCAP、模型权重、运行日志 |
+| `models/` | **仅**以 `<模型名>_<YYYYMMDD_HHMMSS>/` 命名的模型文件夹（如 `act_20261117_143022/`），每个文件夹内**仅包含两个文件**：`model.safetensors`（网络权重与归一化统计量，供推理直接加载）与 `training_args.yaml`（训练时自动生成，仅作备忘不消费） | 预算台账、互斥锁、`runs/` 与 `bundles/` 中间层、原始录制数据、训练数据集、运行日志 |
+| `logs/` | 三端运行事件日志、采集台账与尝试日志（`collection/`）、转换日志（`convert/`）、训练过程指标（`training/`）、策略服务日志（`policy-service/`）及推理运行录制（`recordings/`） | 正式 LeRobot 数据集、模型权重、离线诊断报告 |
+| `debug/` | 环境探针、场景/运动学检查、离线评估报告（如 `batch-policy/<batch-id>/report.json`）、集成/冒烟测试临时产物 | 正式采集录制、正式训练数据集、正式模型包 |
 
-> 无对应 `<scenario-id>` 的系统级临时检查统一放入 `var/_system/diagnostics/`。
+> 无对应 `<robot-id>/<task-id>` 的系统级调试产物统一放入 `var/_system/debug/`。
 > **新产物准入铁律**：规范阶段保留的新功能若产生新的正式文件/目录类型，**必须先向用户说明其性质与消费者，经确认归属后再定型**。
 
 ### 4.2 `build/`（容器 `/build`）精简规范
@@ -120,3 +122,6 @@ Agent 必须严格区分当前处于**开发阶段**还是**规范阶段**，严
 - **先判断再改动，直接给结论**：定位问题或实施修改时，以实测数据与最小复现为依据；向用户汇报时先给结论与验收结果，再附关键根因与改动明细。
 - **规范交付不留试错痕迹**：在阶段二（规范阶段）收尾时，代码、注释与文档中不保留试错痕迹、废弃方案说明或免责套话；如有未验证项或后续优化方向，在回复末尾或根 `README.md` 集中说明。
 - **严格遵守节点确认**：开发完成后的 Git 保存、规范达标后的 Git 保存与合并删分支，均须按 §1 流程经过用户确认后执行。
+
+### 5.1 子代理分工与额度节流准则（Subagent Delegation）
+- **MUST**：面对大范围代码检索、多文件读取、跨目录路径/命名替换、文档同步或简单/重复性修改任务时，主代理必须优先委派子代理（优先使用 `sonnet` / `haiku` 等高性价比模型或 `Explore` 子代理）并行完成，主代理只保留核心架构决策与关键汇总，以最小化主上下文占用与额度消耗。

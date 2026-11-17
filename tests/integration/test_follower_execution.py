@@ -54,10 +54,10 @@ def replace(value, **changes):
     return _dataclass_replace(value, **changes)
 
 
-SCENE_PATH = ROOT / "shared/scenarios/panda_stack/configs/simulation/scene/panda_stack.yaml"
-CONTROL_PATH = ROOT / "shared/scenarios/panda_stack/profiles/control/panda_control_v1.yaml"
-FOLLOWER_PATH = ROOT / "shared/scenarios/panda_stack/profiles/control/panda_follower_v1.yaml"
-PROFILE_PATH = ROOT / "shared/scenarios/panda_stack/profiles/robots/panda_stack_v1/profile.json"
+SCENE_PATH = ROOT / "shared/scenarios/panda_sim/stack/configs/simulation/scene/panda_stack.yaml"
+CONTROL_PATH = ROOT / "shared/scenarios/panda_sim/stack/profiles/control/panda_control_v1.yaml"
+FOLLOWER_PATH = ROOT / "shared/scenarios/panda_sim/stack/profiles/control/panda_follower_v1.yaml"
+PROFILE_PATH = ROOT / "shared/scenarios/panda_sim/stack/profiles/robots/panda_stack_v1/profile.json"
 SCHEMAS = ROOT / "shared/common/interfaces/schemas"
 DT_NS = 2_000_000
 LEASE_NS = 10_000_000_000
@@ -65,7 +65,7 @@ FIRST_START_NS = 250_000_000
 FINAL_CHUNK_SEQ = 11
 TERMINAL = frozenset({"COMPLETED", "CANCELED", "FAILED"})
 REPORT_DIR = Path(
-    os.environ.get("FOLLOWER_REPORT_DIR", ROOT / "var/panda_stack/diagnostics/follower-execution")
+    os.environ.get("FOLLOWER_REPORT_DIR", ROOT / "var/panda_sim/stack/diagnostics/follower-execution")
 )
 BASE_POSITIONS = load_profile(PROFILE_PATH, SCHEMAS).initial_positions
 

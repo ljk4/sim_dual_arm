@@ -1,0 +1,51 @@
+# 堆叠任务与程序示教后端；引用路径相对本文件。
+robot:
+  namespace: /robot
+  profile: ../../../profiles/robots/panda_stack_learning_v1/profile.json
+  schemas: ../../../../../../common/interfaces/schemas
+  scene: ../scene/panda_stack_learning.yaml
+  control: ../../../profiles/control/panda_control_v1.yaml
+  stream: ../../../profiles/control/panda_stream_v1.yaml
+  follower: ../../../profiles/control/panda_follower_v1.yaml
+  task: ../scene/panda_stack_task.yaml
+  # Optional read-only segmentation counts on the same render snapshot.
+  render_quality:
+    enabled: true
+  # Affine PD reference-velocity feedforward; hard limits/tolerances unchanged.
+  velocity_feedforward: true
+  reliable_sensors: true
+  task_mode: teacher
+
+run:
+  seed: 0
+  capture_hz: 20.0
+  realtime_speed: 1.0
+  max_catchup_steps: 8
+
+queues:
+  owner: 64
+  planner: 4
+  render_snapshots: 4
+  render_outputs: 8
+  captures: 32
+  events: 1024
+  feedback: 64
+  accepted_references: 256
+  follower_references: 256
+
+limits:
+  planner_health_s: 10.0
+  renderer_health_s: 5.0
+  request_timeout_s: 5.0
+  shutdown_s: 10.0
+  command_history: 256
+  chunk_history: 256
+
+logging:
+  queue_capacity: 256
+  max_event_bytes: 32768
+  max_file_bytes: 8388608
+  max_total_bytes: 268435456
+  close_timeout_s: 3.0
+  flush_interval_s: 0.2
+  console: false

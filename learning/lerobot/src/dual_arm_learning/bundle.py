@@ -1,77 +1,118 @@
-"""Offline, safetensors-only ACT model bundle and typed prediction helper.
+"""Self-contained ACT model package (one ``model.safetensors`` + one memo).
 
-Bundles contain no executable pickle.  Loading verifies every declared file
-hash before the trained state dict is applied strictly.  Prediction always
-calls upstream ``predict_action_chunk`` and returns a fresh complete 60x16
-chunk; it never uses ``select_action`` or a queue.
+A trained model lives in ``models/act_<timestamp>/`` and contains exactly
+``model.safetensors`` and ``training_args.yaml``.  The safetensors file carries
+the policy state dict, the dataset normalizer/unnormalizer tensors and the JSON
+metadata needed to rebuild the policy and processors without any bundle
+directory.  ``training_args.yaml`` is a human memo and is never read here.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-import shutil
-import time
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-from .checkpoints import CHECKPOINT_FORMAT, load_checkpoint, validate_checkpoint_binding
-from .config import TrainingConfig
-from .dataset import canonical_hash, configure_local_caches, tree_hashes
-from .sample_filter import load_filter_mask
-from .training import BUNDLE_FORMAT, build_act_config, verify_dataset_manifest
+MODEL_FORMAT = "dual-arm-act-model-v2"
+MODEL_FILENAME = "model.safetensors"
+TRAINING_ARGS_FILENAME = "training_args.yaml"
+PREPROCESSOR_FILE = "policy_preprocessor_step_3_normalizer_processor.safetensors"
+POSTPROCESSOR_FILE = "policy_postprocessor_step_0_unnormalizer_processor.safetensors"
+_PREPROCESSOR_PREFIX = "_preprocessor."
+_POSTPROCESSOR_PREFIX = "_postprocessor."
 
 
-class BundleError(RuntimeError):
-    """A model bundle failed an integrity, shape or contract check."""
+class ModelError(RuntimeError):
+    """An ACT model package failed an integrity, shape or contract check."""
 
 
 @dataclass(frozen=True)
-class BundleHandle:
+class ModelHandle:
     root: Path
+    model_file: Path
     policy: Any
     preprocessor: Any
     postprocessor: Any
-    config: Any
-    manifest: dict[str, Any]
+    act_config: Any
+    metadata: dict[str, Any]
+    observation_schema: dict[str, Any]
+    action_schema: dict[str, Any]
     device: str
 
     def prediction_metadata(self) -> dict[str, Any]:
         return {
-            "bundle": str(self.root),
-            "bundle_digest": self.manifest.get("bundle_digest"),
-            "checkpoint_step": self.manifest.get("checkpoint", {}).get("step"),
-            "config_sha256": self.manifest.get("config", {}).get("sha256"),
-            "synthetic": self.manifest.get("dataset", {}).get("synthetic"),
+            "model": str(self.root),
+            "model_sha256": _file_sha256(self.model_file),
+            "step": self.metadata.get("step"),
+            "config_sha256": self.metadata.get("config_sha256"),
+            "synthetic": self.metadata.get("synthetic"),
         }
 
 
-def _json(path: Path) -> dict[str, Any]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise BundleError(f"{path}: cannot read JSON: {error}") from error
-    if not isinstance(value, dict):
-        raise BundleError(f"{path}: expected an object")
-    return value
-
-
-def _write_json(path: Path, value: object) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(value, indent=2, allow_nan=False, default=str) + "\n", encoding="utf-8"
-    )
-
-
-def _processor_digest(processors: Path) -> str:
+def _file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
-    for name, record in sorted(tree_hashes(processors).items()):
-        digest.update(name.encode())
-        digest.update(record["sha256"].encode())
+    with Path(path).open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
     return digest.hexdigest()
+
+
+def resolve_model_path(path: str | Path) -> Path:
+    """Accept either a model directory or its ``model.safetensors`` file."""
+    candidate = Path(path)
+    if candidate.is_dir():
+        verify_model_dir(candidate)
+        candidate = candidate / MODEL_FILENAME
+    if not candidate.is_file():
+        raise ModelError(f"{candidate}: model.safetensors is missing")
+    return candidate
+
+
+def verify_model_dir(root: str | Path) -> Path:
+    """Check that a model directory contains only the two contract files."""
+    directory = Path(root)
+    if not directory.is_dir():
+        raise ModelError(f"{directory}: model directory is missing")
+    names = sorted(path.name for path in directory.iterdir())
+    expected = sorted((MODEL_FILENAME, TRAINING_ARGS_FILENAME))
+    if names != expected:
+        raise ModelError(
+            f"{directory}: expected exactly {expected}, found {names}"
+        )
+    return directory
+
+
+def read_model_metadata(path: str | Path) -> tuple[Path, dict[str, Any]]:
+    """Read safetensors metadata without loading any tensor."""
+    from safetensors import safe_open
+
+    model_file = resolve_model_path(path)
+    try:
+        with safe_open(model_file, framework="pt") as handle:
+            metadata = handle.metadata() or {}
+    except Exception as error:  # noqa: BLE001 - surface one model error type
+        raise ModelError(f"{model_file}: cannot read model metadata: {error}") from error
+    if metadata.get("format") != MODEL_FORMAT:
+        raise ModelError(f"{model_file}: unsupported model format {metadata.get('format')!r}")
+    return model_file, {str(key): str(value) for key, value in metadata.items()}
+
+
+def _json_metadata(metadata: dict[str, Any], key: str) -> dict[str, Any]:
+    value = metadata.get(key)
+    if value is None:
+        raise ModelError(f"model metadata has no {key}")
+    try:
+        document = json.loads(value)
+    except json.JSONDecodeError as error:
+        raise ModelError(f"model metadata {key} is not JSON: {error}") from error
+    if not isinstance(document, dict):
+        raise ModelError(f"model metadata {key} must be an object")
+    return document
 
 
 def _load_processors(root: Path) -> tuple[Any, Any]:
@@ -96,21 +137,118 @@ def _load_processors(root: Path) -> tuple[Any, Any]:
     return pre, post
 
 
+def _processors_from_metadata(
+    metadata: dict[str, Any], tensors: dict[str, Any]
+) -> tuple[Any, Any]:
+    from safetensors.torch import save_file
+
+    pre_tensors = {
+        name.removeprefix(_PREPROCESSOR_PREFIX): tensor
+        for name, tensor in tensors.items()
+        if name.startswith(_PREPROCESSOR_PREFIX)
+    }
+    post_tensors = {
+        name.removeprefix(_POSTPROCESSOR_PREFIX): tensor
+        for name, tensor in tensors.items()
+        if name.startswith(_POSTPROCESSOR_PREFIX)
+    }
+    if not pre_tensors or not post_tensors:
+        raise ModelError("model package has no normalizer/unnormalizer tensors")
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        (root / "policy_preprocessor.json").write_text(
+            metadata["preprocessor_config_json"], encoding="utf-8"
+        )
+        (root / "policy_postprocessor.json").write_text(
+            metadata["postprocessor_config_json"], encoding="utf-8"
+        )
+        save_file(pre_tensors, root / PREPROCESSOR_FILE)
+        save_file(post_tensors, root / POSTPROCESSOR_FILE)
+        return _load_processors(root)
+
+
+def _build_act_config(metadata: dict[str, Any]) -> Any:
+    from lerobot.configs import FeatureType, PolicyFeature
+    from lerobot.policies.act.configuration_act import ACTConfig
+
+    values = _json_metadata(metadata, "act_config_json")
+    observation = _json_metadata(metadata, "observation_schema_json")
+    action = _json_metadata(metadata, "action_schema_json")
+    inputs = {
+        "observation.state": PolicyFeature(
+            FeatureType.STATE, (int(observation["state_dim"]),)
+        )
+    }
+    for camera in observation["cameras"]:
+        inputs[f"observation.images.{camera}"] = PolicyFeature(
+            FeatureType.VISUAL,
+            (3, int(observation["image_height"]), int(observation["image_width"])),
+        )
+    outputs = {
+        "action": PolicyFeature(FeatureType.ACTION, (int(action["dim"]),))
+    }
+    values.pop("pretrained_backbone_weights", None)
+    return ACTConfig(
+        input_features=inputs,
+        output_features=outputs,
+        pretrained_backbone_weights=None,
+        device="cpu",
+        **values,
+    )
+
+
+def load_model(path: str | Path, *, device: str = "cpu") -> ModelHandle:
+    """Rebuild the ACT policy and processors from one safetensors file."""
+    from lerobot.policies.act.modeling_act import ACTPolicy
+    from safetensors.torch import load_file
+
+    model_file, metadata = read_model_metadata(path)
+    act_config = _build_act_config(metadata)
+    policy = ACTPolicy(act_config)
+    tensors = load_file(model_file)
+    state = {
+        name: tensor
+        for name, tensor in tensors.items()
+        if not name.startswith((_PREPROCESSOR_PREFIX, _POSTPROCESSOR_PREFIX))
+    }
+    missing, unexpected = policy.load_state_dict(state, strict=False)
+    if missing or unexpected:
+        raise ModelError(
+            f"model state dict does not match ACT: missing={list(missing)[:4]} "
+            f"unexpected={list(unexpected)[:4]}"
+        )
+    policy.to(device)
+    policy.eval()
+    pre, post = _processors_from_metadata(metadata, tensors)
+    return ModelHandle(
+        root=model_file.parent,
+        model_file=model_file,
+        policy=policy,
+        preprocessor=pre,
+        postprocessor=post,
+        act_config=act_config,
+        metadata=metadata,
+        observation_schema=_json_metadata(metadata, "observation_schema_json"),
+        action_schema=_json_metadata(metadata, "action_schema_json"),
+        device=device,
+    )
+
+
 def _observation_tensors(
-    observation: dict[str, Any], manifest: dict[str, Any], device: str
+    observation: dict[str, Any], handle: ModelHandle
 ) -> dict[str, Any]:
     import torch
 
-    schema = manifest.get("observation", {})
-    cameras = schema.get("cameras", [])
+    schema = handle.observation_schema
+    cameras = list(schema.get("cameras", []))
     state = np.asarray(observation.get("observation.state"), dtype=np.float32)
     if state.shape != (int(schema.get("state_dim", 0)),):
-        raise BundleError(f"observation.state shape {state.shape} does not match the bundle")
+        raise ModelError(f"observation.state shape {state.shape} does not match the model")
     if not np.isfinite(state).all():
-        raise BundleError("observation.state contains non-finite values")
+        raise ModelError("observation.state contains non-finite values")
     images = observation.get("images")
     if not isinstance(images, dict) or set(images) != set(cameras):
-        raise BundleError("observation.images must contain exactly the bundle cameras")
+        raise ModelError("observation.images must contain exactly the model cameras")
     sample: dict[str, Any] = {"observation.state": torch.from_numpy(state)}
     for camera in cameras:
         image = np.asarray(images[camera])
@@ -120,17 +258,17 @@ def _observation_tensors(
             3,
         )
         if image.shape != expected:
-            raise BundleError(f"observation.images.{camera} shape {image.shape} != {expected}")
+            raise ModelError(f"observation.images.{camera} shape {image.shape} != {expected}")
         if image.dtype == np.uint8:
             array = image.astype(np.float32) / 255.0
         elif np.issubdtype(image.dtype, np.floating):
             array = image.astype(np.float32)
             if not np.isfinite(array).all() or array.min() < 0.0 or array.max() > 1.0:
-                raise BundleError(
+                raise ModelError(
                     f"observation.images.{camera} float pixels must be finite in [0,1]"
                 )
         else:
-            raise BundleError(f"observation.images.{camera} dtype must be uint8 or float")
+            raise ModelError(f"observation.images.{camera} dtype must be uint8 or float")
         sample[f"observation.images.{camera}"] = (
             torch.from_numpy(array).permute(2, 0, 1).contiguous()
         )
@@ -149,16 +287,16 @@ def _to_device(value: Any, device: str) -> Any:
     return value
 
 
-def predict_action_chunk(handle: BundleHandle, observation: dict[str, Any]) -> np.ndarray:
+def predict_action_chunk(handle: ModelHandle, observation: dict[str, Any]) -> np.ndarray:
     """Return one fresh complete (60,16) physical action chunk.
 
     The output is never cropped, padded by the caller, or altered per arm.
     """
     import torch
 
-    if not isinstance(handle, BundleHandle):
-        raise BundleError("handle must be a loaded BundleHandle")
-    sample = _observation_tensors(observation, handle.manifest, handle.device)
+    if not isinstance(handle, ModelHandle):
+        raise ModelError("handle must be a loaded ModelHandle")
+    sample = _observation_tensors(observation, handle)
     with torch.no_grad():
         batch = handle.preprocessor(sample)
         batch = _to_device(batch, handle.device)
@@ -170,139 +308,27 @@ def predict_action_chunk(handle: BundleHandle, observation: dict[str, Any]) -> n
         actions = handle.postprocessor(normalized)
     if isinstance(actions, dict):
         if "action" not in actions:
-            raise BundleError("postprocessor did not return an action tensor")
+            raise ModelError("postprocessor did not return an action tensor")
         actions = actions["action"]
     tensor = actions.detach().to("cpu", dtype=torch.float32)
     if tensor.dim() == 3:
         if tensor.shape[0] != 1:
-            raise BundleError(f"prediction batch dimension is {tensor.shape[0]}, expected 1")
+            raise ModelError(f"prediction batch dimension is {tensor.shape[0]}, expected 1")
         tensor = tensor[0]
-    if tuple(tensor.shape) != (
-        handle.manifest.get("chunk_size", 60),
-        handle.manifest.get("state_dim", 16),
-    ):
-        raise BundleError(f"policy returned {tuple(tensor.shape)}, expected complete (60,16)")
+    expected = (
+        int(handle.action_schema.get("chunk_size", 60)),
+        int(handle.action_schema.get("dim", 16)),
+    )
+    if tuple(tensor.shape) != expected:
+        raise ModelError(f"policy returned {tuple(tensor.shape)}, expected {expected}")
     result = tensor.numpy()
     if not np.isfinite(result).all():
-        raise BundleError("policy returned non-finite actions")
+        raise ModelError("policy returned non-finite actions")
     return result
 
 
-def _actual_sample(config: TrainingConfig, train_root: Path) -> dict[str, Any]:
-    configure_local_caches(config.cache_root, data_root=config.data_root)
-    from lerobot.datasets.lerobot_dataset import LeRobotDataset
-
-    dataset = LeRobotDataset(
-        repo_id=f"local/{config.data_root.name}-{train_root.name}",
-        root=train_root,
-        video_backend=config.dataset.video_backend,
-    )
-    sample = dataset[0]
-    images = {
-        camera: (sample[f"observation.images.{camera}"].permute(1, 2, 0).numpy() * 255.0)
-        .round()
-        .clip(0, 255)
-        .astype(np.uint8)
-        for camera in config.dataset.camera_names
-    }
-    return {
-        "observation.state": sample["observation.state"].numpy().astype(np.float32),
-        "images": images,
-    }
-
-
-def _export_inputs(
-    config: TrainingConfig, run_dir: Path, checkpoint_name: str, allow_synthetic: bool
-) -> tuple[Any, dict[str, Any], Any]:
-    audit = verify_dataset_manifest(config, allow_synthetic=allow_synthetic)
-    if audit.synthetic and not allow_synthetic:
-        raise BundleError("refusing to export a bundle from synthetic data")
-    checkpoint_path = run_dir / checkpoint_name
-    if not checkpoint_path.is_file():
-        raise BundleError(f"checkpoint is missing: {checkpoint_path}")
-    checkpoint = load_checkpoint(checkpoint_path)
-    if checkpoint.get("format") != CHECKPOINT_FORMAT:
-        raise BundleError("checkpoint format is not the trusted tool format")
-    if not isinstance(checkpoint.get("model"), dict):
-        raise BundleError("checkpoint has no model state dictionary")
-    validate_checkpoint_binding(checkpoint, config)
-    sample_filter = None
-    if config.sample_filter is not None:
-        sample_filter = load_filter_mask(config.sample_filter)
-    return audit, checkpoint, sample_filter
-
-
-def _save_policy(config: TrainingConfig, checkpoint: dict[str, Any], output_dir: Path):
-    import torch
-    from safetensors.torch import save_file
-
-    act_config = build_act_config(config, device="cpu")
-    from lerobot.policies.act.modeling_act import ACTPolicy
-
-    policy = ACTPolicy(act_config)
-    missing, unexpected = policy.load_state_dict(checkpoint["model"], strict=False)
-    if missing or unexpected:
-        raise BundleError(
-            f"trained state dict is incomplete: missing={list(missing)[:4]} "
-            f"unexpected={list(unexpected)[:4]}"
-        )
-    for name, tensor in policy.state_dict().items():
-        if not torch.isfinite(tensor).all():
-            raise BundleError(f"trained tensor {name} contains non-finite values")
-    policy.eval()
-    save_file(
-        policy.state_dict(),
-        output_dir / "model.safetensors",
-        metadata={
-            "format": BUNDLE_FORMAT,
-            "policy": "act",
-            "step": str(checkpoint.get("step", 0)),
-        },
-    )
-    if act_config.pretrained_backbone_weights is not None:
-        raise BundleError("bundle config would request an implicit backbone download")
-    act_config._save_pretrained(output_dir)
-    return act_config, policy
-
-
-def _copy_metadata(
-    config: TrainingConfig,
-    output_dir: Path,
-    checkpoint: dict[str, Any],
-    sample_filter: Any,
-) -> tuple[Path, dict[str, Any]]:
-    dataset_root = config.data_root
-    processors = dataset_root / "processors"
-    if not processors.is_dir():
-        raise BundleError(f"conversion processors are missing: {processors}")
-    shutil.copytree(processors, output_dir / "processors")
-    metadata = output_dir / "metadata"
-    metadata.mkdir()
-    profile = _json(config.dataset.profile_path)
-    _write_json(metadata / "profile.json", profile)
-    shutil.copy2(dataset_root / config.manifest_name, metadata / "dataset_manifest.json")
-    shutil.copy2(config.source, metadata / "training_config.yaml")
-    if sample_filter is not None:
-        _write_json(metadata / "sample_filter.json", sample_filter.document)
-    _write_json(
-        metadata / "checkpoint.json",
-        {
-            "format": checkpoint.get("format"),
-            "step": checkpoint.get("step"),
-            "best_val_l1": checkpoint.get("best_val_l1"),
-            "reason": checkpoint.get("reason"),
-            "budget_run_id": checkpoint.get("budget_run_id"),
-            "budget_segment_id": checkpoint.get("budget_segment_id"),
-            "budget_instance_id": checkpoint.get("budget_instance_id"),
-            "config_sha256": checkpoint.get("config_sha256"),
-            "mode": checkpoint.get("mode"),
-            "seed": checkpoint.get("seed"),
-        },
-    )
-    return metadata, profile
-
-
-def _schema(config: TrainingConfig, profile: dict[str, Any]) -> tuple[dict, dict]:
+def build_schema(config: Any, profile: dict[str, Any]) -> tuple[dict, dict]:
+    """Build the observation/action schema stored in the model package."""
     joints = list(profile.get("joints", []))
     observation = {
         "state_dim": config.dataset.state_dim,
@@ -324,279 +350,109 @@ def _schema(config: TrainingConfig, profile: dict[str, Any]) -> tuple[dict, dict
     return observation, action
 
 
-def _verify_round_trip(
-    config: TrainingConfig,
-    audit: Any,
-    output_dir: Path,
-    policy: Any,
-    metadata: Path,
-    observation: dict,
-    act_config: Any,
-) -> tuple[int, ...]:
-    pre_copy, post_copy = _load_processors(output_dir / "processors")
-    handle = BundleHandle(
-        root=output_dir,
-        policy=policy,
-        preprocessor=pre_copy,
-        postprocessor=post_copy,
-        config=act_config,
-        manifest={
-            "observation": observation,
-            "chunk_size": config.dataset.chunk_size,
-            "state_dim": config.dataset.state_dim,
-        },
-        device="cpu",
-    )
-    sample = _actual_sample(config, audit.train_root)
-    before = predict_action_chunk(handle, sample)
-    policy.to("cpu")
-    # Reload from the exact files being shipped, not from the in-memory object.
-    after_handle = _load_bundle_unverified(output_dir, manifest_placeholder=True)
-    after = predict_action_chunk(after_handle, sample)
-    difference = float(np.max(np.abs(before - after)))
-    if difference > 1e-6:
-        raise BundleError(f"bundle round-trip prediction changed by {difference}")
-    _write_json(
-        metadata / "verification.json",
-        {
-            "same_actual_batch": True,
-            "shape": list(before.shape),
-            "max_abs_difference": difference,
-            "predict_api": "predict_action_chunk",
-            "chunk_complete": True,
-        },
-    )
-    return tuple(before.shape)
-
-
-def _dataset_record(
-    config: TrainingConfig,
-    audit: Any,
-    sample_filter: Any,
-    files: dict[str, dict[str, Any]],
-) -> dict[str, Any]:
-    train_episodes = len(audit.train_episodes)
-    validation_episodes = len(audit.validation_episodes)
-    record: dict[str, Any] = {
-        "manifest": "metadata/dataset_manifest.json",
-        "manifest_sha256": files["metadata/dataset_manifest.json"]["sha256"],
-        "train_episodes": train_episodes,
-        "validation_episodes": validation_episodes,
-        "training_global_indices": list(audit.training_global_indices),
-        "validation_global_indices": list(audit.validation_global_indices),
-        "synthetic": bool(audit.synthetic),
-        "diagnostic": bool(config.dataset.diagnostic),
-        "seed": config.seed,
-        "split": f"{train_episodes}train/{validation_episodes}validation",
-        "stats_source": "processors/train_stats_summary.json",
-    }
-    if sample_filter is not None:
-        record["sample_filter"] = {
-            "path": "metadata/sample_filter.json",
-            "sha256": files["metadata/sample_filter.json"]["sha256"],
-            "digest": sample_filter.digest,
-            "source_frames": sample_filter.source_frames,
-            "eligible_frames": len(sample_filter.eligible_indices),
-            "excluded_frames": sample_filter.excluded_frames,
-        }
-    return record
-
-
-def _manifest_document(
-    config: TrainingConfig,
-    metadata: Path,
-    audit: Any,
-    sample_filter: Any,
-    files: dict[str, dict[str, Any]],
-    observation: dict,
-    action: dict,
-    processor_digest: str,
-) -> dict[str, Any]:
-    dataset_document = _json(metadata / "dataset_manifest.json")
-    archive_sha256 = config.dataset.lerobot_source_archive_sha256 or str(
-        dataset_document.get("lerobot", {}).get("source_archive_sha256", "")
-    )
-    model_sha = files["model.safetensors"]["sha256"]
-    return {
-        "format": BUNDLE_FORMAT,
-        "created_wall_time_ns": time.time_ns(),
-        "policy": "act",
-        "synthetic": bool(audit.synthetic),
-        "chunk_size": config.dataset.chunk_size,
-        "state_dim": config.dataset.state_dim,
-        "observation": observation,
-        "action": action,
-        "checkpoint": _json(metadata / "checkpoint.json"),
-        "config": {"path": "config.json", "sha256": files["config.json"]["sha256"]},
-        "dataset": _dataset_record(config, audit, sample_filter, files),
-        "profile": {
-            "path": "metadata/profile.json",
-            "sha256": files["metadata/profile.json"]["sha256"],
-            "semantic_sha256": canonical_hash(_json(metadata / "profile.json")),
-        },
-        "processors": {
-            "root": "processors",
-            "digest": processor_digest,
-            "files": {
-                name: record for name, record in files.items() if name.startswith("processors/")
-            },
-        },
-        "source": {
-            "lerobot_revision": config.dataset.lerobot_source_revision,
-            "lerobot_archive_sha256": archive_sha256,
-            "training_config_sha256": files["metadata/training_config.yaml"]["sha256"],
-        },
-        "model": {"path": "model.safetensors", "sha256": model_sha},
-        "state_dict_sha256": model_sha,
-        "files": {name: record for name, record in files.items() if name != "manifest.json"},
-        "deployment": {
-            "format": "safetensors_only",
-            "api": "predict_action_chunk",
-            "fresh_chunk_each_call": True,
-            "select_action_queue": False,
-            "crop": None,
-            "privileged_inputs": [],
-        },
-    }
-
-
-def export_bundle(
-    *,
-    config: TrainingConfig,
-    run_dir: Path,
-    output_dir: Path,
-    checkpoint_name: str = "best.pt",
-    allow_synthetic: bool = False,
-    selection: dict[str, Any] | None = None,
-    overrides: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Export the trained policy plus processors/stats/references as a bundle."""
-    configure_local_caches(config.cache_root, data_root=config.data_root)
-    if output_dir.exists():
-        raise BundleError(f"{output_dir}: bundle output already exists")
-    audit, checkpoint, sample_filter = _export_inputs(
-        config, run_dir, checkpoint_name, allow_synthetic
-    )
-    output_dir.parent.mkdir(parents=True, exist_ok=True)
-    output_dir.mkdir(parents=True, exist_ok=False)
-    act_config, policy = _save_policy(config, checkpoint, output_dir)
-    metadata, profile = _copy_metadata(config, output_dir, checkpoint, sample_filter)
-    observation, action = _schema(config, profile)
-    _write_json(metadata / "schema.json", {"observation": observation, "action": action})
-    _verify_round_trip(config, audit, output_dir, policy, metadata, observation, act_config)
-    files = tree_hashes(output_dir)
-    processor_digest = _processor_digest(output_dir / "processors")
-    manifest = _manifest_document(
-        config,
-        metadata,
-        audit,
-        sample_filter,
-        files,
-        observation,
-        action,
-        processor_digest,
-    )
-    if selection is not None:
-        manifest["selection"] = selection
-    if overrides is not None:
-        manifest["overrides"] = overrides
-    manifest["bundle_digest"] = hashlib.sha256(
-        json.dumps(manifest, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
-    ).hexdigest()
-    _write_json(output_dir / "manifest.json", manifest)
-    return manifest
-
-
-def _load_bundle_unverified(root: Path, *, manifest_placeholder: bool = False) -> BundleHandle:
-    """Construct a handle from files that were just written in this process."""
-    from lerobot.policies.act.configuration_act import ACTConfig
-    from lerobot.policies.act.modeling_act import ACTPolicy
+def _processor_tensors(dataset_root: Path) -> tuple[dict[str, Any], dict[str, str]]:
     from safetensors.torch import load_file
 
-    if not root.is_dir():
-        raise BundleError(f"{root}: bundle directory is missing")
-    config = ACTConfig.from_pretrained(root, local_files_only=True)
-    config.device = "cpu"
-    policy = ACTPolicy(config)
-    state = load_file(root / "model.safetensors")
-    policy.load_state_dict(state, strict=True)
-    policy.to("cpu")
-    policy.eval()
-    pre, post = _load_processors(root / "processors")
-    manifest = _json(root / "manifest.json") if (root / "manifest.json").is_file() else {}
-    if not manifest and not manifest_placeholder:
-        raise BundleError("bundle manifest is missing")
-    manifest.setdefault(
-        "observation",
-        {
-            "state_dim": 16,
-            "cameras": ["global", "left_wrist", "right_wrist"],
-            "image_height": 240,
-            "image_width": 320,
-        },
+    processors = dataset_root / "processors"
+    pre_file = processors / PREPROCESSOR_FILE
+    post_file = processors / POSTPROCESSOR_FILE
+    if not pre_file.is_file() or not post_file.is_file():
+        raise ModelError(f"{processors}: normalizer/unnormalizer tensors are missing")
+    pre = load_file(pre_file)
+    post = load_file(post_file)
+    tensors = {
+        f"{_PREPROCESSOR_PREFIX}{name}": tensor for name, tensor in pre.items()
+    }
+    tensors.update(
+        {f"{_POSTPROCESSOR_PREFIX}{name}": tensor for name, tensor in post.items()}
     )
-    manifest.setdefault("chunk_size", 60)
-    manifest.setdefault("state_dim", 16)
-    return BundleHandle(
-        root=root,
-        policy=policy,
-        preprocessor=pre,
-        postprocessor=post,
-        config=config,
-        manifest=manifest,
-        device="cpu",
-    )
+    configs = {
+        "preprocessor_config_json": (processors / "policy_preprocessor.json").read_text(
+            encoding="utf-8"
+        ),
+        "postprocessor_config_json": (processors / "policy_postprocessor.json").read_text(
+            encoding="utf-8"
+        ),
+    }
+    return tensors, configs
 
 
-def verify_bundle(root: str | Path) -> dict[str, Any]:
-    """Verify one bundle's manifest digest, inventory, symlinks and artefact types."""
-    bundle = Path(root)
-    manifest = _json(bundle / "manifest.json")
-    if manifest.get("format") != BUNDLE_FORMAT:
-        raise BundleError("bundle manifest format is not supported")
-    stored_digest = manifest.get("bundle_digest")
-    digest_payload = {key: value for key, value in manifest.items() if key != "bundle_digest"}
-    expected_digest = hashlib.sha256(
-        json.dumps(digest_payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
-    ).hexdigest()
-    if stored_digest != expected_digest:
-        raise BundleError("bundle manifest digest does not match its contents")
-    if manifest.get("chunk_size") != 60 or manifest.get("state_dim") != 16:
-        raise BundleError("bundle does not declare the 60x16 action contract")
-    declared = manifest.get("files")
-    if not isinstance(declared, dict):
-        raise BundleError("bundle manifest has no file inventory")
-    actual = tree_hashes(bundle)
-    actual.pop("manifest.json", None)
-    if actual != declared:
-        missing = sorted(set(declared) - set(actual))
-        extra = sorted(set(actual) - set(declared))
-        changed = sorted(
-            name for name in set(actual) & set(declared) if actual[name] != declared[name]
-        )
-        raise BundleError(
-            "bundle file hash mismatch: "
-            f"missing={missing[:4]} extra={extra[:4]} changed={changed[:4]}"
-        )
-    for path in tree_files_no_manifest(bundle):
-        if path.is_symlink():
-            raise BundleError(f"{path}: symlinks are not allowed in a deployment bundle")
-    if any(name.endswith((".pt", ".pth", ".pkl", ".pickle")) for name in declared):
-        raise BundleError("bundle contains a pickle-based model artefact")
-    if manifest.get("model", {}).get("sha256") != manifest.get("state_dict_sha256"):
-        raise BundleError("bundle model hash is inconsistent")
-    return manifest
+def save_model_package(
+    model_dir: Path,
+    *,
+    policy: Any,
+    act_config: Any,
+    dataset_root: Path,
+    step: int,
+    synthetic: bool,
+    config_sha256: str,
+    observation_schema: dict[str, Any],
+    action_schema: dict[str, Any],
+    training_args: dict[str, Any],
+) -> Path:
+    """Write ``model.safetensors`` and the human-readable ``training_args.yaml``."""
+    import torch
+    from safetensors.torch import save_file
+
+    model_dir.mkdir(parents=True, exist_ok=True)
+    processor_tensors, processor_configs = _processor_tensors(dataset_root)
+    policy_tensors = {
+        name: tensor.detach().to("cpu").contiguous()
+        for name, tensor in policy.state_dict().items()
+    }
+    for name, tensor in policy_tensors.items():
+        if not torch.isfinite(tensor).all():
+            raise ModelError(f"trained tensor {name} contains non-finite values")
+    tensors = {**policy_tensors, **processor_tensors}
+    metadata = {
+        "format": MODEL_FORMAT,
+        "policy": "act",
+        "step": str(step),
+        "act_config_json": json.dumps(_act_config_document(act_config), sort_keys=True),
+        "preprocessor_config_json": processor_configs["preprocessor_config_json"],
+        "postprocessor_config_json": processor_configs["postprocessor_config_json"],
+        "observation_schema_json": json.dumps(observation_schema, sort_keys=True),
+        "action_schema_json": json.dumps(action_schema, sort_keys=True),
+        "synthetic": str(bool(synthetic)).lower(),
+        "config_sha256": config_sha256,
+    }
+    temporary = model_dir / (MODEL_FILENAME + ".tmp")
+    save_file(tensors, temporary, metadata=metadata)
+    temporary.replace(model_dir / MODEL_FILENAME)
+    _write_training_args(model_dir / TRAINING_ARGS_FILENAME, training_args)
+    return model_dir
+
+
+def _act_config_document(act_config: Any) -> dict[str, Any]:
+    return {
+        "chunk_size": act_config.chunk_size,
+        "n_action_steps": act_config.n_action_steps,
+        "vision_backbone": act_config.vision_backbone,
+        "dim_model": act_config.dim_model,
+        "n_heads": act_config.n_heads,
+        "dim_feedforward": act_config.dim_feedforward,
+        "n_encoder_layers": act_config.n_encoder_layers,
+        "n_decoder_layers": act_config.n_decoder_layers,
+        "use_vae": act_config.use_vae,
+        "latent_dim": act_config.latent_dim,
+        "n_vae_encoder_layers": act_config.n_vae_encoder_layers,
+        "dropout": act_config.dropout,
+        "kl_weight": act_config.kl_weight,
+    }
+
+
+def _write_training_args(path: Path, document: dict[str, Any]) -> None:
+    import yaml
+
+    path.write_text(
+        yaml.safe_dump(document, sort_keys=False, allow_unicode=True), encoding="utf-8"
+    )
 
 
 def deployment_summary(config: Any) -> dict[str, Any]:
-    """Return JSON-safe deployment provenance from an already verified config."""
+    """Return JSON-safe deployment provenance from one loaded policy config."""
     summary: dict[str, Any] = {
-        "format": BUNDLE_FORMAT,
-        "bundle_digest": config.model_bundle_digest,
-        "processor_digest": config.processor_digest,
-        "observation_schema_hash": config.observation_schema_hash,
-        "action_schema_hash": config.action_schema_hash,
-        "profile_semantic_sha256": config.robot_profile_hash,
+        "format": MODEL_FORMAT,
         "chunk_size": config.chunk_size,
         "state_dim": len(config.joint_names),
         "action_period_ns": config.action_period_ns,
@@ -606,73 +462,31 @@ def deployment_summary(config: Any) -> dict[str, Any]:
         "camera_width": config.camera_width,
         "camera_height": config.camera_height,
     }
-    if config.bundle_dir is None:
+    if config.model_path is None:
         return summary
-    manifest = _json(Path(config.bundle_dir) / "manifest.json")
-    dataset, source = manifest.get("dataset", {}), manifest.get("source", {})
+    model_file, metadata = read_model_metadata(config.model_path)
     summary.update(
-        model_sha256=manifest.get("model", {}).get("sha256", ""),
-        state_dict_sha256=manifest.get("state_dict_sha256", ""),
-        config_sha256=manifest.get("config", {}).get("sha256", ""),
-        checkpoint_step=manifest.get("checkpoint", {}).get("step", 0),
-        checkpoint_mode=manifest.get("checkpoint", {}).get("mode", ""),
-        dataset_seed=dataset.get("seed", 0),
-        train_episodes=dataset.get("train_episodes", 0),
-        validation_episodes=dataset.get("validation_episodes", 0),
-        diagnostic=bool(dataset.get("diagnostic")),
-        synthetic=bool(manifest.get("synthetic") or dataset.get("synthetic")),
-        lerobot_revision=source.get("lerobot_revision", ""),
-        lerobot_archive_sha256=source.get("lerobot_archive_sha256", ""),
-        training_config_sha256=source.get("training_config_sha256", ""),
+        model_sha256=_file_sha256(model_file),
+        model_bundle_digest=_file_sha256(model_file),
+        config_sha256=metadata.get("config_sha256", ""),
+        checkpoint_step=int(metadata.get("step", 0)),
+        synthetic=metadata.get("synthetic") == "true",
     )
     return summary
 
 
-def load_bundle(root: str | Path, *, device: str = "cpu") -> BundleHandle:
-    """Verify every bundle file, then strictly load the trained ACT policy."""
-    from lerobot.policies.act.configuration_act import ACTConfig
-    from lerobot.policies.act.modeling_act import ACTPolicy
-    from safetensors.torch import load_file
-
-    bundle = Path(root)
-    manifest = verify_bundle(bundle)
-    config = ACTConfig.from_pretrained(bundle, local_files_only=True)
-    config.device = device
-    policy = ACTPolicy(config)
-    state = load_file(bundle / "model.safetensors")
-    missing, unexpected = policy.load_state_dict(state, strict=False)
-    if missing or unexpected:
-        raise BundleError(
-            f"bundle state dict does not match ACT: missing={list(missing)[:4]} "
-            f"unexpected={list(unexpected)[:4]}"
-        )
-    policy.to(device)
-    policy.eval()
-    pre, post = _load_processors(bundle / "processors")
-    return BundleHandle(
-        root=bundle,
-        policy=policy,
-        preprocessor=pre,
-        postprocessor=post,
-        config=config,
-        manifest=manifest,
-        device=device,
-    )
-
-
-def tree_files_no_manifest(root: Path) -> list[Path]:
-    return sorted(
-        path for path in root.rglob("*") if path.is_file() and path.name != "manifest.json"
-    )
-
-
 __all__ = [
-    "BundleError",
-    "BundleHandle",
+    "MODEL_FILENAME",
+    "MODEL_FORMAT",
+    "ModelError",
+    "ModelHandle",
+    "TRAINING_ARGS_FILENAME",
+    "build_schema",
     "deployment_summary",
-    "export_bundle",
-    "load_bundle",
+    "load_model",
     "predict_action_chunk",
-    "tree_files_no_manifest",
-    "verify_bundle",
+    "read_model_metadata",
+    "resolve_model_path",
+    "save_model_package",
+    "verify_model_dir",
 ]

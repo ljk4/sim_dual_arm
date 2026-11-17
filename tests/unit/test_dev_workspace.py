@@ -66,7 +66,7 @@ def add_common(shared: Path, name: str, **kwargs) -> Path:
 
 def add_extension(shared: Path, name: str, **kwargs) -> Path:
     return write_package(
-        shared / "scenarios/demo/extensions/ros" / name, name, **kwargs
+        shared / "scenarios/demo/sim/extensions/ros" / name, name, **kwargs
     )
 
 
@@ -272,7 +272,7 @@ def test_missing_packages_and_duplicate_names_are_rejected(tmp_path):
 
     first = add_extension(shared, "demo_api_msgs", service=True)
     second = write_package(
-        shared / "scenarios/other/extensions/ros/demo_api_msgs", "demo_api_msgs"
+        shared / "scenarios/other/sim/extensions/ros/demo_api_msgs", "demo_api_msgs"
     )
     with pytest.raises(dev_workspace.DevWorkspaceError) as caught:
         dev_workspace.resolve_selection(
@@ -305,7 +305,7 @@ def test_scenario_selection_uses_binding_packages_and_teacher_capability(tmp_pat
         ROOT / "shared/common/interfaces/schemas",
         shared / "common/interfaces/schemas",
     )
-    scenario = shared / "scenarios/demo"
+    scenario = shared / "scenarios/demo/sim"
     add_common(shared, "sim_api_msgs")
     extension = write_package(
         scenario / "extensions/ros/demo_api_msgs", "demo_api_msgs", service=True,
@@ -324,18 +324,18 @@ def test_scenario_selection_uses_binding_packages_and_teacher_capability(tmp_pat
     tree.write()
 
     selection = dev_workspace.resolve_selection(
-        project, shared_root=shared, scenario="demo"
+        project, shared_root=shared, scenario="demo/sim"
     )
     assert selection.names == (
         "robot_api_msgs", "sim_api_msgs", "demo_api_msgs",
     )
     assert selection.kind == "binding"
-    assert selection.scenario_id == "synthetic_stack"
+    assert selection.scenario_id == "synthetic_sim/stack"
 
     tree.document["interfaces"]["teacher_api"] = "demo_api_msgs.teacher_chunk.v2"
     tree.write()
     with pytest.raises(dev_workspace.DevWorkspaceError) as caught:
-        dev_workspace.resolve_selection(project, shared_root=shared, scenario="demo")
+        dev_workspace.resolve_selection(project, shared_root=shared, scenario="demo/sim")
     assert "no selected extension implements it" in str(caught.value)
 
 

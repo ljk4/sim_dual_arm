@@ -1,0 +1,51 @@
+# Marvin 交接 ACT Policy 服务；首轮关闭时间融合与夹爪修正。
+# 模型身份由 --scenario/--bundle 在启动时从真实 bundle 读取，此处不写摘要。
+schema_version: 1
+
+model:
+  robot_profile_path: ../../profiles/robots/marvin_handover_v1/profile.json
+  observation_schema_path: ../../profiles/observations/marvin_rgb_joint_v1.json
+  action_schema_path: ../../profiles/actions/marvin_joint_position_v1.json
+  device: cuda
+  # Diagnostic admission is granted only through the explicit
+  # test-only entry; the recipe keeps the strict formal default.
+  require_formal: true
+  # Per-axis projection quota in the axis' profile unit.  Listed axes are
+  # clipped onto the hard bounds only within their quota; every unlisted axis
+  # must already be inside the bounds at all 60 points.
+  # Increasing left_joint7 to 0.01 rad is the measured candidate bound: the
+  # recorded 118 rejected predictions overshoot by at most 0.007671 rad.
+  max_prediction_corrections:
+    left_joint7: 0.01
+    left_gripper_width: 0.005
+    right_gripper_width: 0.005
+  temporal_ensemble_coeff: null
+
+service:
+  bind_address: 0.0.0.0
+  port: 50051
+  max_workers: 4
+  max_message_bytes: 16777216
+  max_sessions: 8
+  max_open_requests: 128
+  max_request_cache: 128
+  # 60 x 50 ms targets span 50 ms .. 3000 ms.
+  predict_deadline_s: 3.0
+  open_deadline_s: 5.0
+  close_deadline_s: 5.0
+  test_only: false
+  protocol_major: 1
+  stateful: true
+  task_id: marvin-handover
+  task_text: >-
+    Pick up the block with the left arm, hand it to the right arm, and place it
+    into the box.
+
+logging:
+  queue_capacity: 1024
+  max_event_bytes: 32768
+  max_file_bytes: 8388608
+  max_total_bytes: 268435456
+  close_timeout_s: 5.0
+  flush_interval_s: 0.2
+  console: false

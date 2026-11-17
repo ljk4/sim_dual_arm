@@ -25,8 +25,8 @@ from robot_backend_sim.physics.panda.scene import build_scene  # noqa: E402
 from robot_contracts.models import ContractError  # noqa: E402
 from robot_contracts.profiles import load_profile  # noqa: E402
 
-CONFIG_PATH = ROOT / "shared/scenarios/panda_stack/configs/simulation/scene/panda_stack.yaml"
-PROFILE_PATH = ROOT / "shared/scenarios/panda_stack/profiles/robots/panda_stack_v1/profile.json"
+CONFIG_PATH = ROOT / "shared/scenarios/panda_sim/stack/configs/simulation/scene/panda_stack.yaml"
+PROFILE_PATH = ROOT / "shared/scenarios/panda_sim/stack/profiles/robots/panda_stack_v1/profile.json"
 SCHEMAS = ROOT / "shared/common/interfaces/schemas"
 
 

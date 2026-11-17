@@ -65,8 +65,8 @@ def test_validate_and_show_succeed(scenario, capsys):
     result = json.loads(capsys.readouterr().out)
     assert result["ok"] is True
     assert result["stage"] == "collection"
-    assert result["scenario_id"] == "synthetic_stack"
-    assert result["models"]["source"] == "binding"
+    assert result["scenario_id"] == "synthetic_sim/stack"
+    assert result["models"]["source"] == "none"
     assert result["models"]["digest"] is None
 
     code = _run(module, "show", "--binding", binding, "--shared-root", str(SHARED))
@@ -74,7 +74,7 @@ def test_validate_and_show_succeed(scenario, capsys):
     output = capsys.readouterr().out
     assert output.lstrip().startswith("{")
     shown = json.loads(output)
-    assert shown["binding"]["scenario_id"] == "synthetic_stack"
+    assert shown["binding"]["scenario_id"] == "synthetic_sim/stack"
     assert shown["stages"]["inference"]["satisfied"] is True
     assert "eval" not in output.splitlines()[0]
 
@@ -93,7 +93,7 @@ def test_show_is_identical_from_another_cwd(scenario, tmp_path, monkeypatch, cap
 
 def test_validate_reports_an_unsatisfied_stage(scenario, capsys):
     document = scenario.copy()
-    document["models"]["bundle"] = None
+    document["interfaces"]["policy_api"] = None
     scenario.write(document)
     module = _tool_module()
 
@@ -105,7 +105,7 @@ def test_validate_reports_an_unsatisfied_stage(scenario, capsys):
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "BINDING_STAGE" in captured.err
-    assert "models.bundle" in captured.err
+    assert "interfaces.policy_api" in captured.err
 
 
 def test_bundle_override_is_resolved_from_the_caller_cwd(scenario, monkeypatch, capsys):
@@ -191,7 +191,7 @@ def test_shared_root_defaults_to_the_tool_layout(scenario, monkeypatch, capsys):
     monkeypatch.delenv("SHARED_ROOT", raising=False)
     module = _tool_module()
     assert _run(module, "show", "--binding", str(scenario.binding_path)) == 0
-    assert json.loads(capsys.readouterr().out)["binding"]["scenario_id"] == "synthetic_stack"
+    assert json.loads(capsys.readouterr().out)["binding"]["scenario_id"] == "synthetic_sim/stack"
 
 
 def test_missing_schema_root_is_a_clean_error(scenario, tmp_path, capsys):

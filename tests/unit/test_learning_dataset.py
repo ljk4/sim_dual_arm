@@ -8,7 +8,7 @@ from learning_fixtures import make_export, profile_hash
 from model_helpers import replace
 
 ROOT = Path(__file__).resolve().parents[2]
-SCENARIO = ROOT / "shared/scenarios/panda_stack"
+SCENARIO = ROOT / "shared/scenarios/panda_sim/stack"
 
 
 @pytest.fixture

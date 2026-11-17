@@ -155,6 +155,8 @@ def prepare_workers(
                 if selection is None
                 else {
                     **selection.get("binding", {}),
+                    "robot": selection.get("robot"),
+                    "task": selection.get("task"),
                     "scenario_id": selection.get("scenario_id"),
                 },
                 "recipes": recipes,
@@ -172,6 +174,8 @@ def prepare_workers(
         )
     manifest_selection = selection or {
         "mode": "direct",
+        "robot": None,
+        "task": None,
         "scenario_id": None,
         "binding": None,
         "profiles": None,
@@ -195,7 +199,8 @@ def main() -> int:
     parser.add_argument("--workers", type=int, required=True)
     parser.add_argument("--domain-base", type=int, required=True)
     parser.add_argument("--realtime-speed", type=float, default=1.0)
-    parser.add_argument("--scenario")
+    parser.add_argument("--robot")
+    parser.add_argument("--task")
     parser.add_argument("--shared-root", type=Path)
     parser.add_argument("--binding-sha256")
     parser.add_argument("--runtime-config", type=Path)
@@ -204,30 +209,36 @@ def main() -> int:
         "--set", dest="overrides", action="append", default=[], metavar="PATH=VALUE"
     )
     args = parser.parse_args()
-    if args.scenario is not None:
+    if args.robot is not None:
+        if args.task is None:
+            parser.error("--robot requires --task")
         if args.runtime_config is not None or args.backend_template is not None:
             parser.error(
-                "--scenario cannot be combined with --runtime-config or --backend-template"
+                "--robot/--task cannot be combined with --runtime-config or --backend-template"
             )
     else:
+        if args.task is not None:
+            parser.error("--task requires --robot")
         if args.shared_root is not None:
-            parser.error("--shared-root requires --scenario")
+            parser.error("--shared-root requires --robot/--task")
         if args.binding_sha256 is not None:
-            parser.error("--binding-sha256 requires --scenario")
+            parser.error("--binding-sha256 requires --robot/--task")
         if args.runtime_config is None or args.backend_template is None:
             parser.error("direct mode requires --runtime-config and --backend-template")
     code = check_ros_sdk(
         ROOT,
-        scenario=args.scenario,
+        robot=args.robot,
+        task=args.task,
         shared_root=args.shared_root,
     )
     if code:
         return code
     try:
         selection = None
-        if args.scenario is not None:
+        if args.robot is not None:
             selection = select_collection(
-                scenario=args.scenario,
+                robot=args.robot,
+                task=args.task,
                 shared_root=args.shared_root,
                 project_root=ROOT,
                 binding_sha256=args.binding_sha256,

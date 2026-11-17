@@ -1,0 +1,54 @@
+# Marvin 交接 Policy 推理后端；引用路径相对本文件。
+# task_mode: inference 使用同一任务评价器，不提供 Teacher 目标。
+robot:
+  namespace: /robot
+  profile: ../../../profiles/robots/marvin_handover_v1/profile.json
+  schemas: ../../../../../../common/interfaces/schemas
+  scene: ../scene/marvin_handover.yaml
+  control: ../../../profiles/control/marvin_control_v1.yaml
+  stream: ../../../profiles/control/marvin_stream_v1.yaml
+  follower: ../../../profiles/control/marvin_follower_inference_v1.yaml
+  task: ../scene/marvin_handover_task_inference.yaml
+  task_type: handover
+  task_mode: inference
+  # Policy execution does not need per-phase segmentation counts.
+  render_quality:
+    enabled: false
+  # Affine PD reference-velocity feedforward; hard limits unchanged.
+  velocity_feedforward: true
+  reliable_sensors: true
+
+run:
+  seed: 0
+  capture_hz: 20.0
+  # Half speed leaves 100 ms wall time per 50 ms capture for RGB/RPC/ACK.
+  realtime_speed: 0.5
+  max_catchup_steps: 8
+
+queues:
+  owner: 64
+  planner: 4
+  render_snapshots: 4
+  render_outputs: 8
+  captures: 32
+  events: 1024
+  feedback: 64
+  accepted_references: 256
+  follower_references: 256
+
+limits:
+  planner_health_s: 30.0
+  renderer_health_s: 5.0
+  request_timeout_s: 10.0
+  shutdown_s: 10.0
+  command_history: 64
+  chunk_history: 256
+
+logging:
+  queue_capacity: 256
+  max_event_bytes: 32768
+  max_file_bytes: 8388608
+  max_total_bytes: 268435456
+  close_timeout_s: 3.0
+  flush_interval_s: 0.2
+  console: false

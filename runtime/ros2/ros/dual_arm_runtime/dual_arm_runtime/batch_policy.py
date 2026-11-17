@@ -11,7 +11,7 @@ import sys
 import time
 from pathlib import Path
 
-from dual_arm_runtime.artifact_paths import container_data_root, scenario_segment
+from dual_arm_runtime.artifact_paths import container_data_root, debug_root, logs_root
 from dual_arm_runtime.runtime_cli import _load_configuration
 
 
@@ -41,11 +41,11 @@ def _parser() -> argparse.ArgumentParser:
     selection = parser.add_mutually_exclusive_group(required=True)
     selection.add_argument("--config", type=Path, help="direct runtime recipe path")
     selection.add_argument(
-        "--scenario", help="scenario id under <shared-root>/scenarios/<id>/binding.yaml"
+        "--robot", help="robot id under <shared-root>/scenarios/<robot>/<task>/binding.yaml"
     )
+    parser.add_argument("--task", help="task id for --robot")
     parser.add_argument("--role", choices=("policy",), default="policy")
     parser.add_argument("--shared-root", type=Path)
-    parser.add_argument("--bundle", type=Path)
     parser.add_argument(
         "--count", type=positive_int, default=10, help="number of episodes (default: 10)"
     )
@@ -163,7 +163,9 @@ def _print_startup_info(
     selection = getattr(configuration, "selection", None)
     if isinstance(selection, dict) and selection.get("mode") == "scenario":
         print(
-            f"方案 (scenario): {selection.get('scenario_id')} ({selection.get('role')})", flush=True
+            f"方案 (scenario): {selection.get('robot')}/{selection.get('task')} "
+            f"({selection.get('role')})",
+            flush=True,
         )
         binding = selection.get("binding") or {}
         if binding.get("path"):
@@ -210,12 +212,10 @@ def _episode_command(
         "--reset-seed",
         str(seed),
     ]
-    if args.scenario is not None:
-        command += ["--scenario", args.scenario, "--role", args.role]
+    if args.robot is not None:
+        command += ["--robot", args.robot, "--task", args.task, "--role", args.role]
         if args.shared_root is not None:
             command += ["--shared-root", str(args.shared_root)]
-        if args.bundle is not None:
-            command += ["--bundle", str(args.bundle)]
     else:
         command += ["--config", str(args.config)]
     for item in args.overrides:
@@ -248,6 +248,10 @@ def _episode_succeeded(exit_code: int, summary: dict[str, object]) -> bool:
 def main(argv: list[str] | None = None) -> int:
     cli = _parser()
     args = cli.parse_args(argv)
+    if args.robot is not None and args.task is None:
+        cli.error("--robot requires --task")
+    if args.task is not None and args.robot is None:
+        cli.error("--task requires --robot")
     for item in args.overrides:
         lowered = item.lower()
         if "visualization" in lowered or "viewer" in lowered:
@@ -257,19 +261,21 @@ def main(argv: list[str] | None = None) -> int:
         args.batch_id
         or f"batch-policy-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{os.getpid()}"
     )
-    segment = scenario_segment(args.scenario)
-    base_data = container_data_root() / segment
-    recordings_dir = args.output or (base_data / "logs" / "batch-policy" / batch_id / "recordings")
-    runs_dir = args.runs_output or (base_data / "logs" / "batch-policy" / batch_id / "runs")
-    report_path = base_data / "diagnostics" / "batch-policy" / batch_id / "report.json"
+    base_data = container_data_root()
+    logs_dir = logs_root(base_data, args.robot, args.task) / "batch-policy" / batch_id
+    recordings_dir = args.output or (logs_dir / "recordings")
+    runs_dir = args.runs_output or (logs_dir / "runs")
+    report_path = (
+        debug_root(base_data, args.robot, args.task) / "batch-policy" / batch_id / "report.json"
+    )
 
     load_args = argparse.Namespace(
-        scenario=args.scenario,
+        robot=args.robot,
+        task=args.task,
         config=args.config,
         role=args.role,
         shared_root=args.shared_root,
         project_root=args.project_root,
-        bundle=args.bundle,
         reset_seed=args.seed_start,
         overrides=args.overrides,
     )
@@ -363,7 +369,8 @@ def main(argv: list[str] | None = None) -> int:
     success_rate = round((succeeded / attempted) * 100.0, 2) if attempted else 0.0
     report = {
         "batch_id": batch_id,
-        "scenario": args.scenario,
+        "robot": args.robot,
+        "task": args.task,
         "config": str(configuration.configuration_source),
         "backend": backend_info,
         "visualization_disabled": True,

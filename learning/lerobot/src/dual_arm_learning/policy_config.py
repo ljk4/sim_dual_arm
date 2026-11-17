@@ -17,13 +17,12 @@ from robot_run_logging import LogSettings
 
 from .config_yaml import load_yaml
 
-BUNDLE_FORMAT = "dual-arm-act-bundle-v1"
 CAMERAS = ("global", "left_wrist", "right_wrist")
 STATE_DIM, CHUNK_SIZE, PERIOD_NS, FPS = 16, 60, 50_000_000, 20
 WIDTH, HEIGHT = 320, 240
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _MODEL_KEYS = (
-    "bundle_dir", "robot_profile_path", "observation_schema_path", "action_schema_path",
+    "model_path", "robot_profile_path", "observation_schema_path", "action_schema_path",
     "device", "require_formal", "max_prediction_corrections", "temporal_ensemble_coeff",
 )
 
@@ -79,7 +78,7 @@ class PolicyServiceConfig(rv.StrictMappingModel):
     task_text: rv.NonEmptyStr
     command_space: rv.NonEmptyStr
     logging: LogSettings = Field(default_factory=LogSettings)
-    bundle_dir: Path | None = None
+    model_path: Path | None = None
     robot_profile_path: Path | None = None
     observation_schema_path: Path | None = None
     action_schema_path: Path | None = None
@@ -143,10 +142,10 @@ def load_policy_config(
     values |= {"logging": document.get("logging", {}), "command_space": "joint_position"}
     values.update({key: value for key, value in overrides.items() if value is not None})
     base = Path(path).resolve().parent
-    for key in (name for name in _MODEL_KEYS if name == "bundle_dir" or name.endswith("path")):
+    for key in (name for name in _MODEL_KEYS if name == "model_path" or name.endswith("path")):
         if values.get(key) is not None:
             values[key] = Path(base, values[key]).resolve()
-    if values.get("bundle_dir") is not None:
+    if values.get("model_path") is not None:
         if values.get("robot_profile_path") is None or values.get("test_only"):
             raise PolicyConfigError(str(path), "robot_profile_path", "required")
         if not values.get("stateful"):
@@ -156,30 +155,42 @@ def load_policy_config(
 
 
 def resolve_policy_contract(values: dict[str, Any]) -> dict[str, Any]:
-    from .bundle import BundleError, verify_bundle
+    from .bundle import ModelError, read_model_metadata, resolve_model_path
 
-    root = Path(values["bundle_dir"]).resolve()
     formal = bool(values.get("require_formal", True))
-    if not root.is_dir():
-        raise PolicyConfigError("<bundle>", f"{root}: bundle directory is missing")
     try:
-        manifest = verify_bundle(root)
-    except BundleError as error:
-        raise PolicyConfigError("<bundle>", str(error)) from error
-    checkpoint = _mapping(manifest.get("checkpoint"), "manifest.checkpoint")
-    _check(not formal or checkpoint.get("mode") == "full",
-           "formal ACT deployment requires a full-mode checkpoint")
-    dataset = _mapping(manifest.get("dataset"), "manifest.dataset")
-    _check(not (formal and (manifest.get("synthetic") or dataset.get("synthetic"))),
-           "synthetic bundle cannot deploy a formal model")
-    bundle_profile = _read_json(root / "metadata/profile.json")
-    semantic = _canonical(bundle_profile)
-    _check(_read_json(Path(values["robot_profile_path"])) == bundle_profile,
-           "shipped profile differs from the trained bundle profile")
-    _check(bundle_profile.get("schema_version") == 2 and bundle_profile.get("test_only") is False,
+        model_file = resolve_model_path(values["model_path"])
+        model_file, metadata = read_model_metadata(model_file)
+    except ModelError as error:
+        raise PolicyConfigError("<model>", str(error)) from error
+    _check(not (formal and metadata.get("synthetic") == "true"),
+           "synthetic model cannot deploy a formal ACT policy")
+    try:
+        act_config = json.loads(metadata["act_config_json"])
+        observation_schema = json.loads(metadata["observation_schema_json"])
+        action_schema = json.loads(metadata["action_schema_json"])
+    except (KeyError, json.JSONDecodeError) as error:
+        raise PolicyConfigError("<model>", f"model metadata is incomplete: {error}") from error
+    _check(act_config.get("chunk_size") == CHUNK_SIZE
+           and act_config.get("n_action_steps") == CHUNK_SIZE
+           and act_config.get("temporal_ensemble_coeff") is None,
+           "ACT config must use chunk_size 60 and disable temporal ensembling")
+    _check(observation_schema.get("state_dim") == STATE_DIM
+           and tuple(observation_schema.get("cameras", ())) == CAMERAS
+           and (observation_schema.get("image_width"),
+                observation_schema.get("image_height")) == (WIDTH, HEIGHT),
+           "model observation schema differs from the 16-joint/320x240 contract")
+    _check(action_schema.get("dim") == STATE_DIM
+           and action_schema.get("chunk_size") == CHUNK_SIZE,
+           "model action schema differs from the 60x16 contract")
+
+    profile_document = _read_json(Path(values["robot_profile_path"]))
+    semantic = _canonical(profile_document)
+    _check(profile_document.get("schema_version") == 2
+           and profile_document.get("test_only") is False,
            "profile must be a formal schema-2 RobotProfile")
     try:
-        profile = RobotProfile.validate_dict(bundle_profile)
+        profile = RobotProfile.validate_dict(profile_document)
     except ContractError as error:
         raise PolicyConfigError("<profile>", str(error)) from error
     names = profile.joint_names
@@ -194,37 +205,21 @@ def resolve_policy_contract(values: dict[str, Any]) -> dict[str, Any]:
            "action_schema: joint order/command space differs")
     _check(tuple(observation.get("joint_names", ())) == names,
            "observation_schema: joint order differs")
-    stats = _read_json(root / "processors/train_stats_summary.json")
-    _check(stats.get("source") == "training_split_only",
-           "train_stats_summary.source must prove training-split-only statistics")
-    document = _read_json(root / "metadata/dataset_manifest.json")
-    _check(document.get("status") == "complete" and document.get("schema_version") == 1,
-           "dataset_manifest.json: status must be complete")
-    _check(not (formal and document.get("synthetic")),
-           "synthetic dataset evidence cannot deploy a formal ACT model")
-    splits = document.get("splits", {})
-    train_episodes = splits.get("training", {}).get("episode_count")
-    validation_episodes = splits.get("validation", {}).get("episode_count")
-    _check(dataset.get("train_episodes") == train_episodes
-           and dataset.get("validation_episodes") == validation_episodes,
-           "bundle dataset counts disagree with dataset_manifest")
-    _check(not (formal and document.get("diagnostic")),
-           "diagnostic dataset evidence cannot deploy a formal ACT model")
-    _check(not formal or (train_episodes, validation_episodes) == (45, 5),
-           "dataset_manifest: formal split must be exactly 45/5")
-    _check(document.get("processors", {}).get("training_stats_only") is True,
-           "dataset_manifest: processors must use training-only statistics")
-    act_config = _read_json(root / "config.json")
-    _check(act_config.get("chunk_size") == CHUNK_SIZE
-           and act_config.get("n_obs_steps", 1) == 1
-           and act_config.get("temporal_ensemble_coeff") is None,
-           "ACT config must use chunk_size 60 and disable temporal ensembling")
+
+    digest = hashlib.sha256()
+    with model_file.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    model_digest = digest.hexdigest()
+    processor_digest = _canonical(
+        {
+            "preprocessor": json.loads(metadata["preprocessor_config_json"]),
+            "postprocessor": json.loads(metadata["postprocessor_config_json"]),
+        }
+    )
     return {
-        "model_bundle_digest": _digest(manifest.get("bundle_digest"), "manifest.bundle_digest"),
-        "processor_digest": _digest(
-            _mapping(manifest.get("processors"), "manifest.processors").get("digest"),
-            "manifest.processors.digest",
-        ),
+        "model_bundle_digest": _digest(model_digest, "model.safetensors"),
+        "processor_digest": _digest(processor_digest, "processors"),
         "observation_schema_hash": _canonical(observation),
         "action_schema_hash": _canonical(action),
         "robot_profile_hash": semantic,
@@ -242,7 +237,7 @@ def resolve_policy_contract(values: dict[str, Any]) -> dict[str, Any]:
 
 def _check(condition: object, message: str) -> None:
     if not condition:
-        raise PolicyConfigError("<bundle>", message)
+        raise PolicyConfigError("<model>", message)
 
 
 def _canonical(value: object) -> str:
@@ -260,13 +255,7 @@ def _read_json(path: Path) -> dict[str, Any]:
     return value
 
 
-def _mapping(value: object, location: str) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        raise PolicyConfigError("<bundle>", f"{location}: must be an object")
-    return value
-
-
 def _digest(value: object, location: str) -> str:
     if not isinstance(value, str) or _SHA256.fullmatch(value) is None:
-        raise PolicyConfigError("<bundle>", f"{location}: must be a SHA-256 digest")
+        raise PolicyConfigError("<model>", f"{location}: must be a SHA-256 digest")
     return value

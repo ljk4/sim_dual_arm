@@ -44,7 +44,7 @@ from robot_backend_sim.runtime.diagnostics import code_provenance
 from robot_backend_sim.runtime.worker import WorkerSummary
 
 _RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
-_SCENARIO_SEGMENT_PATTERN = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$")
+_SEGMENT_PATTERN = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$")
 _EXIT_OK = 0
 _EXIT_FAILURE = 1
 
@@ -103,14 +103,15 @@ def _now_utc() -> str:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    selection = parser.add_mutually_exclusive_group(required=True)
-    selection.add_argument("--config", type=Path, help="direct backend recipe path")
-    selection.add_argument(
-        "--scenario", help="scenario id under <shared-root>/scenarios/<id>/binding.yaml"
+    parser.add_argument("--config", type=Path, help="direct backend recipe path")
+    parser.add_argument(
+        "--robot", help="robot id under <shared-root>/scenarios/<robot>/<task>/"
+    )
+    parser.add_argument(
+        "--task", help="task id under <shared-root>/scenarios/<robot>/<task>/"
     )
     parser.add_argument("--role", choices=("teacher", "policy"), default=None)
     parser.add_argument("--shared-root", type=Path, help="shared tree containing scenarios/")
-    parser.add_argument("--bundle", type=Path, help="verified bundle for a policy scenario")
     parser.add_argument("--seed", type=int, default=None, help="override run.seed")
     parser.add_argument(
         "--set",
@@ -125,10 +126,22 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _default_run_root(scenario: str | None) -> Path:
-    segment = scenario or "_direct"
-    if not _SCENARIO_SEGMENT_PATTERN.fullmatch(segment) or ".." in segment:
-        raise SystemExit("scenario id is not a safe artifact directory")
+def _target(parsed: argparse.Namespace) -> tuple[str, str] | None:
+    if parsed.robot is not None or parsed.task is not None:
+        if parsed.robot is None or parsed.task is None:
+            raise SystemExit("--robot and --task must be passed together")
+        return parsed.robot, parsed.task
+    return None
+
+
+def _default_run_root(robot: str | None, task: str | None) -> Path:
+    if robot is None or task is None:
+        segment = "_direct"
+    else:
+        for value in (robot, task):
+            if not _SEGMENT_PATTERN.fullmatch(value) or ".." in value:
+                raise SystemExit("robot/task id is not a safe artifact directory")
+        segment = f"{robot}/{task}"
     return Path(os.environ.get("DATA_ROOT", "/data")) / segment / "logs" / "backend"
 
 
@@ -152,18 +165,25 @@ def _configuration_sources(config) -> dict[str, dict[str, str]]:
     }
 
 
-def _validate_arguments(parsed: argparse.Namespace) -> str:
-    if parsed.scenario is not None:
+def _default_run_suffix() -> str:
+    return f"{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{os.getpid()}"
+
+
+def _validate_arguments(parsed: argparse.Namespace, target: tuple[str, str] | None) -> str:
+    if parsed.config is not None and target is not None:
+        raise SystemExit("--config cannot be combined with --robot/--task")
+    if target is not None:
         parsed.role = parsed.role or "teacher"
-        return parsed.run_id or f"{parsed.scenario}-{parsed.role}"
+        robot, task = target
+        return parsed.run_id or f"{robot}-{task}-{parsed.role}-{_default_run_suffix()}"
     if parsed.role is not None:
-        raise SystemExit("--role requires --scenario")
+        raise SystemExit("--role requires --robot/--task")
     if parsed.shared_root is not None:
-        raise SystemExit("--shared-root requires --scenario")
-    if parsed.bundle is not None:
-        raise SystemExit("--bundle requires --scenario")
+        raise SystemExit("--shared-root requires --robot/--task")
+    if parsed.config is None:
+        raise SystemExit("either --robot/--task or --config is required")
     stem = re.sub(r"[^A-Za-z0-9._-]", "-", parsed.config.stem)
-    return parsed.run_id or f"backend-{stem or 'run'}"
+    return parsed.run_id or f"backend-{stem or 'run'}-{_default_run_suffix()}"
 
 
 def _project_root() -> Path:
@@ -206,26 +226,28 @@ def _write_snapshot(run_dir: Path, document: dict[str, Any]) -> Path:
 
 
 def _prepare_run(parsed: argparse.Namespace):
-    run_id = _validate_run_id(_validate_arguments(parsed))
-    run_root = (parsed.run_root or _default_run_root(parsed.scenario)).resolve()
+    target = _target(parsed)
+    run_id = _validate_run_id(_validate_arguments(parsed, target))
+    robot, task = target if target is not None else (None, None)
+    run_root = (parsed.run_root or _default_run_root(robot, task)).resolve()
     run_dir = (run_root / run_id).resolve()
     if not _inside(run_dir, run_root) or run_dir == run_root:
         raise SystemExit("run directory escapes run root")
     selection: dict[str, Any]
     try:
-        if parsed.scenario is not None:
+        if target is not None:
             resolved = resolve_scenario_backend(
-                scenario=parsed.scenario,
+                robot=robot,
+                task=task,
                 role=parsed.role or "teacher",
                 shared_root=parsed.shared_root,
-                bundle=parsed.bundle,
                 seed=parsed.seed,
                 overrides=parsed.overrides,
             )
             document, selection = resolved.document, resolved.selection
         else:
             document = apply_overrides(_direct_document(parsed), parsed.overrides)
-            selection = {"mode": "direct", "scenario_id": None, "role": None}
+            selection = {"mode": "direct", "robot": None, "task": None, "role": None}
         # Validate before creating the run directory so a bad recipe leaves no
         # orphan directory behind.
         load_backend_document(document, parsed.config or "scenario:selection")

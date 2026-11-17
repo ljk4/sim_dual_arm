@@ -30,7 +30,7 @@ FORBIDDEN = {
 
 
 def _audit():
-    path = ROOT / "shared/scenarios/panda_stack/profiles/robots/panda_stack_v1/profile.json"
+    path = ROOT / "shared/scenarios/panda_sim/stack/profiles/robots/panda_stack_v1/profile.json"
     profile = load_profile(path, ROOT / "shared/common/interfaces/schemas")
     context = RunContext(profile.robot_id, profile.digest, "backend", "time", 0, "episode", 1)
     configuration = {

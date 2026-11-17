@@ -28,7 +28,6 @@ from robot_contracts.validation import (
 from .config_yaml import ConfigError, load_yaml
 
 __all__ = [
-    "BudgetSpec",
     "CheckpointSpec",
     "ConfigError",
     "DatasetConfig",
@@ -123,7 +122,6 @@ class ModeSpec(StrictMappingModel):
     split: Literal["train", "validation"]
     episodes: Episodes
     validation: bool
-    reserve_seconds: Annotated[PositiveFloat, Field(ge=1.0)]
 
     @model_validator(mode="after")
     def _episodes_unique(self) -> ModeSpec:
@@ -132,21 +130,8 @@ class ModeSpec(StrictMappingModel):
         return self
 
 
-class BudgetSpec(StrictMappingModel):
-    limit_seconds: Annotated[PositiveFloat, Field(ge=1.0)]
-    ledger: Path
-    lock: Path
-    stop_margin_seconds: NonNegativeFloat
-    min_free_bytes: NonNegativeInt
-
-
 class CheckpointSpec(StrictMappingModel):
     root: Path
-    keep_latest: bool
-    keep_best: bool
-    keep_final: bool
-    min_free_bytes: NonNegativeInt
-    save_before_exit: bool
 
 
 class LoggingSpec(StrictMappingModel):
@@ -295,16 +280,12 @@ class TrainingConfig(StrictMappingModel):
     val_every_steps: Annotated[PositiveInt, Field(le=1_000_000)] = Field(
         validation_alias=AliasPath("training", "val_every_steps")
     )
-    save_every_steps: Annotated[PositiveInt, Field(le=1_000_000)] = Field(
-        validation_alias=AliasPath("training", "save_every_steps")
-    )
     val_batches: Annotated[PositiveInt, Field(le=10000)] = Field(
         validation_alias=AliasPath("training", "val_batches")
     )
     deterministic: bool = Field(validation_alias=AliasPath("training", "deterministic"))
     modes: dict[str, ModeSpec]
     model: ModelSpec
-    budget: BudgetSpec
     checkpoint: CheckpointSpec
     logging: LoggingSpec
     dataset: DatasetConfig
@@ -447,7 +428,6 @@ def training_before(data: object) -> object:
             "grad_clip_norm",
             "log_every_steps",
             "val_every_steps",
-            "save_every_steps",
             "val_batches",
             "deterministic",
         },
@@ -463,7 +443,6 @@ def training_before(data: object) -> object:
     if "cache_root" in data:
         data["cache_root"] = project_path(data["cache_root"], root)
     for section, keys in (
-        ("budget", ("ledger", "lock")),
         ("checkpoint", ("root",)),
         ("logging", ("root",)),
     ):

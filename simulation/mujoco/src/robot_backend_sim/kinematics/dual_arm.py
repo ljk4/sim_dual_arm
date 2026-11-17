@@ -65,6 +65,9 @@ class IKParameters:
     orientation_cost: float
     lm_damping: float
     solver: str = "daqp"
+    # Interior margin (rad) reserved by the IK configuration limit on every
+    # solved arm hinge, so no joint can land on a hard limit.
+    limit_margin_rad: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,10 +186,45 @@ def _chain(
     return chain, tuple(joint_ids)
 
 
-def _limits(model: object, pair_set: CollisionPairSet | None, clearance: ClearanceParameters):
+def _configuration_limit(
+    model: object, arm_joint_ids: tuple[int, ...], margin_rad: float
+):
+    """Configuration limit with an interior margin on every arm hinge.
+
+    ``mink.ConfigurationLimit`` clamps at the exact hard limits.  Shrinking only
+    the arm joints keeps every solved target at least ``margin_rad`` away from a
+    hard limit while leaving free joints and gripper slides untouched.
+    """
     import mink
 
-    limits: list[object] = [mink.ConfigurationLimit(model)]
+    limit = mink.ConfigurationLimit(model)
+    if margin_rad <= 0.0:
+        return limit
+    for joint_id in arm_joint_ids:
+        if not int(model.jnt_limited[joint_id]):
+            continue
+        lower = float(model.jnt_range[joint_id][0]) + margin_rad
+        upper = float(model.jnt_range[joint_id][1]) - margin_rad
+        if lower >= upper:
+            raise KinematicsError(
+                "ik_limit_margin_invalid",
+                f"joint margin {margin_rad:g} rad collapses joint {joint_id}",
+            )
+        limit.lower[int(model.jnt_qposadr[joint_id])] = lower
+        limit.upper[int(model.jnt_qposadr[joint_id])] = upper
+    return limit
+
+
+def _limits(
+    model: object,
+    pair_set: CollisionPairSet | None,
+    clearance: ClearanceParameters,
+    arm_joint_ids: tuple[int, ...],
+    limit_margin_rad: float,
+):
+    import mink
+
+    limits: list[object] = [_configuration_limit(model, arm_joint_ids, limit_margin_rad)]
     if pair_set is not None and pair_set.pairs:
         try:
             limits.append(
@@ -203,6 +241,28 @@ def _limits(model: object, pair_set: CollisionPairSet | None, clearance: Clearan
                 f"mink collision limit construction failed: {type(error).__name__}: {error}",
             ) from error
     return limits
+
+
+def _posture_reference(
+    model: object, start: object, joint_ids: tuple[int, ...], margin_rad: float
+) -> object:
+    """Incoming state clamped into the interior margin box.
+
+    The previous accepted solution (or the reset pose for the first target) is
+    already interior and non-singular, so using it as the posture reference
+    resolves the redundant DoF toward a safe configuration instead of toward a
+    raw joint midpoint, which for this wrist is the q5 = 0 singularity.
+    """
+    import numpy as np
+
+    target = np.array(start, dtype=np.float64, copy=True)
+    if margin_rad > 0.0:
+        for joint_id in joint_ids:
+            address = int(model.jnt_qposadr[joint_id])
+            lower = float(model.jnt_range[joint_id][0]) + margin_rad
+            upper = float(model.jnt_range[joint_id][1]) - margin_rad
+            target[address] = min(max(float(target[address]), lower), upper)
+    return target
 
 
 def solve_targets(
@@ -227,7 +287,6 @@ def solve_targets(
     if initial.shape != (model.nq,) or not np.isfinite(initial).all():
         raise KinematicsError("initial_state_invalid", "initial qpos is not finite")
     start = initial.copy()
-    limits = _limits(model, pair_set, clearance)
     results: list[IKSolution] = []
     for target in targets:
         if deadline is not None and time.monotonic() > deadline:
@@ -250,6 +309,9 @@ def solve_targets(
         active_addresses = tuple(int(model.jnt_qposadr[joint_id]) for joint_id in joint_ids)
         active_dofs = {int(model.jnt_dofadr[joint_id]) for joint_id in joint_ids}
         frozen_dofs = sorted(set(range(int(model.nv))) - active_dofs)
+        # Only the active chain gets the interior margin; the frozen arm keeps
+        # the hard limits so its measured state can never make the QP infeasible.
+        limits = _limits(model, pair_set, clearance, joint_ids, ik.limit_margin_rad)
         started = time.perf_counter()
         configuration = mink.Configuration(model)
         configuration.update(start)
@@ -262,7 +324,9 @@ def solve_targets(
         )
         frame_task.set_target(mink.SE3.from_matrix(_pose_matrix(target.position, target.rotation)))
         posture_task = mink.PostureTask(model, cost=ik.posture_cost)
-        posture_task.set_target(start)
+        posture_task.set_target(
+            _posture_reference(model, start, joint_ids, ik.limit_margin_rad)
+        )
         tasks = [frame_task, posture_task]
         converged = False
         iterations = 0

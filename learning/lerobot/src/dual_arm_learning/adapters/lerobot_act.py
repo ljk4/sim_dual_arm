@@ -25,8 +25,8 @@ def _vram_peak_mib() -> float | None:
         return None
 
 
-class BundleActModel(PolicyModelAdapter):
-    """Production ACT adapter over the 035 ``predict_action_chunk`` path."""
+class ActModelAdapter(PolicyModelAdapter):
+    """Production ACT adapter over the ``predict_action_chunk`` path."""
 
     policy_family = "act"
 
@@ -125,8 +125,8 @@ class BundleActModel(PolicyModelAdapter):
         log.emit("act.model.ready", fields=scalar, critical=True)
 
 
-def load_act_adapter(config: Any, *, device: str | None = None) -> BundleActModel:
-    """Strictly load the bundle, warm the model, then return the pure adapter."""
+def load_act_adapter(config: Any, *, device: str | None = None) -> ActModelAdapter:
+    """Strictly load the model package, warm the model, then return the adapter."""
     device = config.device if device is None else device
     try:
         import torch
@@ -137,11 +137,11 @@ def load_act_adapter(config: Any, *, device: str | None = None) -> BundleActMode
             raise PolicyError("PROVIDER_MISMATCH", f"requested {device} but CUDA is unavailable")
         torch.cuda.reset_peak_memory_stats()
     started = time.monotonic()
-    from ..bundle import load_bundle
+    from ..bundle import load_model
 
-    handle = load_bundle(config.bundle_dir, device=device)
+    handle = load_model(config.model_path, device=device)
     profile = json.loads(Path(config.robot_profile_path).read_text(encoding="utf-8"))
-    adapter = BundleActModel(
+    adapter = ActModelAdapter(
         handle,
         device=device,
         chunk_size=config.chunk_size,
@@ -156,4 +156,4 @@ def load_act_adapter(config: Any, *, device: str | None = None) -> BundleActMode
     return adapter
 
 
-__all__ = ["BundleActModel", "load_act_adapter"]
+__all__ = ["ActModelAdapter", "load_act_adapter"]

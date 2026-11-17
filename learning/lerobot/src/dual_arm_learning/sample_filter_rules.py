@@ -8,7 +8,6 @@ from typing import Annotated, Literal
 
 from pydantic import BeforeValidator, Field, model_validator
 from robot_contracts.validation import (
-    NonEmptyStr,
     NonNegativeFloat,
     StrictMappingModel,
     as_tuple,
@@ -22,22 +21,17 @@ LEAD_NS = 50_000_000
 PERIOD_NS = 50_000_000
 STATE_DIM = 16
 REASON_REDUNDANT = "redundant_static_anchor"
-RIGHT_ARM = (8, 9, 10, 11, 12, 13, 14)
+# The canonical dual-arm layout: left arm 0..6, left gripper 7, right arm 8..14,
+# right gripper 15.  A frame is static only when every arm joint on *both* arms
+# and both grippers hold still.
+ARM_INDICES = (0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14)
 GRIPPERS = (7, 15)
-KNOWN_PHASES = (
-    "pregrasp",
-    "grasp",
-    "close",
-    "lift",
-    "transport",
-    "lower",
-    "open",
-    "retreat",
-    "stable",
-)
 
-JointIndices = Annotated[tuple[Annotated[int, Field(strict=True, ge=0, le=15)], ...],
-                         BeforeValidator(as_tuple)]
+JointIndices = Annotated[
+    tuple[Annotated[int, Field(strict=True, ge=0, le=15)], ...],
+    BeforeValidator(as_tuple),
+    Field(min_length=1),
+]
 StepLimit = Annotated[NonNegativeFloat, Field(le=1.0)]
 SpeedLimit = Annotated[NonNegativeFloat, Field(le=100.0)]
 FrameCount = Annotated[int, Field(strict=True, ge=0, le=100_000)]
@@ -52,10 +46,10 @@ class FilterRule:
     schema_version: int
     fps: int
     chunk_size: int
-    right_arm_indices: tuple[int, ...]
+    arm_indices: tuple[int, ...]
     gripper_indices: tuple[int, ...]
-    max_right_step_rad: float
-    max_right_velocity_rad_s: float
+    max_arm_step_rad: float
+    max_arm_velocity_rad_s: float
     max_gripper_step_m: float
     max_gripper_velocity_m_s: float
     min_static_run_frames: int
@@ -64,8 +58,6 @@ class FilterRule:
     phase_boundary_frames: int
     episode_boundary_frames: int
     min_episode_kept_frames: int
-    known_phases: tuple[str, ...]
-    tracking_gate: str
     reason: str
     source: Path
 
@@ -75,32 +67,26 @@ class FilterRule:
 
 
 class _ArmRule(StrictMappingModel):
-    joint_indices: JointIndices
+    joint_indices: JointIndices = ARM_INDICES
     max_step_rad: StepLimit
     max_velocity_rad_s: SpeedLimit
 
     @model_validator(mode="after")
     def _unique(self) -> _ArmRule:
-        if len(self.joint_indices) != 7 or len(set(self.joint_indices)) != 7:
-            raise contract_error("joint_indices", "must contain seven unique joint indices")
-        if self.joint_indices != RIGHT_ARM:
-            raise contract_error(
-                "joint_indices", "must be the seven right arm rad axes"
-            )
+        if len(set(self.joint_indices)) != len(self.joint_indices):
+            raise contract_error("joint_indices", "must contain unique joint indices")
         return self
 
 
 class _GripperRule(StrictMappingModel):
-    joint_indices: JointIndices
+    joint_indices: JointIndices = GRIPPERS
     max_step_m: StepLimit
     max_velocity_m_s: SpeedLimit
 
     @model_validator(mode="after")
     def _unique(self) -> _GripperRule:
-        if len(self.joint_indices) != 2 or len(set(self.joint_indices)) != 2:
-            raise contract_error("joint_indices", "must contain two unique joint indices")
-        if self.joint_indices != GRIPPERS:
-            raise contract_error("joint_indices", "must be the left/right gripper metre axes")
+        if len(set(self.joint_indices)) != len(self.joint_indices):
+            raise contract_error("joint_indices", "must contain unique joint indices")
         return self
 
 
@@ -114,27 +100,13 @@ class _StaticRuns(StrictMappingModel):
     reason: Literal["redundant_static_anchor"]
 
 
-class _PhaseGate(StrictMappingModel):
-    known_phases: Annotated[tuple[NonEmptyStr, ...], BeforeValidator(as_tuple)]
-    tracking_gate: NonEmptyStr
-
-    @model_validator(mode="after")
-    def _phases(self) -> _PhaseGate:
-        if len(set(self.known_phases)) != len(self.known_phases):
-            raise contract_error("known_phases", "must be unique")
-        if set(KNOWN_PHASES) - set(self.known_phases):
-            raise contract_error("known_phases", "must contain every panda stack phase")
-        return self
-
-
 class _FilterDocument(StrictMappingModel):
     schema_version: Literal[1]
     fps: Literal[20]
     chunk_size: Literal[60]
-    right_arm: _ArmRule
+    arms: _ArmRule
     grippers: _GripperRule
     static_runs: _StaticRuns
-    phase_gate: _PhaseGate
 
     @model_validator(mode="after")
     def _run_shape(self) -> _FilterDocument:
@@ -153,17 +125,17 @@ def load_filter_rule(path: str | Path) -> FilterRule:
         document = _FilterDocument(**load_yaml(source))
     except ConfigError as error:
         raise ConfigError(str(source), error.field, error.message) from error
-    arm = document.right_arm
+    arms = document.arms
     grippers = document.grippers
     runs = document.static_runs
     return FilterRule(
         schema_version=document.schema_version,
         fps=document.fps,
         chunk_size=document.chunk_size,
-        right_arm_indices=tuple(arm.joint_indices),
+        arm_indices=tuple(arms.joint_indices),
         gripper_indices=tuple(grippers.joint_indices),
-        max_right_step_rad=float(arm.max_step_rad),
-        max_right_velocity_rad_s=float(arm.max_velocity_rad_s),
+        max_arm_step_rad=float(arms.max_step_rad),
+        max_arm_velocity_rad_s=float(arms.max_velocity_rad_s),
         max_gripper_step_m=float(grippers.max_step_m),
         max_gripper_velocity_m_s=float(grippers.max_velocity_m_s),
         min_static_run_frames=runs.min_frames,
@@ -172,19 +144,16 @@ def load_filter_rule(path: str | Path) -> FilterRule:
         phase_boundary_frames=runs.phase_boundary_frames,
         episode_boundary_frames=runs.episode_boundary_frames,
         min_episode_kept_frames=runs.min_episode_kept_frames,
-        known_phases=tuple(document.phase_gate.known_phases),
-        tracking_gate=document.phase_gate.tracking_gate,
         reason=runs.reason,
         source=source,
     )
 
 
 __all__ = [
+    "ARM_INDICES",
     "FilterError",
     "FilterRule",
     "GRIPPERS",
-    "KNOWN_PHASES",
     "REASON_REDUNDANT",
-    "RIGHT_ARM",
     "load_filter_rule",
 ]

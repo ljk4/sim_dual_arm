@@ -42,11 +42,12 @@ ROOT = Path(os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[6
 def _sdk_check(
     project_root: Path,
     *,
-    scenario: str | None = None,
+    robot: str | None = None,
+    task: str | None = None,
     shared_root: Path | None = None,
 ) -> tuple[int, str]:
     result = subprocess.run(
-        sdk_check_command(project_root, scenario=scenario, shared_root=shared_root),
+        sdk_check_command(project_root, robot=robot, task=task, shared_root=shared_root),
         check=False,
         capture_output=True,
         text=True,
@@ -65,13 +66,18 @@ def _campaign_status(project_root: Path, config: dict[str, Any]) -> dict[str, An
 
 def build_plan(args: argparse.Namespace) -> dict[str, Any]:
     project_root = Path(args.project_root).resolve()
-    if args.scenario is not None:
+    if args.robot is not None:
+        if args.task is None:
+            raise CampaignError("--robot requires --task")
         if args.config is not None or args.runtime_config is not None:
-            raise CampaignError("--scenario cannot be combined with --config/--runtime-config")
+            raise CampaignError(
+                "--robot/--task cannot be combined with --config/--runtime-config"
+            )
         if args.backend_template is not None:
-            raise CampaignError("--scenario cannot be combined with --backend-template")
+            raise CampaignError("--robot/--task cannot be combined with --backend-template")
         selection = select_collection(
-            scenario=args.scenario,
+            robot=args.robot,
+            task=args.task,
             shared_root=args.shared_root,
             project_root=project_root,
             binding_sha256=args.binding_sha256,
@@ -80,8 +86,10 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         campaign_path = Path(selection["recipes"]["campaign"]["path"])
         runtime_path = Path(selection["recipes"]["runtime_teacher"]["path"])
         backend_path = Path(selection["recipes"]["simulation_teacher"]["path"])
+    elif args.task is not None:
+        raise CampaignError("--task requires --robot")
     elif args.shared_root is not None:
-        raise CampaignError("--shared-root requires --scenario")
+        raise CampaignError("--shared-root requires --robot/--task")
     else:
         if args.config is None or args.runtime_config is None:
             raise CampaignError("direct preflight requires --config and --runtime-config")
@@ -134,7 +142,8 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
     if not args.skip_sdk_check:
         code, output = _sdk_check(
             project_root,
-            scenario=args.scenario,
+            robot=args.robot,
+            task=args.task,
             shared_root=args.shared_root,
         )
         plan["sdk"] = {"checked": True, "ok": code == 0, "output": output}
@@ -147,7 +156,8 @@ def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     result.add_argument("--project-root", type=Path, default=ROOT)
     result.add_argument("--shared-root", type=Path)
-    result.add_argument("--scenario")
+    result.add_argument("--robot")
+    result.add_argument("--task")
     result.add_argument("--binding-sha256")
     result.add_argument("--config", type=Path)
     result.add_argument("--runtime-config", type=Path)

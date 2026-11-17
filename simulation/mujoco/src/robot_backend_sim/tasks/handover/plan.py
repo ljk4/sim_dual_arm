@@ -687,6 +687,7 @@ def plan_handover(
         orientation_cost=config.ik.orientation_cost,
         lm_damping=config.ik.lm_damping,
         solver=config.ik.solver,
+        limit_margin_rad=config.ik.limit_margin_rad,
     )
     clearance = ClearanceParameters(
         minimum_clearance_m=config.clearance.minimum_clearance_m,

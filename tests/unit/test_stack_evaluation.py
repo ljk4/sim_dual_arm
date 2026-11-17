@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from collection_fixtures import SCENARIO_ID, build_collection_tree
+from collection_fixtures import ROBOT, SCENARIO_ID, TASK, build_collection_tree
 
 ROOT = Path(__file__).resolve().parents[2]
 from dual_arm_runtime.offline import campaign, evaluate  # noqa: E402
@@ -51,7 +51,7 @@ def campaign_config(tmp_path: Path) -> tuple[Path, Path]:
     }
     config_path = (
         root
-        / "shared/scenarios/panda_stack/configs/runtime/experiments/stack_campaign.yaml"
+        / "shared/scenarios/panda_sim/stack/configs/runtime/experiments/stack_campaign.yaml"
     )
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
@@ -633,14 +633,14 @@ def test_evaluate_arguments_require_exactly_one_config_source():
     with pytest.raises(SystemExit):
         evaluate.parse_arguments([])
     with pytest.raises(SystemExit):
-        evaluate.parse_arguments(["--config", "a.yaml", "--scenario", "panda_stack"])
+        evaluate.parse_arguments(["--config", "a.yaml", "--robot", ROBOT, "--task", TASK])
     with pytest.raises(SystemExit):
         evaluate.parse_arguments(["--shared-root", "/shared", "--config", "a.yaml"])
 
 
 def test_evaluate_defaults_to_generic_output_directory():
     args = evaluate.parse_arguments(["--config", "campaign.yaml"])
-    assert args.output == Path("var/_direct/diagnostics/evaluation")
+    assert args.output == Path("var/_direct/debug/evaluation")
 
 
 def test_evaluate_scenario_resolves_the_campaign_recipe(tmp_path, monkeypatch):
@@ -655,7 +655,8 @@ def test_evaluate_scenario_resolves_the_campaign_recipe(tmp_path, monkeypatch):
     code = evaluate.main(
         [
             "--project-root", str(tree.repo),
-            "--scenario", SCENARIO_ID,
+            "--robot", ROBOT,
+            "--task", TASK,
             "--shared-root", str(tree.shared),
             "--no-media",
         ]
@@ -663,5 +664,5 @@ def test_evaluate_scenario_resolves_the_campaign_recipe(tmp_path, monkeypatch):
     assert code == 0
     assert seen["config_path"] == tree.campaign_recipe.resolve()
     assert seen["output"] == (
-        tree.repo / "var" / SCENARIO_ID / "diagnostics/evaluation"
+        tree.repo / "var" / SCENARIO_ID / "debug/evaluation"
     ).resolve()

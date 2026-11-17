@@ -67,14 +67,14 @@ from robot_backend_sim.physics.marvin.scene import build_marvin_scene  # noqa: E
 from robot_backend_sim.tasks.handover.config import load_handover_plan_config  # noqa: E402
 from robot_backend_sim.tasks.handover.plan import plan_handover  # noqa: E402
 
-SCENARIO = ROOT / "shared/scenarios/marvin_handover"
+SCENARIO = ROOT / "shared/scenarios/marvin_sim/handover"
 RECIPE = Path(
     os.environ.get(
         "P02B_BACKEND_CONFIG",
         str(SCENARIO / "configs/simulation/backend/backend_marvin_control.yaml"),
     )
 )
-EVIDENCE_DIR = Path(os.environ.get("P02B_EVIDENCE_DIR", "/data/marvin_handover/diagnostics/p02b"))
+EVIDENCE_DIR = Path(os.environ.get("P02B_EVIDENCE_DIR", "/data/marvin_sim/handover/diagnostics/p02b"))
 SCENE_PATH = SCENARIO / "configs/simulation/scene/marvin_handover.yaml"
 PLANNING_PATH = SCENARIO / "configs/simulation/planning/handover_paths.yaml"
 PROFILE_PATH = SCENARIO / "profiles/robots/marvin_handover_v1/profile.json"

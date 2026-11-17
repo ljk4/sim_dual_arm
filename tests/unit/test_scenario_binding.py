@@ -33,12 +33,12 @@ def _write(tree: ScenarioTree, document: dict) -> Path:
 def test_valid_binding_resolves_every_declared_reference(scenario):
     resolved = _load(scenario)
 
-    assert resolved.binding.scenario_id == "synthetic_stack"
+    assert resolved.binding.scenario_id == "synthetic_sim/stack"
     assert resolved.path == scenario.binding_path.resolve()
     assert resolved.root == scenario.root.resolve()
-    assert resolved.bundle.source == "binding"
-    assert resolved.bundle.path == (scenario.root / "bundles/act").resolve()
-    assert resolved.bundle.declared == "bundles/act"
+    assert resolved.bundle.source == "none"
+    assert resolved.bundle.path is None
+    assert resolved.bundle.declared is None
     assert len(resolved.sha256) == 64
     assert set(resolved.references) == {
         "profiles.robot",
@@ -114,18 +114,17 @@ def test_stage_requirements_fail_with_a_clear_field(scenario, field, stage):
     assert str(scenario.binding_path.resolve()) in str(caught.value)
 
 
-def test_collection_allows_no_model_but_inference_requires_one(scenario):
+def test_model_bundle_is_optional_for_every_stage(scenario):
     document = scenario.copy()
-    document["models"]["bundle"] = None
+    document.setdefault("models", {})["bundle"] = None
     _write(scenario, document)
     resolved = _load(scenario)
 
     assert resolved.bundle.source == "none"
     assert resolved.bundle.path is None
-    resolved.validate_stage("collection")
-    resolved.validate_stage("learning")
-    with pytest.raises(BindingError, match="models.bundle"):
-        resolved.validate_stage("inference")
+    for stage in BindingStage:
+        resolved.validate_stage(stage)
+    assert "models.bundle" not in resolved.requirements("inference")
 
 
 def test_hardware_backend_does_not_require_simulation_recipes(scenario):
@@ -156,7 +155,7 @@ def test_bundle_override_records_the_real_source_without_a_fake_digest(scenario)
     resolved = _load(scenario, bundle=override.resolve())
 
     assert resolved.bundle.source == "override"
-    assert resolved.bundle.declared == "bundles/act"
+    assert resolved.bundle.declared is None
     assert resolved.bundle.path == override.resolve()
     assert resolved.bundle.effective == str(override.resolve())
     assert resolved.bundle.summary()["digest"] is None
@@ -261,7 +260,6 @@ def test_unknown_fields_and_implicit_inheritance_are_rejected(scenario, label, m
             "interfaces.extension_ros[0]",
             lambda tree: shutil.rmtree(tree.root / "extensions/ros/panda_stack_api_msgs"),
         ),
-        ("models.bundle", lambda tree: shutil.rmtree(tree.root / "bundles/act")),
     ],
 )
 def test_missing_reference_is_rejected(scenario, field, remove):
@@ -293,12 +291,6 @@ def test_missing_reference_is_rejected(scenario, field, remove):
             "interfaces.extension_ros[0]",
             lambda tree: shutil.rmtree(tree.root / "extensions/ros/panda_stack_api_msgs")
             or (tree.root / "extensions/ros/panda_stack_api_msgs").write_text("file"),
-            "expected a directory",
-        ),
-        (
-            "models.bundle",
-            lambda tree: shutil.rmtree(tree.root / "bundles/act")
-            or (tree.root / "bundles/act").write_text("file"),
             "expected a directory",
         ),
     ],
@@ -340,7 +332,7 @@ def test_reference_outside_declared_source_roots_is_rejected(scenario):
 
 def test_relative_source_roots_cover_end_and_shared_configs(tmp_path):
     repository = tmp_path / "repo"
-    scenario = build_scenario(repository / "shared/scenarios/panda_stack")
+    scenario = build_scenario(repository / "shared/scenarios/panda_sim/stack")
     end_config = repository / "runtime/ros2/configs/existing.yaml"
     end_config.parent.mkdir(parents=True)
     end_config.write_text("schema_version: 1\n", encoding="utf-8")
@@ -350,11 +342,11 @@ def test_relative_source_roots_cover_end_and_shared_configs(tmp_path):
 
     document = scenario.copy()
     document["source_roots"] = [
-        "../../../runtime/ros2/configs",
-        "../..",
+        "../../../../runtime/ros2/configs",
+        "../../..",
     ]
-    document["recipes"]["runtime_teacher"] = "../../../runtime/ros2/configs/existing.yaml"
-    document["recipes"]["dataset"] = "../../common/configs/shared.yaml"
+    document["recipes"]["runtime_teacher"] = "../../../../runtime/ros2/configs/existing.yaml"
+    document["recipes"]["dataset"] = "../../../common/configs/shared.yaml"
     _write(scenario, document)
 
     resolved = _load(scenario)
@@ -431,7 +423,8 @@ def test_explicit_acyclic_reference_is_recorded(tmp_path):
     first = build_scenario(scenarios / "a")
     second = build_scenario(scenarios / "b")
     second_document = second.copy()
-    second_document["scenario_id"] = "synthetic_stack_dependency"
+    second_document["robot_id"] = "synthetic_sim"
+    second_document["task_id"] = "dependency"
     second.write(second_document)
     first_document = first.copy()
     first_document["source_roots"] = [".."]
@@ -440,7 +433,7 @@ def test_explicit_acyclic_reference_is_recorded(tmp_path):
 
     resolved = _load(first)
     assert len(resolved.dependencies) == 1
-    assert resolved.dependencies[0].binding.scenario_id == "synthetic_stack_dependency"
+    assert resolved.dependencies[0].binding.scenario_id == "synthetic_sim/dependency"
     summary = resolved.summary()
     assert summary["dependencies"][0]["path"] == str(second.binding_path.resolve())
     assert summary["references"]["references[0]"]["kind"] == "file"
@@ -463,7 +456,7 @@ def test_absolute_model_requires_a_declared_artifact_root(scenario, tmp_path):
     (artifacts / "bundle").mkdir(parents=True)
     document = scenario.copy()
     document["artifact_roots"] = [str(artifacts.resolve())]
-    document["models"]["bundle"] = str((artifacts / "bundle").resolve())
+    document.setdefault("models", {})["bundle"] = str((artifacts / "bundle").resolve())
     _write(scenario, document)
 
     resolved = _load(scenario)
@@ -528,7 +521,7 @@ def test_stage_requirement_helper_is_stable():
         "recipes.dataset",
         "recipes.training",
     )
-    assert "models.bundle" in stage_requirements(binding, "inference")
+    assert "models.bundle" not in stage_requirements(binding, "inference")
 
     hardware = base_binding()
     hardware["backend"]["kind"] = "hardware"
@@ -542,12 +535,12 @@ def test_unknown_stage_is_rejected(scenario):
         _load(scenario).validate_stage("training")
 
 
-def test_template_scenario_id_is_structurally_accepted(scenario):
+def test_template_robot_and_task_are_structurally_accepted(scenario):
     document = scenario.copy()
-    document["scenario_id"] = "_template"
+    document["robot_id"] = "_template"
     _write(scenario, document)
 
-    assert _load(scenario).binding.scenario_id == "_template"
+    assert _load(scenario).binding.scenario_id == "_template/stack"
 
 
 def test_template_example_is_unfilled_and_not_runnable():
@@ -557,7 +550,8 @@ def test_template_example_is_unfilled_and_not_runnable():
     assert example.is_file()
     assert not (template_dir / "binding.yaml").exists()
     document = yaml.safe_load(example.read_text(encoding="utf-8"))
-    assert document["scenario_id"] == "replace_me"
+    assert document["robot_id"] == "replace_me"
+    assert document["task_id"] == "replace_me"
     with pytest.raises(BindingError) as caught:
         load_binding(example, shared_root=SHARED)
     assert caught.value.reason == "BINDING_REFERENCE"

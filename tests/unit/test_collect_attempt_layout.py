@@ -18,6 +18,7 @@ def _campaign(tmp_path: Path) -> Path:
                 "schema_version": 1,
                 "export": {"max_labels": 700},
                 "quality": {"sidecar": "export/quality.json"},
+                "paths": {"ledger": str(tmp_path / "logs/collection/attempts.jsonl")},
             }
         ),
         encoding="utf-8",
@@ -87,11 +88,14 @@ def test_collect_attempt_flattens_raw_logs_and_export_without_copies(
         ]
     ) == 0
 
-    assert (attempt / "runtime.yaml").is_file()
+    logs = tmp_path / "logs/collection/attempts" / attempt.name
+    assert (logs / "runtime.yaml").is_file()
     assert (attempt / "raw" / "manifest.json").is_file()
     assert (attempt / "raw" / "task_result.json").is_file()
     assert (attempt / "export" / "quality.json").is_file()
     assert not (attempt / "stack").exists()
+    assert not (attempt / "logs").exists()
+    assert not (attempt / "runtime.yaml").exists()
     assert not (attempt / "manifest.json").exists()
     assert not (attempt / "task_result.json").exists()
     assert not (attempt / "quality.json").exists()
@@ -101,9 +105,7 @@ def test_collect_attempt_flattens_raw_logs_and_export_without_copies(
     assert Path(runtime_command[runtime_command.index("--episode-dir") + 1]) == (
         attempt / "raw"
     )
-    assert Path(runtime_command[runtime_command.index("--runs-output") + 1]) == (
-        attempt / "logs"
-    )
+    assert Path(runtime_command[runtime_command.index("--runs-output") + 1]) == logs
     assert Path(export_command[export_command.index("--episode-dir") + 1]) == (
         attempt / "raw"
     )
@@ -149,7 +151,8 @@ def test_collect_attempt_forwards_scenario_overrides(tmp_path, monkeypatch):
     assert collect_attempt.main(
         [
             "--campaign-config", str(campaign),
-            "--scenario", "synthetic_stack",
+            "--robot", "synthetic_sim",
+            "--task", "stack",
             "--shared-root", str(tmp_path),
             "--set", "observation.max_age_ns=250000000",
             "--backend-log", str(tmp_path),
@@ -157,6 +160,9 @@ def test_collect_attempt_forwards_scenario_overrides(tmp_path, monkeypatch):
     ) == 0
 
     runtime_command = commands[0]
-    assert runtime_command[runtime_command.index("--scenario") + 1] == "synthetic_stack"
+    assert runtime_command[runtime_command.index("--robot") + 1] == "synthetic_sim"
+    assert runtime_command[runtime_command.index("--task") + 1] == "stack"
     assert "observation.max_age_ns=250000000" in runtime_command
+    logs = tmp_path / "logs/collection/attempts" / attempt.name
     assert not (attempt / "runtime.yaml").exists()
+    assert not (logs / "runtime.yaml").exists()

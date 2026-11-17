@@ -8,7 +8,7 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-SCENARIO = ROOT / "shared/scenarios/marvin_handover"
+SCENARIO = ROOT / "shared/scenarios/marvin_sim/handover"
 TASK = SCENARIO / "configs/simulation/scene/marvin_handover_task.yaml"
 INFERENCE_TASK = SCENARIO / "configs/simulation/scene/marvin_handover_task_inference.yaml"
 RUNTIME_POLICY = SCENARIO / "configs/runtime/policy_eval.yaml"
@@ -35,10 +35,8 @@ def test_teacher_plan_budget_only_applies_when_teacher_is_enabled():
     assert inference.teacher.max_plan_duration_s > inference.success.max_task_sim_duration_s
 
 
-def _runtime_with_verified_placeholders(tmp_path: Path) -> Path:
+def _runtime_config(tmp_path: Path) -> Path:
     document = yaml.safe_load(RUNTIME_POLICY.read_text(encoding="utf-8"))
-    for enum in ("model_bundle_digest", "processor_digest"):
-        document["policy"][enum] = "0" * 64
     for field in (
         "robot_profile",
         "observation_schema",
@@ -55,13 +53,13 @@ def _runtime_with_verified_placeholders(tmp_path: Path) -> Path:
 def test_runtime_policy_recipe_declares_bounded_task_execution(tmp_path):
     from dual_arm_runtime.runtime_config import load_runtime_configuration
 
-    policy = load_runtime_configuration(_runtime_with_verified_placeholders(tmp_path), ROOT)
+    policy = load_runtime_configuration(_runtime_config(tmp_path), ROOT)
     stream = policy.recipe.policy
     assert stream is not None
     assert stream.termination_mode == "task"
-    assert stream.task_sim_budget_ns == 10_000_000_000
+    assert stream.task_sim_budget_ns == 180_000_000_000
     assert stream.task_stop_margin_s == 1.0
-    assert stream.total_wall_deadline_s == 60.0
+    assert stream.total_wall_deadline_s == 420.0
     assert stream.startup_settle_sim_ns == 2_000_000_000
     follower = policy.recipe.follower
     assert follower is not None
@@ -72,7 +70,7 @@ def test_runtime_policy_recipe_declares_bounded_task_execution(tmp_path):
 def test_runtime_and_task_evaluation_budgets_agree(tmp_path):
     from dual_arm_runtime.runtime_config import load_runtime_configuration
 
-    policy = load_runtime_configuration(_runtime_with_verified_placeholders(tmp_path), ROOT)
+    policy = load_runtime_configuration(_runtime_config(tmp_path), ROOT)
     stream = policy.recipe.policy
     assert stream is not None
     task = _load_task(INFERENCE_TASK)
@@ -96,7 +94,8 @@ def test_inference_following_budget_covers_measured_model_output_only():
     budgets = inference["max_target_deviations"]
     assert len(budgets) == 16
     assert inference["joint_names"] == teacher["joint_names"]
-    assert inference["target_count"] == teacher["target_count"]
+    assert inference["target_count"] == 20
+    assert teacher["target_count"] == 10
     assert all(budget >= value for budget, value in zip(budgets, measured, strict=True))
     # The Teacher profile keeps its own measured following budget.
     assert teacher["max_target_deviations"][:7] == [0.05] * 7
@@ -116,12 +115,12 @@ def test_marvin_binding_declares_learning_and_policy_recipes():
     dataset = yaml.safe_load(
         (SCENARIO / recipes["dataset"]).read_text(encoding="utf-8")
     )
-    assert dataset["diagnostic"] is True
+    assert dataset["diagnostic"] is False
     assert dataset["expected"] == {
-        "formal_episodes": 6,
-        "training_episodes": 4,
-        "validation_episodes": 2,
-        "validation_positions": [4, 5],
+        "formal_episodes": 50,
+        "training_episodes": 45,
+        "validation_episodes": 5,
+        "validation_positions": [9, 19, 29, 39, 49],
     }
     assert document["interfaces"]["policy_api"] == "bimanual.policy.v1"
     policy_service = yaml.safe_load(

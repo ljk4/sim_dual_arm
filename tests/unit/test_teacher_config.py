@@ -6,7 +6,7 @@ from dual_arm_runtime.runtime_config import load_runtime_configuration
 from robot_contracts.models import ContractError
 
 ROOT = Path(__file__).resolve().parents[2]
-TEACHER = ROOT / "shared/scenarios/panda_stack/configs/runtime/teacher_collect.yaml"
+TEACHER = ROOT / "shared/scenarios/panda_sim/stack/configs/runtime/teacher_collect.yaml"
 
 
 def test_teacher_config_is_task_terminated_and_policy_free():
@@ -32,8 +32,6 @@ def test_teacher_and_policy_sections_are_mutually_exclusive(tmp_path):
         value[field] = str((TEACHER.parent / value[field]).resolve())
     value["policy"] = {
         "endpoint": "127.0.0.1:50051",
-        "model_bundle_digest": "0" * 64,
-        "processor_digest": "1" * 64,
         "allow_test_policy": False,
         "expected_test_only": False,
         "task_id": "task",

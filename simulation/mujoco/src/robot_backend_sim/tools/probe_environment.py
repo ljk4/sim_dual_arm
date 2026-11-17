@@ -113,15 +113,24 @@ def _validate_report_root(path: Path) -> Path:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--report-root", type=Path, required=True, help="report parent directory")
-    parser.add_argument("--run-id", required=True, help="fresh report run identity")
+    parser.add_argument(
+        "--run-id",
+        default=None,
+        help="fresh report run identity (default: probe-<UTC>-<pid>)",
+    )
     return parser
 
 
 def parse_arguments(argv: list[str] | None = None) -> ProbeArguments:
     parsed = _parser().parse_args(argv)
+    run_id = (
+        f"probe-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{os.getpid()}"
+        if parsed.run_id is None
+        else parsed.run_id
+    )
     return ProbeArguments(
         report_root=_validate_report_root(parsed.report_root),
-        run_id=_validate_run_id(parsed.run_id),
+        run_id=_validate_run_id(run_id),
     )
 
 

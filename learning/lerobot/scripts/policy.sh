@@ -11,16 +11,21 @@ POLICY_SDK="${POLICY_SDK_ROOT:-/build/generated/policy-sdk}"
 ACT_LOG_DIRECTORY="${ACT_LOG_DIRECTORY:-}"
 
 has_help=false
-scenario="_direct"
+robot=""
+task=""
 previous=""
 for argument in "$@"; do
   if [[ "$argument" == "-h" || "$argument" == "--help" ]]; then
     has_help=true
   fi
-  if [[ "$previous" == "--scenario" ]]; then
-    scenario="$argument"
-  elif [[ "$argument" == --scenario=* ]]; then
-    scenario="${argument#*=}"
+  if [[ "$previous" == "--robot" ]]; then
+    robot="$argument"
+  elif [[ "$argument" == --robot=* ]]; then
+    robot="${argument#*=}"
+  elif [[ "$previous" == "--task" ]]; then
+    task="$argument"
+  elif [[ "$argument" == --task=* ]]; then
+    task="${argument#*=}"
   fi
   previous="$argument"
 done
@@ -31,12 +36,17 @@ if [[ "$has_help" != "true" ]]; then
     --sdk-root "$POLICY_SDK" 1>&2 >/dev/null
 fi
 
+run_id="${ACT_RUN_ID:-policy-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
 log_directory="$ACT_LOG_DIRECTORY"
 if [[ -z "$log_directory" ]]; then
-  log_directory="$DATA_ROOT/$scenario/logs/policy-service"
+  if [[ -n "$robot" && -n "$task" ]]; then
+    log_directory="$DATA_ROOT/$robot/$task/logs/policy-service/$run_id"
+  else
+    log_directory="$DATA_ROOT/_direct/logs/policy-service/$run_id"
+  fi
 fi
 
 exec python3 -m dual_arm_learning.policy_service_cli \
   --log-directory "$log_directory" \
-  --run-id "${ACT_RUN_ID:-policy-$(date -u +%Y%m%dT%H%M%SZ)-$$}" \
+  --run-id "$run_id" \
   "$@"

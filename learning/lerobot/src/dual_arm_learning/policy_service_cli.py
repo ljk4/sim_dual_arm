@@ -1,9 +1,9 @@
 """ROS-free entry for the named ACT Policy service.
 
-The process loads and verifies one bundle, derives every wire identity from the
-real files, warms the ACT adapter before the gRPC server is ready, then serves
-the existing PolicyService/PolicyServer contract.  It never imports ROS, never
-reads task truth and never falls back to a fake or constant provider.
+The process loads one self-contained model package, derives every wire identity
+from the real files, warms the ACT adapter before the gRPC server is ready,
+then serves the existing PolicyService/PolicyServer contract.  It never imports
+ROS, never reads task truth and never falls back to a fake or constant provider.
 """
 
 from __future__ import annotations
@@ -20,11 +20,17 @@ from pathlib import Path
 from robot_contracts.project_paths import project_path
 
 from .adapters.lerobot_act import load_act_adapter
-from .bundle import BundleError, deployment_summary
+from .bundle import ModelError, deployment_summary
 from .policy_config import PolicyConfigError, PolicyServiceConfig, load_policy_config
 from .policy_server import serve_forever
 from .policy_types import PolicyError
-from .scenario import LearningScenario, ScenarioSelectionError, select_scenario
+from .scenario import (
+    LearningScenario,
+    ScenarioSelectionError,
+    artifact_paths,
+    latest_model,
+    select_scenario,
+)
 
 
 def _project_root() -> Path:
@@ -47,7 +53,7 @@ def _write_startup_failure(
     error: BaseException,
     config_path: Path,
     config: PolicyServiceConfig | None,
-    bundle_dir: Path | None = None,
+    model_path: Path | None = None,
 ) -> None:
     """Leave a bounded, structured failure artefact even before the logger exists."""
     try:
@@ -60,10 +66,10 @@ def _write_startup_failure(
             "error": str(error),
             "wall_time_ns": time.time_ns(),
             "config_path": str(config_path),
-            "bundle": (
-                str(bundle_dir)
-                if bundle_dir is not None
-                else ("" if config is None else str(config.bundle_dir))
+            "model": (
+                str(model_path)
+                if model_path is not None
+                else ("" if config is None else str(config.model_path))
             ),
             "profile": "" if config is None else str(config.robot_profile_path),
             "observation_schema": ("" if config is None else str(config.observation_schema_path)),
@@ -88,20 +94,23 @@ def _scalar_fields(value: dict[str, object]) -> dict[str, object]:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    selection = parser.add_mutually_exclusive_group(required=True)
-    selection.add_argument(
-        "--config", type=Path, default=None, help="direct ACT policy recipe path"
+    parser.add_argument("--config", type=Path, default=None, help="direct ACT policy recipe path")
+    parser.add_argument(
+        "--robot", help="robot id under <shared-root>/scenarios/<robot>/<task>/"
     )
-    selection.add_argument(
-        "--scenario", help="scenario id under <shared-root>/scenarios/<id>/binding.yaml"
-    )
+    parser.add_argument("--task", help="task id for --robot")
     parser.add_argument("--shared-root", type=Path, help="shared tree containing scenarios/")
     parser.add_argument(
-        "--bundle",
-        "--bundle-dir",
-        dest="bundle_dir",
+        "--model",
+        dest="model_path",
         type=Path,
-        help="verified model bundle; overrides models.bundle in the binding",
+        help="model directory or model.safetensors; defaults to the newest act_* model",
+    )
+    parser.add_argument(
+        "--bundle",
+        dest="model_path",
+        type=Path,
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--set",
@@ -137,14 +146,14 @@ def _snapshot(
 ) -> dict:
     record = {
         "schema_version": 1,
-        "bundle": summary,
+        "model": summary,
         "service": config.to_document(),
         "provider": adapter.summary(),
         "task_id": config.task_id,
         "task_text": config.task_text,
         "config": {"path": str(config_path.resolve()), "sha256": _sha256(config_path)},
         "source": {
-            "bundle_root": str(config.bundle_dir),
+            "model": str(config.model_path),
             "profile": str(config.robot_profile_path),
             "observation_schema": str(config.observation_schema_path),
             "action_schema": str(config.action_schema_path),
@@ -152,16 +161,20 @@ def _snapshot(
         },
     }
     if selection is not None:
-        record["selection"] = selection.summary(include_bundle=True)
+        record["selection"] = selection.summary()
         record["model_source"] = {
             "source": selection.resolved.bundle.source,
             "declared": selection.resolved.bundle.declared,
-            "path": str(config.bundle_dir),
-            "bundle_digest": config.model_bundle_digest,
+            "path": str(config.model_path),
+            "model_digest": config.model_bundle_digest,
         }
     if overrides:
         record["overrides"] = overrides
     return record
+
+
+def _default_run_id() -> str:
+    return f"policy-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{os.getpid()}"
 
 
 def _serve(
@@ -172,7 +185,7 @@ def _serve(
     args: object,
     config_path: Path,
 ) -> int:
-    run_id = args.run_id or "act-policy-" + uuid.uuid4().hex[:12]
+    run_id = args.run_id or _default_run_id()
     code = serve_forever(
         config,
         adapter,
@@ -208,7 +221,7 @@ def _fail(
         error=error,
         config_path=config_path,
         config=config,
-        bundle_dir=args.bundle_dir,
+        model_path=args.model_path,
     )
     if args.debug:
         raise error
@@ -216,28 +229,48 @@ def _fail(
     return 1
 
 
+def _target(args: argparse.Namespace, parser: argparse.ArgumentParser) -> tuple[str, str] | None:
+    if args.robot is None and args.task is None:
+        if args.config is None:
+            parser.error("either --robot/--task or --config is required")
+        return None
+    if args.robot is None or args.task is None:
+        parser.error("--robot and --task must be passed together")
+    if args.config is not None:
+        parser.error("--config cannot be combined with --robot/--task")
+    return args.robot, args.task
+
+
+def _default_log_directory(robot: str | None, task: str | None, run_id: str) -> Path:
+    if robot is None or task is None:
+        segment = "_direct"
+    else:
+        segment = f"{robot}/{task}"
+    return Path(os.environ.get("DATA_ROOT", "/data")) / segment / "logs" / "policy-service" / run_id
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
     project_root = _project_root()
+    target = _target(args, parser)
+    if args.shared_root is not None and target is None:
+        parser.error("--shared-root requires --robot/--task")
+    if not args.run_id:
+        args.run_id = _default_run_id()
     if args.log_directory is None:
-        segment = args.scenario or "_direct"
-        args.log_directory = (
-            Path(os.environ.get("DATA_ROOT", "/data")) / segment / "logs" / "policy-service"
-        )
-    if args.scenario is None and args.shared_root is not None:
-        parser.error("--shared-root requires --scenario")
-    if args.scenario is not None and any(
+        args.log_directory = _default_log_directory(*(target or (None, None)), args.run_id)
+    if target is not None and any(
         value is not None
         for value in (args.robot_profile, args.observation_schema, args.action_schema)
     ):
         parser.error(
             "--robot-profile/--observation-schema/--action-schema cannot be combined "
-            "with --scenario; the binding supplies the profile identity"
+            "with --robot/--task; the binding supplies the profile identity"
         )
     config_path = (
-        Path(f"scenario:{args.scenario}")
-        if args.scenario is not None
+        Path(f"scenario:{target[0]}/{target[1]}")
+        if target is not None
         else project_path(args.config, project_root)
     )
     selection: LearningScenario | None = None
@@ -245,30 +278,36 @@ def main(argv: list[str] | None = None) -> int:
     config: PolicyServiceConfig | None = None
     stage = "config"
     try:
-        if args.scenario is not None:
+        if target is not None:
+            robot, task = target
+            model_path = args.model_path or latest_model(robot, task, project_root)
+            if model_path is None:
+                raise ModelError(
+                    f"{artifact_paths(robot, task, project_root)['models']}: no act_* model found"
+                )
+            model_path = project_path(model_path, project_root)
+            model_root = model_path.parent if model_path.is_file() else model_path
             selection = select_scenario(
-                scenario=args.scenario,
+                robot=robot,
+                task=task,
                 recipe_field="policy_service",
                 stage="inference",
                 project_root=project_root,
                 shared_root=args.shared_root,
-                bundle=args.bundle_dir,
+                model=model_root,
             )
             config_path = selection.recipe_path
             config = load_policy_config(
                 config_path,
-                bundle_dir=selection.resolved.bundle.path,
+                model_path=model_path,
                 robot_profile_path=selection.profile_path("robot"),
                 observation_schema_path=selection.profile_path("observation"),
                 action_schema_path=selection.profile_path("action"),
                 device=args.device,
                 set_overrides=args.overrides,
             )
-            if args.bundle_dir is not None:
-                overrides["bundle_dir"] = {
-                    "value": str(args.bundle_dir),
-                    "source": "argument",
-                }
+            if args.model_path is not None:
+                overrides["model_path"] = {"value": str(model_path), "source": "argument"}
             if args.device is not None:
                 overrides["device"] = {"value": args.device, "source": "argument"}
             if args.overrides:
@@ -276,8 +315,8 @@ def main(argv: list[str] | None = None) -> int:
         else:
             config = load_policy_config(
                 config_path,
-                bundle_dir=(
-                    None if args.bundle_dir is None else project_path(args.bundle_dir, project_root)
+                model_path=(
+                    None if args.model_path is None else project_path(args.model_path, project_root)
                 ),
                 robot_profile_path=(
                     None
@@ -299,12 +338,15 @@ def main(argv: list[str] | None = None) -> int:
             )
             if args.overrides:
                 overrides["set"] = {"value": list(args.overrides), "source": "argument"}
+        if config.model_path is None and not config.test_only:
+            raise ModelError("--model is required for a non-test policy service")
         stage = "load_warm"
         print("=== Policy 服务配置与详细参数 ===", flush=True)
         if selection is not None:
-            print(f"方案 (scenario): {selection.scenario_id}", flush=True)
+            print(f"机器人/任务:     {selection.robot}/{selection.task}", flush=True)
             print(f"Binding 文件:    {selection.resolved.path}", flush=True)
         print(f"配置文件路径:    {config_path.resolve()}", flush=True)
+        print(f"模型路径:        {config.model_path}", flush=True)
         print("--- 详细参数 ---", flush=True)
         print(json.dumps(config.to_document(), indent=2, ensure_ascii=False), flush=True)
         print("================================", flush=True)
@@ -332,7 +374,7 @@ def main(argv: list[str] | None = None) -> int:
     except (
         PolicyConfigError,
         PolicyError,
-        BundleError,
+        ModelError,
         ScenarioSelectionError,
         OSError,
         ValueError,
