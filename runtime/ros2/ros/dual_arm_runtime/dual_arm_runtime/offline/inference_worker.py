@@ -139,6 +139,7 @@ class InferencePool:
         self.episodes: list[dict[str, Any]] = []
         self.stopped = threading.Event()
         self.next_index = 0
+        self.active = 0
         self.started = time.monotonic()
 
     @property
@@ -152,6 +153,33 @@ class InferencePool:
     @property
     def max_failures(self) -> int:
         return max(self.worker_failures.values(), default=0)
+
+    def _is_tty(self) -> bool:
+        return sys.stdout.isatty()
+
+    def _render_progress(self, *, force: bool = False) -> None:
+        if not self._is_tty() and not force:
+            return
+        with self.lock:
+            done = len(self.episodes)
+            active = self.active
+            succeeded = self.succeeded
+            failures = self.max_failures
+        total = max(1, self.args.count)
+        fraction = min(1.0, done / total)
+        filled = int(20 * fraction)
+        bar = "█" * filled + "░" * (20 - filled)
+        elapsed = _format_duration(time.monotonic() - self.started)
+        limit = self.args.max_consecutive_failures or "-"
+        line = (
+            f"并行推理 [{bar}] {done}/{self.args.count} | 在途 {active} "
+            f"| 成功 {succeeded} | 最大连败 {failures}/{limit} | {elapsed}"
+        )
+        if self._is_tty():
+            sys.stdout.write(f"\r\033[K{line}")
+            sys.stdout.flush()
+        else:
+            print(line, flush=True)
 
     def _take_index(self) -> int | None:
         with self.lock:
@@ -238,17 +266,25 @@ class InferencePool:
         verdict = "成功" if record["succeeded"] else (
             f"失败 · {record['failure_stage']} · {record['failure_reason']}"
         )
-        print(
+        line = (
             f"[{completed}/{self.args.count}] {worker['id']} seed {seed} "
-            f"{verdict} | {_format_duration(wall_s)} | {run_id}",
-            flush=True,
+            f"{verdict} | {_format_duration(wall_s)} | {run_id}"
         )
+        if self._is_tty():
+            if not record["succeeded"]:
+                sys.stdout.write(f"\r\033[2K{line}\n")
+                sys.stdout.flush()
+            self._render_progress()
+        else:
+            print(line, flush=True)
 
     def _worker_loop(self, worker: dict[str, Any]) -> None:
         while True:
             index = self._take_index()
             if index is None:
                 return
+            with self.lock:
+                self.active += 1
             try:
                 self._run_episode(worker, index)
             except Exception as error:  # noqa: BLE001 - one worker must not kill the batch
@@ -276,6 +312,10 @@ class InferencePool:
                     file=sys.stderr,
                     flush=True,
                 )
+            finally:
+                with self.lock:
+                    self.active -= 1
+                self._render_progress()
 
     def run(self) -> int:
         threads = [

@@ -20,7 +20,7 @@ import signal
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 from robot_contracts.project_paths import project_path
 
@@ -163,7 +163,7 @@ def _execute(
     project_root: Path,
     output: Path,
     *,
-    console: object | None = None,
+    console: TextIO | None = None,
 ) -> tuple[int, float, str]:
     try:
         code, wall_s, failure = run_command(

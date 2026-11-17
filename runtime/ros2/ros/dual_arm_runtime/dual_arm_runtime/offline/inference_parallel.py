@@ -16,7 +16,7 @@ import sys
 import time
 from pathlib import Path
 
-from dual_arm_runtime.artifact_paths import scenario_root
+from dual_arm_runtime.artifact_paths import container_data_root, debug_root, scenario_root
 from dual_arm_runtime.offline.record_parallel import (
     automatic_workers,
     container_path_to_host,
@@ -87,7 +87,6 @@ class DockerWorkers:
             shell += 'echo "$$" > "$1"; shift; '
         return [
             "docker", "exec",
-            *(["-e", "RECORD_PROGRESS_TTY=1"] if sys.stdout.isatty() else []),
             self.runtime, "bash", "-c",
             shell + 'exec "$@"', "bash", *([pid_file] if pid_file else []), *arguments,
         ]
@@ -200,7 +199,7 @@ class DockerWorkers:
             time.sleep(0.25)
         raise RuntimeError("parallel inference backends did not become ready within 60 seconds")
 
-    def run(self, plan: dict) -> int:
+    def run(self) -> int:
         relative = Path(host_path_to_container(self.directory, self.args.project_root))
         command = self.runtime_command(
             [
@@ -209,7 +208,10 @@ class DockerWorkers:
                 "--recordings", str(relative / "recordings"),
                 "--runs-root", str(relative / "runs"),
                 "--console-root", str(relative / "runs"),
-                "--report", str(relative / "report.json"),
+                "--report", str(
+                    debug_root(container_data_root(), self.args.robot, self.args.task)
+                    / "batch-policy" / self.batch_id / "report.json"
+                ),
                 "--batch-id", self.batch_id,
                 "--count", str(self.args.count),
                 "--seed-start", str(self.args.seed_start),
@@ -321,7 +323,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     root = scenario_root(args.project_root / "var", args.robot, args.task)
     directory = root / "logs" / "batch-policy" / batch_id / "workers"
-    report_path = args.project_root / "var" / segment / "debug" / "batch-policy" / batch_id / "report.json"
+    report_path = (
+        args.project_root / "var" / segment / "debug" / "batch-policy" / batch_id
+        / "report.json"
+    )
     docker = DockerWorkers(args, directory, batch_id)
 
     def interrupted(signum: int, frame: object) -> None:
@@ -341,12 +346,8 @@ def main(argv: list[str] | None = None) -> int:
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as executor:
             list(executor.map(docker.start_backend, workers))
         docker.wait_ready(workers)
-        code = docker.run(plan)
-        if (directory / "report.json").is_file():
-            report_path.parent.mkdir(parents=True, exist_ok=True)
-            report_path.write_text(
-                (directory / "report.json").read_text(encoding="utf-8"), encoding="utf-8"
-            )
+        code = docker.run()
+        if report_path.is_file():
             print(f"报告: {report_path}", flush=True)
         return code
     except KeyboardInterrupt:

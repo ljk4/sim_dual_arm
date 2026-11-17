@@ -9,7 +9,7 @@ import signal
 import subprocess
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 from robot_contracts.project_paths import project_path
 
@@ -124,7 +124,7 @@ def run_command(
     disk_root: Path,
     *,
     stop_grace_s: float = 10.0,
-    console: object | None = None,
+    console: TextIO | None = None,
 ) -> tuple[int, float, str]:
     started = time.monotonic()
     deadline = started + timeout_s
