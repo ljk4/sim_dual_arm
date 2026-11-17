@@ -27,6 +27,7 @@ from robot_contracts.project_paths import project_path
 from dual_arm_runtime.offline.campaign_execution import (
     LaunchInterrupted,
     acquire_run_lock,
+    attempt_log_directory,
     classify,
     discard_unqualified_attempt,
     episode_manifest,
