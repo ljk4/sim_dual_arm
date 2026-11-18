@@ -24,6 +24,7 @@ from .training_support import (
     MetricsWriter,
     TrainingError,
     TrainingInterrupted,
+    build_optimizer_param_groups,
     build_policy,
     build_processors,
     build_report,
@@ -186,7 +187,9 @@ def _prepare_model(context: _TrainingContext) -> None:
         config, context.train_dataset, context.act_config
     )
     context.optimizer = torch.optim.AdamW(
-        context.policy.parameters(), lr=config.lr, weight_decay=config.weight_decay
+        build_optimizer_param_groups(context.policy, config),
+        lr=config.lr,
+        weight_decay=config.weight_decay,
     )
     context.scheduler = torch.optim.lr_scheduler.ConstantLR(
         context.optimizer, factor=1.0, total_iters=max(1, context.steps_total)
@@ -204,6 +207,8 @@ def _emit_model_ready(context: _TrainingContext) -> None:
         context.logger,
         "training.model_ready",
         batch_size=config.batch_size,
+        lr=config.lr,
+        lr_backbone=(config.lr if config.lr_backbone is None else config.lr_backbone),
         loaded_backbone_tensors=context.loaded_backbone,
         weights_sha256=context.weights_sha256,
         train_frames=len(context.train_dataset),

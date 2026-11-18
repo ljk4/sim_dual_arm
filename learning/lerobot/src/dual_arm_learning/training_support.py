@@ -110,8 +110,32 @@ def build_act_config(config: TrainingConfig, *, device: str | None = None) -> An
         n_vae_encoder_layers=model.n_vae_encoder_layers,
         dropout=model.dropout,
         kl_weight=model.kl_weight,
+        optimizer_lr=config.lr,
+        optimizer_lr_backbone=(config.lr if config.lr_backbone is None else config.lr_backbone),
         device=config.device if device is None else device,
     )
+
+
+def build_optimizer_param_groups(policy: Any, config: TrainingConfig) -> list[dict[str, Any]]:
+    """Split visual backbone parameters into their lower learning-rate group when configured."""
+    if config.lr_backbone is None:
+        return [{"params": [p for p in policy.parameters() if p.requires_grad], "lr": config.lr}]
+    head_params = []
+    backbone_params = []
+    for name, param in policy.named_parameters():
+        if not param.requires_grad:
+            continue
+        if name.startswith("model.backbone"):
+            backbone_params.append(param)
+        else:
+            head_params.append(param)
+    if not backbone_params:
+        return [{"params": head_params, "lr": config.lr}]
+    groups: list[dict[str, Any]] = []
+    if head_params:
+        groups.append({"params": head_params, "lr": config.lr})
+    groups.append({"params": backbone_params, "lr": config.lr_backbone})
+    return groups
 
 
 def build_policy(config: TrainingConfig) -> tuple[Any, Any, int, str]:
@@ -408,6 +432,7 @@ __all__ = [
     "TrainingError",
     "TrainingInterrupted",
     "build_act_config",
+    "build_optimizer_param_groups",
     "build_policy",
     "build_processors",
     "build_report",

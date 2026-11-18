@@ -647,17 +647,27 @@ def sample_teacher_chunk(
     period_ns: int,
     profile: RobotProfile,
     control_config: ControlConfig,
+    start_sim_time_ns: int | None = None,
 ) -> TeacherChunk:
     """Sample only the currently gated phase and hold its end pose.
 
     Points never cross an unpassed gate.  Gate evidence is the immutable
-    per-capture feedback, not a wall clock or the nominal plan time.
+    per-capture feedback, not a wall clock or the nominal plan time.  When
+    ``start_sim_time_ns`` is given (the scheduled follower hand-off), the phase
+    ramp begins at ``max(actual_start, start_sim_time_ns)`` so points prior to
+    the hand-off hold ``segment.start_positions`` and the selected window never
+    drops the start of the ramp.
     """
     segment, actual_start = _teacher_gate(
         plan, gate, feedback, capture_seq, observation_time_ns, chunk_size, period_ns
     )
+    motion_start = (
+        actual_start
+        if start_sim_time_ns is None
+        else max(actual_start, start_sim_time_ns)
+    )
     positions, phases, times = _teacher_positions(
-        segment, actual_start, observation_time_ns, chunk_size, period_ns
+        segment, motion_start, observation_time_ns, chunk_size, period_ns
     )
     first = positions[0]
     if not all(math.isfinite(value) for position in positions for value in position):
@@ -676,6 +686,9 @@ def sample_teacher_chunk(
             raise _error("LEFT_ARM_MOVED", "teacher may not move the left arm")
     _payload, digest = _teacher_chunk_document(
         plan, gate, capture_seq, observation_time_ns, positions, segment
+    )
+    phase_wait_s = max(
+        0.0, (observation_time_ns - motion_start) / 1e9 - segment.duration_s
     )
     return TaskChunk(
         request_id=request_id,
@@ -697,6 +710,6 @@ def sample_teacher_chunk(
         ),
         gate_state=gate.status,
         gate_failure=gate.failure,
-        phase_start_sim_time_ns=gate.actual_start_sim_time_ns,
-        phase_wait_s=gate.phase_wait_s,
+        phase_start_sim_time_ns=motion_start,
+        phase_wait_s=phase_wait_s,
     )

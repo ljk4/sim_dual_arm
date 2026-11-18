@@ -19,8 +19,38 @@ def test_real_learning_configs_load():
     assert training.modes["overfit"].steps == 500
     assert training.modes["full"].steps == 5000
     assert training.model.pretrained_backbone_weights is None
+    assert training.lr == pytest.approx(1e-4)
+    assert training.lr_backbone == pytest.approx(1e-5)
     assert training.checkpoint.root == ROOT / "var/panda_sim/stack/models"
     assert training.dataset.camera_names == dataset.camera_names
+
+
+def test_lr_backbone_contract_and_optimizer_param_groups(tmp_path):
+    torch = pytest.importorskip("torch")
+    from dual_arm_learning.training_support import build_optimizer_param_groups
+
+    document = yaml.safe_load((SCENARIO / "configs/learning/act_training.yaml").read_text())
+    document["training"]["lr_backbone"] = 0.001
+    bad = tmp_path / "bad-lr.yaml"
+    bad.write_text(yaml.safe_dump(document))
+    with pytest.raises(ConfigError, match="lr_backbone"):
+        load_training_config(bad, ROOT)
+
+    training = load_training_config(SCENARIO / "configs/learning/act_training.yaml", ROOT)
+
+    class _FakePolicy(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.model = torch.nn.Module()
+            self.model.backbone = torch.nn.Linear(2, 2)
+            self.model.decoder = torch.nn.Linear(2, 2)
+
+    groups = build_optimizer_param_groups(_FakePolicy(), training)
+    assert len(groups) == 2
+    assert groups[0]["lr"] == pytest.approx(1e-4)
+    assert groups[1]["lr"] == pytest.approx(1e-5)
+    assert len(groups[0]["params"]) == 2
+    assert len(groups[1]["params"]) == 2
 
 
 def test_unknown_field_and_invalid_mode_are_rejected(tmp_path):

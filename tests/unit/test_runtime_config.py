@@ -218,8 +218,8 @@ def test_policy_startup_settle_defaults_to_disabled(tmp_path):
     assert configuration.snapshot["recipe"]["policy"]["startup_settle_sim_ns"] == 0
 
 
-@pytest.mark.parametrize("value", [0, 2_000_000_000, 5_000_000_000])
-def test_policy_startup_settle_accepts_zero_to_five_seconds(tmp_path, value):
+@pytest.mark.parametrize("value", [0, 3_000_000_000, 15_000_000_000])
+def test_policy_startup_settle_accepts_zero_to_fifteen_seconds(tmp_path, value):
     document = policy_document()
     document["policy"]["startup_settle_sim_ns"] = value
     configuration = load_runtime_configuration(write_policy(tmp_path, document), ROOT)
@@ -227,7 +227,7 @@ def test_policy_startup_settle_accepts_zero_to_five_seconds(tmp_path, value):
     assert configuration.snapshot["recipe"]["policy"]["startup_settle_sim_ns"] == value
 
 
-@pytest.mark.parametrize("value", [-1, True, 1.5, "1000", 5_000_000_001])
+@pytest.mark.parametrize("value", [-1, True, 1.5, "1000", 15_000_000_001])
 def test_policy_startup_settle_rejects_invalid_values(tmp_path, value):
     document = policy_document()
     document["policy"]["startup_settle_sim_ns"] = value

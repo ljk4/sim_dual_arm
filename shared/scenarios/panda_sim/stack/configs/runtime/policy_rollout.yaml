@@ -4,7 +4,7 @@ robot_profile: ../../profiles/robots/panda_stack_learning_v1/profile.json
 observation_schema: ../../profiles/observations/panda_rgb_joint_v1.json
 action_schema: ../../profiles/actions/panda_joint_position_v1.json
 control_constraints: ../../profiles/control/panda_control_v1.yaml
-follower_config: ../../profiles/control/panda_follower_v1.yaml
+follower_config: ../../profiles/control/panda_follower_inference_v1.yaml
 robot_namespace: /robot
 
 action_source: policy
@@ -48,7 +48,10 @@ policy:
   # at handoff, so a window is not always points 0..4 of a fresh chunk.
   # Settle before task prepare/start; the 90 s task budget starts afterwards.
   # ACT still consumes only subsequent fresh RGB and measured state.
-  startup_settle_sim_ns: 2000000000
+  startup_settle_sim_ns: 3000000000
+  warmup_on_settle: true
+  async_inference: true
+  prefetch_lead_ns: 0
   initial_lead_ns: 250000000
   max_chunks: 256
   total_sim_deadline_ns: 90000000000

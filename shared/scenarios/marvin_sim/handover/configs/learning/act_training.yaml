@@ -39,6 +39,7 @@ training:
   use_amp: true
   amp_dtype: bfloat16
   lr: 0.0001
+  lr_backbone: 0.00001
   weight_decay: 0.0001
   grad_clip_norm: 10.0
   log_every_steps: 10

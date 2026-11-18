@@ -47,7 +47,10 @@ policy:
   action_period_ns: 50000000
   # A 20-point window is 1.0 s at the fixed 50 ms period.  The provider still
   # returns a complete 60-point chunk; the interface remains 60x16.
-  startup_settle_sim_ns: 2000000000
+  startup_settle_sim_ns: 3000000000
+  warmup_on_settle: true
+  async_inference: true
+  prefetch_lead_ns: 0
   initial_lead_ns: 250000000
   # 256 windows x 20 points x 50 ms cover 256 s, above the 180 s task budget.
   max_chunks: 256

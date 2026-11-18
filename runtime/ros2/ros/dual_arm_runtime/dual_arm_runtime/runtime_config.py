@@ -148,7 +148,10 @@ class PolicyConfig(StrictMappingModel):
     termination_mode: Literal["finite_chunks", "task"] = "finite_chunks"
     task_stop_margin_s: PositiveFloat = 1.0
     task_sim_budget_ns: Annotated[PositiveInt, Field(le=MAX_TASK_BUDGET_NS)] = 30_000_000_000
-    startup_settle_sim_ns: Annotated[NonNegativeInt, Field(le=5_000_000_000)] = 0
+    startup_settle_sim_ns: Annotated[NonNegativeInt, Field(le=15_000_000_000)] = 0
+    warmup_on_settle: bool = False
+    async_inference: bool = True
+    prefetch_lead_ns: Annotated[NonNegativeInt, Field(le=1_000_000_000)] = 0
 
     @model_validator(mode="after")
     def _policy(self) -> PolicyConfig:

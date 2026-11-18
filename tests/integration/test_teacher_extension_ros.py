@@ -61,12 +61,8 @@ def test_runtime_and_simulation_resolve_the_same_teacher_type():
         assert str(messages.TeacherCapability.ID) == capability
         assert teacher_service_type(capability) is services.GetTeacherChunk
         request = services.GetTeacherChunk.Request()
-        if package == "marvin_handover_api_msgs":
-            # The handover Teacher aligns its target clock to the scheduled
-            # hand-off, so the request carries that time explicitly.
-            assert hasattr(request, "handoff_time")
-        else:
-            assert not hasattr(request, "handoff_time")
+        # Both Teacher extensions align their target clock to the scheduled hand-off.
+        assert hasattr(request, "handoff_time")
         capability_type, service_type = teacher_extension_modules(capability)
         assert capability_type is messages.TeacherCapability
         assert service_type is services.GetTeacherChunk

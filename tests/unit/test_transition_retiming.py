@@ -180,6 +180,65 @@ def test_retiming_is_deterministic_and_stateless():
     assert window.source_targets[21].positions[15] == pytest.approx(0.079865)
 
 
+def test_coordinated_arm_group_scales_all_moving_arm_axes_proportionally():
+    import math
+    from robot_contracts.models import coordinated_axis_groups
+
+    joints = _joints()
+    groups = coordinated_axis_groups(joints)
+    assert groups == ((0, 1, 2, 3, 4, 5, 6), (8, 9, 10, 11, 12, 13, 14))
+
+    initial = [0.0] * 16
+    initial[15] = 0.08
+    # right_joint3 (index 10) moves 0.80 rad in 1.0 s (beyond 0.48 reachable & 0.25 stop bound);
+    # right_joint1 (8), right_joint2 (9), right_joint4 (11) stay within their own budgets;
+    # left_joint1 (0) and right_gripper_width (15) belong to other groups / independent axes.
+    end_targets = list(initial)
+    end_targets[0] = 0.10
+    end_targets[8] = 0.20
+    end_targets[9] = -0.16
+    end_targets[10] = 0.80
+    end_targets[11] = 0.12
+
+    source = []
+    for index in range(60):
+        values = list(initial)
+        if 21 <= index <= 40:
+            values = list(end_targets)
+        source.append(Target((index + 1) * 50_000_000, tuple(values)))
+    window = ActionWindow(1, 0, 1_050_000_000, tuple(source), 20)
+    anchor = _anchor(initial, [0.0] * 16)
+    all_axes = tuple(range(16))
+
+    result = retime_action_window(
+        window, anchor, joints, AMAX, BUDGET, all_axes, axis_groups=groups
+    )
+    assert result.retimed
+    retimed_names = [item.name for item in result.axes]
+    assert set(retimed_names) == {
+        "right_joint1",
+        "right_joint2",
+        "right_joint3",
+        "right_joint4",
+    }
+
+    expected_alpha = 0.25 / 0.80
+    adapted_end = result.window.targets[-1].positions
+    assert adapted_end[0] == pytest.approx(0.10)
+    assert adapted_end[15] == pytest.approx(0.08)
+    assert adapted_end[10] == pytest.approx(0.25)
+    assert adapted_end[8] == pytest.approx(0.20 * expected_alpha)
+    assert adapted_end[9] == pytest.approx(-0.16 * expected_alpha)
+    assert adapted_end[11] == pytest.approx(0.12 * expected_alpha)
+
+    orig_vec = [end_targets[i] - initial[i] for i in range(8, 15)]
+    adap_vec = [adapted_end[i] - initial[i] for i in range(8, 15)]
+    dot = sum(a * b for a, b in zip(orig_vec, adap_vec, strict=True))
+    norm_orig = math.sqrt(sum(a * a for a in orig_vec))
+    norm_adap = math.sqrt(sum(b * b for b in adap_vec))
+    assert dot / (norm_orig * norm_adap) == pytest.approx(1.0)
+
+
 @pytest.mark.parametrize(
     ("position", "velocity", "time_s", "expected"),
     [

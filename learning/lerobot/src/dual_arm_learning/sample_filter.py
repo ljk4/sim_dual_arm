@@ -309,7 +309,8 @@ def _static_runs(edges: np.ndarray) -> list[tuple[int, int]]:
 
 
 def _protections(phase: list[str | None], gate: list[str | None], rule: FilterRule) -> np.ndarray:
-    """Protect episode edges and phase/gate transitions, never whole holds."""
+    """Protect episode edges and real phase transitions, never internal gate holds."""
+    del gate
     count = len(phase)
     protected = np.zeros(count, dtype=bool)
     edge = rule.episode_boundary_frames
@@ -319,7 +320,7 @@ def _protections(phase: list[str | None], gate: list[str | None], rule: FilterRu
     window = rule.phase_boundary_frames
     if window:
         for index in range(1, count):
-            if phase[index] != phase[index - 1] or gate[index] != gate[index - 1]:
+            if phase[index] != phase[index - 1]:
                 protected[max(0, index - window) : min(count, index + window + 1)] = True
     return protected
 

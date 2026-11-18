@@ -270,6 +270,9 @@ class TrainingConfig(StrictMappingModel):
     lr: Annotated[PositiveFloat, Field(ge=1e-12)] = Field(
         validation_alias=AliasPath("training", "lr")
     )
+    lr_backbone: Annotated[PositiveFloat, Field(ge=1e-12)] | None = Field(
+        default=None, validation_alias=AliasPath("training", "lr_backbone")
+    )
     weight_decay: NonNegativeFloat = Field(validation_alias=AliasPath("training", "weight_decay"))
     grad_clip_norm: NonNegativeFloat = Field(
         validation_alias=AliasPath("training", "grad_clip_norm")
@@ -424,6 +427,7 @@ def training_before(data: object) -> object:
             "use_amp",
             "amp_dtype",
             "lr",
+            "lr_backbone",
             "weight_decay",
             "grad_clip_norm",
             "log_every_steps",
@@ -465,6 +469,8 @@ def training_after(config) -> None:
         raise contract_error("modes.full.episodes", "must use every configured training episode")
     if not full.validation or full.split != "train":
         raise contract_error("modes.full", "must validate on the independent validation split")
+    if config.lr_backbone is not None and config.lr_backbone > config.lr:
+        raise contract_error("training.lr_backbone", "must not exceed training.lr")
 
 
 def feature_spec(config) -> dict[str, dict[str, object]]:

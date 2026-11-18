@@ -215,7 +215,15 @@ class PolicyService:
             session = _Session(session_id, context, digest, calibrations, pipeline=pipeline)
             self._sessions[session_id] = session
             self._open_cache[open_request_id] = (digest, session_id)
-            return self._open_reply(session)
+        if pipeline is not None:
+            try:
+                pipeline.warm_up()
+            except BaseException:
+                with self._lock:
+                    self._sessions.pop(session_id, None)
+                    self._open_cache.pop(open_request_id, None)
+                raise
+        return self._open_reply(session)
 
     def _open_reply(self, session: _Session) -> object:
         from dual_arm_policy.v1 import policy_pb2

@@ -11,6 +11,7 @@ owners.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, wait
 import threading
 import time
 from collections.abc import Callable
@@ -75,11 +76,39 @@ class PolicyTargetSource:
         self.total_wall_deadline_s = policy.total_wall_deadline_s
         self.task_stop_margin_s = policy.task_stop_margin_s
         self.task_sim_budget_ns = policy.task_sim_budget_ns
+        self.warmup_on_settle = policy.warmup_on_settle
+        self.async_inference = policy.async_inference
+        self.prefetch_lead_ns = policy.prefetch_lead_ns
         self._context: RunContext | None = None
         self._episode_id = ""
         self._task_epoch = 0
         self._last_task: object | None = None
         self._task_end: tuple[str, str, object | None] = ("", "", None)
+
+    def warm_up(
+        self,
+        observation: ExactObservation,
+        request_id: str,
+        *,
+        context: RunContext | None = None,
+    ) -> None:
+        """Warm up the full RPC + GPU inference pipeline before StartTask starts the task clock."""
+        effective_context = context or self._context or observation.context
+        if effective_context is None:
+            raise ContractError("STREAM_NOT_STARTED", "policy warm-up has no context")
+        policy_observation = observation_from_exact(
+            observation, self.client.profile, self.policy
+        )
+        self.client.predict(
+            effective_context,
+            self.client.session_id,
+            request_id,
+            policy_observation,
+            deadline_s=self.predict_deadline_s,
+        )
+        reset_session = getattr(self.client, "reset", None)
+        if callable(reset_session):
+            reset_session(effective_context, f"{request_id}-reset")
 
     def begin(self, context: RunContext, episode_id: str, task_id: str) -> int | None:
         self._context = context
@@ -201,6 +230,7 @@ class ContinuousStreamRunner:
         self.task_start_sim_time_ns: int | None = None
         self.task_end: tuple[str, str, object | None] = ("", "", None)
         self._wall_deadline = clock() + source.total_wall_deadline_s
+        self._predict_executor: ThreadPoolExecutor | None = None
         # Policy source needs the live lease for task prepare/start.
         bind = getattr(source, "bind_lease", None)
         if callable(bind):
@@ -209,45 +239,104 @@ class ContinuousStreamRunner:
     def _kind(self) -> str:
         return "stream"
 
+    def _close_predict_executor(self) -> None:
+        executor = self._predict_executor
+        if executor is not None:
+            self._predict_executor = None
+            executor.shutdown(wait=False, cancel_futures=True)
+
     def run(self) -> None:
-        self.task_start_sim_time_ns = self.source.begin(
-            self.context, self.episode_id, self.task_id
-        )
-        observation = self._first_observation()
-        anchor = self.control.get_anchor(self.context)
-        self._first_anchor_checks(anchor, observation)
-        simulation_deadline = self._simulation_deadline(anchor)
-        chunk_index = 0
-        while True:
-            self._check_stop()
-            self._check_task_end()
-            if chunk_index >= self.source.max_chunks:
-                if self.source.termination_mode == "task":
-                    self._finish_task("TASK_TIMEOUT", "TASK_TIMEOUT", None)
-                    break
-                self._validate_last_command()
-                break
-            chunk_index += 1
-            if chunk_index > 1:
-                anchor = self._wait_successor_anchor(chunk_index)
-                observation = self._wait_successor_observation(anchor)
+        try:
+            self.task_start_sim_time_ns = self.source.begin(
+                self.context, self.episode_id, self.task_id
+            )
+            observation = self._first_observation()
+            anchor = self.control.get_anchor(self.context)
+            self._first_anchor_checks(anchor, observation)
+            simulation_deadline = self._simulation_deadline(anchor)
+            chunk_index = 0
+            while True:
                 self._check_stop()
-                if observation.stamp_ns >= anchor.start_sim_time_ns:  # type: ignore[attr-defined]
-                    raise ContractError(
-                        "STREAM_LATE_PREDICTION",
-                        "successor observation is not before its fixed hand-off",
-                    )
-            self._check_deadline(observation, simulation_deadline)
-            self._run_chunk(chunk_index, observation, anchor)
-            self._check_task_end()
-        self._emit_completed()
+                self._check_task_end()
+                if chunk_index >= self.source.max_chunks:
+                    if self.source.termination_mode == "task":
+                        self._finish_task("TASK_TIMEOUT", "TASK_TIMEOUT", None)
+                        break
+                    self._validate_last_command()
+                    break
+                chunk_index += 1
+                if chunk_index > 1:
+                    anchor = self._wait_successor_anchor(chunk_index)
+                    observation = self._wait_successor_observation(anchor)
+                    self._check_stop()
+                    if observation.stamp_ns >= anchor.start_sim_time_ns:  # type: ignore[attr-defined]
+                        raise ContractError(
+                            "STREAM_LATE_PREDICTION",
+                            "successor observation is not before its fixed hand-off",
+                        )
+                self._check_deadline(observation, simulation_deadline)
+                self._run_chunk(chunk_index, observation, anchor)
+                self._check_task_end()
+            self._emit_completed()
+        finally:
+            self._close_predict_executor()
 
     def _wait_successor_observation(self, anchor: object) -> ExactObservation:
-        return self.io.wait_observation(
-            self.last_observation_id,
-            self.configuration.recipe.call_timeout_s,
-            self.stop_requested,
+        prefetch_lead_ns = int(getattr(self.source, "prefetch_lead_ns", 0))
+        target_obs_ns = (
+            int(anchor.start_sim_time_ns) - prefetch_lead_ns  # type: ignore[attr-defined]
+            if prefetch_lead_ns > 0
+            else 0
         )
+        while True:
+            observation = self.io.wait_observation(
+                self.last_observation_id,
+                self.configuration.recipe.call_timeout_s,
+                self.stop_requested,
+            )
+            self.last_observation_id = observation.observation_id
+            self._check_stop()
+            self._check_task_end()
+            if prefetch_lead_ns <= 0 or observation.stamp_ns + 50_000_000 > target_obs_ns:
+                return observation
+
+    def _predict_chunk(
+        self,
+        observation: ExactObservation,
+        chunk_index: int,
+        request_id: str,
+        *,
+        handoff_time_ns: int,
+    ) -> Prediction:
+        if not getattr(self.source, "async_inference", False):
+            return self.source.predict(
+                observation,
+                chunk_index,
+                request_id,
+                handoff_time_ns=handoff_time_ns,
+            )
+        if self._predict_executor is None:
+            self._predict_executor = ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix="policy-predict"
+            )
+        future = self._predict_executor.submit(
+            self.source.predict,
+            observation,
+            chunk_index,
+            request_id,
+            handoff_time_ns=handoff_time_ns,
+        )
+        interval = min(float(self.source.poll_interval_s), 0.005)
+        try:
+            while not future.done():
+                self._check_stop()
+                self._check_task_end()
+                wait((future,), timeout=interval)
+            return future.result()
+        except BaseException:
+            if not future.done():
+                self._close_predict_executor()
+            raise
 
     def _first_observation(self) -> ExactObservation:
         while True:
@@ -279,7 +368,7 @@ class ContinuousStreamRunner:
             f"{self.episode_id}-{self._kind()}-{chunk_index}-obs-{observation.observation_id}"
         )
         try:
-            prediction = self.source.predict(
+            prediction = self._predict_chunk(
                 observation,
                 chunk_index,
                 request_id,
@@ -680,6 +769,7 @@ class PolicyStreamRunner(ContinuousStreamRunner):
             self.limits.max_accelerations,
             self.limits.max_target_deviations,
             self.retiming_axes,
+            axis_groups=self.profile.coordinated_axis_groups,
         )
 
     def run(self) -> None:
@@ -708,6 +798,14 @@ class PolicyStreamRunner(ContinuousStreamRunner):
         first_observation_id = observation.observation_id
         first_stamp_ns = observation.stamp_ns
         last_stamp_ns = first_stamp_ns
+        if self.policy.warmup_on_settle:
+            warm_up = getattr(self.source, "warm_up", None)
+            if callable(warm_up):
+                warm_up(
+                    observation,
+                    f"{self.episode_id}-warmup-obs-{observation.observation_id}",
+                    context=self.context,
+                )
         self._emit(
             "policy.startup_settle.started",
             reason="STARTUP_SETTLE_STARTED",

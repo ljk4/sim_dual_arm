@@ -369,20 +369,24 @@ scripts/client_interactive.sh --robot marvin_sim --task handover \
 
 ## 5. 已发现的待后续改进问题
 
-在完成闭环主链路修复并达到 80%（10 次测试 8 次成功：Panda 5/5、Marvin 3/5）闭环成功率后，排查过程中已定位并解决以下两项，其余留待后续迭代优化（详细排查总结见 [`docs/experiments/closed-loop-triage.md`](docs/experiments/closed-loop-triage.md)）：
+在完成早期闭环主链路修复并达到 80%（10 次测试 8 次成功：Panda 5/5、Marvin 3/5）闭环成功率后，随后的结构重构与数据重采曾出现 `panda_sim/stack` 成功率明显回退（新模型 `act_20261117_082737` 实测 2/19 = 10.5%），`marvin_sim/handover` 则尚未执行转换与重训。本轮排查已定位全部回退根因并完成以下修复与收敛（详细排查记录见 [`docs/experiments/closed-loop-triage.md`](docs/experiments/closed-loop-triage.md) 与 [`docs/closed-loop-recovery/taskbook.md`](docs/closed-loop-recovery/taskbook.md)）：
 
-**已解决**：
+**已完成的定位与代码修复**：
 
-1. **阶段末静止帧过滤**：数据集不再包含 32%–47% 的阶段末门控等待静止帧，模型可完整展开动作，推理侧无需再依赖扩窗死等跨过静止区。
-2. **Panda/Marvin 奇异位形与 IK 限位余量**：Teacher 示教已配置 IK 关节限位余量并避开奇异位形，消除了贴近硬限位的门控等待与姿态翻转风险。
-3. **Panda 堆叠任务预算过紧**：1 s 执行窗口下 Teacher 约需 29–30 s 才走完全部阶段，原 30 s 任务预算减去 1 s 停止余量后只剩 29 s，导致采集 23/73 次无谓超时、推理最好一局在 27.9 s 已满足全部 14 项条件却来不及完成 2 s 稳定窗口。现已将 `panda_stack_task.yaml` 的任务仿真预算提高到 90 s，同步放宽运行端 teacher/policy 的仿真与墙钟截止时间，并把动作流墙钟从 120 s 放宽到 240 s，避免 0.5 倍速下的长局被流级墙钟提前终止。
+1. **Panda Teacher 阶段时钟对齐与采集/推理配置拆分**：
+   - 定位到 `panda_sim/stack` 共用了 `target_count: 20`（1.0 s）且 `panda_sim/stack/teacher.py` 未将阶段运动起点对齐 `handoff_time_ns`，导致新采 50 条数据每阶段首秒加速段被丢弃、阶段末出现 34–39 帧静止平台且全部于 29.0 s 被旧预算截断。
+   - 现已对齐 `panda_stack_api_msgs/srv/GetTeacherChunk.srv`（补充 `handoff_time`）、修复 `panda_sim/stack/{__init__.py, teacher.py, gate.py}` 使阶段平滑起点对齐 `handoff_time_ns`，并拆分为采集专用 `panda_follower_v1.yaml`（`target_count: 10`）与推理专用 `panda_follower_inference_v1.yaml`（`target_count: 20`）。
+2. **阶段末静止帧过滤修正**：
+   - 修复 `learning/lerobot/src/dual_arm_learning/sample_filter.py` 的 `_protections()` 不再将静止平台内部的 `gate_state` 跳变当作阶段切换保护，并将 `act_sample_filter.yaml` 调优为 `min_frames: 6`、`edge_frames: 2`、`interior_stride: 10`、`phase_boundary_frames: 2`。注：静止帧过滤仅作用于训练查询锚点采样，若需消除 60 步目标块中的冗长等待仍须基于已修复的 Teacher 重新采集。
+3. **Panda/Marvin 奇异位形、IK 限位余量与任务预算**：已完成初始非奇异位姿与限位余量配置，并将 `panda_sim/stack` 仿真预算放宽至 90 s（流墙钟 240 s）。
+4. **多轴协同过渡重定时（Coordinated Multi-Axis Retiming）**：清除 `transition_retiming.py` 中遗留的场景启发式魔数；在 `RobotProfile` 上按侧别派生 `coordinated_axis_groups`，由公共层 `retime_action_window` 按最受限轴比例协同缩放同侧机械臂 7 轴位移，严格保持联合运动方向并保持夹爪轴独立。
+5. **空中交接双持到右独持的持物移交边界细化**：细化 `marvin_sim/handover/evaluator.py` 的 `_holder_required`，在左手仍稳定持物且右爪保持闭合接触的移交过渡期允许右手夹紧微调，并在左爪完全脱离后刷新右爪稳定性参考位姿。
+6. **训练侧视觉骨干与头部参数分组学习率**：在 `learning/lerobot` 新增 `training.lr_backbone` 支持（`ACTConfig` 与 `AdamW` 参数分组拆分 `model.backbone` 与头部），两方案 `act_training.yaml` 默认启用 `lr_backbone: 1e-5` / `lr: 1e-4`。
+7. **冷启动预热增强与异步预取推理**：在 `PolicyService.open_session` 增加工作线程预热；将两方案 `startup_settle_sim_ns` 延长至 `3.0 s` 并开启 `warmup_on_settle`（在 `StartTask` 计时前以真实观测预热完整 RPC 与 GPU 推理链路）；在 `ContinuousStreamRunner` 实现 `async_inference` 后台异步推理与可配置 `prefetch_lead_ns` 准时采样预取。
 
-**待后续改进**：
+**待后续验收**：
 
-1. **多轴协同过渡重定时（Coordinated Multi-Axis Retiming）**：当前 `transition_retiming.py` 按单轴独立判断偏差预算并裁剪末点（例如 Marvin 种子 `4155` 中仅 `right_joint3` 略超预算触发裁剪，同臂其余关节未按相同比例缩放），会导致单臂 7 轴运动不完全同步并偏离笛卡尔接近路径；后续应改为按同侧手臂最受限轴等比例协同缩放。
-2. **空中交接双持到右独持的持物移交边界细化**：在 Marvin 种子 `5103` 中，`dual_airborne_stable` 刚满 `0.5 s` 但左手尚未张开释放（左手仍以 `>9 N` 稳定持物）时，右手在微调夹紧过程中短暂减力超过 `0.25 s` 即被 `_holder_required(right)` 判为 `HOLD_LOST`；后续应在左手仍稳定持物期间允许右手完成夹紧微调，待左手开始释放后再严格锁定右手失持守卫。
-3. **训练侧视觉骨干与头部参数分组学习率**：后续可在训练侧启用视觉骨干与头部参数分组学习率（`1e-5` / `1e-4`），提升小样本下的收敛稳定性。
-4. **冷启动首块提前量余量**：当仿真倍速 `realtime_speed > 1.0` 且首次启动服务时，首块 `initial_lead_ns = 250 ms` 的墙钟余量较紧；后续可在策略会话 `Open` 或 `startup_settle` 阶段预热完整推理链路。
+- 待代码变更确认并合入后，按第 2–4 节流程重新采集 `panda_sim/stack` 正式数据，并完成 `panda_sim/stack` 与 `marvin_sim/handover` 的数据集转换、分组学习率训练及端到端批量闭环验收（`prefetch_lead_ns` 亦可在重训后结合实测对比调优）。
 
 ---
 

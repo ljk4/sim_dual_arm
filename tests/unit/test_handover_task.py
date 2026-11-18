@@ -683,6 +683,23 @@ def test_policy_left_release_can_take_longer_than_hold_loss_tolerance():
     assert state.metrics["handover_sequence"]["complete"] is True
 
 
+def test_right_grip_micro_adjustment_while_left_holds_does_not_fail():
+    runtime = _runtime(())
+    time_ns = _complete_policy_dual_phase(runtime)
+    state, time_ns = _run(
+        runtime,
+        lambda now: _airborne(
+            now, left_open=CLOSE, left_holding=True, right_open=CLOSE, right_holding=False
+        ),
+        0.6,
+        time_ns,
+    )
+    assert state.phase == "RUNNING", state.metrics
+    state, _time_ns = _run(runtime, _right_airborne, 0.6, time_ns)
+    assert state.phase == "RUNNING", state.metrics
+    assert state.metrics["handover_sequence"]["complete"] is True
+
+
 def test_sequence_timer_does_not_accumulate_across_an_interruption():
     runtime = _runtime(())
     state, time_ns = _run(runtime, _left_airborne, 0.4, 0)
