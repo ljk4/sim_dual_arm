@@ -16,8 +16,9 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim.config.panda_scene_config import load_scene_config  # noqa: E402
-from robot_backend_sim.render import visibility  # noqa: E402
+from robot_backend_sim.panda_sim.stack.scene_config import load_scene_config  # noqa: E402
+from robot_backend_sim.common.render import visibility  # noqa: E402
+from robot_backend_sim.panda_sim.stack import visibility as panda_visibility
 from robot_backend_sim.tools import check_scene  # noqa: E402
 
 SCENE_CONFIG = ROOT / "shared/scenarios/panda_sim/stack/configs/simulation/scene/panda_stack.yaml"
@@ -55,7 +56,7 @@ def set_value(*path, value):
 
 
 def test_default_check_config_is_typed_frozen_and_cross_checked():
-    config = visibility.load_check_config(CHECK_CONFIG, scene_config())
+    config = panda_visibility.load_check_config(CHECK_CONFIG, scene_config())
 
     assert config.schema_version == 1
     assert config.seeds == (11, 23, 37)
@@ -77,8 +78,8 @@ def test_default_check_config_is_typed_frozen_and_cross_checked():
 
 def test_boundary_layouts_cover_both_objects_jointly_and_within_domains():
     scene = scene_config()
-    config = visibility.load_check_config(CHECK_CONFIG, scene)
-    layouts = visibility.build_layouts(config, scene)
+    config = panda_visibility.load_check_config(CHECK_CONFIG, scene)
+    layouts = panda_visibility.build_layouts(config, scene)
 
     assert len(layouts) == 67
     seeds = [layout for layout in layouts if layout.kind == "seed"]
@@ -139,8 +140,8 @@ def test_boundary_layouts_cover_both_objects_jointly_and_within_domains():
 )
 def test_check_config_rejects_invalid_typed_values(tmp_path, mutate, field):
     path = mutated(tmp_path, mutate)
-    with pytest.raises(visibility.SceneCheckConfigError) as caught:
-        visibility.load_check_config(path, scene_config())
+    with pytest.raises(panda_visibility.SceneCheckConfigError) as caught:
+        panda_visibility.load_check_config(path, scene_config())
     assert caught.value.field == field
     assert str(path) in str(caught.value)
 
@@ -151,46 +152,46 @@ def test_check_config_rejects_invalid_typed_values(tmp_path, mutate, field):
 )
 def test_thresholds_reject_bool_zero_negative_nonfinite_and_huge(tmp_path, value):
     path = mutated(tmp_path, set_value("min_visible_pixels", "global", "source", value=value))
-    with pytest.raises(visibility.SceneCheckConfigError) as caught:
-        visibility.load_check_config(path, scene_config())
+    with pytest.raises(panda_visibility.SceneCheckConfigError) as caught:
+        panda_visibility.load_check_config(path, scene_config())
     assert caught.value.field == "min_visible_pixels.global.source"
 
 
 def test_threshold_names_must_match_scene_cameras_and_objects(tmp_path):
     unknown_camera = mutated(tmp_path, set_value("min_visible_pixels", "overhead", value={}))
-    with pytest.raises(visibility.SceneCheckConfigError) as caught:
-        visibility.load_check_config(unknown_camera, scene_config())
+    with pytest.raises(panda_visibility.SceneCheckConfigError) as caught:
+        panda_visibility.load_check_config(unknown_camera, scene_config())
     assert caught.value.field == "min_visible_pixels"
 
     duplicate_object = mutated(
         tmp_path,
         set_value("min_visible_pixels", "global", value={"source": 64, "target": 64, "other": 1}),
     )
-    with pytest.raises(visibility.SceneCheckConfigError) as caught:
-        visibility.load_check_config(duplicate_object, scene_config())
+    with pytest.raises(panda_visibility.SceneCheckConfigError) as caught:
+        panda_visibility.load_check_config(duplicate_object, scene_config())
     assert caught.value.field == "min_visible_pixels.global"
 
     missing_object = mutated(
         tmp_path,
         set_value("min_visible_pixels", "global", value={"source": 64}),
     )
-    with pytest.raises(visibility.SceneCheckConfigError) as caught:
-        visibility.load_check_config(missing_object, scene_config())
+    with pytest.raises(panda_visibility.SceneCheckConfigError) as caught:
+        panda_visibility.load_check_config(missing_object, scene_config())
     assert caught.value.field == "min_visible_pixels.global"
 
 
 def test_unknown_and_duplicate_yaml_keys_are_rejected(tmp_path):
     path = mutated(tmp_path, set_value("unexpected", value=1))
-    with pytest.raises(visibility.SceneCheckConfigError) as caught:
-        visibility.load_check_config(path, scene_config())
+    with pytest.raises(panda_visibility.SceneCheckConfigError) as caught:
+        panda_visibility.load_check_config(path, scene_config())
     assert caught.value.field == "unexpected"
 
     duplicate = tmp_path / "duplicate.yaml"
     duplicate.write_text(
         CHECK_CONFIG.read_text(encoding="utf-8") + "\nseeds: [1]\n", encoding="utf-8"
     )
-    with pytest.raises(visibility.SceneCheckConfigError, match="duplicate key"):
-        visibility.load_check_config(duplicate, scene_config())
+    with pytest.raises(panda_visibility.SceneCheckConfigError, match="duplicate key"):
+        panda_visibility.load_check_config(duplicate, scene_config())
 
 
 def test_pixel_count_uses_exact_objid_and_objtype_not_colors():
@@ -209,7 +210,7 @@ def test_pixel_count_uses_exact_objid_and_objtype_not_colors():
 
 
 def test_zero_pixels_fails_a_camera_and_layout():
-    layout = visibility.LayoutSpec("seed-1", "seed", 1, ())
+    layout = panda_visibility.LayoutSpec("seed-1", "seed", 1, ())
     segmentation = [
         [[0, 0], [0, 0], [0, 0]],
         [[0, 0], [0, 0], [0, 0]],
@@ -217,7 +218,7 @@ def test_zero_pixels_fails_a_camera_and_layout():
     thresholds = {
         camera: {"source": 1, "target": 1} for camera in ("global", "left_wrist", "right_wrist")
     }
-    result = visibility.summarize_layout(
+    result = panda_visibility.summarize_layout(
         layout,
         {camera: segmentation for camera in thresholds},
         {"source": 100, "target": 101},
@@ -233,7 +234,7 @@ def test_zero_pixels_fails_a_camera_and_layout():
 def test_contact_sheet_uses_first_and_worst_layouts(tmp_path):
     from PIL import Image
 
-    config = visibility.load_check_config(CHECK_CONFIG, scene_config())
+    config = panda_visibility.load_check_config(CHECK_CONFIG, scene_config())
     run_dir = tmp_path / "run"
     results = []
     for index, (layout_id, total) in enumerate((("seed-11", 300), ("boundary-007", 40))):
@@ -290,7 +291,7 @@ def test_save_rgb_images_writes_three_real_pngs_and_protects_layout_directory(tm
     from PIL import Image
 
     run_dir = tmp_path / "run"
-    layout = visibility.LayoutSpec("seed-11", "seed", 11, ())
+    layout = panda_visibility.LayoutSpec("seed-11", "seed", 11, ())
     rgb = {
         camera: _TestRGB(40 + index, 30, (10 + index, 20, 30))
         for index, camera in enumerate(("global", "left_wrist", "right_wrist"))
@@ -317,7 +318,7 @@ def test_save_rgb_images_write_error_is_artifact_write_failed(tmp_path, monkeypa
     from PIL import Image
 
     run_dir = tmp_path / "run"
-    layout = visibility.LayoutSpec("seed-11", "seed", 11, ())
+    layout = panda_visibility.LayoutSpec("seed-11", "seed", 11, ())
     rgb = {camera: _TestRGB(8, 6, (1, 2, 3)) for camera in ("global", "left_wrist")}
 
     def fail_save(*_args, **_kwargs):
@@ -333,9 +334,9 @@ def test_save_rgb_images_write_error_is_artifact_write_failed(tmp_path, monkeypa
 def test_contact_sheet_write_error_has_clear_reason(tmp_path, monkeypatch):
     from PIL import Image
 
-    config = visibility.load_check_config(CHECK_CONFIG, scene_config())
+    config = panda_visibility.load_check_config(CHECK_CONFIG, scene_config())
     run_dir = tmp_path / "run"
-    layout = visibility.LayoutSpec("seed-11", "seed", 11, ())
+    layout = panda_visibility.LayoutSpec("seed-11", "seed", 11, ())
     paths = check_scene._save_rgb_images(
         run_dir,
         layout,
@@ -421,7 +422,9 @@ class FakeModel:
 class FakeScene:
     def __init__(self) -> None:
         self.model = FakeModel()
-        self.indices = SimpleNamespace(object_free_joint_qpos={"source": 7, "target": 14})
+        self.indices = SimpleNamespace(
+            environment=SimpleNamespace(object_free_joint_qpos={"source": 7, "target": 14})
+        )
         self.data = SimpleNamespace(qpos=[0.0] * 32)
         self.reset(11)
 
@@ -465,7 +468,7 @@ def fake_summary(layout, _segmentation, geom_ids, thresholds, resolutions):
     cameras = []
     for camera, objects in thresholds.items():
         items = tuple(
-            visibility.ObjectVisibility(
+            panda_visibility.ObjectVisibility(
                 object=name,
                 geom_id=geom_ids[name],
                 pixels=thresholds[camera][name],
@@ -476,7 +479,7 @@ def fake_summary(layout, _segmentation, geom_ids, thresholds, resolutions):
         )
         width, height = resolutions[camera]
         cameras.append(
-            visibility.CameraVisibility(
+            panda_visibility.CameraVisibility(
                 camera=camera,
                 width=width,
                 height=height,
@@ -486,7 +489,7 @@ def fake_summary(layout, _segmentation, geom_ids, thresholds, resolutions):
             )
         )
     total = sum(camera.total_pixels for camera in cameras)
-    return visibility.LayoutVisibility(
+    return panda_visibility.LayoutVisibility(
         layout_id=layout.layout_id,
         kind=layout.kind,
         cameras=tuple(cameras),

@@ -14,10 +14,11 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim.config.panda_scene_config import load_scene_config  # noqa: E402
-from robot_backend_sim.physics.panda.scene import build_scene  # noqa: E402
-from robot_backend_sim.render import rendering, visibility  # noqa: E402
-from robot_backend_sim.render.rendering import SceneRenderer, SceneRenderError  # noqa: E402
+from robot_backend_sim.panda_sim.stack.scene_config import load_scene_config  # noqa: E402
+from robot_backend_sim.panda_sim.stack.scene import build_scene  # noqa: E402
+from robot_backend_sim.common.render import rendering, visibility  # noqa: E402
+from robot_backend_sim.panda_sim.stack import visibility as panda_visibility
+from robot_backend_sim.common.render.rendering import SceneRenderer, SceneRenderError  # noqa: E402
 from robot_backend_sim.tools import check_scene  # noqa: E402
 
 CONFIG_PATH = ROOT / "shared/scenarios/panda_sim/stack/configs/simulation/scene/panda_stack.yaml"
@@ -83,7 +84,7 @@ def test_rgb_and_segmentation_come_from_one_immutable_snapshot(scene, renderer):
     scene.reset(23)
     np.testing.assert_array_equal(snapshot.state, original_state)
 
-    check = visibility.load_check_config(CHECK_PATH, scene.config)
+    check = panda_visibility.load_check_config(CHECK_PATH, scene.config)
     geom_ids = {obj.name: scene.model.geom(f"{obj.name}_geom").id for obj in scene.config.objects}
     counts = {
         camera: {
@@ -119,7 +120,7 @@ def test_snapshot_time_matches_reported_state_and_mismatch_is_rejected(scene, re
 
 
 def test_full_check_entry_with_one_real_layout(tmp_path, monkeypatch):
-    real_build_layouts = visibility.build_layouts
+    real_build_layouts = panda_visibility.build_layouts
     monkeypatch.setattr(
         visibility,
         "build_layouts",

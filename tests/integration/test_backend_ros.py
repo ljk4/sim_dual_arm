@@ -56,10 +56,10 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim.config.backend_config import load_backend_config  # noqa: E402
-from robot_backend_sim.ros.node import BackendNode  # noqa: E402
-from robot_backend_sim.ros.ros_bridge import RosFutureBridge  # noqa: E402
-from robot_backend_sim.runtime.worker import Worker  # noqa: E402
+from robot_backend_sim.common.config.backend_config import load_backend_config  # noqa: E402
+from robot_backend_sim.common.ros.node import BackendNode  # noqa: E402
+from robot_backend_sim.common.ros.ros_bridge import RosFutureBridge  # noqa: E402
+from robot_backend_sim.common.runtime.worker import Worker  # noqa: E402
 
 CONFIG = SCENARIO / "configs/simulation/backend/backend.yaml"
 PROFILE_PATH = PROFILES / "robots/panda_stack_v1/profile.json"
@@ -122,7 +122,7 @@ class Stack:
             [
                 sys.executable,
                 "-m",
-                "robot_backend_sim.ros.node",
+                "robot_backend_sim.common.ros.node",
                 "--config",
                 str(self.config),
                 "--run-root",

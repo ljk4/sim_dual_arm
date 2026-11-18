@@ -50,10 +50,10 @@ for source in (
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
 
-from robot_backend_sim.config.follower_config import load_follower_config  # noqa: E402
-from robot_backend_sim.config.motion_config import load_control_config  # noqa: E402
-from robot_backend_sim.control.control_state import ChunkStatus  # noqa: E402
-from robot_backend_sim.follower.follower_protocol import (  # noqa: E402
+from robot_backend_sim.common.config.follower_config import load_follower_config  # noqa: E402
+from robot_backend_sim.common.config.motion_config import load_control_config  # noqa: E402
+from robot_backend_sim.common.control.control_state import ChunkStatus  # noqa: E402
+from robot_backend_sim.common.follower.follower_protocol import (  # noqa: E402
     follower_reference_from_chunk_status,
     prepare_follower_request,
     validation_limits,

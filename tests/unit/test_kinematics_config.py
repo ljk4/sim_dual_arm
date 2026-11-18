@@ -14,13 +14,15 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim.config.kinematics_config import (  # noqa: E402
+from robot_backend_sim.panda_sim.kinematics_config import (  # noqa: E402
     KinematicsConfigError,
     load_kinematics_config,
 )
-from robot_backend_sim.config.panda_scene_config import load_scene_config  # noqa: E402
-from robot_backend_sim.kinematics import common, kinematics  # noqa: E402
-from robot_backend_sim.render import visibility  # noqa: E402
+from robot_backend_sim.panda_sim.stack.scene_config import load_scene_config  # noqa: E402
+from robot_backend_sim.common.kinematics import common
+from robot_backend_sim.panda_sim import kinematics  # noqa: E402
+from robot_backend_sim.common.render import visibility  # noqa: E402
+from robot_backend_sim.panda_sim.stack import visibility as panda_visibility
 
 SCENE_PATH = SCENARIO / "configs/simulation/scene/panda_stack.yaml"
 CHECK_PATH = SCENARIO / "configs/simulation/checks/scene_check.yaml"
@@ -81,8 +83,8 @@ def test_config_records_all_mandated_initial_values(config):
 
 
 def test_config_reuses_the_67_layout_boundary_domain(config, scene_config):
-    check = visibility.load_check_config(CHECK_PATH, scene_config)
-    layouts = visibility.build_layouts(check, scene_config)
+    check = panda_visibility.load_check_config(CHECK_PATH, scene_config)
+    layouts = panda_visibility.build_layouts(check, scene_config)
     assert len(layouts) == 67
     assert [layout.kind for layout in layouts[:3]] == ["seed", "seed", "seed"]
     assert all(layout.kind == "boundary" for layout in layouts[3:])

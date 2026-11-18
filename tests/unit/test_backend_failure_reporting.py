@@ -7,7 +7,7 @@ import pytest
 
 pytest.importorskip("mujoco")
 
-from robot_backend_sim.runtime.worker_owner import _Owner  # noqa: E402
+from robot_backend_sim.common.runtime.worker_owner import _Owner  # noqa: E402
 
 
 @pytest.mark.parametrize("operation", ["stop", "release"])

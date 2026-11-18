@@ -14,9 +14,9 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim.config.panda_scene_config import load_scene_config  # noqa: E402
-from robot_backend_sim.tasks.stack import validate_scene_geometry  # noqa: E402
-from robot_backend_sim.tasks.stack.config import (  # noqa: E402
+from robot_backend_sim.panda_sim.stack.scene_config import load_scene_config  # noqa: E402
+from robot_backend_sim.panda_sim.stack import validate_scene_geometry  # noqa: E402
+from robot_backend_sim.panda_sim.stack.config import (  # noqa: E402
     StackTaskConfigError,
     load_task_config,
 )

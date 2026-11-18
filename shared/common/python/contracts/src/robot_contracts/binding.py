@@ -76,6 +76,7 @@ _RECIPE_FIELDS = (
     "dataset",
     "training",
     "policy_service",
+    "evaluation",
 )
 _PROFILE_FIELDS = ("robot", "observation", "action")
 _BASE_REQUIREMENTS = tuple(f"profiles.{name}" for name in _PROFILE_FIELDS)
@@ -139,6 +140,7 @@ class RecipesSpec(StrictContractModel):
     dataset: NonEmptyStr | None = None
     training: NonEmptyStr | None = None
     policy_service: NonEmptyStr | None = None
+    evaluation: NonEmptyStr | None = None
 
 
 class InterfacesSpec(StrictContractModel):

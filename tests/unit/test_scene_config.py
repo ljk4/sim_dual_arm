@@ -15,11 +15,7 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim.config.panda_scene_config import (  # noqa: E402
-    SceneConfigError,
-    camera_declared_description,
-    load_scene_config,
-)
+from robot_backend_sim.panda_sim.stack.scene_config import SceneConfigError, camera_declared_description, load_scene_config  # noqa: E402
 from robot_contracts.profiles import load_profile, semantic_hash  # noqa: E402
 
 CONFIG_PATH = ROOT / "shared/scenarios/panda_sim/stack/configs/simulation/scene/panda_stack.yaml"

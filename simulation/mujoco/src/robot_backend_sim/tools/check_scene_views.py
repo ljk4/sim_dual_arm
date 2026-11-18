@@ -7,16 +7,17 @@ import statistics
 import time
 from pathlib import Path
 
-from robot_backend_sim.config.panda_scene_config import SceneConfig
-from robot_backend_sim.render import visibility
-from robot_backend_sim.render.visibility import LayoutSpec, LayoutVisibility, SceneCheckConfig
+from robot_backend_sim.panda_sim.stack.scene_config import SceneConfig
+from robot_backend_sim.common.render import visibility
+from robot_backend_sim.panda_sim.stack import visibility as panda_visibility
+from robot_backend_sim.panda_sim.stack.visibility import LayoutSpec, LayoutVisibility, SceneCheckConfig
 from robot_backend_sim.tools.check_scene_common import SceneCheckFailure
 
 
 def _actual_object_poses(scene: object, scene_config: SceneConfig) -> list[dict[str, object]]:
     poses: list[dict[str, object]] = []
     for obj in scene_config.objects:
-        address = scene.indices.object_free_joint_qpos[obj.name]
+        address = scene.indices.environment.object_free_joint_qpos[obj.name]
         qpos = scene.data.qpos[address : address + 7]
         yaw = 2.0 * math.atan2(float(qpos[6]), float(qpos[3]))
         poses.append(
@@ -55,7 +56,7 @@ def _boundary_updates(
     updates: dict[int, tuple[float, ...]] = {}
     for obj in scene_config.objects:
         placement = by_name[obj.name]
-        address = scene.indices.object_free_joint_qpos[obj.name]
+        address = scene.indices.environment.object_free_joint_qpos[obj.name]
         z = scene_config.table.top_z + obj.half_extents[2]
         updates[address] = (
             placement.x,

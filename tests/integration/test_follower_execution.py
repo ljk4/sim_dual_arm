@@ -26,17 +26,17 @@ for source in (ROOT / "simulation/mujoco/src", ROOT / "shared/common/python/cont
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
 
-from robot_backend_sim.config.follower_config import load_follower_config  # noqa: E402
-from robot_backend_sim.config.motion_config import load_control_config  # noqa: E402
-from robot_backend_sim.config.panda_scene_config import load_scene_config  # noqa: E402
-from robot_backend_sim.config.stream_config import StreamConfig  # noqa: E402
-from robot_backend_sim.control.control import ControlSession  # noqa: E402
-from robot_backend_sim.control.control_state import PreparedControlCommand  # noqa: E402
-from robot_backend_sim.follower.follower_plan import prepare_follower_plan  # noqa: E402
-from robot_backend_sim.motion.motion_controller import MotionController, Phase  # noqa: E402
-from robot_backend_sim.motion.stream_schedule import next_grid_time  # noqa: E402
-from robot_backend_sim.physics.panda.io import PandaIO  # noqa: E402
-from robot_backend_sim.physics.panda.scene import build_scene  # noqa: E402
+from robot_backend_sim.common.config.follower_config import load_follower_config  # noqa: E402
+from robot_backend_sim.common.config.motion_config import load_control_config  # noqa: E402
+from robot_backend_sim.panda_sim.stack.scene_config import load_scene_config  # noqa: E402
+from robot_backend_sim.common.config.stream_config import StreamConfig  # noqa: E402
+from robot_backend_sim.common.control.control import ControlSession  # noqa: E402
+from robot_backend_sim.common.control.control_state import PreparedControlCommand  # noqa: E402
+from robot_backend_sim.common.follower.follower_plan import prepare_follower_plan  # noqa: E402
+from robot_backend_sim.common.motion.motion_controller import MotionController, Phase  # noqa: E402
+from robot_backend_sim.common.motion.stream_schedule import next_grid_time  # noqa: E402
+from robot_backend_sim.panda_sim.io import PandaIO  # noqa: E402
+from robot_backend_sim.panda_sim.stack.scene import build_scene  # noqa: E402
 from robot_contracts.action_chunks import ActionWindow  # noqa: E402
 from robot_contracts.control import ControlCommand  # noqa: E402
 from robot_contracts.models import ContractError, RunContext, Target  # noqa: E402
@@ -1105,12 +1105,12 @@ def install_contact_source(scene) -> None:
     model = scene.model
     data = scene.data
     mujoco.mj_forward(model, data)
-    tcp = int(scene.indices.tcp_site_ids["right_tcp"])
+    tcp = int(scene.indices.robot.tcp_site_ids["right_tcp"])
     position = np.asarray(data.site_xpos[tcp], dtype=float)
     matrix = np.asarray(data.site_xmat[tcp], dtype=float)
     quaternion = np.zeros(4, dtype=float)
     mujoco.mju_mat2Quat(quaternion, matrix)
-    address = int(scene.indices.object_free_joint_qpos["source"])
+    address = int(scene.indices.environment.object_free_joint_qpos["source"])
     data.qpos[address : address + 7] = (*position, *quaternion)
     free_dof = int(model.joint("source_free").dofadr[0])
     data.qvel[free_dof : free_dof + 6] = 0.0

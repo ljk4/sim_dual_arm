@@ -7,8 +7,8 @@ from robot_contracts.models import ContractError, Target
 
 ruckig = pytest.importorskip("ruckig")
 
-from robot_backend_sim.follower import follower_plan  # noqa: E402
-from robot_backend_sim.motion.ruckig_export import export_ruckig_reference  # noqa: E402
+from robot_backend_sim.common.follower import follower_plan  # noqa: E402
+from robot_backend_sim.common.motion.ruckig_export import export_ruckig_reference  # noqa: E402
 
 
 def long_profile():

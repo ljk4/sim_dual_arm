@@ -39,6 +39,7 @@ recipes:
   dataset: configs/learning/act_dataset.yaml
   training: configs/learning/act_training.yaml
   policy_service: configs/learning/policy_temporal.yaml
+  evaluation: configs/runtime/evaluation.yaml
 
 interfaces:
   # Common ROS packages.  robot_api_msgs is the core contract; sim_api_msgs is

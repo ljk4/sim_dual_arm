@@ -15,11 +15,9 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim.config.panda_scene_config import (  # noqa: E402
-    PANDA_JOINT_RANGES,
-    load_scene_config,
-)
-from robot_backend_sim.physics.panda.scene import Scene, build_scene  # noqa: E402
+from robot_backend_sim.panda_sim.robot_config import PANDA_JOINT_RANGES  # noqa: E402
+from robot_backend_sim.panda_sim.stack.scene_config import load_scene_config  # noqa: E402
+from robot_backend_sim.panda_sim.stack.scene import Scene, build_scene  # noqa: E402
 
 CONFIG_PATH = ROOT / "shared/scenarios/panda_sim/stack/configs/simulation/scene/panda_stack.yaml"
 
@@ -33,7 +31,7 @@ def scene():
 
 
 def object_qpos(scene, name: str):
-    address = scene.indices.object_free_joint_qpos[name]
+    address = scene.indices.environment.object_free_joint_qpos[name]
     return scene.data.qpos[address : address + 7]
 
 
@@ -54,8 +52,8 @@ def test_model_has_dual_panda_names_dof_and_cameras(scene):
             assert model.actuator(f"{side}_actuator{actuator}").name == f"{side}_actuator{actuator}"
         assert model.body(f"{side}_hand").name == f"{side}_hand"
         assert model.site(f"{side}_tcp").name == f"{side}_tcp"
-        assert len(scene.indices.arm_joint_qpos[side]) == 7
-        assert len(scene.indices.finger_joint_qpos[side]) == 2
+        assert len(scene.indices.robot.arm_joint_qpos[side]) == 7
+        assert len(scene.indices.robot.finger_joint_qpos[side]) == 2
 
     assert np.all(model.cam_targetbodyid == -1)
     assert np.all(model.cam_mode == mujoco.mjtCamLight.mjCAMLIGHT_FIXED)
@@ -84,7 +82,7 @@ def test_joint_ranges_and_initial_values_match_fixed_upstream(scene):
             assert model.jnt_limited[joint.id] == 1
             position = home[index - 1]
             assert lower <= position <= upper
-            assert scene.data.qpos[scene.indices.arm_joint_qpos[side][index - 1]] == (
+            assert scene.data.qpos[scene.indices.robot.arm_joint_qpos[side][index - 1]] == (
                 pytest.approx(position)
             )
 
@@ -110,7 +108,7 @@ def test_same_seed_reset_restores_complete_state(scene):
     expected_qpos = scene.data.qpos.copy()
     expected_ctrl = scene.data.ctrl.copy()
     expected_sites = {
-        side: scene.data.site(scene.indices.tcp_site_ids[f"{side}_tcp"]).xpos.copy()
+        side: scene.data.site(scene.indices.robot.tcp_site_ids[f"{side}_tcp"]).xpos.copy()
         for side in ("left", "right")
     }
     expected_bodies = {
@@ -138,7 +136,7 @@ def test_same_seed_reset_restores_complete_state(scene):
     assert not np.any(scene.data.qacc_warmstart)
     for side, expected in expected_sites.items():
         np.testing.assert_array_equal(
-            scene.data.site(scene.indices.tcp_site_ids[f"{side}_tcp"]).xpos, expected
+            scene.data.site(scene.indices.robot.tcp_site_ids[f"{side}_tcp"]).xpos, expected
         )
     for name, expected in expected_bodies.items():
         np.testing.assert_array_equal(scene.data.body(name).xpos, expected)
@@ -195,8 +193,8 @@ def test_gripper_initialization_uses_continuous_vendor_command(scene):
 
     scene.reset(0)
     for side in ("left", "right"):
-        gripper = scene.indices.gripper_actuator_ids[side]
+        gripper = scene.indices.robot.gripper_actuator_ids[side]
         assert scene.data.ctrl[gripper] == pytest.approx(255.0)
         assert half_data.ctrl[gripper] == pytest.approx(127.5)
-        for address in scene.indices.finger_joint_qpos[side]:
+        for address in scene.indices.robot.finger_joint_qpos[side]:
             assert half_data.qpos[address] == pytest.approx(0.02)

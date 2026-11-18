@@ -3,12 +3,23 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import yaml
 
-from dual_arm_runtime.offline.inference_worker import _classification, _stage_state
+from dual_arm_runtime.offline.inference_worker import (
+    _classification,
+    _stage_state,
+    load_classification,
+)
 from dual_arm_runtime.offline.inference_workers import prepare_workers
+
+_STACK_EVALUATION = (
+    Path(os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[2])
+    / "shared/scenarios/panda_sim/stack/configs/runtime/evaluation.yaml"
+)
+CONFIG = load_classification(_STACK_EVALUATION)
 
 
 def _task(reason: str, conditions: dict[str, bool], state: str = "FAILED") -> dict:
@@ -25,7 +36,7 @@ def _task(reason: str, conditions: dict[str, bool], state: str = "FAILED") -> di
 
 
 def test_success_marks_every_milestone():
-    stage, _reason, reached = _stage_state(_task("", {}, state="SUCCEEDED"))
+    stage, _reason, reached = _stage_state(_task("", {}, state="SUCCEEDED"), CONFIG)
     assert stage == ""
     assert reached == {"grasp": True, "place": True, "release": True, "stable": True}
 
@@ -36,7 +47,7 @@ def test_timeout_after_all_conditions_is_stable_wait():
         {"source_not_on_table": True, "source_on_target_height": True,
          "right_gripper_opening": True},
     )
-    stage, reason, reached = _stage_state(task)
+    stage, reason, reached = _stage_state(task, CONFIG)
     assert stage == "稳定确认"
     assert reason == "CONTROL_FAILED: TASK_TIMEOUT"
     assert all(reached.values())
@@ -44,14 +55,14 @@ def test_timeout_after_all_conditions_is_stable_wait():
 
 def test_dropped_block_is_transport_failure():
     stage, _reason, _reached = _stage_state(
-        _task("DROPPED: a block was dropped or left the table", {})
+        _task("DROPPED: a block was dropped or left the table", {}), CONFIG
     )
     assert stage == "搬运/放置（掉落）"
 
 
 def test_failed_grasp_is_first_stage():
     stage, _reason, reached = _stage_state(
-        _task("CONTROL_FAILED: TASK_TIMEOUT", {"source_not_on_table": False})
+        _task("CONTROL_FAILED: TASK_TIMEOUT", {"source_not_on_table": False}), CONFIG
     )
     assert stage == "抓取/交接"
     assert reached["grasp"] is False
@@ -63,7 +74,8 @@ def test_failed_release_after_place_is_release_stage():
             "CONTROL_FAILED: TASK_TIMEOUT",
             {"source_not_on_table": True, "source_on_target_height": True,
              "right_tcp_clearance": False},
-        )
+        ),
+        CONFIG,
     )
     assert stage == "释放/撤离"
     assert reached["place"] is True
@@ -79,7 +91,7 @@ def test_episode_classification_reads_recorded_artifacts(tmp_path):
     (episode / "manifest.json").write_text(
         json.dumps({"recording": {"complete": True}, "runtime": {"outcome": "stopped"}})
     )
-    result = _classification(recordings, "run-1", 0)
+    result = _classification(recordings, "run-1", 0, CONFIG)
     assert result["succeeded"] is True
     assert result["failure_stage"] == ""
     assert result["record_directory"] == str(episode)
@@ -88,7 +100,7 @@ def test_episode_classification_reads_recorded_artifacts(tmp_path):
 def test_missing_artifacts_report_execution_failure(tmp_path):
     recordings = tmp_path / "recordings"
     recordings.mkdir()
-    result = _classification(recordings, "missing-run", 1)
+    result = _classification(recordings, "missing-run", 1, CONFIG)
     assert result["succeeded"] is False
     assert result["failure_stage"] == "执行异常"
 

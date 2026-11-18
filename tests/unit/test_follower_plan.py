@@ -23,10 +23,10 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim.config.follower_config import load_follower_config  # noqa: E402
-from robot_backend_sim.config.motion_config import load_control_config  # noqa: E402
-from robot_backend_sim.follower.follower_plan import prepare_follower_plan  # noqa: E402
-from robot_backend_sim.motion.ruckig_export import export_ruckig_reference  # noqa: E402
+from robot_backend_sim.common.config.follower_config import load_follower_config  # noqa: E402
+from robot_backend_sim.common.config.motion_config import load_control_config  # noqa: E402
+from robot_backend_sim.common.follower.follower_plan import prepare_follower_plan  # noqa: E402
+from robot_backend_sim.common.motion.ruckig_export import export_ruckig_reference  # noqa: E402
 
 ruckig = pytest.importorskip("ruckig")
 

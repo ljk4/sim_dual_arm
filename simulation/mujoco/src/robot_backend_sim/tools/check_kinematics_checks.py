@@ -11,11 +11,12 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from robot_backend_sim.config.kinematics_config import KinematicsCheckConfig, TargetConfig
-from robot_backend_sim.config.panda_scene_config import SceneConfig
-from robot_backend_sim.kinematics import common, kinematics
-from robot_backend_sim.kinematics.common import extract_object_pose
-from robot_backend_sim.kinematics.kinematics import (
+from robot_backend_sim.panda_sim.kinematics_config import KinematicsCheckConfig, TargetConfig
+from robot_backend_sim.panda_sim.stack.scene_config import SceneConfig
+from robot_backend_sim.common.kinematics import common
+from robot_backend_sim.panda_sim import kinematics
+from robot_backend_sim.common.kinematics.common import extract_object_pose
+from robot_backend_sim.panda_sim.kinematics import (
     IKResult,
     KinematicsError,
     PathResult,
@@ -25,8 +26,9 @@ from robot_backend_sim.kinematics.kinematics import (
     check_path,
     solve_key_poses,
 )
-from robot_backend_sim.render import visibility
-from robot_backend_sim.render.visibility import LayoutSpec, SceneCheckConfig
+from robot_backend_sim.common.render import visibility
+from robot_backend_sim.panda_sim.stack import visibility as panda_visibility
+from robot_backend_sim.panda_sim.stack.visibility import LayoutSpec, SceneCheckConfig
 from robot_backend_sim.tools.check_kinematics_common import (
     ArtifactBudget,
     KinematicsCheckFailure,
@@ -34,8 +36,8 @@ from robot_backend_sim.tools.check_kinematics_common import (
 )
 
 if TYPE_CHECKING:
-    from robot_backend_sim.physics.panda.scene import Scene
-    from robot_backend_sim.render.rendering import SceneRenderer, Snapshot
+    from robot_backend_sim.panda_sim.stack.scene import Scene
+    from robot_backend_sim.common.render.rendering import SceneRenderer, Snapshot
 
 
 def _apply_updates(qpos: object, updates: dict[int, tuple[float, ...]]) -> object:
@@ -53,7 +55,7 @@ def _boundary_updates(
     updates: dict[int, tuple[float, ...]] = {}
     for obj in scene_config.objects:
         placement = by_name[obj.name]
-        address = scene.indices.object_free_joint_qpos[obj.name]
+        address = scene.indices.environment.object_free_joint_qpos[obj.name]
         z = scene_config.table.top_z + obj.half_extents[2]
         updates[address] = (
             placement.x,
@@ -315,7 +317,7 @@ def _prepare_layout(
         qpos = _apply_updates(qpos, updates)
     poses = {
         obj.name: extract_object_pose(
-            qpos, scene.indices.object_free_joint_qpos[obj.name], obj.name
+            qpos, scene.indices.environment.object_free_joint_qpos[obj.name], obj.name
         )
         for obj in scene_config.objects
     }
@@ -350,7 +352,7 @@ def _check_motion(
     )
     if len(solved) != len(prepared.targets) or not all(result.converged for result in solved):
         return MotionChecks(initial, solved, (), len(prepared.targets))
-    addresses = scene.indices.arm_joint_qpos["right"]
+    addresses = scene.indices.robot.arm_joint_qpos["right"]
     previous = tuple(float(prepared.qpos[address]) for address in addresses)
     previous_phase = "initial"
     paths = []
@@ -498,7 +500,7 @@ def _check_one_layout(
                     prepared,
                     solved,
                     layout_id=layout.layout_id,
-                    right_addresses=tuple(scene.indices.arm_joint_qpos["right"]),
+                    right_addresses=tuple(scene.indices.robot.arm_joint_qpos["right"]),
                     geom_ids=geom_ids,
                     config=config,
                     budget=budget,
@@ -532,7 +534,12 @@ def _run_layouts(
     report: dict[str, object],
     budget: ArtifactBudget,
 ) -> tuple[list[dict[str, object]], KinematicsCheckFailure | None]:
-    pairs = build_collision_pairs(scene.model)
+    pairs = build_collision_pairs(
+        scene.model,
+        robot_prefixes=("left_", "right_"),
+        robot_sides={"left": ("left_",), "right": ("right_",)},
+        object_names=("source", "target"),
+    )
     report["collision_pairs"] = {
         "total_effective_pairs": len(pairs.pairs),
         "categories": pairs.categories,
@@ -554,7 +561,7 @@ def _run_layouts(
     report["layouts"] = results  # Preserve completed layouts if a later resource fails.
     first_failure = None
     remaining = kinematics_config.clearance.max_total_samples
-    for layout in visibility.build_layouts(check_config, scene_config):
+    for layout in panda_visibility.build_layouts(check_config, scene_config):
         result = _check_one_layout(
             run_dir,
             scene,

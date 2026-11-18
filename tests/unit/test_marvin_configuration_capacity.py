@@ -4,11 +4,11 @@ import os
 from pathlib import Path
 
 import pytest
-from robot_backend_sim.config.backend_config import load_backend_config
-from robot_backend_sim.config.stream_config import load_stream_config
-from robot_backend_sim.runtime.worker import Worker
-from robot_backend_sim.tasks.handover.plugin import HandoverTaskPlugin
-from robot_backend_sim.tasks.handover.task_config import load_handover_task_config
+from robot_backend_sim.common.config.backend_config import load_backend_config
+from robot_backend_sim.common.config.stream_config import load_stream_config
+from robot_backend_sim.common.runtime.worker import Worker
+from robot_backend_sim.marvin_sim.handover.plugin import HandoverTaskPlugin
+from robot_backend_sim.marvin_sim.handover.task_config import load_handover_task_config
 
 
 @pytest.mark.parametrize("role", ["teacher", "policy"])

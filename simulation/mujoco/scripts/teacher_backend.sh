@@ -123,7 +123,7 @@ python3 - "$robot" "$task" "$seed" "$run_id" "$run_root" "$shared_root" "${overr
 import sys
 from pathlib import Path
 import yaml
-from robot_backend_sim.config.scenario_config import resolve_scenario_backend
+from robot_backend_sim.common.config.scenario_config import resolve_scenario_backend
 
 robot, task, seed_str, run_id, run_root, shared_root, *overrides = sys.argv[1:]
 resolved = resolve_scenario_backend(
@@ -150,7 +150,7 @@ print("================================", flush=True)
 PY
 
 cmd=(
-  python3 -m robot_backend_sim.ros.node
+  python3 -m robot_backend_sim.common.ros.node
   --robot "$robot"
   --task "$task"
   --role teacher

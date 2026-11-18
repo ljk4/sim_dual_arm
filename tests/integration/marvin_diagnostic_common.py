@@ -60,12 +60,12 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim.config.follower_config import load_follower_config  # noqa: E402
-from robot_backend_sim.config.marvin_scene_config import load_marvin_scene_config  # noqa: E402
-from robot_backend_sim.config.scenario_config import ROBOT_REFERENCE_FIELDS  # noqa: E402
-from robot_backend_sim.physics.marvin.scene import build_marvin_scene  # noqa: E402
-from robot_backend_sim.tasks.handover.config import load_handover_plan_config  # noqa: E402
-from robot_backend_sim.tasks.handover.plan import plan_handover  # noqa: E402
+from robot_backend_sim.common.config.follower_config import load_follower_config  # noqa: E402
+from robot_backend_sim.marvin_sim.handover.scene_config import load_marvin_scene_config  # noqa: E402
+from robot_backend_sim.common.config.scenario_config import ROBOT_REFERENCE_FIELDS  # noqa: E402
+from robot_backend_sim.marvin_sim.handover.scene import build_marvin_scene  # noqa: E402
+from robot_backend_sim.marvin_sim.handover.config import load_handover_plan_config  # noqa: E402
+from robot_backend_sim.marvin_sim.handover.plan import plan_handover  # noqa: E402
 
 SCENARIO = ROOT / "shared/scenarios/marvin_sim/handover"
 RECIPE = Path(
@@ -160,7 +160,7 @@ class Stack:
             [
                 sys.executable,
                 "-m",
-                "robot_backend_sim.ros.node",
+                "robot_backend_sim.common.ros.node",
                 "--config",
                 str(self.config),
                 "--run-root",

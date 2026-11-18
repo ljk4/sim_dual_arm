@@ -13,8 +13,8 @@ from dual_arm_runtime.scenario_runtime import (
     ScenarioRuntimeError,
     resolve_scenario_runtime,
 )
-from robot_backend_sim.config.backend_config import load_backend_document
-from robot_backend_sim.config.scenario_config import (
+from robot_backend_sim.common.config.backend_config import load_backend_document
+from robot_backend_sim.common.config.scenario_config import (
     ScenarioError,
     resolve_scenario_backend,
 )

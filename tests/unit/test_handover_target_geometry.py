@@ -14,12 +14,12 @@ np = pytest.importorskip("numpy")
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "simulation/mujoco/src"))
 
-from robot_backend_sim.config.marvin_scene_config import load_marvin_scene_config  # noqa: E402
-from robot_backend_sim.kinematics.dual_arm import relative_block_pose  # noqa: E402
-from robot_backend_sim.physics.marvin.scene import build_marvin_scene  # noqa: E402
-from robot_backend_sim.physics.robot_geometry import ArmChain  # noqa: E402
-from robot_backend_sim.tasks.handover.config import load_handover_plan_config  # noqa: E402
-from robot_backend_sim.tasks.handover.plan import (  # noqa: E402
+from robot_backend_sim.marvin_sim.handover.scene_config import load_marvin_scene_config  # noqa: E402
+from robot_backend_sim.marvin_sim.kinematics import relative_block_pose  # noqa: E402
+from robot_backend_sim.marvin_sim.handover.scene import build_marvin_scene  # noqa: E402
+from robot_backend_sim.common.physics.robot_geometry import ArmChain  # noqa: E402
+from robot_backend_sim.marvin_sim.handover.config import load_handover_plan_config  # noqa: E402
+from robot_backend_sim.marvin_sim.handover.plan import (  # noqa: E402
     HandoverLayout,
     build_handover_targets,
     layout_from_scene,

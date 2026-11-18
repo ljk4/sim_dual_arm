@@ -16,7 +16,7 @@ RUNTIME_POLICY = SCENARIO / "configs/runtime/policy_eval.yaml"
 
 def _load_task(path: Path):
     pytest.importorskip("mujoco")
-    from robot_backend_sim.tasks.handover.task_config import load_handover_task_config
+    from robot_backend_sim.marvin_sim.handover.task_config import load_handover_task_config
 
     return load_handover_task_config(path)
 

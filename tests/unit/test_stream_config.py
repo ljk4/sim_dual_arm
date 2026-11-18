@@ -13,7 +13,7 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim.config.stream_config import (  # noqa: E402
+from robot_backend_sim.common.config.stream_config import (  # noqa: E402
     STREAM_CONFIG_FIELDS,
     StreamConfig,
     StreamConfigError,

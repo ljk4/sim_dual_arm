@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from robot_backend_sim.config.follower_config import FollowerConfig
-from robot_backend_sim.config.motion_config import ControlConfig
-from robot_backend_sim.follower.follower_plan import prepare_follower_plan
+from robot_backend_sim.common.config.follower_config import FollowerConfig
+from robot_backend_sim.common.config.motion_config import ControlConfig
+from robot_backend_sim.common.follower.follower_plan import prepare_follower_plan
 from robot_contracts.action_chunks import ActionWindow, ChunkAnchor
 from robot_contracts.models import ContractError, RobotProfile, Target
 from robot_contracts.profiles import load_profile

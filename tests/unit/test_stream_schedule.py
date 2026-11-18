@@ -14,7 +14,7 @@ for source in (SIM_SRC, CONTRACT_SRC):
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
 
-from robot_backend_sim.motion.stream_schedule import (  # noqa: E402
+from robot_backend_sim.common.motion.stream_schedule import (  # noqa: E402
     ChunkEvent,
     StreamSchedule,
     boundary_rejection,

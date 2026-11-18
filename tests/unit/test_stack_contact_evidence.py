@@ -22,8 +22,8 @@ for source in (SIM_SRC, CONTRACTS):
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
 
-from robot_backend_sim.tasks.stack.config import load_task_config  # noqa: E402
-from robot_backend_sim.tasks.stack.evaluator import (  # noqa: E402
+from robot_backend_sim.panda_sim.stack.config import load_task_config  # noqa: E402
+from robot_backend_sim.panda_sim.stack.evaluator import (  # noqa: E402
     TaskBinding,
     _finger_contacts,
     _right_finger_source_evidence,
@@ -165,12 +165,14 @@ def _stack_scene(finger_offset: float):
         data=data,
         config=SimpleNamespace(table=SimpleNamespace(top_z=0.0)),
         indices=SimpleNamespace(
-            finger_joint_qpos={
-                "right": tuple(
-                    int(model.jnt_qposadr[model.joint(f"right_finger_joint{i}").id])
-                    for i in (1, 2)
-                )
-            }
+            robot=SimpleNamespace(
+                finger_joint_qpos={
+                    "right": tuple(
+                        int(model.jnt_qposadr[model.joint(f"right_finger_joint{i}").id])
+                        for i in (1, 2)
+                    )
+                }
+            )
         ),
     )
     binding = TaskBinding(

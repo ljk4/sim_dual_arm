@@ -33,7 +33,7 @@ from marvin_diagnostic_common import (  # noqa: E402
     _support_force,
     _write_evidence,
 )
-from robot_backend_sim.tasks.handover.cohold import (  # noqa: E402
+from robot_backend_sim.marvin_sim.handover.cohold import (  # noqa: E402
     CoholdReference,
     plan_cohold_step,
 )

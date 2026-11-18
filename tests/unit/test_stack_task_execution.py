@@ -15,10 +15,10 @@ for source in (SIM_SRC, CONTRACTS):
 
 pytest.importorskip("mujoco")
 import mujoco  # noqa: E402
-from robot_backend_sim.config.panda_scene_config import load_scene_config  # noqa: E402
-from robot_backend_sim.physics.panda.scene import build_scene  # noqa: E402
-from robot_backend_sim.tasks.stack.config import load_task_config  # noqa: E402
-from robot_backend_sim.tasks.stack.evaluator import (  # noqa: E402
+from robot_backend_sim.panda_sim.stack.scene_config import load_scene_config  # noqa: E402
+from robot_backend_sim.panda_sim.stack.scene import build_scene  # noqa: E402
+from robot_backend_sim.panda_sim.stack.config import load_task_config  # noqa: E402
+from robot_backend_sim.panda_sim.stack.evaluator import (  # noqa: E402
     StackTaskRuntime,
     capture_task_observation,
     evaluate_task,
@@ -44,8 +44,8 @@ def scene_fixture():
 def _place_static_stack(scene) -> None:
     """Test-only physical fixture: not a data episode and not teacher success."""
     indices = scene.indices
-    target_address = indices.object_free_joint_qpos["target"]
-    source_address = indices.object_free_joint_qpos["source"]
+    target_address = indices.environment.object_free_joint_qpos["target"]
+    source_address = indices.environment.object_free_joint_qpos["source"]
     target = scene.data.qpos[target_address : target_address + 7].copy()
     target[3:7] = (1.0, 0.0, 0.0, 0.0)
     scene.data.qpos[target_address : target_address + 7] = target

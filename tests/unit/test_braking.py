@@ -12,7 +12,7 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim.control.braking import BrakingPlan, plan_braking  # noqa: E402
+from robot_backend_sim.common.control.braking import BrakingPlan, plan_braking  # noqa: E402
 from robot_contracts.models import ContractError, JointSpec  # noqa: E402
 from robot_contracts.trajectory.spline import JointExtremes, ReferenceExtremes  # noqa: E402
 from robot_trajectory.spline_math import check_continuous_limits  # noqa: E402

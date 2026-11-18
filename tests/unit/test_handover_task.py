@@ -21,22 +21,22 @@ from robot_contracts.profiles import load_profile  # noqa: E402
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "simulation/mujoco/src"))
 
-from robot_backend_sim.config.marvin_scene_config import load_marvin_scene_config  # noqa: E402
-from robot_backend_sim.config.motion_config import load_control_config  # noqa: E402
-from robot_backend_sim.physics.marvin.scene import build_marvin_scene  # noqa: E402
-from robot_backend_sim.tasks.handover.evaluator import HandoverTaskRuntime  # noqa: E402
-from robot_backend_sim.tasks.handover.gate import HandoverFeedback  # noqa: E402
-from robot_backend_sim.tasks.handover.observation import (  # noqa: E402
+from robot_backend_sim.marvin_sim.handover.scene_config import load_marvin_scene_config  # noqa: E402
+from robot_backend_sim.common.config.motion_config import load_control_config  # noqa: E402
+from robot_backend_sim.marvin_sim.handover.scene import build_marvin_scene  # noqa: E402
+from robot_backend_sim.marvin_sim.handover.evaluator import HandoverTaskRuntime  # noqa: E402
+from robot_backend_sim.marvin_sim.handover.gate import HandoverFeedback  # noqa: E402
+from robot_backend_sim.marvin_sim.handover.observation import (  # noqa: E402
     FingerContact,
     HandoverBinding,
     HandoverObservation,
     SupportContact,
 )
-from robot_backend_sim.tasks.handover.plan import HandoverLayout, layout_from_config  # noqa: E402
-from robot_backend_sim.tasks.handover.task_config import (  # noqa: E402
+from robot_backend_sim.marvin_sim.handover.plan import HandoverLayout, layout_from_config  # noqa: E402
+from robot_backend_sim.marvin_sim.handover.task_config import (  # noqa: E402
     load_handover_task_config,
 )
-from robot_backend_sim.tasks.handover.teacher import (  # noqa: E402
+from robot_backend_sim.marvin_sim.handover.teacher import (  # noqa: E402
     HandoverPlan,
     HandoverSnapshot,
     HandoverStep,

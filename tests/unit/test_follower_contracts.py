@@ -273,7 +273,7 @@ def changed(**changes: object) -> dict[str, object]:
 
 
 def test_follower_config_values_and_round_trip(tmp_path):
-    from robot_backend_sim.config.follower_config import load_follower_config, parse_follower_config
+    from robot_backend_sim.common.config.follower_config import load_follower_config, parse_follower_config
 
     config = load_follower_config(CONFIG_PATH)
     assert config.target_count == 20
@@ -316,7 +316,7 @@ def test_follower_config_values_and_round_trip(tmp_path):
     ),
 )
 def test_follower_config_strictly_rejects_bad_documents(mutate, field):
-    from robot_backend_sim.config.follower_config import FollowerConfigError, parse_follower_config
+    from robot_backend_sim.common.config.follower_config import FollowerConfigError, parse_follower_config
 
     document = changed()
     mutate(document)
@@ -326,7 +326,7 @@ def test_follower_config_strictly_rejects_bad_documents(mutate, field):
 
 
 def test_follower_joint_order_is_bound_to_the_selected_robot_profile():
-    from robot_backend_sim.config.follower_config import parse_follower_config
+    from robot_backend_sim.common.config.follower_config import parse_follower_config
 
     document = changed()
     expected_order = tuple(document["joint_names"])
@@ -338,7 +338,7 @@ def test_follower_joint_order_is_bound_to_the_selected_robot_profile():
 
 
 def test_follower_config_rejects_duplicate_keys(tmp_path):
-    from robot_backend_sim.config.follower_config import FollowerConfigError, load_follower_config
+    from robot_backend_sim.common.config.follower_config import FollowerConfigError, load_follower_config
 
     path = tmp_path / "duplicate.yaml"
     path.write_text(

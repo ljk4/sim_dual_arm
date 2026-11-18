@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the MuJoCo Robot API backend (robot_backend_sim.ros.node) inside the simulation container.
+# Run the MuJoCo Robot API backend (robot_backend_sim.common.ros.node) inside the simulation container.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -42,6 +42,6 @@ if [[ "$has_help" != "true" ]]; then
     --build-root "$ROS_SDK" 1>&2
 fi
 
-exec python3 -m robot_backend_sim.ros.node \
+exec python3 -m robot_backend_sim.common.ros.node \
   --run-root "$DATA_ROOT/$(target_segment "$@")/logs/backend" \
   "$@"

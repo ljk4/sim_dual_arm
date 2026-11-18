@@ -25,11 +25,11 @@ for source in (ROOT / "simulation/mujoco/src", ROOT / "shared/common/python/cont
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
 
-from robot_backend_sim.config.follower_config import load_follower_config  # noqa: E402
-from robot_backend_sim.config.motion_config import load_control_config  # noqa: E402
-from robot_backend_sim.control.control_state import ChunkStatus, ControlStatus  # noqa: E402
-from robot_backend_sim.follower.follower_plan import RUCKIG_ALGORITHM_VERSION  # noqa: E402
-from robot_backend_sim.follower.follower_protocol import (  # noqa: E402
+from robot_backend_sim.common.config.follower_config import load_follower_config  # noqa: E402
+from robot_backend_sim.common.config.motion_config import load_control_config  # noqa: E402
+from robot_backend_sim.common.control.control_state import ChunkStatus, ControlStatus  # noqa: E402
+from robot_backend_sim.common.follower.follower_plan import RUCKIG_ALGORITHM_VERSION  # noqa: E402
+from robot_backend_sim.common.follower.follower_protocol import (  # noqa: E402
     follower_reference,
     follower_reference_from_chunk_status,
     follower_reference_from_status,

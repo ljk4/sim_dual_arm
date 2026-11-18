@@ -1,0 +1,32 @@
+# Offline batch-evaluation failure classification for the Marvin handover task.
+#
+# Stages are checked in order; a stage is "reached" when none of its conditions
+# is present-and-false in task_result.json metrics.conditions.  The first
+# unreached stage names the failure stage.  Exactly one stage carries
+# `succeeded: true` (the terminal marker, not condition-based).
+schema_version: 1
+stages:
+  - name: grasp
+    label: 抓取/交接
+    conditions:
+      - airborne_handover_sequence
+      - not_on_table
+  - name: place
+    label: 搬运/放置
+    conditions:
+      - block_contained
+      - box_bottom_support
+      - block_linear_speed
+      - block_angular_speed
+      - block_position_drift
+      - block_orientation_drift
+  - name: release
+    label: 释放/撤离
+    conditions:
+      - left_released
+      - right_released
+  - name: stable
+    label: 稳定确认
+    succeeded: true
+dropped_prefix: DROPPED
+dropped_label: 搬运/放置（掉落）

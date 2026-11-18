@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "simulation/mujoco/src"))
-from robot_backend_sim.control.feedback_mailbox import FeedbackMailbox
+from robot_backend_sim.common.control.feedback_mailbox import FeedbackMailbox
 
 
 def test_pressure_preserves_transition_order():

@@ -33,7 +33,7 @@ if ROS_IMPORT_ERROR is not None:  # pragma: no cover - host without ROS
 
 import numpy as np  # noqa: E402
 import rclpy  # noqa: E402
-from robot_backend_sim.tasks.handover.plan import _placement_containment  # noqa: E402
+from robot_backend_sim.marvin_sim.handover.plan import _placement_containment  # noqa: E402
 
 
 @pytest.fixture(scope="module", autouse=True)

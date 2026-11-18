@@ -14,7 +14,7 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim.config.motion_config import (  # noqa: E402
+from robot_backend_sim.common.config.motion_config import (  # noqa: E402
     CONTROL_JOINT_NAMES,
     MotionConfigError,
     load_control_config,

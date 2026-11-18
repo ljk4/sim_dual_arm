@@ -18,13 +18,13 @@ for source in (SIM_SRC, CONTRACTS):
 pytest.importorskip("mujoco")
 pytest.importorskip("mink")
 import numpy as np  # noqa: E402
-from robot_backend_sim.config.kinematics_config import load_kinematics_config  # noqa: E402
-from robot_backend_sim.config.motion_config import load_control_config  # noqa: E402
-from robot_backend_sim.config.panda_scene_config import load_scene_config  # noqa: E402
-from robot_backend_sim.kinematics.common import extract_object_pose  # noqa: E402
-from robot_backend_sim.physics.panda.scene import build_scene  # noqa: E402
-from robot_backend_sim.tasks.stack.config import load_task_config  # noqa: E402
-from robot_backend_sim.tasks.stack.teacher import (  # noqa: E402
+from robot_backend_sim.panda_sim.kinematics_config import load_kinematics_config  # noqa: E402
+from robot_backend_sim.common.config.motion_config import load_control_config  # noqa: E402
+from robot_backend_sim.panda_sim.stack.scene_config import load_scene_config  # noqa: E402
+from robot_backend_sim.common.kinematics.common import extract_object_pose  # noqa: E402
+from robot_backend_sim.panda_sim.stack.scene import build_scene  # noqa: E402
+from robot_backend_sim.panda_sim.stack.config import load_task_config  # noqa: E402
+from robot_backend_sim.panda_sim.stack.teacher import (  # noqa: E402
     TeacherError,
     TeacherFeedback,
     TeacherProgress,
@@ -54,8 +54,8 @@ def fixture():
     )
     indices = scene.indices
     qpos = tuple(float(value) for value in scene.data.qpos)
-    source = extract_object_pose(qpos, indices.object_free_joint_qpos["source"], "source")
-    target = extract_object_pose(qpos, indices.object_free_joint_qpos["target"], "target")
+    source = extract_object_pose(qpos, indices.environment.object_free_joint_qpos["source"], "source")
+    target = extract_object_pose(qpos, indices.environment.object_free_joint_qpos["target"], "target")
     snapshot = TeacherSnapshot(
         context=RunContext("robot", profile.digest, "backend", "time", 0, "episode", 1),
         task_epoch=1,
@@ -65,13 +65,13 @@ def fixture():
         target=target,
         source_half_extents_m=task_config.source_half_extents_m,
         target_half_extents_m=task_config.target_half_extents_m,
-        left_positions=tuple(qpos[address] for address in indices.arm_joint_qpos["left"]),
-        right_positions=tuple(qpos[address] for address in indices.arm_joint_qpos["right"]),
+        left_positions=tuple(qpos[address] for address in indices.robot.arm_joint_qpos["left"]),
+        right_positions=tuple(qpos[address] for address in indices.robot.arm_joint_qpos["right"]),
         left_gripper_opening_m=float(
-            sum(qpos[address] for address in indices.finger_joint_qpos["left"])
+            sum(qpos[address] for address in indices.robot.finger_joint_qpos["left"])
         ),
         right_gripper_opening_m=float(
-            sum(qpos[address] for address in indices.finger_joint_qpos["right"])
+            sum(qpos[address] for address in indices.robot.finger_joint_qpos["right"])
         ),
         table_top_z_m=scene.config.table.top_z,
     )

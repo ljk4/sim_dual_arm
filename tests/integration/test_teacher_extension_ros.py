@@ -17,7 +17,7 @@ if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
 from dual_arm_runtime.teacher_client import teacher_service_type  # noqa: E402
-from robot_backend_sim.ros.teacher_extension import (  # noqa: E402
+from robot_backend_sim.common.ros.teacher_extension import (  # noqa: E402
     register_teacher_service,
     teacher_extension_modules,
 )

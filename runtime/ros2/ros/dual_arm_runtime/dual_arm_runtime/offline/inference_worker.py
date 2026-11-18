@@ -10,36 +10,77 @@ import sys
 import threading
 import time
 import traceback
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 ROOT = Path(os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[6])
 
-_GRASP_KEYS = (
-    "source_not_on_table",
-    "not_on_table",
-    "source_grasped",
-    "airborne_handover_sequence",
-    "left_hold",
-    "right_hold",
-    "hold_lost",
+@dataclass(frozen=True)
+class ClassificationStage:
+    """One ordered failure stage: label plus the condition names it requires."""
+
+    name: str
+    label: str
+    conditions: tuple[str, ...] = ()
+    succeeded: bool = False
+
+
+@dataclass(frozen=True)
+class ClassificationConfig:
+    """Per-scenario failure taxonomy, loaded from a recipe-owned YAML."""
+
+    stages: tuple[ClassificationStage, ...]
+    dropped_prefix: str
+    dropped_label: str
+
+    @property
+    def stage_names(self) -> tuple[str, ...]:
+        return tuple(stage.name for stage in self.stages)
+
+    def label(self, name: str) -> str:
+        for stage in self.stages:
+            if stage.name == name:
+                return stage.label
+        return name
+
+
+# Direct --config mode has no scenario and therefore no scenario taxonomy; it
+# reports a single "result" milestone and the raw failure reason.
+GENERIC_CLASSIFICATION = ClassificationConfig(
+    stages=(ClassificationStage(name="result", label="结果", succeeded=True),),
+    dropped_prefix="DROPPED",
+    dropped_label="搬运/放置（掉落）",
 )
-_PLACE_KEYS = (
-    "source_on_target_height",
-    "source_xy_inside_target",
-    "source_target_vertical_contact",
-    "block_contained",
-    "box_bottom_support",
-    "source_tilt",
-    "target_tilt",
-)
-_RELEASE_KEYS = (
-    "no_finger_contact",
-    "right_gripper_opening",
-    "right_tcp_clearance",
-    "left_released",
-    "right_released",
-)
+
+
+def load_classification(path: Path) -> ClassificationConfig:
+    """Load a scenario-owned evaluation taxonomy (plain dataclasses, no Pydantic)."""
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(document, dict):
+        raise ValueError(f"classification config is not a mapping: {path}")
+    raw_stages = document.get("stages")
+    if not isinstance(raw_stages, list) or not raw_stages:
+        raise ValueError(f"classification config has no stages: {path}")
+    stages = tuple(
+        ClassificationStage(
+            name=str(stage.get("name")),
+            label=str(stage.get("label", stage.get("name"))),
+            conditions=tuple(str(c) for c in stage.get("conditions", []) or []),
+            succeeded=bool(stage.get("succeeded", False)),
+        )
+        for stage in raw_stages
+        if isinstance(stage, dict)
+    )
+    if not any(stage.succeeded for stage in stages):
+        raise ValueError(f"classification config has no succeeded stage: {path}")
+    return ClassificationConfig(
+        stages=stages,
+        dropped_prefix=str(document.get("dropped_prefix", "DROPPED")),
+        dropped_label=str(document.get("dropped_label", "搬运/放置（掉落）")),
+    )
 
 
 def _conditions(task: dict[str, Any]) -> dict[str, bool]:
@@ -52,41 +93,41 @@ def _conditions(task: dict[str, Any]) -> dict[str, bool]:
     return result
 
 
-def _stage_state(task: dict[str, Any]) -> tuple[str, str, dict[str, bool]]:
+def _stage_state(
+    task: dict[str, Any], config: ClassificationConfig
+) -> tuple[str, str, dict[str, bool]]:
     """Return (failure_stage, failure_reason, reached_milestones)."""
     reason = str(task.get("failure_reason") or task.get("reason") or "")
+    condition_stages = [stage for stage in config.stages if stage.conditions]
     if not task.get("state") and not reason:
         return (
             "执行异常",
             "未产出有效的 task_result.json",
-            {"grasp": False, "place": False, "release": False},
+            {stage.name: False for stage in condition_stages},
         )
     conditions = _conditions(task)
     reached = {
-        "grasp": not any(
-            conditions.get(name) is False for name in _GRASP_KEYS if name in conditions
-        ),
-        "place": not any(
-            conditions.get(name) is False for name in _PLACE_KEYS if name in conditions
-        ),
-        "release": not any(
-            conditions.get(name) is False for name in _RELEASE_KEYS if name in conditions
-        ),
+        stage.name: not any(
+            conditions.get(name) is False
+            for name in stage.conditions
+            if name in conditions
+        )
+        for stage in condition_stages
     }
     if task.get("state") == "SUCCEEDED":
-        return "", reason, {"grasp": True, "place": True, "release": True, "stable": True}
-    if reason.startswith("DROPPED"):
-        return "搬运/放置（掉落）", reason, reached
-    if not reached["grasp"]:
-        return "抓取/交接", reason, reached
-    if not reached["place"]:
-        return "搬运/放置", reason, reached
-    if not reached["release"]:
-        return "释放/撤离", reason, reached
-    return "稳定确认", reason, reached
+        return "", reason, {stage.name: True for stage in config.stages}
+    if config.dropped_prefix and reason.startswith(config.dropped_prefix):
+        return config.dropped_label, reason, reached
+    for stage in condition_stages:
+        if not reached[stage.name]:
+            return stage.label, reason, reached
+    terminal = next((stage for stage in config.stages if stage.succeeded), None)
+    return terminal.label if terminal else "", reason, reached
 
 
-def _classification(recordings: Path, run_id: str, exit_code: int) -> dict[str, Any]:
+def _classification(
+    recordings: Path, run_id: str, exit_code: int, config: ClassificationConfig
+) -> dict[str, Any]:
     episode_dir = recordings / run_id
     task: dict[str, Any] = {}
     manifest: dict[str, Any] = {}
@@ -108,7 +149,7 @@ def _classification(recordings: Path, run_id: str, exit_code: int) -> dict[str, 
         and runtime.get("outcome") in {"stopped", "completed"}
         and recording.get("complete") is True
     )
-    failure_stage, failure_reason, reached = _stage_state(task_section)
+    failure_stage, failure_reason, reached = _stage_state(task_section, config)
     return {
         "succeeded": succeeded,
         "failure_stage": "" if succeeded else failure_stage,
@@ -129,9 +170,15 @@ def _format_duration(seconds: float) -> str:
 
 
 class InferencePool:
-    def __init__(self, args: argparse.Namespace, workers: list[dict[str, Any]]) -> None:
+    def __init__(
+        self,
+        args: argparse.Namespace,
+        workers: list[dict[str, Any]],
+        classification: ClassificationConfig,
+    ) -> None:
         self.args = args
         self.workers = workers
+        self.classification = classification
         self.recordings = args.recordings
         self.runs_root = args.runs_root
         self.lock = threading.Lock()
@@ -238,7 +285,9 @@ class InferencePool:
                 check=False,
             )
         wall_s = time.monotonic() - started
-        classified = _classification(self.recordings, run_id, result.returncode)
+        classified = _classification(
+            self.recordings, run_id, result.returncode, self.classification
+        )
         record = {
             "index": index,
             "worker": worker["id"],
@@ -340,7 +389,7 @@ class InferencePool:
         attempted = len(self.episodes)
         succeeded = self.succeeded
         stages: dict[str, dict[str, int]] = {}
-        for name in ("grasp", "place", "release", "stable"):
+        for name in self.classification.stage_names:
             reached = sum(
                 1 for item in self.episodes if item.get("milestones", {}).get(name)
             )
@@ -377,15 +426,6 @@ class InferencePool:
         }
 
 
-def _stage_label(name: str) -> str:
-    return {
-        "grasp": "抓取/交接",
-        "place": "搬运/放置",
-        "release": "释放/撤离",
-        "stable": "稳定确认",
-    }[name]
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, required=True)
@@ -403,10 +443,17 @@ def main(argv: list[str] | None = None) -> int:
     if not isinstance(workers, list) or not workers:
         print("inference: worker manifest has no workers", file=sys.stderr)
         return 2
+    selection = document.get("selection") or {}
+    recipes = selection.get("recipes") or {}
+    evaluation = recipes.get("evaluation")
+    if isinstance(evaluation, dict) and evaluation.get("path"):
+        classification = load_classification(Path(evaluation["path"]))
+    else:
+        classification = GENERIC_CLASSIFICATION
     args.recordings.mkdir(parents=True, exist_ok=True)
     args.runs_root.mkdir(parents=True, exist_ok=True)
     args.console_root.mkdir(parents=True, exist_ok=True)
-    pool = InferencePool(args, workers)
+    pool = InferencePool(args, workers, classification)
     print(
         f"并行推理开始：{len(workers)} 个 worker | 共 {args.count} 局 | "
         f"起始 seed {args.seed_start}",
@@ -429,13 +476,13 @@ def main(argv: list[str] | None = None) -> int:
         f"用时 {_format_duration(summary['elapsed_s'])}",
         flush=True,
     )
-    for name in ("grasp", "place", "release", "stable"):
+    for name in classification.stage_names:
         stage = summary["stages"][name]
         rate = (
             stage["reached"] / stage["total"] * 100.0 if stage["total"] else 0.0
         )
         print(
-            f"  {_stage_label(name)} 达成 {stage['reached']}/{stage['total']} "
+            f"  {classification.label(name)} 达成 {stage['reached']}/{stage['total']} "
             f"({rate:.0f}%)",
             flush=True,
         )

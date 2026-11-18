@@ -19,9 +19,9 @@ for source in (SIM_SRC, CONTRACTS_SRC):
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
 
-from robot_backend_sim.config.panda_scene_config import load_scene_config  # noqa: E402
-from robot_backend_sim.physics.panda.io import JOINT_NAMES, Measurement, PandaIO  # noqa: E402
-from robot_backend_sim.physics.panda.scene import build_scene  # noqa: E402
+from robot_backend_sim.panda_sim.stack.scene_config import load_scene_config  # noqa: E402
+from robot_backend_sim.panda_sim.io import JOINT_NAMES, Measurement, PandaIO  # noqa: E402
+from robot_backend_sim.panda_sim.stack.scene import build_scene  # noqa: E402
 from robot_contracts.models import ContractError  # noqa: E402
 from robot_contracts.profiles import load_profile  # noqa: E402
 
@@ -191,15 +191,15 @@ def test_asymmetric_targets_write_named_ctrl_without_touching_physical_state(io,
 
     for index in range(len(JOINT_NAMES)):
         if index == 7:
-            actuator = scene.indices.gripper_actuator_ids["left"]
+            actuator = scene.indices.robot.gripper_actuator_ids["left"]
             assert scene.data.ctrl[actuator] == pytest.approx(127.5)
         elif index == 15:
-            actuator = scene.indices.gripper_actuator_ids["right"]
+            actuator = scene.indices.robot.gripper_actuator_ids["right"]
             assert scene.data.ctrl[actuator] == pytest.approx(63.75)
         else:
             side = "left" if index < 8 else "right"
             local = index if index < 8 else index - 8
-            actuator = scene.indices.arm_actuator_ids[side][local]
+            actuator = scene.indices.robot.arm_actuator_ids[side][local]
             assert scene.data.ctrl[actuator] == pytest.approx(targets[index])
 
     assert_physical_state(scene, before)
@@ -268,7 +268,7 @@ def test_wrong_camera_order_size_and_calibration_digest_are_rejected(scene, prof
 
 
 def test_missing_and_wrong_actuators_are_rejected(scene, profile):
-    gripper_id = scene.indices.gripper_actuator_ids["left"]
+    gripper_id = scene.indices.robot.gripper_actuator_ids["left"]
     original_range = scene.model.actuator_ctrlrange[gripper_id].copy()
     try:
         scene.model.actuator_ctrlrange[gripper_id] = (0.0, 254.0)
@@ -277,7 +277,7 @@ def test_missing_and_wrong_actuators_are_rejected(scene, profile):
     finally:
         scene.model.actuator_ctrlrange[gripper_id] = original_range
 
-    arm_id = scene.indices.arm_actuator_ids["right"][0]
+    arm_id = scene.indices.robot.arm_actuator_ids["right"][0]
     original_target = int(scene.model.actuator_trnid[arm_id, 0])
     try:
         scene.model.actuator_trnid[arm_id, 0] = int(scene.model.joint("right_joint2").id)
@@ -449,7 +449,7 @@ def test_velocity_feedforward_reduces_real_joint_tracking_lag(scene, profile):
             mujoco.mj_forward(scene.model, scene.data)
             measured = io.measure()
             peak = max(peak, abs(measured.positions[14] - positions[14]))
-            actuator = scene.indices.arm_actuator_ids["right"][6]
+            actuator = scene.indices.robot.arm_actuator_ids["right"][6]
             lower, upper = scene.model.actuator_ctrlrange[actuator]
             assert lower <= scene.data.ctrl[actuator] <= upper
         peaks.append(peak)

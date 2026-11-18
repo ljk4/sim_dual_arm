@@ -40,8 +40,8 @@ def test_generated_prepare_response_preserves_mode_on_wire(prepare_kind):
 @pytest.mark.parametrize("prepare_kind", ["teacher", "evaluation_only"])
 def test_backend_adapter_returns_preparation_mode(prepare_kind):
     pytest.importorskip("mujoco")
-    from robot_backend_sim.ros.node_services import ServiceAdapter
-    from robot_backend_sim.tasks.base import TaskPrepareResult
+    from robot_backend_sim.common.ros.node_services import ServiceAdapter
+    from robot_backend_sim.common.tasks.base import TaskPrepareResult
     from robot_contracts.models import RunContext
     from robot_contracts.task_state import TaskState
     from robot_ros_support.conversions import context_message

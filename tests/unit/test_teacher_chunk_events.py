@@ -21,8 +21,8 @@ for source in (SIM_SRC, CONTRACTS, RUN_LOGGING, ROS_SUPPORT):
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
 
-from robot_backend_sim.ros.node_services import ServiceAdapter  # noqa: E402
-from robot_backend_sim.tasks.base import TaskChunk  # noqa: E402
+from robot_backend_sim.common.ros.node_services import ServiceAdapter  # noqa: E402
+from robot_backend_sim.common.tasks.base import TaskChunk  # noqa: E402
 
 
 class _RecordingNode:

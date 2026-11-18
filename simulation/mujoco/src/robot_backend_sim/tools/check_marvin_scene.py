@@ -25,12 +25,13 @@ from robot_contracts.profiles import (
     semantic_hash,
 )
 
-from robot_backend_sim.config.camera_config import camera_declared_description
-from robot_backend_sim.config.marvin_scene_config import load_marvin_scene_config
-from robot_backend_sim.physics.marvin.assembly import SIDES, read_urdf_semantics
-from robot_backend_sim.physics.marvin.scene import build_marvin_scene, gripper_opening
-from robot_backend_sim.render.rendering import SceneRenderer
-from robot_backend_sim.render.visibility import count_visible_pixels
+from robot_backend_sim.common.config.camera_config import camera_declared_description
+from robot_backend_sim.marvin_sim.handover.scene_config import load_marvin_scene_config
+from robot_backend_sim.marvin_sim.assembly import SIDES, read_urdf_semantics
+from robot_backend_sim.marvin_sim.assembly import gripper_opening
+from robot_backend_sim.marvin_sim.handover.scene import build_marvin_scene
+from robot_backend_sim.common.render.rendering import SceneRenderer
+from robot_backend_sim.common.render.visibility import count_visible_pixels
 
 __all__ = ["main", "parse_arguments", "run"]
 

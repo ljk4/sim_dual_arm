@@ -32,7 +32,7 @@ from dual_arm_runtime.offline.campaign_ledger import load as load_campaign
 from dual_arm_runtime.offline.collect_attempt import REFERENCES as RUNTIME_REFERENCES
 
 COLLECTION_RECIPES = ("runtime_teacher", "simulation_teacher", "campaign")
-INFERENCE_RECIPES = ("runtime_policy", "simulation_policy")
+INFERENCE_RECIPES = ("runtime_policy", "simulation_policy", "evaluation")
 PROFILE_FIELDS = ("robot", "observation", "action")
 RUNTIME_PROFILE_FIELDS = {
     "robot": "robot_profile",

@@ -76,7 +76,7 @@ Agent 必须严格区分当前处于**开发阶段**还是**规范阶段**，严
 - **通用端 100% 方案无关**：`shared/common/`、`runtime/ros2/`、`learning/lerobot/` 的业务代码与默认配置中，**严禁硬编码 `panda_sim/stack`、`marvin_sim/handover` 等方案/机器人/任务名**，也严禁隐式回退到某一默认方案。
 - **方案按两级目录集中存放**：具体方案只存在于 `shared/scenarios/<robot-id>/<task-id>/`（如 `shared/scenarios/panda_sim/stack/`、`shared/scenarios/marvin_sim/handover/`），内含 `binding.yaml`、`profiles/`、`configs/`、`extensions/`；机器人 id 与任务 id 分别对应目录层级，不得再使用单层 `<scenario-id>` 扁平命名。
 - **三端统一选择入口**：所有端的 CLI 一律通过 `--robot <robot-id> --task <task-id>` 选择方案（与直接 `--config <recipe>` 互斥）；运行期产物路径也按同一对 `<robot-id>/<task-id>` 展开，确保配置与产物一一对应。
-- **端内插件平级对称（Symmetry）**：在 `simulation/mujoco/` 等包含具体机器人/任务的端内，通用机制（`control/`、`motion/`、`follower/`、`render/`、`ros/`、`runtime/`、`kinematics/common.py`）必须与具体插件彻底分离；不同机器人/任务必须平级对称存放（如 `physics/panda/` 与 `physics/marvin/`、`tasks/stack/` 与 `tasks/handover/`），严禁把先接入的机器人写在顶层公用目录。
+- **端内插件平级对称（Symmetry）**：在 `simulation/mujoco/` 等包含具体机器人/任务的端内，通用机制必须统一收敛到 `robot_backend_sim/common/`（含 `control/`、`motion/`、`follower/`、`render/`、`ros/`、`runtime/`、`kinematics/`、`physics/`、`config/`、`tasks/` 中方案无关的部分），与具体插件彻底分离；具体机器人/任务按场景 id 平级对称存放为 `robot_backend_sim/<robot-id>/<task-id>/`（如 `panda_sim/stack/`、`marvin_sim/handover/`）。机器人级、任务无关的代码（robot assembly、robot kinematics、robot io、robot_config）直接放在 `<robot-id>/` 下；任务级代码（environment、evaluator、teacher、gate、task config、scene 编排）放在 `<robot-id>/<task-id>/` 下。调度注册表（`common/config/scene_loader.py`、`common/physics/robot_adapters.py`、`common/tasks/registry.py`）只按 assembly/task 名解析场景目录，新增机器人/任务只需新建 `<robot-id>/<task-id>/` 目录树并放入插件文件，严禁把先接入的机器人写在顶层公用目录，也严禁在 `common/` 内硬编码任何机器人/任务名。
 
 ---
 

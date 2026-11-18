@@ -1,0 +1,36 @@
+# Offline batch-evaluation failure classification for the dual-Panda stack task.
+#
+# Stages are checked in order; a stage is "reached" when none of its conditions
+# is present-and-false in task_result.json metrics.conditions.  The first
+# unreached stage names the failure stage.  Exactly one stage carries
+# `succeeded: true` (the terminal marker, not condition-based).
+schema_version: 1
+stages:
+  - name: grasp
+    label: 抓取/交接
+    conditions:
+      - source_not_on_table
+  - name: place
+    label: 搬运/放置
+    conditions:
+      - source_on_target_height
+      - source_xy_inside_target
+      - source_target_vertical_contact
+      - target_on_table
+      - source_tilt
+      - target_tilt
+      - source_linear_speed
+      - target_linear_speed
+      - source_angular_speed
+      - target_angular_speed
+  - name: release
+    label: 释放/撤离
+    conditions:
+      - no_finger_contact
+      - right_gripper_opening
+      - right_tcp_clearance
+  - name: stable
+    label: 稳定确认
+    succeeded: true
+dropped_prefix: DROPPED
+dropped_label: 搬运/放置（掉落）

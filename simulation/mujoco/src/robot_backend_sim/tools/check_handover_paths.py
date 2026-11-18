@@ -17,19 +17,14 @@ from pathlib import Path
 
 from robot_contracts.profiles import load_profile
 
-from robot_backend_sim.config.marvin_scene_config import load_marvin_scene_config
-from robot_backend_sim.physics.marvin.scene import build_marvin_scene
-from robot_backend_sim.runtime.diagnostics import (
-    code_provenance,
-    sha256_file,
-    utc_now,
-    write_json_atomic,
-)
-from robot_backend_sim.tasks.handover.config import (
+from robot_backend_sim.marvin_sim.handover.scene_config import load_marvin_scene_config
+from robot_backend_sim.marvin_sim.handover.scene import build_marvin_scene
+from robot_backend_sim.common.runtime.diagnostics import code_provenance, sha256_file, utc_now, write_json_atomic
+from robot_backend_sim.marvin_sim.handover.config import (
     HandoverPlanConfigError,
     load_handover_plan_config,
 )
-from robot_backend_sim.tasks.handover.plan import plan_document, plan_handover
+from robot_backend_sim.marvin_sim.handover.plan import plan_document, plan_handover
 
 __all__ = ["main", "run"]
 

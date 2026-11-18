@@ -18,29 +18,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from robot_backend_sim.config.kinematics_config import (
+from robot_backend_sim.panda_sim.kinematics_config import (
     KinematicsCheckConfig,
     KinematicsConfigError,
     load_kinematics_config,
 )
-from robot_backend_sim.config.panda_scene_config import (
-    SceneConfig,
-    SceneConfigError,
-    load_scene_config,
-)
-from robot_backend_sim.kinematics.kinematics import KinematicsError
-from robot_backend_sim.physics import assets
-from robot_backend_sim.render import visibility
-from robot_backend_sim.render.visibility import (
-    SceneCheckConfig,
-    SceneCheckConfigError,
-    load_check_config,
-)
-from robot_backend_sim.runtime.diagnostics import (
-    code_provenance,
-    scene_config_document,
-    sha256_file,
-)
+from robot_backend_sim.panda_sim.stack.scene_config import SceneConfig, SceneConfigError, load_scene_config
+from robot_backend_sim.panda_sim.kinematics import KinematicsError
+from robot_backend_sim.common.physics import assets
+from robot_backend_sim.panda_sim.stack import visibility
+from robot_backend_sim.panda_sim.stack.visibility import SceneCheckConfig, SceneCheckConfigError, load_check_config
+from robot_backend_sim.common.runtime.diagnostics import code_provenance, sha256_file
+from robot_backend_sim.panda_sim.stack.diagnostics import scene_config_document
 
 if TYPE_CHECKING:
 
@@ -225,7 +214,7 @@ def _kinematics_config_document(config: KinematicsCheckConfig) -> dict[str, obje
 
 
 def _build_scene(scene_config: SceneConfig) -> object:
-    from robot_backend_sim.physics.panda.scene import SceneBuildError, build_scene
+    from robot_backend_sim.panda_sim.stack.scene import SceneBuildError, build_scene
 
     try:
         return build_scene(scene_config)
@@ -269,7 +258,7 @@ def _scene_info(scene: object, scene_config: SceneConfig) -> dict[str, object]:
 
 
 def _make_renderer(scene: object, scene_config: SceneConfig) -> object:
-    from robot_backend_sim.render.rendering import SceneRenderer
+    from robot_backend_sim.common.render.rendering import SceneRenderer
 
     first = scene_config.cameras[0]
     return SceneRenderer(

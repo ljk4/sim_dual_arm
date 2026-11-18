@@ -11,11 +11,11 @@ from model_helpers import replace
 from robot_contracts.trajectory.spline import ReferenceSample
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "simulation/mujoco/src"))
-from robot_backend_sim.config.motion_config import CONTROL_JOINT_NAMES
-from robot_backend_sim.config.stream_config import StreamConfig, StreamConfigError
-from robot_backend_sim.physics.contacts import FingerContactEvidence, GripperContactEvidence
-from robot_backend_sim.physics.gripper_contact import ContactUnloader, GripperContactTracker
-from robot_backend_sim.physics.panda.io import Measurement
+from robot_backend_sim.common.config.motion_config import CONTROL_JOINT_NAMES
+from robot_backend_sim.common.config.stream_config import StreamConfig, StreamConfigError
+from robot_backend_sim.common.physics.contacts import FingerContactEvidence, GripperContactEvidence
+from robot_backend_sim.common.physics.gripper_contact import ContactUnloader, GripperContactTracker
+from robot_backend_sim.panda_sim.io import Measurement
 
 
 def evidence(object_name="source"):

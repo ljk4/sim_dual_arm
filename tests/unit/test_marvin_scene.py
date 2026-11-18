@@ -16,14 +16,10 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim.config.camera_config import camera_declared_description  # noqa: E402
-from robot_backend_sim.config.marvin_scene_config import (  # noqa: E402
-    load_marvin_scene_config,
-)
-from robot_backend_sim.physics.marvin.scene import (  # noqa: E402
-    build_marvin_scene,
-    gripper_opening,
-)
+from robot_backend_sim.common.config.camera_config import camera_declared_description  # noqa: E402
+from robot_backend_sim.marvin_sim.handover.scene_config import load_marvin_scene_config  # noqa: E402
+from robot_backend_sim.marvin_sim.handover.scene import build_marvin_scene  # noqa: E402
+from robot_backend_sim.marvin_sim.assembly import gripper_opening  # noqa: E402
 from robot_contracts.models import ContractError  # noqa: E402
 from robot_contracts.profiles import (  # noqa: E402
     load_document,
