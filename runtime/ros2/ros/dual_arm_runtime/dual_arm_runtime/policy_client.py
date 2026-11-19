@@ -23,12 +23,6 @@ from dual_arm_runtime.runtime_config import PolicyConfig
 IMAGE_ENCODING_RAW_RGB8 = 1
 
 
-class PolicyRpcError(RuntimeError):
-    def __init__(self, reason: str, detail: str = "") -> None:
-        self.reason = reason
-        super().__init__(f"{reason}: {detail}" if detail else reason)
-
-
 @dataclass(frozen=True, slots=True)
 class PolicyCameraSample:
     camera_name: str
@@ -132,10 +126,17 @@ def observation_from_exact(
         _finite(value, f"state.velocities[{index}]")
         for index, value in enumerate(state_message.joints.velocity)
     )
-    if len(positions) != len(profile.joints):
-        raise ContractError("POLICY_OBSERVATION_MISMATCH", "capture positions are not 16-wide")
-    if velocities and len(velocities) != len(profile.joints):
-        raise ContractError("POLICY_OBSERVATION_MISMATCH", "capture velocities are not 16-wide")
+    expected_dim = len(profile.joints)
+    if len(positions) != expected_dim:
+        raise ContractError(
+            "POLICY_OBSERVATION_MISMATCH",
+            f"capture positions width {len(positions)} != {expected_dim}",
+        )
+    if velocities and len(velocities) != expected_dim:
+        raise ContractError(
+            "POLICY_OBSERVATION_MISMATCH",
+            f"capture velocities width {len(velocities)} != {expected_dim}",
+        )
     cameras: list[PolicyCameraSample] = []
     for camera in profile.cameras:
         frame = frames[camera.name].payload
@@ -511,7 +512,10 @@ class PolicyClient:
                 for axis, value in enumerate(target.positions)
             )
             if len(values) != len(self.profile.joints):
-                raise ContractError("POLICY_ACTION_MISMATCH", f"target[{index}] is not 16-wide")
+                raise ContractError(
+                    "POLICY_ACTION_MISMATCH",
+                    f"target[{index}] width {len(values)} != {len(self.profile.joints)}",
+                )
             for axis, (value, joint) in enumerate(zip(values, self.profile.joints, strict=True)):
                 if not joint.minimum <= value <= joint.maximum:
                     raise ContractError(
@@ -584,6 +588,5 @@ __all__ = [
     "PolicyClient",
     "PolicyObservation",
     "PolicyPrediction",
-    "PolicyRpcError",
     "observation_from_exact",
 ]

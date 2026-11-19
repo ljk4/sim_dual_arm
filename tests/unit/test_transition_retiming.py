@@ -8,7 +8,6 @@ from robot_contracts.action_chunks import ActionWindow, ChunkAnchor
 from robot_contracts.models import JointSpec, Target
 from robot_contracts.trajectory.spline import ReferenceSample
 from robot_trajectory.transition_retiming import (
-    gripper_axes,
     reachable_bounds,
     retime_action_window,
 )
@@ -21,6 +20,7 @@ JOINT_NAMES = (
 )
 AMAX = tuple(1.0 if "gripper" not in name else 0.5 for name in JOINT_NAMES)
 BUDGET = tuple(0.3 if "gripper" not in name else 0.04 for name in JOINT_NAMES)
+LINEAR_AXES = (7, 15)
 
 
 def _joints() -> tuple[JointSpec, ...]:
@@ -64,7 +64,7 @@ def test_retimes_a_stationary_start_on_the_first_selected_point():
         [0.0] * 15 + [0.04],
     )
     result = retime_action_window(
-        window, anchor, _joints(), AMAX, BUDGET, gripper_axes(JOINT_NAMES))
+        window, anchor, _joints(), AMAX, BUDGET, LINEAR_AXES)
     assert result.retimed
     assert [axis.name for axis in result.axes] == ["right_gripper_width"]
     axis = result.axes[0]
@@ -91,7 +91,7 @@ def test_retimes_a_reverse_switch_from_a_closing_velocity():
     )
     budgets = tuple(0.3 if "gripper" not in name else 0.01 for name in JOINT_NAMES)
     result = retime_action_window(
-        window, anchor, _joints(), AMAX, budgets, gripper_axes(JOINT_NAMES))
+        window, anchor, _joints(), AMAX, budgets, LINEAR_AXES)
     assert result.retimed
     axis = next(item for item in result.axes if item.name == "left_gripper_width")
     assert axis.original_excess == pytest.approx(0.019716277049734998)
@@ -123,7 +123,7 @@ def test_keeps_targets_that_are_reachable_within_the_budget():
     window = _right_gripper_window(right)
     anchor = _anchor([0.0] * 15 + [0.0222], [0.0] * 15 + [0.04])
     result = retime_action_window(
-        window, anchor, _joints(), AMAX, BUDGET, gripper_axes(JOINT_NAMES))
+        window, anchor, _joints(), AMAX, BUDGET, LINEAR_AXES)
     assert not result.retimed
     assert result.axes == ()
     assert result.window is window
@@ -134,7 +134,7 @@ def test_window_internal_direction_change_keeps_times_and_unselected_tail():
     window = _right_gripper_window(right)
     anchor = _anchor([0.0] * 15 + [0.0222], [0.0] * 15 + [0.04])
     result = retime_action_window(
-        window, anchor, _joints(), AMAX, BUDGET, gripper_axes(JOINT_NAMES))
+        window, anchor, _joints(), AMAX, BUDGET, LINEAR_AXES)
     assert result.retimed
     changed = [
         index for index, (before, after) in enumerate(
@@ -162,7 +162,7 @@ def test_only_profile_gripper_axes_are_retimed():
     window = ActionWindow(1, 0, 1_050_000_000, tuple(source), 20)
     anchor = _anchor([0.0] * 15 + [0.0222], [0.0] * 16)
     result = retime_action_window(
-        window, anchor, _joints(), AMAX, BUDGET, gripper_axes(JOINT_NAMES))
+        window, anchor, _joints(), AMAX, BUDGET, LINEAR_AXES)
     assert [axis.name for axis in result.axes] == ["right_gripper_width"]
     assert result.window.source_targets[21].positions[0] == pytest.approx(1.0)
 
@@ -171,9 +171,9 @@ def test_retiming_is_deterministic_and_stateless():
     window = _right_gripper_window([0.079865] * 20)
     anchor = _anchor([0.0] * 15 + [0.022205447806916776], [0.0] * 15 + [0.04])
     first = retime_action_window(
-        window, anchor, _joints(), AMAX, BUDGET, gripper_axes(JOINT_NAMES))
+        window, anchor, _joints(), AMAX, BUDGET, LINEAR_AXES)
     second = retime_action_window(
-        window, anchor, _joints(), AMAX, BUDGET, gripper_axes(JOINT_NAMES))
+        window, anchor, _joints(), AMAX, BUDGET, LINEAR_AXES)
     assert first.window == second.window
     assert first.axes == second.axes
     # The input window remains the original prediction.

@@ -26,9 +26,6 @@ try:
         StreamRequest,
         Trajectory,
     )
-    from robot_contracts.trajectory.follower_reference import (
-        compute_legacy_follower_reference_digest,
-    )
     from robot_contracts.trajectory.spline import ReferenceSample
     from robot_ros_support.conversions import context_message, time_ns
     from robot_ros_support.follower_conversions import (
@@ -210,20 +207,12 @@ def test_follower_reference_really_serializes_and_roundtrips():
         validation_limits(CONTROL, FOLLOWER, duration_grid_ns=GRID_NS),
     )
 
-    legacy = follower_reference_message(record)
-    legacy.reference_digest = compute_legacy_follower_reference_digest(record)
-    decoded_legacy = deserialize_message(
-        serialize_message(legacy), FollowerReferenceMessage
-    )
-    reused = follower_reference_from_message(decoded_legacy, legacy_digest=True)
-    assert reused == record
+    tampered = follower_reference_message(record)
+    tampered.reference_digest = "0" * 64
     with pytest.raises(ContractError, match="FOLLOWER_DIGEST_MISMATCH"):
-        follower_reference_from_message(decoded_legacy)
-    tampered_legacy = follower_reference_message(record)
-    tampered_legacy.reference_digest = "0" * 64
-    with pytest.raises(ContractError) as caught:
-        follower_reference_from_message(tampered_legacy, legacy_digest=True)
-    assert caught.value.reason == "INVALID_FOLLOWER_REFERENCE"
+        follower_reference_from_message(deserialize_message(
+            serialize_message(tampered), FollowerReferenceMessage
+        ))
 
     submit = SubmitFollower.Request(request=stream_command_message(raw))
     assert deserialize_message(serialize_message(submit), SubmitFollower.Request).request.kind == 2

@@ -16,7 +16,7 @@ from robot_contracts.models import ContractError, RobotProfile, Target
 from robot_contracts.profiles import load_profile
 from robot_contracts.trajectory.spline import ReferenceSample
 from robot_trajectory.sampling import sample_reference_interval
-from robot_trajectory.transition_retiming import gripper_axes, retime_action_window
+from robot_trajectory.transition_retiming import retime_action_window
 
 ROOT = Path(__file__).resolve().parents[2]
 SCHEMAS = ROOT / "shared/common/interfaces/schemas"
@@ -126,9 +126,12 @@ def test_retimed_gripper_transition_is_executable_and_reports_both_deviations(ca
     follower = _follower(profile, case["axis"], case["budget"])
     anchor = _anchor(case, profile)
     window = _window(case, profile)
+    linear_axes = tuple(
+        index for index, joint in enumerate(profile.joints) if joint.unit == "m"
+    )
     retimed = retime_action_window(
         window, anchor, profile.joints, control.max_accelerations,
-        follower.max_target_deviations, gripper_axes(profile.joint_names))
+        follower.max_target_deviations, linear_axes)
     assert retimed.retimed
     prepared = prepare_follower_plan(
         anchor, retimed.window, profile, control, follower, is_final=False,

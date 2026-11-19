@@ -29,7 +29,6 @@ from robot_contracts.trajectory.follower_reference import FollowerValidationLimi
 from robot_run_logging import EventContext, Scalar
 from robot_trajectory.transition_retiming import (
     RetimedWindow,
-    gripper_axes,
     retime_action_window,
 )
 
@@ -508,7 +507,7 @@ class ContinuousStreamRunner:
         chunk_index: int,
         request_id: str,
     ) -> None:
-        """Record each explicit original-to-execution gripper target change."""
+        """Record each explicit original-to-execution target change."""
         for axis in retiming.axes:
             self._emit(
                 "follower.chunk_retimed",

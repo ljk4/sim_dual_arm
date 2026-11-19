@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 import yaml
 from dual_arm_learning.config import ConfigError, load_dataset_config, load_training_config
+from robot_contracts.project_paths import project_path
 
 ROOT = Path(__file__).resolve().parents[2]
 SCENARIO = ROOT / "shared/scenarios/panda_sim/stack"
@@ -21,7 +22,7 @@ def test_real_learning_configs_load():
     assert training.model.pretrained_backbone_weights is None
     assert training.lr == pytest.approx(1e-4)
     assert training.lr_backbone == pytest.approx(1e-4)
-    assert training.checkpoint.root == ROOT / "var/panda_sim/stack/models"
+    assert training.checkpoint.root == project_path("var/panda_sim/stack/models", ROOT)
     assert training.dataset.camera_names == dataset.camera_names
 
 

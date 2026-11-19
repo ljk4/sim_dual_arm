@@ -44,12 +44,6 @@ def mapping(value: object, location: str) -> dict[str, Any]:
     return result
 
 
-def reject_unknown(value: dict[str, Any], known: set[str], location: str) -> None:
-    unknown = sorted(set(value) - known)
-    if unknown:
-        raise ConfigError(location, f"unknown field(s): {', '.join(unknown)}")
-
-
 def require(value: dict[str, Any], name: str, location: str) -> Any:
     if name not in value:
         raise ConfigError(f"{location}.{name}", "field is required")
@@ -85,10 +79,6 @@ def number(
     if not math.isfinite(result) or not minimum <= result <= maximum:
         raise ConfigError(location, f"must be a finite number within [{minimum}, {maximum}]")
     return result
-
-
-def path_value(value: object, location: str) -> Path:
-    return Path(text(value, location))
 
 
 def name(value: object, location: str) -> str:

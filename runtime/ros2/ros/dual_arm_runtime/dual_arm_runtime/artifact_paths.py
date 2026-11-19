@@ -57,10 +57,6 @@ def datasets_root(base: Path, robot: str | None, task: str | None = None) -> Pat
     return scenario_root(base, robot, task) / "datasets"
 
 
-def raw_datasets_root(base: Path, robot: str | None, task: str | None = None) -> Path:
-    return datasets_root(base, robot, task) / "raw"
-
-
 def logs_root(base: Path, robot: str | None, task: str | None = None) -> Path:
     return scenario_root(base, robot, task) / "logs"
 
@@ -104,7 +100,6 @@ __all__ = [
     "debug_root",
     "default_backend_log",
     "logs_root",
-    "raw_datasets_root",
     "recordings_root",
     "runs_root",
     "scenario_root",

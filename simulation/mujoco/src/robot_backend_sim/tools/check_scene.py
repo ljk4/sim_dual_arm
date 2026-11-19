@@ -475,14 +475,15 @@ def _execute_checks(arguments, run_dir: Path, report: dict, logger: object):
     dependencies = probe_environment.check_dependencies()
     probe_environment._verify_mounted_source(dependencies)
     report["dependencies"] = dependencies
-    report["source"] = {"model_directory": str(assets.MODEL_DIR), "code": _code_provenance()}
+    model_dir = str(assets.robot_model_path(scene_config.robot.assembly).parent)
+    report["source"] = {"model_directory": model_dir, "code": _code_provenance()}
     scene = _build_scene(scene_config)
     report["scene"] = _scene_info(scene, scene_config)
     _emit(
         logger,
         "model_loaded",
-        "local Panda model compiled into the scene",
-        {"model_directory": str(assets.MODEL_DIR)},
+        "local robot model compiled into the scene",
+        {"model_directory": model_dir},
     )
     renderer = _make_renderer(scene, scene_config)
     report["gl"] = _gl_document(renderer.gl_info)

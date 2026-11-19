@@ -14,7 +14,6 @@ import json
 import os
 import sys
 import time
-import uuid
 from pathlib import Path
 
 from robot_contracts.project_paths import project_path
@@ -105,12 +104,6 @@ def _parser() -> argparse.ArgumentParser:
         dest="model_path",
         type=Path,
         help="model directory or model.safetensors; defaults to the newest act_* model",
-    )
-    parser.add_argument(
-        "--bundle",
-        dest="model_path",
-        type=Path,
-        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--set",

@@ -30,17 +30,11 @@ from robot_contracts.action_chunks import ActionWindow, ChunkAnchor
 from robot_contracts.models import JointSpec, Target, coordinated_axis_groups
 
 __all__ = [
-    "GRIPPER_JOINT_NAMES",
     "AxisRetiming",
     "RetimedWindow",
-    "gripper_axes",
     "reachable_bounds",
     "retime_action_window",
 ]
-
-# Public 16-joint contract names of the two parallel grippers.  Axis selection
-# stays a profile/contract lookup; no scenario, robot or task name appears here.
-GRIPPER_JOINT_NAMES = ("left_gripper_width", "right_gripper_width")
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,7 +51,7 @@ class AxisRetiming:
 
 @dataclass(frozen=True, slots=True)
 class RetimedWindow:
-    """A window whose selected gripper targets were retimed when infeasible."""
+    """A window whose selected targets were retimed onto the reachable envelope."""
 
     window: ActionWindow
     axes: tuple[AxisRetiming, ...]
@@ -65,14 +59,6 @@ class RetimedWindow:
     @property
     def retimed(self) -> bool:
         return bool(self.axes)
-
-
-def gripper_axes(joint_names: Sequence[str]) -> tuple[int, ...]:
-    """Return the profile positions of the public gripper joints, by name."""
-    names = tuple(joint_names)
-    return tuple(
-        index for index, name in enumerate(names) if name in GRIPPER_JOINT_NAMES
-    )
 
 
 def reachable_bounds(
@@ -176,7 +162,6 @@ class _AxisState:
     budget: float
     acceleration: float
     initial_position: float
-    initial_velocity: float
     original: tuple[float, ...]
     bounds: tuple[tuple[float, float], ...]
     excess: float
@@ -305,7 +290,6 @@ def retime_action_window(
             budget=budget,
             acceleration=acceleration,
             initial_position=initial_position,
-            initial_velocity=initial_velocity,
             original=original,
             bounds=bounds,
             excess=excess,

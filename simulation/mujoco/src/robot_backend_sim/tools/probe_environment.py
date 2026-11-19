@@ -213,7 +213,9 @@ def _check_model() -> dict[str, object]:
     import mujoco
     import numpy as np
 
-    scene_path, panda_path = assets.model_paths()
+    from robot_backend_sim.panda_sim.plugin import panda_model_paths
+
+    scene_path, panda_path = panda_model_paths()
     for path in (scene_path, panda_path):
         if not path.is_file():
             raise ProbeFailure("model_missing", f"model file is missing: {path}")
@@ -316,7 +318,9 @@ def _prepare_render():
         raise ProbeFailure("egl_not_selected", "MUJOCO_GL must be 'egl'")
     if os.environ.get("PYOPENGL_PLATFORM") != "egl":
         raise ProbeFailure("egl_not_selected", "PYOPENGL_PLATFORM must be 'egl'")
-    scene_path, _panda_path = assets.model_paths()
+    from robot_backend_sim.panda_sim.plugin import panda_model_paths
+
+    scene_path, _panda_path = panda_model_paths()
     model = mujoco.MjModel.from_xml_path(str(scene_path))
     data = mujoco.MjData(model)
     data.qpos[:] = model.key_qpos[0]
@@ -520,7 +524,7 @@ def _report_template(arguments: ProbeArguments) -> dict[str, object]:
             "PYOPENGL_PLATFORM": os.environ.get("PYOPENGL_PLATFORM"),
         },
         "assets": None,
-        "source": {"model_directory": str(assets.MODEL_DIR)},
+        "source": {"model_directory": str(assets.robot_model_path("panda").parent)},
         "model": None,
         "qp": None,
         "render": None,
@@ -570,7 +574,7 @@ def _run_probe_checks(arguments, run_dir: Path, report: dict, logger) -> None:
     )
     model_info = _check_model()
     report["model"] = model_info
-    report["assets"] = {"model_directory": str(assets.MODEL_DIR)}
+    report["assets"] = {"model_directory": str(assets.robot_model_path("panda").parent)}
     stats = model_info["stats"]
     _emit(
         logger,

@@ -258,7 +258,7 @@ def _verify_episode_values(
         [label.get("applied_velocities") for label in ordered], dtype=np.float64
     )
     if applied_velocity.shape != arrays["applied"].shape:
-        raise FilterError("applied_velocities do not contain 16-joint arrays")
+        raise FilterError(f"applied_velocities do not contain {state_dim}-joint arrays")
 
 
 def _static_edges(

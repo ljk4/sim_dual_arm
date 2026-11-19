@@ -12,10 +12,7 @@ from robot_api_msgs.msg import ReferenceSegment as ReferenceSegmentMessage
 from robot_contracts.action_chunks import ActionWindow
 from robot_contracts.models import ContractError
 from robot_contracts.stream_request import plan_from_segments
-from robot_contracts.trajectory.follower_reference import (
-    FollowerReference,
-    compute_legacy_follower_reference_digest,
-)
+from robot_contracts.trajectory.follower_reference import FollowerReference
 from robot_contracts.trajectory.spline import CubicSegment
 
 from .stream_conversions import (
@@ -86,16 +83,8 @@ def follower_reference_message(value: FollowerReference) -> FollowerReferenceMes
     )
 
 
-def follower_reference_from_message(
-    value: object, *, legacy_digest: bool = False
-) -> FollowerReference:
-    """Rebuild and fully re-verify one wire record.
-
-    ``legacy_digest`` verifies a recording made with the previous follower
-    definition, whose stored digest named this record's duration field after
-    Ruckig.  The rebuilt record carries the current digest; the recorded one is
-    checked against the identical content under the v1 payload.
-    """
+def follower_reference_from_message(value: object) -> FollowerReference:
+    """Rebuild and fully re-verify one wire record."""
     if not isinstance(value, FollowerReferenceMessage):
         raise _invalid("value is not a FollowerReference message")
     if not value.has_duration_grid and value.duration_grid_ns != 0:
@@ -159,11 +148,8 @@ def follower_reference_from_message(
         algorithm_version=value.algorithm_version,
         sampler_version=value.sampler_version,
         normalization_version=value.normalization_version,
-        reference_digest=None if legacy_digest else value.reference_digest or None,
+        reference_digest=value.reference_digest or None,
     )
-    if legacy_digest and value.reference_digest:
-        if value.reference_digest != compute_legacy_follower_reference_digest(reference):
-            raise _invalid("legacy reference_digest does not cover the retained record")
     if value.extension_ns != reference.extension_ns:
         raise _invalid("extension_ns differs from the retained durations")
     return reference
