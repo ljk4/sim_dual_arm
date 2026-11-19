@@ -336,8 +336,11 @@ var/panda_sim/stack/
 `marvin_sim/handover` 与 `panda_sim/stack` 使用完全相同的入口，训练默认同样为 50 条正式数据（45 训练 / 5 验证）与 full 5000 步，共享同一份 ResNet18 权重；只需替换 `--robot/--task`：
 
 ```bash
-# simulation：示教后端
+# simulation：示教后端（--run-id 为前缀，自动追加 _YYYYMMDD_HHMMSS 时间戳）
 scripts/teacher_backend.sh --robot marvin_sim --task handover --seed 0 --run-id teacher-backend
+
+# 宿主机（可选）：启动 MuJoCo 实时可视化（若报 X11 权限错误先执行 xhost +SI:localuser:$(id -un)）
+./env.sh viewer --robot marvin_sim --task handover --role teacher
 
 # runtime：试采
 scripts/record.sh --robot marvin_sim --task handover \
@@ -351,7 +354,7 @@ scripts/record.sh --robot marvin_sim --task handover \
 scripts/convert.sh --robot marvin_sim --task handover
 scripts/train.sh --robot marvin_sim --task handover --mode full
 
-# 推理：learning 策略服务、simulation 后端、runtime 交互闭环
+# 推理：learning 策略服务、simulation 后端、runtime 交互闭环（可选用 ./env.sh viewer --robot marvin_sim --task handover --role policy 查看可视化）
 scripts/server_policy.sh --robot marvin_sim --task handover
 scripts/inference_backend.sh --robot marvin_sim --task handover \
   --seed 5100 --run-id policy-backend
@@ -364,29 +367,6 @@ scripts/client_interactive.sh --robot marvin_sim --task handover \
 ```
 
 `scripts/server_policy.sh` 省略 `--model` 时自动加载 `/data/marvin_sim/handover/models/` 下最新的 `act_*` 模型，也可用 `--model` 显式指定；推理链路直接加载模型目录，不再需要单独导出模型包。方案说明见 [`shared/scenarios/marvin_sim/handover/README.md`](shared/scenarios/marvin_sim/handover/README.md)。
-
----
-
-## 5. 已发现的待后续改进问题
-
-在完成早期闭环主链路修复并达到 80%（10 次测试 8 次成功：Panda 5/5、Marvin 3/5）闭环成功率后，随后的结构重构与数据重采曾出现 `panda_sim/stack` 成功率明显回退（新模型 `act_20261117_082737` 实测 2/19 = 10.5%），`marvin_sim/handover` 则尚未执行转换与重训。本轮排查已定位全部回退根因并完成以下修复与收敛（详细排查记录见 [`docs/experiments/closed-loop-triage.md`](docs/experiments/closed-loop-triage.md) 与 [`docs/closed-loop-recovery/taskbook.md`](docs/closed-loop-recovery/taskbook.md)）：
-
-**已完成的定位与代码修复**：
-
-1. **Panda Teacher 阶段时钟对齐与采集/推理配置拆分**：
-   - 定位到 `panda_sim/stack` 共用了 `target_count: 20`（1.0 s）且 `panda_sim/stack/teacher.py` 未将阶段运动起点对齐 `handoff_time_ns`，导致新采 50 条数据每阶段首秒加速段被丢弃、阶段末出现 34–39 帧静止平台且全部于 29.0 s 被旧预算截断。
-   - 现已对齐 `panda_stack_api_msgs/srv/GetTeacherChunk.srv`（补充 `handoff_time`）、修复 `panda_sim/stack/{__init__.py, teacher.py, gate.py}` 使阶段平滑起点对齐 `handoff_time_ns`，并拆分为采集专用 `panda_follower_v1.yaml`（`target_count: 10`）与推理专用 `panda_follower_inference_v1.yaml`（`target_count: 20`）。
-2. **阶段末静止帧过滤修正**：
-   - 修复 `learning/lerobot/src/dual_arm_learning/sample_filter.py` 的 `_protections()` 不再将静止平台内部的 `gate_state` 跳变当作阶段切换保护，并将 `act_sample_filter.yaml` 调优为 `min_frames: 6`、`edge_frames: 2`、`interior_stride: 10`、`phase_boundary_frames: 2`。注：静止帧过滤仅作用于训练查询锚点采样，若需消除 60 步目标块中的冗长等待仍须基于已修复的 Teacher 重新采集。
-3. **Panda/Marvin 奇异位形、IK 限位余量与任务预算**：已完成初始非奇异位姿与限位余量配置，并将 `panda_sim/stack` 仿真预算放宽至 90 s（流墙钟 240 s）。
-4. **多轴协同过渡重定时（Coordinated Multi-Axis Retiming）**：清除 `transition_retiming.py` 中遗留的场景启发式魔数；在 `RobotProfile` 上按侧别派生 `coordinated_axis_groups`，由公共层 `retime_action_window` 按最受限轴比例协同缩放同侧机械臂 7 轴位移，严格保持联合运动方向并保持夹爪轴独立。
-5. **空中交接双持到右独持的持物移交边界细化**：细化 `marvin_sim/handover/evaluator.py` 的 `_holder_required`，在左手仍稳定持物且右爪保持闭合接触的移交过渡期允许右手夹紧微调，并在左爪完全脱离后刷新右爪稳定性参考位姿。
-6. **训练侧视觉骨干与头部参数分组学习率**：在 `learning/lerobot` 新增 `training.lr_backbone` 支持（`ACTConfig` 与 `AdamW` 参数分组拆分 `model.backbone` 与头部），两方案 `act_training.yaml` 默认启用 `lr_backbone: 1e-5` / `lr: 1e-4`。
-7. **冷启动预热增强与异步预取推理**：在 `PolicyService.open_session` 增加工作线程预热；将两方案 `startup_settle_sim_ns` 延长至 `3.0 s` 并开启 `warmup_on_settle`（在 `StartTask` 计时前以真实观测预热完整 RPC 与 GPU 推理链路）；在 `ContinuousStreamRunner` 实现 `async_inference` 后台异步推理与可配置 `prefetch_lead_ns` 准时采样预取。
-
-**待后续验收**：
-
-- 待代码变更确认并合入后，按第 2–4 节流程重新采集 `panda_sim/stack` 正式数据，并完成 `panda_sim/stack` 与 `marvin_sim/handover` 的数据集转换、分组学习率训练及端到端批量闭环验收（`prefetch_lead_ns` 亦可在重训后结合实测对比调优）。
 
 ---
 

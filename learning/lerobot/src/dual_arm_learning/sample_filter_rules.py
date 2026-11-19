@@ -8,6 +8,7 @@ from typing import Annotated, Literal
 
 from pydantic import BeforeValidator, Field, model_validator
 from robot_contracts.validation import (
+    NonEmptyStr,
     NonNegativeFloat,
     StrictMappingModel,
     as_tuple,
@@ -37,6 +38,16 @@ SpeedLimit = Annotated[NonNegativeFloat, Field(le=100.0)]
 FrameCount = Annotated[int, Field(strict=True, ge=0, le=100_000)]
 
 
+def _optional_tuple(value: object) -> object:
+    return None if value is None else as_tuple(value)
+
+
+OptionalGateStates = Annotated[
+    tuple[NonEmptyStr, ...] | None,
+    BeforeValidator(_optional_tuple),
+]
+
+
 class FilterError(ValueError):
     """The filter rule or mask cannot be trusted."""
 
@@ -60,6 +71,7 @@ class FilterRule:
     min_episode_kept_frames: int
     reason: str
     source: Path
+    only_gate_states: tuple[str, ...] | None = None
 
     @property
     def sha256(self) -> str:
@@ -97,7 +109,17 @@ class _StaticRuns(StrictMappingModel):
     phase_boundary_frames: FrameCount
     episode_boundary_frames: FrameCount
     min_episode_kept_frames: FrameCount
+    only_gate_states: OptionalGateStates = None
     reason: Literal["redundant_static_anchor"]
+
+    @model_validator(mode="after")
+    def _gates(self) -> _StaticRuns:
+        if self.only_gate_states is not None:
+            if not self.only_gate_states:
+                raise contract_error("only_gate_states", "must not be empty")
+            if len(set(self.only_gate_states)) != len(self.only_gate_states):
+                raise contract_error("only_gate_states", "must contain unique gate states")
+        return self
 
 
 class _FilterDocument(StrictMappingModel):
@@ -146,6 +168,9 @@ def load_filter_rule(path: str | Path) -> FilterRule:
         min_episode_kept_frames=runs.min_episode_kept_frames,
         reason=runs.reason,
         source=source,
+        only_gate_states=(
+            None if runs.only_gate_states is None else tuple(runs.only_gate_states)
+        ),
     )
 
 

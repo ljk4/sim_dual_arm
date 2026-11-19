@@ -2,6 +2,7 @@
 
 import json
 import sys
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -82,7 +83,10 @@ raise SystemExit(130 if state == "interrupted" else 1 if state == "runtime_failu
 
 
 def _summary(capsys):
-    return json.loads(capsys.readouterr().out.splitlines()[-1])
+    last_line = capsys.readouterr().out.splitlines()[-1]
+    if last_line.startswith("运行摘要: "):
+        return json.loads(Path(last_line.split("运行摘要: ", 1)[1]).read_text())
+    return json.loads(last_line)
 
 
 def _seeds(root):

@@ -286,6 +286,9 @@ class TrainingConfig(StrictMappingModel):
     val_batches: Annotated[PositiveInt, Field(le=10000)] = Field(
         validation_alias=AliasPath("training", "val_batches")
     )
+    image_shift_px: Annotated[NonNegativeInt, Field(le=32)] = Field(
+        default=0, validation_alias=AliasPath("training", "image_shift_px")
+    )
     deterministic: bool = Field(validation_alias=AliasPath("training", "deterministic"))
     modes: dict[str, ModeSpec]
     model: ModelSpec
@@ -433,6 +436,7 @@ def training_before(data: object) -> object:
             "log_every_steps",
             "val_every_steps",
             "val_batches",
+            "image_shift_px",
             "deterministic",
         },
         "training",

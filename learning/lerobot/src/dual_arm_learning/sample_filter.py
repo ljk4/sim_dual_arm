@@ -132,11 +132,15 @@ def _source_paths(attempt_dir: Path) -> tuple[Path, list[Path]]:
             f"{attempt_dir}: expected exactly one export labels.json, got {len(labels)}"
         )
     events = sorted(attempt_dir.glob("logs/*/logs/runtime/*/events.*.jsonl"))
+    if not events:
+        events = sorted(attempt_dir.glob("*/logs/runtime/*/events.*.jsonl"))
     for ancestor in attempt_dir.parents[:3]:
         if events:
             break
         collection_logs = ancestor / "logs" / "collection" / "attempts" / attempt_dir.name
-        events = sorted(collection_logs.glob("logs/*/logs/runtime/*/events.*.jsonl"))
+        events = sorted(collection_logs.glob("*/logs/runtime/*/events.*.jsonl"))
+        if not events:
+            events = sorted(collection_logs.glob("logs/*/logs/runtime/*/events.*.jsonl"))
     return labels[0], events
 
 
@@ -309,8 +313,7 @@ def _static_runs(edges: np.ndarray) -> list[tuple[int, int]]:
 
 
 def _protections(phase: list[str | None], gate: list[str | None], rule: FilterRule) -> np.ndarray:
-    """Protect episode edges and real phase transitions, never internal gate holds."""
-    del gate
+    """Protect episode edges, phase transitions, and gate transitions."""
     count = len(phase)
     protected = np.zeros(count, dtype=bool)
     edge = rule.episode_boundary_frames
@@ -320,7 +323,7 @@ def _protections(phase: list[str | None], gate: list[str | None], rule: FilterRu
     window = rule.phase_boundary_frames
     if window:
         for index in range(1, count):
-            if phase[index] != phase[index - 1]:
+            if phase[index] != phase[index - 1] or gate[index] != gate[index - 1]:
                 protected[max(0, index - window) : min(count, index + window + 1)] = True
     return protected
 
@@ -335,6 +338,7 @@ def _choose_anchors(
     keep = np.ones(count, dtype=bool)
     reasons = [""] * count
     runs = _static_runs(edges)
+    allowed_gates = None if rule.only_gate_states is None else set(rule.only_gate_states)
     for start, end in runs:
         length = end - start + 1
         if length < rule.min_static_run_frames:
@@ -342,6 +346,8 @@ def _choose_anchors(
         interior_start = start + rule.keep_edge_frames
         interior_end = end - rule.keep_edge_frames
         for index in range(interior_start, interior_end + 1):
+            if allowed_gates is not None and gate[index] not in allowed_gates:
+                continue
             if (index - interior_start) % rule.interior_anchor_stride:
                 keep[index] = False
                 reasons[index] = rule.reason
@@ -358,6 +364,17 @@ def _counts(values: list[str | None]) -> dict[str, int]:
         key = "unknown" if value is None else value
         result[key] = result.get(key, 0) + 1
     return result
+
+
+def _attempt_episode_id_matches(label_episode_id: object, attempt_id: str, seed: int) -> bool:
+    if not isinstance(label_episode_id, str) or not label_episode_id:
+        return False
+    if label_episode_id == attempt_id.replace(":", "-"):
+        return True
+    parts = attempt_id.split(":", 2)
+    if len(parts) == 3 and parts[1].isdigit() and int(parts[1]) == seed:
+        return label_episode_id == f"{parts[0]}-{seed:05d}-{parts[2]}"
+    return False
 
 
 def _episode_inputs(
@@ -378,7 +395,7 @@ def _episode_inputs(
     labels_document = read_filter_json(labels_path)
     if labels_document.get("seed") != seed:
         raise FilterError(f"{labels_path}: label seed disagrees with the manifest")
-    if labels_document.get("episode_id") != attempt_id.replace(":", "-"):
+    if not _attempt_episode_id_matches(labels_document.get("episode_id"), attempt_id, seed):
         raise FilterError(f"{labels_path}: label episode_id disagrees with the attempt")
     if labels_document.get("robot_profile_hash") != split["manifest_profile_sha256"]:
         raise FilterError(f"{labels_path}: robot profile hash disagrees with the manifest")
@@ -540,6 +557,9 @@ def _source_document(
             "phase_boundary_frames": rule.phase_boundary_frames,
             "episode_boundary_frames": rule.episode_boundary_frames,
             "min_episode_kept_frames": rule.min_episode_kept_frames,
+            "only_gate_states": (
+                None if rule.only_gate_states is None else list(rule.only_gate_states)
+            ),
             "reason": rule.reason,
         },
     }

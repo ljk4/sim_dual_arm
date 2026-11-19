@@ -174,7 +174,7 @@ def _snapshot(
 
 
 def _default_run_id() -> str:
-    return f"policy-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{os.getpid()}"
+    return f"policy_{time.strftime('%Y%m%d_%H%M%S')}"
 
 
 def _serve(

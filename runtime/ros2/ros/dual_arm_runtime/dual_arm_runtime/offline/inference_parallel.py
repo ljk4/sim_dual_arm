@@ -317,11 +317,17 @@ def main(argv: list[str] | None = None) -> int:
                                                   args.batch_id) is None:
         cli.error("--batch-id must be 1..100 letters, digits, '.', '_' or '-'")
     args.project_root = args.project_root.resolve()
-    batch_id = (
-        args.batch_id
-        or f"batch-policy-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{os.getpid()}"
-    )
     root = scenario_root(args.project_root / "var", args.robot, args.task)
+    batch_id = args.batch_id
+    if not batch_id:
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        candidate = f"batch-policy_{stamp}"
+        if (root / "logs" / "batch-policy" / candidate).exists():
+            suffix = 2
+            while (root / "logs" / "batch-policy" / f"{candidate}_{suffix}").exists():
+                suffix += 1
+            candidate = f"{candidate}_{suffix}"
+        batch_id = candidate
     directory = root / "logs" / "batch-policy" / batch_id / "workers"
     report_path = (
         args.project_root / "var" / segment / "debug" / "batch-policy" / batch_id

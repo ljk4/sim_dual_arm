@@ -53,7 +53,15 @@ fi
 
 run_id="$(option_value --run-id "$@" || true)"
 if [[ -z "$run_id" ]]; then
-  run_id="policy-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+  run_id="policy_$(date +%Y%m%d_%H%M%S)"
+  rec_dir="$DATA_ROOT/$segment/logs/recordings"
+  if [[ -e "$rec_dir/$run_id" ]]; then
+    suffix=2
+    while [[ -e "$rec_dir/${run_id}_${suffix}" ]]; do
+      suffix=$((suffix + 1))
+    done
+    run_id="${run_id}_${suffix}"
+  fi
 fi
 defaults=()
 option_value --run-id "$@" >/dev/null || defaults+=(--run-id "$run_id")

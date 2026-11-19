@@ -152,6 +152,7 @@ class PolicyConfig(StrictMappingModel):
     warmup_on_settle: bool = False
     async_inference: bool = True
     prefetch_lead_ns: Annotated[NonNegativeInt, Field(le=1_000_000_000)] = 0
+    action_execution_latency_ns: Annotated[NonNegativeInt, Field(le=500_000_000)] = 0
 
     @model_validator(mode="after")
     def _policy(self) -> PolicyConfig:

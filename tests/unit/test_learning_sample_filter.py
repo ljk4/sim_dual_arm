@@ -246,7 +246,11 @@ def test_real_filter_rule_loads():
     rule = load_filter_rule(RULE)
     assert rule.arm_indices == (0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14)
     assert rule.gripper_indices == (7, 15)
-    assert rule.min_static_run_frames == 6
+    assert rule.min_static_run_frames == 15
+    assert rule.keep_edge_frames == 5
+    assert rule.interior_anchor_stride == 5
+    assert rule.phase_boundary_frames == 5
+    assert rule.only_gate_states == ("WAITING_FOR_FEEDBACK",)
     assert rule.max_arm_step_rad == 0.001
 
 
@@ -299,19 +303,22 @@ def test_short_static_pause_is_preserved_completely(tmp_path):
     assert document["training"]["episodes"][0]["static_runs"]["long"] == 0
 
 
-def test_long_static_run_keeps_edges_and_every_tenth_anchor(tmp_path):
-    document, _ = _build(tmp_path / "data", training=[_spec(600)])
+def test_long_static_run_keeps_edges_and_every_fifth_wait_anchor(tmp_path):
+    document, _ = _build(
+        tmp_path / "data",
+        training=[_spec(600, gates=["WAITING_FOR_FEEDBACK"] * 600)],
+    )
     episode = document["training"]["episodes"][0]
-    expected = set(range(5)) | set(range(595, 600)) | set(range(2, 598, 10))
+    expected = set(range(5)) | set(range(595, 600)) | set(range(5, 595, 5))
     assert set(episode["kept_indices"]) == expected
-    assert episode["kept_count"] == 69
-    assert episode["excluded_count"] == 531
-    assert episode["excluded_reasons"] == {"redundant_static_anchor": 531}
+    assert episode["kept_count"] == 128
+    assert episode["excluded_count"] == 472
+    assert episode["excluded_reasons"] == {"redundant_static_anchor": 472}
     assert episode["fallback"] is None
 
 
-def test_long_static_holds_are_thinned_while_transitions_are_kept(tmp_path):
-    """WAITING_FOR_FEEDBACK/HOLDING holds and unknown phases are no longer blanket-kept."""
+def test_non_wait_physical_holds_are_preserved_while_wait_for_feedback_is_thinned(tmp_path):
+    """TRACKING/HOLDING static holds stay intact while WAITING_FOR_FEEDBACK waits are thinned."""
     phases = (
         ["stable"] * 60 + ["transport"] * 60 + ["open"] * 60 + ["stable"] * 60 + ["mystery"] * 60
     )
@@ -319,7 +326,7 @@ def test_long_static_holds_are_thinned_while_transitions_are_kept(tmp_path):
         ["TRACKING"] * 60
         + ["TRACKING"] * 60
         + ["WAITING_FOR_FEEDBACK"] * 60
-        + ["TRACKING"] * 60
+        + ["HOLDING"] * 60
         + ["TRACKING"] * 60
     )
     spec = _spec(300, phases=phases, gates=gates)
@@ -332,18 +339,22 @@ def test_long_static_holds_are_thinned_while_transitions_are_kept(tmp_path):
     episode = document["training"]["episodes"][0]
     kept = set(episode["kept_indices"])
     excluded = set(episode["excluded_indices"])
-    for start, end in ((58, 62), (118, 122), (178, 182), (238, 242)):
+    # Phase and gate transition boundaries (±5 frames) are preserved.
+    for start, end in ((55, 65), (115, 125), (175, 185), (235, 245)):
         assert set(range(start, end + 1)) <= kept
-    # The 60-frame physics wait and the unknown-phase hold must lose interior frames.
-    assert excluded & set(range(123, 177))
-    assert excluded & set(range(243, 294))
-    assert document["training"]["excluded_frames"] > 0
+    # Physical holds (TRACKING / HOLDING) are not thinned.
+    assert set(range(0, 60)) <= kept
+    assert set(range(180, 300)) <= kept
+    # Only the interior of WAITING_FOR_FEEDBACK is thinned.
+    assert excluded <= set(range(126, 175))
+    assert excluded
+    assert document["training"]["excluded_frames"] == len(excluded)
     assert document["training"]["gate_counts"]["source"]["WAITING_FOR_FEEDBACK"] == 60
     assert document["training"]["gate_counts"]["source"].get("unknown", 0) == 0
     assert document["training"]["phase_counts"]["source"]["mystery"] == 60
 
 
-def test_internal_gate_change_within_same_phase_does_not_protect_static_frames(tmp_path):
+def test_gate_transition_protects_boundary_frames_and_only_thins_wait_interior(tmp_path):
     phases = ["pregrasp"] * 140
     gates = ["TRACKING"] * 100 + ["WAITING_FOR_FEEDBACK"] * 40
     spec = _spec(140, phases=phases, gates=gates)
@@ -356,11 +367,33 @@ def test_internal_gate_change_within_same_phase_does_not_protect_static_frames(t
     spec["applied"][60:, 8] = motion[-1]
     document, _ = _build(tmp_path / "data", training=[spec])
     episode = document["training"]["episodes"][0]
-    assert set(range(98, 103)) & set(episode["excluded_indices"])
+    kept = set(episode["kept_indices"])
+    excluded = set(episode["excluded_indices"])
+    # TRACKING frames and the ±5 boundary around gate transition at 100 are preserved.
+    assert set(range(60, 106)) <= kept
+    # Interior of WAITING_FOR_FEEDBACK after the boundary window is thinned.
+    assert excluded & set(range(106, 135))
+    assert excluded <= set(range(106, 135))
+
+
+def test_rule_without_only_gate_states_thins_any_long_static_run(tmp_path):
+    import yaml
+
+    rule_doc = yaml.safe_load(RULE.read_text(encoding="utf-8"))
+    rule_doc["static_runs"].pop("only_gate_states", None)
+    custom_rule = tmp_path / "no_gate_filter.yaml"
+    custom_rule.write_text(yaml.safe_dump(rule_doc), encoding="utf-8")
+    dataset_root = _make_source(tmp_path / "data", training=[_spec(400)])
+    document = build_filter_manifest(rule_path=custom_rule, dataset_root=dataset_root)
+    assert document["rule"]["resolved"]["only_gate_states"] is None
+    assert document["training"]["excluded_frames"] > 0
 
 
 def test_validation_split_is_never_filtered(tmp_path):
-    document, dataset_root = _build(tmp_path / "data", training=[_spec(600)])
+    document, dataset_root = _build(
+        tmp_path / "data",
+        training=[_spec(600, gates=["WAITING_FOR_FEEDBACK"] * 600)],
+    )
     mask = build_filter_mask(rule_path=RULE, dataset_root=dataset_root)
     assert document["validation"]["filtered"] is False
     assert document["validation"]["excluded_frames"] == 0
@@ -480,3 +513,38 @@ def test_mask_json_can_be_loaded_directly(tmp_path):
     assert mask.source == path.resolve()
     assert len(mask.eligible_indices) == document["training"]["eligible_frames"]
     assert mask.source_sha256 == file_sha256(path)
+
+
+def test_four_digit_zero_padded_episode_id_and_collection_events(tmp_path):
+    from dual_arm_learning.sample_filter import _attempt_episode_id_matches, _source_paths
+
+    assert _attempt_episode_id_matches(
+        "formal-04100-pool-123-worker-01",
+        "formal:4100:pool-123-worker-01",
+        4100,
+    )
+    assert not _attempt_episode_id_matches(
+        "formal-04101-pool-123-worker-01",
+        "formal:4100:pool-123-worker-01",
+        4100,
+    )
+    attempt_dir = tmp_path / "datasets" / "raw" / "formal-04100-run"
+    (attempt_dir / "export").mkdir(parents=True)
+    (attempt_dir / "export" / "labels.json").write_text("{}", encoding="utf-8")
+    runtime_dir = (
+        tmp_path
+        / "logs"
+        / "collection"
+        / "attempts"
+        / "formal-04100-run"
+        / "run"
+        / "logs"
+        / "runtime"
+        / "inst-1"
+    )
+    runtime_dir.mkdir(parents=True)
+    ev = runtime_dir / "events.000001.jsonl"
+    ev.write_text("", encoding="utf-8")
+    labels_path, events = _source_paths(attempt_dir)
+    assert labels_path == attempt_dir / "export" / "labels.json"
+    assert events == [ev]

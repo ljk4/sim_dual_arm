@@ -39,5 +39,27 @@
 - **P02 — 多轴协同过渡重定时**：在 `RobotProfile` 派生 `coordinated_axis_groups`，在 `transition_retiming.py` 实现同臂多轴按最受限轴等比例协同缩放并彻底清除场景硬编码启发式，在 `PolicyStreamRunner._retime` 接入并在 `tests/unit/test_transition_retiming.py` 补充单元测试。
 - **P03 — 修复 Panda Teacher 时钟对齐、配置拆分与静止帧过滤**：对齐 `panda_sim/stack` 阶段运动起点与 `handoff_time_ns`；拆分 `panda_follower_v1.yaml`（采集 `target_count: 10`）与 `panda_follower_inference_v1.yaml`（推理 `target_count: 20`）；修正 `sample_filter.py` 的 `_protections()` 与两端 `act_sample_filter.yaml` 阈值。
 - **P04 — 启动预热增强与异步预取推理**：服务端 `OpenSession` 调用 `pipeline.warm_up()`；扩展 `startup_settle_sim_ns` 上限并设为 3.0 s，开启 `warmup_on_settle` 在 `StartTask` 前执行真实观测预热 `Predict`；在 `ContinuousStreamRunner` 实现 `async_inference` 后台异步推理与 `prefetch_lead_ns` 准时预取；补充单元测试。
-- **P05 — 空中交接移交边界细化与视觉骨干分组学习率**：细化 `marvin_sim/handover/evaluator.py` 的 `_holder_required` 移交过渡守卫与左爪释放后的右爪稳定性参考刷新；为 `learning/lerobot` 增加 `training.lr_backbone` 支持并在两方案 `act_training.yaml` 配置 `1e-5`。
-- **P06 — 归属清理、全量单测回归与文档同步**：修正 `hardware/README.md` 单层方案路径，清理残留孤立 `.pyc`，同步更新 `README.md` §5 与 `docs/experiments/closed-loop-triage.md`，通过容器运行相关单元测试并汇总结果（重采与重训待代码确认后执行）。
+- **P05 — 空中交接移交边界细化与视觉骨干分组学习率**：细化 `marvin_sim/handover/evaluator.py` 的 `_holder_required` 移交过渡守卫与左爪释放后的右爪稳定性参考刷新；为 `learning/lerobot` 增加 `training.lr_backbone` 支持并在两方案 `act_training.yaml` 配置。
+- **P06 — 归属清理、全量单测回归与文档同步**：修正 `hardware/README.md` 单层方案路径，清理残留孤立 `.pyc`，同步更新 `README.md` §5 与 `docs/experiments/closed-loop-triage.md`，通过容器运行相关单元测试并汇总结果。
+
+---
+
+## 3. 第二轮实测问题排查与修复计划（Issues 1–8）
+
+- **P07 — `panda_sim/stack` 推理失败与 `marvin_sim/handover` 训练/并行采集修复（Issues 5, 7, 8）**：
+  - **Issue 8（`marvin_sim/handover` `FilterError: label episode_id disagrees with the attempt`）**：
+    - 根因：`campaign.py` 对 4 位数种子（`4100..4199`）生成 `episode_id` 时使用 `f"{purpose}-{seed:05d}-{run_id}"`（即 `formal-04100-...`），而 `attempt_id` 未补零（`formal:4100:...`），导致 `sample_filter.py:381` 用 `attempt_id.replace(":", "-")` 校验时失败；同时 `sample_filter.py:139` 的 `_source_paths` 多写了前导 `logs/` 目录，导致所有 episode 都找不到运行端 `events.*.jsonl`、静默跳过 `phase_boundary_frames` 保护。
+    - 修复：在 `sample_filter.py` 按 `attempt_dir.name` / `raw/manifest.json` 的 `episode_id` 与 `(purpose, seed, run_id)` 语义一致校验（直接兼容已采集的 50 条 Marvin 原始数据与 LeRobot 数据集），并修复 `_source_paths` 事件日志匹配路径。
+  - **Issue 5（`panda_sim/stack` 推理未成功）**：
+    - 根因：对 `act_20261118_060048` 离线与在线回放核查表明，虽然模型与训练流程正常，但在仅有 5,000 step 的训练预算下，将 `lr_backbone` 从 `1e-4` 骤降 10 倍至 `1e-5` 加上 `sample_filter.py:139` 丢失阶段边界保护，导致 ResNet18 视觉骨干欠拟合（`best_val_l1 = 0.0465`，远高于历史 `0.0132 rad`），即便是训练种子 `10000` 也出现 `+0.078 rad`（约 5.5 cm）的横向定位偏移并在 4 cm 方块旁抓空闭环振荡。
+    - 修复：修复 `sample_filter.py` 阶段边界保护；保留 `learning/lerobot` 分组学习率机制并将两方案 `act_training.yaml` 默认 `lr_backbone` 恢复为 `0.0001`（匹配 5,000 step 下 `~0.013 rad` 收敛验证值，并在 `training_args.yaml` 记录 `lr_backbone`）。
+  - **Issue 7（`marvin_sim/handover` 并行采集连续 3 次失败）**：
+    - 根因：`pool-1794985076901478387` 中 4 路并发以 `realtime_speed: 1.0` 采集且并行运行 `export_episode.py`（每局压缩 2,760 张 PNG）时，物理任务与相机可见性其实全部成功（`TASK_SUCCEEDED`, `vis_qualified=True`），但后端 `queues.render_snapshots: 4`（20 Hz 下仅 200 ms 缓冲）在 transient 渲染阻塞 >200 ms 时丢弃 1~17 帧快照，打破了导出器严格零间隙 20 Hz 连续性检查（`trajectory_qualified=False`）。
+    - 修复：在两方案后端配方将 `queues.render_snapshots` 由 `4` 提升至 `32`、`queues.render_outputs` 由 `8` 提升至 `32`（符合 `BackendConfig <= 64` 契约），提供 1.6 s 瞬态抗抖动缓冲。
+- **P08 — 后端启动/停止就绪反馈与并行进度剩余时间（Issues 1, 2）**：
+  - **Issue 1**：在 `backend_cli.py::_serve_node` 启动完成（`_emit_backend_start` 后）和关闭完成时输出明确且立即刷新的控制台就绪/停止状态反馈。
+  - **Issue 2**：为 `record_pool.py` 与 `inference_worker.py` 的进度条补充 `HH:MM:SS` 格式的 `用时` 与估算 `剩余` 时间（`--:--:--` 到 `00:00:00`），并在 TTY 轮询等待期间定期刷新进度。
+- **P09 — 全链路日志与 `run-id` 统一时间戳结尾（Issues 3, 4）**：
+  - 统一 `record.sh`、`record_parallel.sh`、`convert.sh`、`train.sh`、`teacher_backend.sh`、`inference_backend.sh`、`client_policy.sh`、`client_interactive.sh`、`server_policy.sh`、`inference_parallel.sh` 等日志目录/文件/默认 `run-id` 使用可读本地时间戳 `_<YYYYMMDD_HHMMSS>` 结尾（不再使用 `time.time_ns()` 或 `-$$` 后缀）；当向 `teacher_backend.sh` / `inference_backend.sh` 传入 `--run-id <前缀>` 时自动追加 `_<YYYYMMDD_HHMMSS>`（同秒冲突追加 `_2`），确保可重复运行且不破坏 `default_backend_log` 自动发现。
+- **P10 — 更新 `README.md` §4/§5 与全量回归验收（Issue 6）**：
+  - 在 `README.md` §4 为 `marvin_sim/handover` 补充 `./env.sh viewer` 可视化命令；移除已全部定位并修复的 §5（`## 5. 已发现的待后续改进问题`）；运行三端容器回归单元测试并更新 `progress.md`。

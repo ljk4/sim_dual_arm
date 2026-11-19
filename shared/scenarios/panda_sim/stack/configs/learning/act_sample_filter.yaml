@@ -14,11 +14,12 @@ grippers:
   max_step_m: 0.0005
   max_velocity_m_s: 0.002
 static_runs:
-  min_frames: 6
-  edge_frames: 2
-  interior_stride: 10
-  # 仅保护真实阶段切换与首尾边界，长静止保持会被大幅抽稀。
-  phase_boundary_frames: 2
+  min_frames: 15
+  edge_frames: 5
+  interior_stride: 5
+  # 仅抽稀无用的 WAITING_FOR_FEEDBACK 等待段内部帧，完整保留物理稳定保持与阶段/门控切换边界。
+  only_gate_states: [WAITING_FOR_FEEDBACK]
+  phase_boundary_frames: 5
   episode_boundary_frames: 5
   min_episode_kept_frames: 60
   reason: redundant_static_anchor

@@ -38,7 +38,9 @@ training:
   use_amp: true
   amp_dtype: bfloat16
   lr: 0.0001
-  lr_backbone: 0.00001
+  # 5,000-step runs (~10 epochs) require 1e-4 on ResNet18 to localize small objects cleanly;
+  # setting 1e-5 here underfitted val_l1 (0.0465 vs 0.0132). Keep grouped override configurable.
+  lr_backbone: 0.0001
   weight_decay: 0.0001
   grad_clip_norm: 10.0
   log_every_steps: 10

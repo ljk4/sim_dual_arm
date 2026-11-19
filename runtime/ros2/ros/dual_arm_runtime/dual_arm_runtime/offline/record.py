@@ -154,12 +154,37 @@ def _preflight(args: argparse.Namespace) -> int:
     )
 
 
+def _unique_timestamped_path(parent: Path, prefix: str, suffix: str = "") -> Path:
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    candidate = parent / f"{prefix}_{stamp}{suffix}"
+    if not candidate.exists():
+        return candidate
+    index = 2
+    while (parent / f"{prefix}_{stamp}_{index}{suffix}").exists():
+        index += 1
+    return parent / f"{prefix}_{stamp}_{index}{suffix}"
+
+
+def _next_run_id(records: list[dict], prefix: str = "record") -> str:
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    existing = {item.get("run_id") for item in records if isinstance(item, dict)}
+    base = f"{prefix}_{stamp}"
+    if base not in existing:
+        return base
+    index = 2
+    while f"{base}_{index}" in existing:
+        index += 1
+    return f"{base}_{index}"
+
+
 def record(args: argparse.Namespace, config: dict, ledger: Ledger) -> int:
     qualified = attempted = consecutive_failures = 0
     stop_reason, exit_code = "target_reached", 0
     try:
         while qualified < args.count:
-            run_id = f"record-{time.time_ns()}"
+            with ledger.locked():
+                existing_records = ledger.records()
+            run_id = _next_run_id(existing_records)
             code = campaign.main(
                 [
                     "--project-root",
@@ -231,12 +256,9 @@ def record(args: argparse.Namespace, config: dict, ledger: Ledger) -> int:
         )
         if destination is not None:
             summary["formal_select"] = str(destination)
-    summary_path = (
-        project_path(config["paths"]["ledger"], args.project_root).parent
-        / "summaries"
-        / f"record-{time.time_ns()}.json"
-    )
-    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summaries_dir = project_path(config["paths"]["ledger"], args.project_root).parent / "summaries"
+    summaries_dir.mkdir(parents=True, exist_ok=True)
+    summary_path = _unique_timestamped_path(summaries_dir, "record", ".json")
     summary_path.write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
@@ -309,8 +331,8 @@ def _print_status(args: argparse.Namespace, config: dict, ledger: Ledger) -> Non
 
 def _print_startup_info(args: argparse.Namespace, config: dict, ledger: Ledger) -> None:
     ledger_path = project_path(config["paths"]["ledger"], args.project_root)
-    detail_path = ledger_path.parent / f"startup-{time.time_ns()}.yaml"
-    detail_path.parent.mkdir(parents=True, exist_ok=True)
+    ledger_path.parent.mkdir(parents=True, exist_ok=True)
+    detail_path = _unique_timestamped_path(ledger_path.parent, "startup", ".yaml")
     detail_path.write_text(
         "# 采集配方与运行参数\n"
         + yaml.safe_dump(

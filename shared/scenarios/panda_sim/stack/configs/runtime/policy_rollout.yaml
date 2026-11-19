@@ -51,7 +51,8 @@ policy:
   startup_settle_sim_ns: 3000000000
   warmup_on_settle: true
   async_inference: true
-  prefetch_lead_ns: 0
+  prefetch_lead_ns: 200000000
+  action_execution_latency_ns: 0
   initial_lead_ns: 250000000
   max_chunks: 256
   total_sim_deadline_ns: 90000000000

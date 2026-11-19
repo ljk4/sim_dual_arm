@@ -297,3 +297,33 @@ def test_preflight_command_converts_host_paths(tmp_path):
     assert "--task" in command and "stack" in command
     assert "/shared" in command
     assert "--config" not in command
+
+
+def test_pool_and_inference_progress_include_eta_and_timestamp(tmp_path, capsys):
+    from dual_arm_runtime.offline import record_pool
+
+    args = SimpleNamespace(
+        project_root=tmp_path,
+        count=10,
+        max_consecutive_failures=3,
+    )
+    pool = record_pool.RecordingPool(
+        args,
+        {"paths": {"attempts_root": "var/x/y/datasets/raw"}},
+        None,  # type: ignore[arg-type]
+        [{"id": "worker-01"}],
+    )
+    pool.started = record_pool.time.monotonic() - 12.0
+    pool._render_progress(force=True)
+    out = capsys.readouterr().out
+    assert "用时 00:00:12 | 剩余 --:--:--" in out
+
+    pool.qualified = 4
+    pool._render_progress(force=True)
+    out = capsys.readouterr().out
+    assert "用时 00:00:12 | 剩余 00:00:18" in out
+
+    pool.qualified = 10
+    pool._render_progress(force=True)
+    out = capsys.readouterr().out
+    assert "用时 00:00:12 | 剩余 00:00:00" in out

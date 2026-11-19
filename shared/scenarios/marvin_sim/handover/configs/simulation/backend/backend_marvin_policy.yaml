@@ -28,8 +28,8 @@ run:
 queues:
   owner: 64
   planner: 4
-  render_snapshots: 4
-  render_outputs: 8
+  render_snapshots: 32
+  render_outputs: 32
   captures: 32
   events: 1024
   feedback: 64

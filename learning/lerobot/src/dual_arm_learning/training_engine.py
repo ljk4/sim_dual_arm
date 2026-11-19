@@ -24,6 +24,7 @@ from .training_support import (
     MetricsWriter,
     TrainingError,
     TrainingInterrupted,
+    augment_image_shift,
     build_optimizer_param_groups,
     build_policy,
     build_processors,
@@ -209,6 +210,7 @@ def _emit_model_ready(context: _TrainingContext) -> None:
         batch_size=config.batch_size,
         lr=config.lr,
         lr_backbone=(config.lr if config.lr_backbone is None else config.lr_backbone),
+        image_shift_px=config.image_shift_px,
         loaded_backbone_tensors=context.loaded_backbone,
         weights_sha256=context.weights_sha256,
         train_frames=len(context.train_dataset),
@@ -284,6 +286,8 @@ def _train_step(context: _TrainingContext, amp: tuple[bool, Any, Any]) -> dict[s
         batch = next(context.iterator)
     step_started = time.monotonic()
     processed = _process_batch(context.pre, batch, _sample_keys(config))
+    if config.image_shift_px > 0:
+        processed = augment_image_shift(processed, config.image_shift_px)
     context.optimizer.zero_grad(set_to_none=True)
     amp_enabled, amp_dtype, scaler = amp
     with torch.amp.autocast(device_type="cuda", dtype=amp_dtype, enabled=amp_enabled):
@@ -342,11 +346,13 @@ def _training_args(context: _TrainingContext) -> dict[str, Any]:
         "use_amp": config.use_amp,
         "amp_dtype": config.amp_dtype,
         "lr": config.lr,
+        "lr_backbone": config.lr_backbone,
         "weight_decay": config.weight_decay,
         "grad_clip_norm": config.grad_clip_norm,
         "log_every_steps": config.log_every_steps,
         "val_every_steps": config.val_every_steps,
         "val_batches": config.val_batches,
+        "image_shift_px": config.image_shift_px,
         "deterministic": config.deterministic,
     }
     return {

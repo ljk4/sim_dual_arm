@@ -85,7 +85,11 @@ def default_backend_log(robot: str | None, task: str | None = None) -> Path:
             for child in backend_root.iterdir()
             if child.is_dir()
             and (child / "log").is_dir()
-            and (child.name.startswith("teacher-backend") or "-teacher" in child.name)
+            and (
+                child.name.startswith("teacher-backend")
+                or "-teacher" in child.name
+                or "_teacher" in child.name
+            )
         ]
         if candidates:
             candidates.sort(key=lambda item: item.parent.stat().st_mtime_ns, reverse=True)
