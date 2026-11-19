@@ -37,6 +37,17 @@ def _print(value: object) -> None:
     print(json.dumps(value, indent=2, sort_keys=True, default=str))
 
 
+def _timestamped_log(directory: Path, prefix: str) -> Path:
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    candidate = directory / f"{prefix}_{stamp}.log"
+    if not candidate.exists():
+        return candidate
+    suffix = 2
+    while (directory / f"{prefix}_{stamp}_{suffix}.log").exists():
+        suffix += 1
+    return directory / f"{prefix}_{stamp}_{suffix}.log"
+
+
 def _add_selection_arguments(parser: argparse.ArgumentParser) -> None:
     """Every command needs one explicit recipe source; there is no default."""
     parser.add_argument("--config", type=Path, default=None, help="direct recipe path")
@@ -279,7 +290,7 @@ def _command_convert(args: argparse.Namespace, root: Path) -> int:
     ]
     if args.progress:
         _print_effective_config("数据转换配置与详细参数", config_path, selection, config)
-    default_log = _logs_root(args, root) / "convert" / f"convert-{time.time_ns()}.log"
+    default_log = _timestamped_log(_logs_root(args, root) / "convert", "convert")
     with _operator_console(args, "数据转换配置", settings, default_log) as console:
         manifest = convert(
             select_path=config.select_path,
@@ -340,7 +351,7 @@ def _command_train(args: argparse.Namespace, root: Path) -> int:
     ]
     if args.progress:
         _print_effective_config("ACT 训练配置与详细参数", config_path, selection, config)
-    default_log = config.logging.root / "_console" / f"train-{time.time_ns()}.log"
+    default_log = _timestamped_log(config.logging.root / "_console", "train")
     with _operator_console(args, "ACT 训练配置", settings, default_log) as console:
         if console is not None:
             console.progress.phase("校验训练数据")

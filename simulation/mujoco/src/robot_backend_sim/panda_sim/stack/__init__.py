@@ -96,6 +96,7 @@ class StackTaskPlugin:
         self._last_observation: object | None = None
         self._prepared_command_id = ""
         self._chunk_cache: dict[str, tuple[str, TaskChunk]] = {}
+        self._phase_motion_start: dict[int, int] = {}
 
     @classmethod
     def from_path(
@@ -364,6 +365,7 @@ class StackTaskPlugin:
         ):
             self._teacher_progress = TeacherProgress(runtime.plan, self.config)  # type: ignore[arg-type]
             self._teacher_feedback.clear()
+            self._phase_motion_start.clear()
         return state, idempotent
 
     def capture_observation(self, scene: object) -> object:
@@ -377,6 +379,7 @@ class StackTaskPlugin:
         runtime = self._require_runtime()
         self._teacher_progress = None
         self._teacher_feedback.clear()
+        self._phase_motion_start.clear()
         self._last_observation = None
         self.clear_chunk_cache()
         return runtime.reset(reason)
@@ -446,6 +449,7 @@ class StackTaskPlugin:
             plan=plan, task_epoch=state.task_epoch, task_start_sim_time_ns=start_ns,
             current_sim_time_ns=current_sim_time_ns, latest_capture_seq=latest_capture_seq,
             state=state, feedback=feedback[0], progress=feedback[1],
+            handoff_time_ns=handoff_time_ns,
         )
 
     def sample_chunk(
@@ -458,6 +462,7 @@ class StackTaskPlugin:
                 if view.state.context is not None else None,
                 "task_epoch": view.task_epoch, "request_id": request_id,
                 "capture_seq": capture_seq, "observation_time_ns": observation_time_ns,
+                "handoff_time_ns": view.handoff_time_ns,
                 "plan_digest": view.plan.plan_digest,
             }
         )
@@ -473,12 +478,22 @@ class StackTaskPlugin:
                 "TEACHER_CACHE_FULL",
                 "teacher idempotency cache is full; refusing to drop an audited chunk",
             )
+        phase_index = view.progress.phase_index
+        motion_start = self._phase_motion_start.get(phase_index)
+        if motion_start is None:
+            motion_start = (
+                view.handoff_time_ns or view.progress.actual_start_sim_time_ns
+            )
+            self._phase_motion_start[phase_index] = motion_start
+            if self._teacher_progress is not None:
+                self._teacher_progress.bind_motion_start(phase_index, motion_start)
         chunk = sample_teacher_chunk(
             view.plan, gate=view.progress, feedback=view.feedback,
             request_id=request_id, task_epoch=view.task_epoch, capture_seq=capture_seq,
             observation_time_ns=observation_time_ns, chunk_size=self.config.teacher.chunk_size,
             period_ns=self.config.teacher.action_period_ns, profile=profile,
             control_config=control_config,  # type: ignore[arg-type]
+            start_sim_time_ns=motion_start,
         )
         self._chunk_cache[request_id] = (content_digest, chunk)
         return chunk
@@ -494,6 +509,7 @@ class StackTaskPlugin:
     def clear_teacher_state(self) -> None:
         self._teacher_progress = None
         self._teacher_feedback.clear()
+        self._phase_motion_start.clear()
         self._last_observation = None
 
 

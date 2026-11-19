@@ -6,6 +6,7 @@ source:
   scope: implementation
 mounts:
   /data: writable
+  /etc/bash.bashrc: read-only
   /opt/ros-dev: read-only
 networks: [ros]
 gpu: true

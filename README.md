@@ -336,8 +336,11 @@ var/panda_sim/stack/
 `marvin_sim/handover` 与 `panda_sim/stack` 使用完全相同的入口，训练默认同样为 50 条正式数据（45 训练 / 5 验证）与 full 5000 步，共享同一份 ResNet18 权重；只需替换 `--robot/--task`：
 
 ```bash
-# simulation：示教后端
+# simulation：示教后端（--run-id 为前缀，自动追加 _YYYYMMDD_HHMMSS 时间戳）
 scripts/teacher_backend.sh --robot marvin_sim --task handover --seed 0 --run-id teacher-backend
+
+# 宿主机（可选）：启动 MuJoCo 实时可视化（若报 X11 权限错误先执行 xhost +SI:localuser:$(id -un)）
+./env.sh viewer --robot marvin_sim --task handover --role teacher
 
 # runtime：试采
 scripts/record.sh --robot marvin_sim --task handover \
@@ -351,7 +354,7 @@ scripts/record.sh --robot marvin_sim --task handover \
 scripts/convert.sh --robot marvin_sim --task handover
 scripts/train.sh --robot marvin_sim --task handover --mode full
 
-# 推理：learning 策略服务、simulation 后端、runtime 交互闭环
+# 推理：learning 策略服务、simulation 后端、runtime 交互闭环（可选用 ./env.sh viewer --robot marvin_sim --task handover --role policy 查看可视化）
 scripts/server_policy.sh --robot marvin_sim --task handover
 scripts/inference_backend.sh --robot marvin_sim --task handover \
   --seed 5100 --run-id policy-backend
@@ -364,25 +367,6 @@ scripts/client_interactive.sh --robot marvin_sim --task handover \
 ```
 
 `scripts/server_policy.sh` 省略 `--model` 时自动加载 `/data/marvin_sim/handover/models/` 下最新的 `act_*` 模型，也可用 `--model` 显式指定；推理链路直接加载模型目录，不再需要单独导出模型包。方案说明见 [`shared/scenarios/marvin_sim/handover/README.md`](shared/scenarios/marvin_sim/handover/README.md)。
-
----
-
-## 5. 已发现的待后续改进问题
-
-在完成闭环主链路修复并达到 80%（10 次测试 8 次成功：Panda 5/5、Marvin 3/5）闭环成功率后，排查过程中已定位并解决以下两项，其余留待后续迭代优化（详细排查总结见 [`docs/experiments/closed-loop-triage.md`](docs/experiments/closed-loop-triage.md)）：
-
-**已解决**：
-
-1. **阶段末静止帧过滤**：数据集不再包含 32%–47% 的阶段末门控等待静止帧，模型可完整展开动作，推理侧无需再依赖扩窗死等跨过静止区。
-2. **Panda/Marvin 奇异位形与 IK 限位余量**：Teacher 示教已配置 IK 关节限位余量并避开奇异位形，消除了贴近硬限位的门控等待与姿态翻转风险。
-3. **Panda 堆叠任务预算过紧**：1 s 执行窗口下 Teacher 约需 29–30 s 才走完全部阶段，原 30 s 任务预算减去 1 s 停止余量后只剩 29 s，导致采集 23/73 次无谓超时、推理最好一局在 27.9 s 已满足全部 14 项条件却来不及完成 2 s 稳定窗口。现已将 `panda_stack_task.yaml` 的任务仿真预算提高到 90 s，同步放宽运行端 teacher/policy 的仿真与墙钟截止时间，并把动作流墙钟从 120 s 放宽到 240 s，避免 0.5 倍速下的长局被流级墙钟提前终止。
-
-**待后续改进**：
-
-1. **多轴协同过渡重定时（Coordinated Multi-Axis Retiming）**：当前 `transition_retiming.py` 按单轴独立判断偏差预算并裁剪末点（例如 Marvin 种子 `4155` 中仅 `right_joint3` 略超预算触发裁剪，同臂其余关节未按相同比例缩放），会导致单臂 7 轴运动不完全同步并偏离笛卡尔接近路径；后续应改为按同侧手臂最受限轴等比例协同缩放。
-2. **空中交接双持到右独持的持物移交边界细化**：在 Marvin 种子 `5103` 中，`dual_airborne_stable` 刚满 `0.5 s` 但左手尚未张开释放（左手仍以 `>9 N` 稳定持物）时，右手在微调夹紧过程中短暂减力超过 `0.25 s` 即被 `_holder_required(right)` 判为 `HOLD_LOST`；后续应在左手仍稳定持物期间允许右手完成夹紧微调，待左手开始释放后再严格锁定右手失持守卫。
-3. **训练侧视觉骨干与头部参数分组学习率**：后续可在训练侧启用视觉骨干与头部参数分组学习率（`1e-5` / `1e-4`），提升小样本下的收敛稳定性。
-4. **冷启动首块提前量余量**：当仿真倍速 `realtime_speed > 1.0` 且首次启动服务时，首块 `initial_lead_ns = 250 ms` 的墙钟余量较紧；后续可在策略会话 `Open` 或 `startup_settle` 阶段预热完整推理链路。
 
 ---
 

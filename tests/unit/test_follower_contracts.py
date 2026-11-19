@@ -276,15 +276,15 @@ def test_follower_config_values_and_round_trip(tmp_path):
     from robot_backend_sim.common.config.follower_config import load_follower_config, parse_follower_config
 
     config = load_follower_config(CONFIG_PATH)
-    assert config.target_count == 20
+    assert config.target_count == 10
     assert config.max_target_deviations == (
-        (0.30,) * 6 + (0.40, 0.04) + (0.30,) * 6 + (0.40, 0.04)
+        (0.50,) * 7 + (0.06,) + (0.50,) * 7 + (0.06,)
     )
     assert config.max_terminal_tail_duration_s == pytest.approx(3.0)
     assert config.max_terminal_tail_duration_ns == 3_000_000_000
     snapshot = config.to_document()
     snapshot["max_target_deviations"][0] = 99.0
-    assert config.max_target_deviations[0] == 0.30
+    assert config.max_target_deviations[0] == 0.50
     assert parse_follower_config(config.to_document(), "<snapshot>") == config
 
     path = tmp_path / "follower.yaml"

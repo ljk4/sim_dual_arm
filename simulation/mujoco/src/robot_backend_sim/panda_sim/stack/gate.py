@@ -60,6 +60,13 @@ class TeacherProgress:
     def phase(self) -> str:
         return self.plan.segments[min(self.phase_index, len(self.plan.segments) - 1)].phase
 
+    def bind_motion_start(self, phase_index: int, motion_start_ns: int) -> None:
+        """Align the active phase start clock to its scheduled follower hand-off."""
+        if phase_index == self.phase_index and motion_start_ns > self.actual_start_ns:
+            self.actual_start_ns = motion_start_ns
+            if self.actual_starts_ns:
+                self.actual_starts_ns[-1] = motion_start_ns
+
     def _arm_ok(self, feedback: TeacherFeedback, segment: TeacherSegment) -> bool:
         target = segment.end_positions[8:15]
         teacher = self.config.teacher

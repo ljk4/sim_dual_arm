@@ -721,3 +721,388 @@ def test_teacher_targets_are_not_rewritten_by_policy_adaptation():
     assert io.commands[-1].trajectory.targets == original
     assert not [event for event, _ in rejecting_log.events
                 if event == "follower.chunk_retimed"]
+
+
+def test_startup_settle_warms_up_policy_before_source_begin(tmp_path, monkeypatch):
+    configuration = policy_configuration(tmp_path, settle_ns=500_000_000)
+    value = yaml.safe_load(POLICY_CONFIG.read_text(encoding="utf-8"))
+    for field in (
+        "robot_profile",
+        "observation_schema",
+        "action_schema",
+        "control_constraints",
+        "follower_config",
+    ):
+        value[field] = str((POLICY_CONFIG.parent / value[field]).resolve())
+    value["policy"]["startup_settle_sim_ns"] = 500_000_000
+    value["policy"]["warmup_on_settle"] = True
+    value["policy"]["max_chunks"] = 2
+    path = tmp_path / "policy_warmup.yaml"
+    path.write_text(yaml.safe_dump(value), encoding="utf-8")
+    configuration = load_runtime_configuration(path, ROOT)
+    profile = configuration.profile
+    io = _IO(profile)
+    events = []
+    original_begin = PolicyTargetSource.begin
+
+    def tracked_begin(self, context, episode_id, task_id):
+        events.append(("begin", io.count))
+        return original_begin(self, context, episode_id, task_id)
+
+    monkeypatch.setattr(PolicyTargetSource, "begin", tracked_begin)
+
+    class _WarmupClient(_Client):
+        def predict(self, context, session_id, request_id, observation, deadline_s=None):
+            events.append(("predict", request_id))
+            return super().predict(context, session_id, request_id, observation, deadline_s)
+
+        def reset(self, context, reset_id):
+            events.append(("reset", reset_id))
+            return context
+
+    context = RunContext("panda_stack", profile.digest, "backend", "sim", 1, "episode", 1)
+    io.context = context
+    runner = PolicyStreamRunner(
+        configuration,
+        context,
+        "episode",
+        "task",
+        io,
+        _Control(profile, start_ns=1_750_000_000),
+        _WarmupClient(configuration.recipe.policy, profile),
+        follower_limits(configuration, [1.0] * 16),
+        stop_requested=threading.Event(),
+        clock=lambda: 0.0,
+    )
+    runner.run()
+
+    assert events[0][0] == "predict" and "-warmup-" in events[0][1]
+    assert events[1][0] == "reset"
+    assert events[2][0] == "begin"
+    assert runner.chunks == 2
+
+
+def test_async_inference_and_prefetch_lead_use_fresh_observation_and_worker_thread(tmp_path):
+    value = yaml.safe_load(POLICY_CONFIG.read_text(encoding="utf-8"))
+    for field in (
+        "robot_profile",
+        "observation_schema",
+        "action_schema",
+        "control_constraints",
+        "follower_config",
+    ):
+        value[field] = str((POLICY_CONFIG.parent / value[field]).resolve())
+    value["policy"]["startup_settle_sim_ns"] = 0
+    value["policy"]["async_inference"] = True
+    value["policy"]["prefetch_lead_ns"] = 100_000_000
+    value["policy"]["max_chunks"] = 2
+    path = tmp_path / "policy_prefetch.yaml"
+    path.write_text(yaml.safe_dump(value), encoding="utf-8")
+    configuration = load_runtime_configuration(path, ROOT)
+    profile = configuration.profile
+    io = _IO(profile)
+    main_thread_id = threading.get_ident()
+    predict_threads = []
+
+    class _SlowControl(_Control):
+        def get_anchor(self, context, start_sim_time_ns=None):
+            self.anchors += 1
+            start = 1_250_000_000 + (self.anchors - 1) * 1_000_000_000
+            return ChunkAnchor(
+                "stream-1",
+                self.anchors - 1,
+                start,
+                ReferenceSample(
+                    tuple(joint.initial for joint in self.profile.joints),
+                    (0.0,) * 16,
+                    (0.0,) * 16,
+                ),
+                self.profile.digest,
+            )
+
+    class _ThreadTrackingClient(_Client):
+        def predict(self, context, session_id, request_id, observation, deadline_s=None):
+            predict_threads.append(threading.get_ident())
+            return super().predict(context, session_id, request_id, observation, deadline_s)
+
+    context = RunContext("panda_stack", profile.digest, "backend", "sim", 1, "episode", 1)
+    io.context = context
+    runner = PolicyStreamRunner(
+        configuration,
+        context,
+        "episode",
+        "task",
+        io,
+        _SlowControl(profile),
+        _ThreadTrackingClient(configuration.recipe.policy, profile),
+        follower_limits(configuration, [1.0] * 16),
+        stop_requested=threading.Event(),
+        clock=lambda: 0.0,
+    )
+    runner.run()
+
+    assert runner.chunks == 2
+    assert len(predict_threads) >= 2
+    assert all(thread_id != main_thread_id for thread_id in predict_threads)
+    # Chunk 2 anchor is 2.25s; with prefetch_lead_ns=0.10s, target_obs_ns=2.15s -> obs >= 2.15s.
+    assert io.commands[1].observation_time_ns >= 2_150_000_000
+    assert io.commands[1].observation_time_ns < 2_250_000_000
+
+
+def test_async_inference_falls_back_to_speculative_backup_when_target_rpc_stalls(tmp_path):
+    value = yaml.safe_load(POLICY_CONFIG.read_text(encoding="utf-8"))
+    for field in (
+        "robot_profile",
+        "observation_schema",
+        "action_schema",
+        "control_constraints",
+        "follower_config",
+    ):
+        value[field] = str((POLICY_CONFIG.parent / value[field]).resolve())
+    value["policy"]["startup_settle_sim_ns"] = 0
+    value["policy"]["async_inference"] = True
+    value["policy"]["prefetch_lead_ns"] = 200_000_000
+    value["policy"]["max_chunks"] = 2
+    path = tmp_path / "policy_async_fallback.yaml"
+    path.write_text(yaml.safe_dump(value), encoding="utf-8")
+    configuration = load_runtime_configuration(path, ROOT)
+    profile = configuration.profile
+
+    target_entered = threading.Event()
+    release_target = threading.Event()
+
+    class _AdvancingIO(_IO):
+        def robot_time_ns(self):
+            # Once the target RPC stalls, advance sim clock past handoff - 100 ms.
+            return 2_160_000_000 if target_entered.is_set() else 1_000_000_000
+
+    class _SlowControl(_Control):
+        def get_anchor(self, context, start_sim_time_ns=None):
+            self.anchors += 1
+            start = 1_250_000_000 + (self.anchors - 1) * 1_000_000_000
+            return ChunkAnchor(
+                "stream-1",
+                self.anchors - 1,
+                start,
+                ReferenceSample(
+                    tuple(joint.initial for joint in self.profile.joints),
+                    (0.0,) * 16,
+                    (0.0,) * 16,
+                ),
+                self.profile.digest,
+            )
+
+    class _StallingTargetClient(_Client):
+        def predict(self, context, session_id, request_id, observation, deadline_s=None):
+            if observation.reference_robot_time_ns >= 2_050_000_000:
+                target_entered.set()
+                release_target.wait(timeout=2.0)
+            return super().predict(context, session_id, request_id, observation, deadline_s)
+
+    io = _AdvancingIO(profile)
+    context = RunContext("panda_stack", profile.digest, "backend", "sim", 1, "episode", 1)
+    io.context = context
+    runner = PolicyStreamRunner(
+        configuration,
+        context,
+        "episode",
+        "task",
+        io,
+        _SlowControl(profile),
+        _StallingTargetClient(configuration.recipe.policy, profile),
+        follower_limits(configuration, [1.0] * 16),
+        stop_requested=threading.Event(),
+        clock=lambda: 0.0,
+    )
+    try:
+        runner.run()
+    finally:
+        release_target.set()
+
+    assert runner.chunks == 2
+    assert target_entered.is_set()
+    # Chunk 2 fell back to the completed speculative prediction around 1.85s (< 2.05s).
+    assert 1_850_000_000 <= io.commands[1].observation_time_ns < 2_050_000_000
+
+
+def test_wait_advance_preserves_timestamps_and_prefers_newest_active_prediction(tmp_path):
+    value = yaml.safe_load(POLICY_CONFIG.read_text(encoding="utf-8"))
+    for field in (
+        "robot_profile",
+        "observation_schema",
+        "action_schema",
+        "control_constraints",
+    ):
+        value[field] = str((POLICY_CONFIG.parent / value[field]).resolve())
+    value["follower_config"] = str(
+        ROOT / "shared/scenarios/panda_sim/stack/profiles/control/panda_follower_inference_v1.yaml"
+    )
+    value["policy"]["startup_settle_sim_ns"] = 0
+    value["policy"]["async_inference"] = False
+    value["policy"]["prefetch_lead_ns"] = 200_000_000
+    value["policy"]["max_chunks"] = 2
+    path = tmp_path / "policy_wait_advance.yaml"
+    path.write_text(yaml.safe_dump(value), encoding="utf-8")
+    configuration = load_runtime_configuration(path, ROOT)
+    profile = configuration.profile
+    base0 = profile.joints[0].initial
+
+    class _OneSecControl(_Control):
+        def get_anchor(self, context, start_sim_time_ns=None):
+            self.anchors += 1
+            start = 1_250_000_000 + (self.anchors - 1) * 1_000_000_000
+            return ChunkAnchor(
+                "stream-1",
+                self.anchors - 1,
+                start,
+                ReferenceSample(
+                    tuple(joint.initial for joint in self.profile.joints),
+                    (0.0,) * 16,
+                    (0.0,) * 16,
+                ),
+                self.profile.digest,
+            )
+
+    def _run_case(*, chunk2_active: bool):
+        io = _IO(profile)
+        log = _Log()
+
+        class _ScenarioClient(_Client):
+            def predict(self, context, session_id, request_id, observation, deadline_s=None):
+                times = tuple((index + 1) * 50_000_000 for index in range(60))
+                base = list(observation.positions)
+                positions = []
+                for time_ns in times:
+                    t_abs = observation.reference_robot_time_ns + time_ns
+                    row = list(base)
+                    if observation.observation_id == 1:
+                        # Static during [1.30..2.25s], active ramp during [2.30..3.25s].
+                        if t_abs >= 2_300_000_000:
+                            step = min(1.0, (t_abs - 2_250_000_000) / 1_000_000_000)
+                            row[0] = base0 + 0.08 * step
+                    elif chunk2_active and t_abs >= 2_300_000_000:
+                        # Newer active prediction moves in the opposite direction.
+                        step = min(1.0, (t_abs - 2_250_000_000) / 1_000_000_000)
+                        row[0] = base0 - 0.12 * step
+                    positions.append(tuple(row))
+                return PolicyPrediction(
+                    session_id,
+                    request_id,
+                    context,
+                    observation.observation_id,
+                    MODEL_DIGEST,
+                    self.profile.joint_names,
+                    times,
+                    tuple(positions),
+                    1_000,
+                )
+
+        context = RunContext("panda_stack", profile.digest, "backend", "sim", 1, "episode", 1)
+        io.context = context
+        runner = PolicyStreamRunner(
+            configuration,
+            context,
+            "episode",
+            "task",
+            io,
+            _OneSecControl(profile),
+            _ScenarioClient(configuration.recipe.policy, profile),
+            follower_limits(configuration, [1.0] * 16),
+            stop_requested=threading.Event(),
+            log=log,
+            clock=lambda: 0.0,
+        )
+        runner.run()
+        return io.commands, log.events
+
+    # Case A: Chunk 2 predicts stationary -> reuse Chunk 1's [2.30..3.25s] at exact timestamps.
+    cmds_fallback, events_fallback = _run_case(chunk2_active=False)
+    # Chunk 1 must NOT warp future [2.30..3.25s] targets onto [1.30..2.25s].
+    chunk1_selected = cmds_fallback[0].window.selected_source_targets
+    assert all(target.positions[0] == pytest.approx(base0) for target in chunk1_selected)
+    # Chunk 2 keeps its fresh observation_id and exact timestamps [2.30..3.25s] with Chunk 1 values.
+    chunk2_cmd = cmds_fallback[1]
+    assert chunk2_cmd.trajectory.observation_id > 1
+    chunk2_selected = chunk2_cmd.window.selected_source_targets
+    assert chunk2_cmd.observation_time_ns + chunk2_selected[0].time_ns == 2_300_000_000
+    assert chunk2_cmd.observation_time_ns + chunk2_selected[-1].time_ns == 3_250_000_000
+    assert chunk2_selected[-1].positions[0] == pytest.approx(base0 + 0.08)
+    wa_events = [fields for event, fields in events_fallback if event == "policy.wait_advance_applied"]
+    assert len(wa_events) == 1
+    assert wa_events[0]["fields"]["source_observation_id"] == 1
+    assert wa_events[0]["fields"]["observation_id"] == chunk2_cmd.trajectory.observation_id
+
+    # Case B: Chunk 2 predicts active motion -> newest prediction wins verbatim.
+    cmds_new, events_new = _run_case(chunk2_active=True)
+    chunk2_new_selected = cmds_new[1].window.selected_source_targets
+    assert chunk2_new_selected[-1].positions[0] == pytest.approx(base0 - 0.12)
+    assert not [event for event, _ in events_new if event == "policy.wait_advance_applied"]
+
+
+def test_latency_matching_discards_inference_and_execution_latency_steps(tmp_path):
+    value = yaml.safe_load(POLICY_CONFIG.read_text(encoding="utf-8"))
+    for field in (
+        "robot_profile",
+        "observation_schema",
+        "action_schema",
+        "control_constraints",
+        "follower_config",
+    ):
+        value[field] = str((POLICY_CONFIG.parent / value[field]).resolve())
+    value["policy"]["startup_settle_sim_ns"] = 0
+    value["policy"]["async_inference"] = False
+    value["policy"]["action_execution_latency_ns"] = 100_000_000
+    value["policy"]["max_chunks"] = 1
+    path = tmp_path / "policy_latency_match.yaml"
+    path.write_text(yaml.safe_dump(value), encoding="utf-8")
+    configuration = load_runtime_configuration(path, ROOT)
+    profile = configuration.profile
+    base0 = profile.joints[0].initial
+
+    class _IndexedClient(_Client):
+        def predict(self, context, session_id, request_id, observation, deadline_s=None):
+            times = tuple((index + 1) * 50_000_000 for index in range(60))
+            positions = []
+            for index in range(60):
+                row = list(observation.positions)
+                row[0] = base0 + 0.002 * index
+                positions.append(tuple(row))
+            return PolicyPrediction(
+                session_id,
+                request_id,
+                context,
+                observation.observation_id,
+                MODEL_DIGEST,
+                self.profile.joint_names,
+                times,
+                tuple(positions),
+                1_000,
+            )
+
+    io = _IO(profile)
+    log = _Log()
+    context = RunContext("panda_stack", profile.digest, "backend", "sim", 1, "episode", 1)
+    io.context = context
+    runner = PolicyStreamRunner(
+        configuration,
+        context,
+        "episode",
+        "task",
+        io,
+        _Control(profile),
+        _IndexedClient(configuration.recipe.policy, profile),
+        follower_limits(configuration, [1.0] * 16),
+        stop_requested=threading.Event(),
+        log=log,
+        clock=lambda: 0.0,
+    )
+    runner.run()
+
+    # obs=1.00s, handoff=1.25s -> 5 inference/lead steps skipped (idx 0..4), plus 2 execution steps -> idx 7.
+    selected = io.commands[0].window.selected_source_targets
+    assert selected[0].positions[0] == pytest.approx(base0 + 0.002 * 7)
+    lm_events = [fields for event, fields in log.events if event == "policy.latency_matched"]
+    assert len(lm_events) == 1
+    assert lm_events[0]["fields"]["inference_skipped_steps"] == 5
+    assert lm_events[0]["fields"]["execution_skipped_steps"] == 2
+    assert lm_events[0]["fields"]["total_skipped_steps"] == 7

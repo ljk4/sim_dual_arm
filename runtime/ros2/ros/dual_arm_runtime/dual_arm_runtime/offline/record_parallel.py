@@ -487,13 +487,19 @@ def main(argv: list[str] | None = None) -> int:
         args.project_root = args.project_root.resolve()
     except ValueError as error:
         cli.error(str(error))
-    directory = (
+    pools_root = (
         scenario_root(args.project_root / "var", args.robot, args.task)
         / "logs"
         / "collection"
         / "record-pools"
-        / f"pool-{time.time_ns()}"
     )
+    pool_stamp = time.strftime("%Y%m%d_%H%M%S")
+    directory = pools_root / f"pool_{pool_stamp}"
+    if directory.exists():
+        suffix = 2
+        while (pools_root / f"pool_{pool_stamp}_{suffix}").exists():
+            suffix += 1
+        directory = pools_root / f"pool_{pool_stamp}_{suffix}"
     docker = DockerWorkers(args, directory)
     def interrupted(signum: int, frame: object) -> None:
         raise KeyboardInterrupt

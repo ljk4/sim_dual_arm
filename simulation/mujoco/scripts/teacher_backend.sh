@@ -20,7 +20,7 @@ options:
   --robot <id>          robot id (required)
   --task <id>           task id (required)
   --seed <int>          initial simulation seed (default: 0)
-  --run-id <id>         backend run id (default: teacher-backend-<UTC>-<pid>)
+  --run-id <id>         backend run id prefix (default: teacher-backend_<YYYYMMDD_HHMMSS>)
   --shared-root <path>  override shared scenarios root
   --run-root <path>     override backend run root
   --set PATH=VALUE      override one existing configuration path (repeatable)
@@ -31,7 +31,7 @@ EOF
 robot=""
 task=""
 seed="0"
-run_id="teacher-backend-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+run_id=""
 shared_root=""
 run_root=""
 overrides=()
@@ -113,6 +113,21 @@ fi
 
 if [[ -z "$run_root" ]]; then
   run_root="$DATA_ROOT/$robot/$task/logs/backend"
+fi
+
+ts="$(date +%Y%m%d_%H%M%S)"
+base="${run_id:-teacher-backend}"
+if [[ ! "$base" =~ (_[0-9]{8}_[0-9]{6}|-[0-9]{8}T[0-9]{6}Z)$ ]]; then
+  run_id="${base}_${ts}"
+else
+  run_id="$base"
+fi
+if [[ -e "$run_root/$run_id" || -e "$run_root/${run_id}-startup-parameters.yaml" ]]; then
+  suffix=2
+  while [[ -e "$run_root/${run_id}_${suffix}" || -e "$run_root/${run_id}_${suffix}-startup-parameters.yaml" ]]; do
+    suffix=$((suffix + 1))
+  done
+  run_id="${run_id}_${suffix}"
 fi
 
 python3 "${SHARED_ROOT:-/shared}/common/tools/scripts/dev_workspace.py" check \

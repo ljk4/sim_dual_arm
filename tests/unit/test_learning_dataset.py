@@ -135,3 +135,16 @@ def test_cache_environment_override_is_also_checked_against_data(tmp_path, monke
     monkeypatch.setenv("LEARNING_CACHE_ROOT", str(data / "wrong-cache"))
     with pytest.raises(ExportError, match="inside data root"):
         configure_local_caches(tmp_path / "otherwise-valid", data_root=data)
+
+
+def test_convert_fails_fast_when_output_root_already_exists(config, tmp_path, monkeypatch):
+    import dual_arm_learning.dataset as dataset_mod
+
+    config.output_root.mkdir(parents=True)
+
+    def _unexpected_resolve(*_args, **_kwargs):
+        raise AssertionError("_resolve_episodes should not run before output_root validation")
+
+    monkeypatch.setattr(dataset_mod, "_resolve_episodes", _unexpected_resolve)
+    with pytest.raises(ExportError, match="output root already exists"):
+        dataset_mod.convert(select_path=tmp_path / "missing-select.json", config=config)

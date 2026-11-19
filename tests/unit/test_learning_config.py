@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 import yaml
 from dual_arm_learning.config import ConfigError, load_dataset_config, load_training_config
+from robot_contracts.project_paths import project_path
 
 ROOT = Path(__file__).resolve().parents[2]
 SCENARIO = ROOT / "shared/scenarios/panda_sim/stack"
@@ -19,8 +20,38 @@ def test_real_learning_configs_load():
     assert training.modes["overfit"].steps == 500
     assert training.modes["full"].steps == 5000
     assert training.model.pretrained_backbone_weights is None
-    assert training.checkpoint.root == ROOT / "var/panda_sim/stack/models"
+    assert training.lr == pytest.approx(1e-4)
+    assert training.lr_backbone == pytest.approx(1e-4)
+    assert training.checkpoint.root == project_path("var/panda_sim/stack/models", ROOT)
     assert training.dataset.camera_names == dataset.camera_names
+
+
+def test_lr_backbone_contract_and_optimizer_param_groups(tmp_path):
+    torch = pytest.importorskip("torch")
+    from dual_arm_learning.training_support import build_optimizer_param_groups
+
+    document = yaml.safe_load((SCENARIO / "configs/learning/act_training.yaml").read_text())
+    document["training"]["lr_backbone"] = 0.001
+    bad = tmp_path / "bad-lr.yaml"
+    bad.write_text(yaml.safe_dump(document))
+    with pytest.raises(ConfigError, match="lr_backbone"):
+        load_training_config(bad, ROOT)
+
+    training = load_training_config(SCENARIO / "configs/learning/act_training.yaml", ROOT)
+
+    class _FakePolicy(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.model = torch.nn.Module()
+            self.model.backbone = torch.nn.Linear(2, 2)
+            self.model.decoder = torch.nn.Linear(2, 2)
+
+    groups = build_optimizer_param_groups(_FakePolicy(), training)
+    assert len(groups) == 2
+    assert groups[0]["lr"] == pytest.approx(1e-4)
+    assert groups[1]["lr"] == pytest.approx(1e-4)
+    assert len(groups[0]["params"]) == 2
+    assert len(groups[1]["params"]) == 2
 
 
 def test_unknown_field_and_invalid_mode_are_rejected(tmp_path):
@@ -96,3 +127,39 @@ def test_diagnostic_dataset_config_is_explicit_and_consistent(tmp_path):
     path.write_text(yaml.safe_dump(document))
     with pytest.raises(ConfigError, match="episode range"):
         load_dataset_config(path, ROOT)
+
+
+def test_image_shift_px_config_and_augmentation(tmp_path):
+    torch = pytest.importorskip("torch")
+    from dual_arm_learning.training_support import augment_image_shift
+
+    panda_cfg = load_training_config(SCENARIO / "configs/learning/act_training.yaml", ROOT)
+    assert panda_cfg.image_shift_px == 0
+    marvin_cfg = load_training_config(
+        ROOT / "shared/scenarios/marvin_sim/handover/configs/learning/act_training.yaml", ROOT
+    )
+    assert marvin_cfg.image_shift_px == 4
+
+    document = yaml.safe_load((SCENARIO / "configs/learning/act_training.yaml").read_text())
+    document["training"]["image_shift_px"] = 64
+    bad = tmp_path / "bad-shift.yaml"
+    bad.write_text(yaml.safe_dump(document))
+    with pytest.raises(ConfigError, match="image_shift_px"):
+        load_training_config(bad, ROOT)
+
+    img = torch.arange(2 * 3 * 12 * 16, dtype=torch.float32).reshape(2, 3, 12, 16)
+    state = torch.ones((2, 16), dtype=torch.float32)
+    batch = {"observation.images.global": img, "observation.state": state}
+    assert augment_image_shift(batch, 0) is batch
+
+    torch.manual_seed(123)
+    out1 = augment_image_shift(batch, 4)
+    torch.manual_seed(123)
+    out2 = augment_image_shift(batch, 4)
+    assert torch.equal(out1["observation.images.global"], out2["observation.images.global"])
+    assert out1["observation.images.global"].shape == img.shape
+    assert out1["observation.images.global"].dtype == img.dtype
+    assert not torch.equal(out1["observation.images.global"], img)
+    assert torch.equal(out1["observation.state"], state)
+    assert float(out1["observation.images.global"].min()) >= float(img.min())
+    assert float(out1["observation.images.global"].max()) <= float(img.max())

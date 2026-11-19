@@ -7,6 +7,7 @@ source:
 mounts:
   /build: writable
   /data: writable
+  /etc/bash.bashrc: read-only
   /third_party: read-only
 networks: [learning]
 gpu: true

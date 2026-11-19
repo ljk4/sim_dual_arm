@@ -398,3 +398,34 @@ def test_contact_cannot_cut_the_raw_closing_ramp_short(fixture):
     progress.update(replace(feedback, sim_time_ns=duration_ns), "RUNNING")
     assert progress.phase_index == 3
     assert plan.segments[3].start_positions == segment.end_positions
+
+
+def test_handoff_start_sim_time_ns_holds_start_until_handoff_and_binds_gate(fixture):
+    scene, task_config, profile, control, kinematics, snapshot = fixture
+    plan = build_teacher_plan(scene.model, snapshot, profile, control, kinematics, task_config)
+    progress = TeacherProgress(plan, task_config)
+    progress.actual_start_ns = 1_000_000_000
+    progress.actual_starts_ns.append(1_000_000_000)
+    handoff_ns = 1_500_000_000
+    progress.bind_motion_start(0, handoff_ns)
+    assert progress.actual_start_ns == handoff_ns
+    feedback = _feedback_for(plan, snapshot, capture=21, sim_ns=1_000_000_000)
+    chunk = sample_teacher_chunk(
+        plan,
+        gate=progress.fact(),
+        feedback=feedback,
+        request_id="chunk-handoff",
+        task_epoch=plan.task_epoch,
+        capture_seq=21,
+        observation_time_ns=1_000_000_000,
+        chunk_size=60,
+        period_ns=50_000_000,
+        profile=profile,
+        control_config=control,
+        start_sim_time_ns=handoff_ns,
+    )
+    # Points at or before handoff_ns (indices 0..9 -> 1.05s..1.50s) hold start_positions;
+    # the first selected point after handoff_ns (index 10 -> 1.55s) begins moving smoothly.
+    assert chunk.phase_start_sim_time_ns == handoff_ns
+    assert chunk.positions[9] == plan.segments[0].start_positions
+    assert chunk.positions[10] != plan.segments[0].start_positions

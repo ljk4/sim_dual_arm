@@ -156,7 +156,9 @@ class _FollowerAudit(_Audit):
                     if target.time_ns != (target_index + 1) * period_ns:
                         raise record_error("raw follower source is not on the 50 ms grid")
                     if len(target.positions) != len(self.joint_names):
-                        raise record_error("raw follower source is not 16-wide")
+                        raise record_error(
+                            f"raw follower source width {len(target.positions)} != {len(self.joint_names)}"
+                        )
                     if not all(math.isfinite(value) for value in target.positions):
                         raise record_error("raw follower source has a non-finite position")
                 if record.window.source_targets != targets:

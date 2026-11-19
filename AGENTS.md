@@ -78,6 +78,19 @@ Agent 必须严格区分当前处于**开发阶段**还是**规范阶段**，严
 - **三端统一选择入口**：所有端的 CLI 一律通过 `--robot <robot-id> --task <task-id>` 选择方案（与直接 `--config <recipe>` 互斥）；运行期产物路径也按同一对 `<robot-id>/<task-id>` 展开，确保配置与产物一一对应。
 - **端内插件平级对称（Symmetry）**：在 `simulation/mujoco/` 等包含具体机器人/任务的端内，通用机制必须统一收敛到 `robot_backend_sim/common/`（含 `control/`、`motion/`、`follower/`、`render/`、`ros/`、`runtime/`、`kinematics/`、`physics/`、`config/`、`tasks/` 中方案无关的部分），与具体插件彻底分离；具体机器人/任务按场景 id 平级对称存放为 `robot_backend_sim/<robot-id>/<task-id>/`（如 `panda_sim/stack/`、`marvin_sim/handover/`）。机器人级、任务无关的代码（robot assembly、robot kinematics、robot io、robot_config）直接放在 `<robot-id>/` 下；任务级代码（environment、evaluator、teacher、gate、task config、scene 编排）放在 `<robot-id>/<task-id>/` 下。调度注册表（`common/config/scene_loader.py`、`common/physics/robot_adapters.py`、`common/tasks/registry.py`）只按 assembly/task 名解析场景目录，新增机器人/任务只需新建 `<robot-id>/<task-id>/` 目录树并放入插件文件，严禁把先接入的机器人写在顶层公用目录，也严禁在 `common/` 内硬编码任何机器人/任务名。
 
+### 2.4 改动/新增代码归属判断与破例确认准则
+- **第一级判断：与端无关（`shared/`） vs 与四端有关（`simulation` / `runtime` / `learning` / `hardware`）**
+  - **与具体运行端无关**（跨端接口契约、通用数学/轨迹工具、方案绑定与配方）：统一归属 `shared/`。
+    - 与机器人和任务均无关 → 归属 `shared/common/`（严禁出现任何机器人名、任务名或场景特定阈值/魔数）；
+    - 与机器人或任务有关 → 归属 `shared/scenarios/<robot-id>/<task-id>/`（机器人级契约档案置于 `profiles/robots/`、`profiles/control/` 等，任务级配方与扩展置于 `configs/`、`extensions/`）。
+  - **与四端之一有关**（属于 `simulation/mujoco/`、`runtime/ros2/`、`learning/lerobot/`、`hardware/` 某一端的具体实现）：先确定归属哪一端，再按第二级判断端内归属。
+- **第二级判断：端内机器人/任务无关（`common/`） vs 机器人专属（`<robot-id>/`） vs 任务专属（`<robot-id>/<task-id>/`）**
+  - **与机器人和任务均无关**（通用控制、运动规划、跟随器、渲染、ROS 通信、训练与推理管线等通用机制） → 归属该端的 `common/`（或完全方案无关的端主包，严禁硬编码 `<robot-id>` 或 `<task-id>`）；
+  - **与特定机器人绑定、与具体任务无关**（如机器人装配 `assembly`、运动学模型与协同轴组拓扑、关节 I/O 映射、`robot_config`、真机特定型号驱动） → 归属该端下的 `<robot-id>/`；
+  - **与特定机器人及特定任务绑定**（如任务场景 `scene`、任务环境 `environment`、程序示教 `teacher`、阶段门控 `gate`、成功评价器 `evaluator`、任务专属配置与诊断） → 归属该端下的 `<robot-id>/<task-id>/`。
+- **破坏性改动或不符合规范的破例确认准则**：
+  - 在排查或开发过程中，若遇到需要做出**破坏性改动**（如修改跨端契约/配置结构、改变动作窗口或数据分布导致既有数据集/模型失效、改变核心物理或评价判定语义）或**认为某项偏离现有规范的做法确有工程意义**时，**必须先向用户说明原因、影响范围与预期收益，经用户确认并获得许可后方可实施修改**。
+
 ---
 
 ## 3. 容器环境与脚本规范

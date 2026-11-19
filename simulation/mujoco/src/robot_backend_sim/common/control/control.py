@@ -1,6 +1,6 @@
 """Single-owner control session over an already owned scene and I/O.
 
-``ControlSession`` composes an existing :class:`~robot_backend_sim.panda_sim.stack.scene.Scene`,
+``ControlSession`` composes an existing :class:`~robot_backend_sim.common.physics.scene_container.CompiledScene`,
 the selected :class:`~robot_backend_sim.common.physics.robot_io.RobotIO` and the one
 ``MotionController`` physical loop.  It adds explicit leases, immutable command
 identity, bounded idempotent command/chunk history, aggregate status and

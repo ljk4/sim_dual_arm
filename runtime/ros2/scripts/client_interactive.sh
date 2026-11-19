@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Prompt, reset via episode start, run one policy episode, and hold until Ctrl-C.set -euo pipefail
+# Prompt, reset via episode start, run one policy episode, and hold until Ctrl-C.
+set -euo pipefail
 
 APP_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${PROJECT_SETUP:-${SHARED_ROOT:-$APP_ROOT/../../shared}/common/tools/docker/setup.sh}"
@@ -135,11 +136,19 @@ fi
 if [[ -z "$output_root" ]]; then
   output_root="$DATA_ROOT/$segment/logs/recordings"
 fi
-if [[ -z "$run_id" ]]; then
-  run_id="interactive-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+ts="$(date +%Y%m%d_%H%M%S)"
+base="${run_id:-interactive}"
+if [[ ! "$base" =~ (_[0-9]{8}_[0-9]{6}|-[0-9]{8}T[0-9]{6}Z)$ ]]; then
+  run_id="${base}_${ts}"
 else
-  # An explicit base id is kept as a prefix so repeated runs never collide.
-  run_id="${run_id}-$(date -u +%Y%m%dT%H%M%SZ)"
+  run_id="$base"
+fi
+if [[ -e "$output_root/$run_id" ]]; then
+  suffix=2
+  while [[ -e "$output_root/${run_id}_${suffix}" ]]; do
+    suffix=$((suffix + 1))
+  done
+  run_id="${run_id}_${suffix}"
 fi
 if [[ -n "$seed" && ! "$seed" =~ ^[0-9]+$ ]]; then
   printf 'interactive: --seed must be a non-negative integer\n' >&2

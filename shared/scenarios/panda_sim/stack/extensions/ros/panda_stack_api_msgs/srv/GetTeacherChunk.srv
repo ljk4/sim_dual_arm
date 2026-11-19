@@ -8,6 +8,10 @@ uint64 task_epoch
 string request_id
 uint64 capture_seq
 builtin_interfaces/Time observation_time
+# Scheduled hand-off for which this chunk is requested.  The teacher starts a
+# newly gated phase at this time so its targets continue the reference the
+# follower will inherit, instead of racing ahead of the observation.
+builtin_interfaces/Time handoff_time
 ---
 bool success
 string reason

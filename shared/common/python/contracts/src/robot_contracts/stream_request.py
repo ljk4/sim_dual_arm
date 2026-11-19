@@ -43,10 +43,6 @@ REQUEST_KIND_NAMES = {
 }
 
 
-def _invalid(location: str, message: str) -> ContractError:
-    return ContractError("INVALID_STREAM_REQUEST", f"{location}: {message}")
-
-
 class Trajectory(StrictContractModel):
     """One frozen command trajectory: identity, joint order and timed targets."""
 

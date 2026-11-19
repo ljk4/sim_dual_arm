@@ -59,7 +59,7 @@ def resolve_chunk_anchor(
     if phase is Phase.STOPPING:
         raise invalid("STREAM_ANCHOR_UNAVAILABLE", "stopping motion has no successor")
     if schedule is None and phase in ACTIVE_PHASES:
-        raise invalid("MOTION_ACTIVE", "legacy motion is active")
+        raise invalid("MOTION_ACTIVE", "single-shot motion is active")
     if schedule is not None and phase in (Phase.ACCEPTED, Phase.RUNNING, Phase.SETTLING):
         return compute_active_chunk_anchor(schedule, phase, start_sim_time_ns, profile_digest)
     return compute_idle_chunk_anchor(

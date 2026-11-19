@@ -36,14 +36,22 @@ if [[ "$has_help" != "true" ]]; then
     --sdk-root "$POLICY_SDK" 1>&2 >/dev/null
 fi
 
-run_id="${ACT_RUN_ID:-policy-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+run_id="${ACT_RUN_ID:-policy_$(date +%Y%m%d_%H%M%S)}"
 log_directory="$ACT_LOG_DIRECTORY"
 if [[ -z "$log_directory" ]]; then
   if [[ -n "$robot" && -n "$task" ]]; then
-    log_directory="$DATA_ROOT/$robot/$task/logs/policy-service/$run_id"
+    service_root="$DATA_ROOT/$robot/$task/logs/policy-service"
   else
-    log_directory="$DATA_ROOT/_direct/logs/policy-service/$run_id"
+    service_root="$DATA_ROOT/_direct/logs/policy-service"
   fi
+  if [[ -z "${ACT_RUN_ID:-}" && -e "$service_root/$run_id" ]]; then
+    suffix=2
+    while [[ -e "$service_root/${run_id}_${suffix}" ]]; do
+      suffix=$((suffix + 1))
+    done
+    run_id="${run_id}_${suffix}"
+  fi
+  log_directory="$service_root/$run_id"
 fi
 
 exec python3 -m dual_arm_learning.policy_service_cli \

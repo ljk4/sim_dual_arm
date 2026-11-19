@@ -57,10 +57,6 @@ def datasets_root(base: Path, robot: str | None, task: str | None = None) -> Pat
     return scenario_root(base, robot, task) / "datasets"
 
 
-def raw_datasets_root(base: Path, robot: str | None, task: str | None = None) -> Path:
-    return datasets_root(base, robot, task) / "raw"
-
-
 def logs_root(base: Path, robot: str | None, task: str | None = None) -> Path:
     return scenario_root(base, robot, task) / "logs"
 
@@ -85,7 +81,11 @@ def default_backend_log(robot: str | None, task: str | None = None) -> Path:
             for child in backend_root.iterdir()
             if child.is_dir()
             and (child / "log").is_dir()
-            and (child.name.startswith("teacher-backend") or "-teacher" in child.name)
+            and (
+                child.name.startswith("teacher-backend")
+                or "-teacher" in child.name
+                or "_teacher" in child.name
+            )
         ]
         if candidates:
             candidates.sort(key=lambda item: item.parent.stat().st_mtime_ns, reverse=True)
@@ -100,7 +100,6 @@ __all__ = [
     "debug_root",
     "default_backend_log",
     "logs_root",
-    "raw_datasets_root",
     "recordings_root",
     "runs_root",
     "scenario_root",

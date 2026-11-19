@@ -11,6 +11,8 @@ owners.
 
 from __future__ import annotations
 
+from collections import deque
+from dataclasses import dataclass
 import threading
 import time
 from collections.abc import Callable
@@ -27,7 +29,6 @@ from robot_contracts.trajectory.follower_reference import FollowerValidationLimi
 from robot_run_logging import EventContext, Scalar
 from robot_trajectory.transition_retiming import (
     RetimedWindow,
-    gripper_axes,
     retime_action_window,
 )
 
@@ -75,11 +76,40 @@ class PolicyTargetSource:
         self.total_wall_deadline_s = policy.total_wall_deadline_s
         self.task_stop_margin_s = policy.task_stop_margin_s
         self.task_sim_budget_ns = policy.task_sim_budget_ns
+        self.warmup_on_settle = policy.warmup_on_settle
+        self.async_inference = policy.async_inference
+        self.prefetch_lead_ns = policy.prefetch_lead_ns
+        self.action_execution_latency_ns = policy.action_execution_latency_ns
         self._context: RunContext | None = None
         self._episode_id = ""
         self._task_epoch = 0
         self._last_task: object | None = None
         self._task_end: tuple[str, str, object | None] = ("", "", None)
+
+    def warm_up(
+        self,
+        observation: ExactObservation,
+        request_id: str,
+        *,
+        context: RunContext | None = None,
+    ) -> None:
+        """Warm up the full RPC + GPU inference pipeline before StartTask starts the task clock."""
+        effective_context = context or self._context or observation.context
+        if effective_context is None:
+            raise ContractError("STREAM_NOT_STARTED", "policy warm-up has no context")
+        policy_observation = observation_from_exact(
+            observation, self.client.profile, self.policy
+        )
+        self.client.predict(
+            effective_context,
+            self.client.session_id,
+            request_id,
+            policy_observation,
+            deadline_s=self.predict_deadline_s,
+        )
+        reset_session = getattr(self.client, "reset", None)
+        if callable(reset_session):
+            reset_session(effective_context, f"{request_id}-reset")
 
     def begin(self, context: RunContext, episode_id: str, task_id: str) -> int | None:
         self._context = context
@@ -209,45 +239,100 @@ class ContinuousStreamRunner:
     def _kind(self) -> str:
         return "stream"
 
+    def _close_runner(self) -> None:
+        return None
+
     def run(self) -> None:
-        self.task_start_sim_time_ns = self.source.begin(
-            self.context, self.episode_id, self.task_id
-        )
-        observation = self._first_observation()
-        anchor = self.control.get_anchor(self.context)
-        self._first_anchor_checks(anchor, observation)
-        simulation_deadline = self._simulation_deadline(anchor)
-        chunk_index = 0
-        while True:
-            self._check_stop()
-            self._check_task_end()
-            if chunk_index >= self.source.max_chunks:
-                if self.source.termination_mode == "task":
-                    self._finish_task("TASK_TIMEOUT", "TASK_TIMEOUT", None)
-                    break
-                self._validate_last_command()
-                break
-            chunk_index += 1
-            if chunk_index > 1:
-                anchor = self._wait_successor_anchor(chunk_index)
-                observation = self._wait_successor_observation(anchor)
+        try:
+            self.task_start_sim_time_ns = self.source.begin(
+                self.context, self.episode_id, self.task_id
+            )
+            first_observation = self._first_observation()
+            anchor = self.control.get_anchor(self.context)
+            self._first_anchor_checks(anchor, first_observation)
+            simulation_deadline = self._simulation_deadline(anchor)
+            chunk_index = 0
+            while True:
                 self._check_stop()
-                if observation.stamp_ns >= anchor.start_sim_time_ns:  # type: ignore[attr-defined]
-                    raise ContractError(
-                        "STREAM_LATE_PREDICTION",
-                        "successor observation is not before its fixed hand-off",
-                    )
-            self._check_deadline(observation, simulation_deadline)
-            self._run_chunk(chunk_index, observation, anchor)
-            self._check_task_end()
-        self._emit_completed()
+                self._check_task_end()
+                if chunk_index >= self.source.max_chunks:
+                    if self.source.termination_mode == "task":
+                        self._finish_task("TASK_TIMEOUT", "TASK_TIMEOUT", None)
+                        break
+                    self._validate_last_command()
+                    break
+                chunk_index += 1
+                if chunk_index > 1:
+                    anchor = self._wait_successor_anchor(chunk_index)
+                    self._check_stop()
+                    self._check_task_end()
+                observation, prediction = self._acquire_chunk_prediction(
+                    chunk_index,
+                    anchor,
+                    first_observation if chunk_index == 1 else None,
+                    simulation_deadline,
+                )
+                self._run_chunk(chunk_index, observation, anchor, prediction=prediction)
+                self._check_task_end()
+            self._emit_completed()
+        finally:
+            self._close_runner()
+
+    def _acquire_chunk_prediction(
+        self,
+        chunk_index: int,
+        anchor: object,
+        first_observation: ExactObservation | None,
+        simulation_deadline: int,
+    ) -> tuple[ExactObservation, Prediction]:
+        if chunk_index == 1:
+            assert first_observation is not None
+            observation = first_observation
+        else:
+            observation = self._wait_successor_observation(anchor)
+            self._check_stop()
+            if observation.stamp_ns >= anchor.start_sim_time_ns:  # type: ignore[attr-defined]
+                raise ContractError(
+                    "STREAM_LATE_PREDICTION",
+                    "successor observation is not before its fixed hand-off",
+                )
+        self._check_deadline(observation, simulation_deadline)
+        self.last_observation_id = observation.observation_id
+        request_id = self._request_id(chunk_index, observation.observation_id)
+        try:
+            prediction = self.source.predict(
+                observation,
+                chunk_index,
+                request_id,
+                handoff_time_ns=int(anchor.start_sim_time_ns),  # type: ignore[attr-defined]
+            )
+        except TaskTerminal as terminal:
+            self.task_end = (terminal.runtime_reason, terminal.task_reason, terminal.state)
+            raise _TaskComplete from terminal
+        return observation, prediction
+
+    def _request_id(self, chunk_index: int, observation_id: int) -> str:
+        return f"{self.episode_id}-{self._kind()}-{chunk_index}-obs-{observation_id}"
 
     def _wait_successor_observation(self, anchor: object) -> ExactObservation:
-        return self.io.wait_observation(
-            self.last_observation_id,
-            self.configuration.recipe.call_timeout_s,
-            self.stop_requested,
+        prefetch_lead_ns = int(getattr(self.source, "prefetch_lead_ns", 0))
+        period_ns = int(getattr(self.source, "action_period_ns", 50_000_000))
+        target_obs_ns = (
+            int(anchor.start_sim_time_ns) - prefetch_lead_ns  # type: ignore[attr-defined]
+            if prefetch_lead_ns > 0
+            else 0
         )
+        while True:
+            observation = self.io.wait_observation(
+                self.last_observation_id,
+                self.configuration.recipe.call_timeout_s,
+                self.stop_requested,
+            )
+            self.last_observation_id = observation.observation_id
+            self._check_stop()
+            self._check_task_end()
+            if prefetch_lead_ns <= 0 or observation.stamp_ns + period_ns > target_obs_ns:
+                return observation
 
     def _first_observation(self) -> ExactObservation:
         while True:
@@ -273,21 +358,22 @@ class ContinuousStreamRunner:
         chunk_index: int,
         observation: ExactObservation,
         anchor: object,
+        *,
+        prediction: Prediction | None = None,
     ) -> None:
-        self.last_observation_id = observation.observation_id
-        request_id = (
-            f"{self.episode_id}-{self._kind()}-{chunk_index}-obs-{observation.observation_id}"
-        )
-        try:
-            prediction = self.source.predict(
-                observation,
-                chunk_index,
-                request_id,
-                handoff_time_ns=int(anchor.start_sim_time_ns),  # type: ignore[attr-defined]
-            )
-        except TaskTerminal as terminal:
-            self.task_end = (terminal.runtime_reason, terminal.task_reason, terminal.state)
-            raise _TaskComplete from terminal
+        self.last_observation_id = max(self.last_observation_id, observation.observation_id)
+        request_id = self._request_id(chunk_index, observation.observation_id)
+        if prediction is None:
+            try:
+                prediction = self.source.predict(
+                    observation,
+                    chunk_index,
+                    request_id,
+                    handoff_time_ns=int(anchor.start_sim_time_ns),  # type: ignore[attr-defined]
+                )
+            except TaskTerminal as terminal:
+                self.task_end = (terminal.runtime_reason, terminal.task_reason, terminal.state)
+                raise _TaskComplete from terminal
         self._check_stop()
         self._validate_prediction(prediction, observation)
         pending = prediction.task_end
@@ -301,7 +387,7 @@ class ContinuousStreamRunner:
             and chunk_index == self.source.max_chunks
         )
         request, retiming = self._request(
-            observation, anchor, prediction, chunk_index, final=final
+            observation, anchor, prediction, chunk_index, request_id, final=final
         )
         if request.window is None or len(request.window.selected_indices) != (
             self.source.target_count
@@ -353,6 +439,7 @@ class ContinuousStreamRunner:
         anchor: object,
         prediction: Prediction,
         chunk_index: int,
+        request_id: str,
         *,
         final: bool,
     ) -> tuple[StreamRequest, RetimedWindow | None]:
@@ -371,8 +458,11 @@ class ContinuousStreamRunner:
             targets,
             self.source.target_count,
         )
+        window = self._prepare_window(
+            window, observation, anchor, prediction, chunk_index, request_id
+        )
         retiming = self._retime(window, anchor)
-        response_targets = targets if retiming is None else retiming.window.source_targets
+        response_targets = window.source_targets if retiming is None else retiming.window.source_targets
         accept_before = self.io.robot_time_ns() + self.configuration.recipe.command_acceptance_ns
         request = StreamRequest(
             trajectory=Trajectory(
@@ -393,6 +483,19 @@ class ContinuousStreamRunner:
         )
         return request, retiming
 
+    def _prepare_window(
+        self,
+        window: ActionWindow,
+        observation: ExactObservation,
+        anchor: object,
+        prediction: Prediction,
+        chunk_index: int,
+        request_id: str,
+    ) -> ActionWindow:
+        """Source-specific window preparation hook; shared stream leaves window unchanged."""
+        del observation, anchor, prediction, chunk_index, request_id
+        return window
+
     def _retime(self, window: ActionWindow, anchor: object) -> RetimedWindow | None:
         """Source-specific target shaping hook; the shared stream does none."""
         return None
@@ -404,7 +507,7 @@ class ContinuousStreamRunner:
         chunk_index: int,
         request_id: str,
     ) -> None:
-        """Record each explicit original-to-execution gripper target change."""
+        """Record each explicit original-to-execution target change."""
         for axis in retiming.axes:
             self._emit(
                 "follower.chunk_retimed",
@@ -620,8 +723,15 @@ class _TaskComplete(Exception):
     """Internal control flow: the task judge froze a terminal fact."""
 
 
+@dataclass(frozen=True, slots=True)
+class _CachedPrediction:
+    observation_id: int
+    stamp_ns: int
+    by_abs_time_ns: dict[int, tuple[float, ...]]
+
+
 class PolicyStreamRunner(ContinuousStreamRunner):
-    """Backwards-compatible finite policy runner used by the 032 diagnostic."""
+    """Continuous policy runner with true async inference and timestamp-invariant wait advance."""
 
     def __init__(
         self,
@@ -668,9 +778,368 @@ class PolicyStreamRunner(ContinuousStreamRunner):
             clock=clock,
         )
         self.retiming_axes = tuple(range(len(self.profile.joint_names)))
+        self._prediction_history: deque[_CachedPrediction] = deque(maxlen=12)
+        self._async_cond = threading.Condition()
+        self._async_thread: threading.Thread | None = None
+        self._async_closed = False
+        self._async_job: tuple[int, int, int, ExactObservation | None] | None = None
+        self._async_completed_chunk = 0
+        self._async_latest: tuple[int, ExactObservation, Prediction] | None = None
+        self._async_error: BaseException | None = None
 
     def _kind(self) -> str:
         return "policy"
+
+    def _close_runner(self) -> None:
+        thread = self._async_thread
+        if thread is None:
+            return
+        with self._async_cond:
+            self._async_closed = True
+            self._async_cond.notify_all()
+        thread.join(timeout=1.0)
+        self._async_thread = None
+
+    def _ensure_async_producer(self) -> None:
+        if self._async_thread is not None:
+            return
+        self._async_closed = False
+        thread = threading.Thread(
+            target=self._async_producer_loop,
+            name="policy-async-producer",
+            daemon=True,
+        )
+        self._async_thread = thread
+        thread.start()
+
+    def _record_cached_prediction(
+        self, observation: ExactObservation, prediction: Prediction
+    ) -> None:
+        if prediction.task_end:
+            return
+        by_abs_time_ns = {
+            observation.stamp_ns + time_ns: positions
+            for time_ns, positions in zip(
+                prediction.times_from_observation_ns,
+                prediction.positions,
+                strict=True,
+            )
+        }
+        entry = _CachedPrediction(
+            observation_id=observation.observation_id,
+            stamp_ns=observation.stamp_ns,
+            by_abs_time_ns=by_abs_time_ns,
+        )
+        with self._async_cond:
+            if (
+                self._prediction_history
+                and self._prediction_history[-1].observation_id == entry.observation_id
+            ):
+                return
+            self._prediction_history.append(entry)
+
+    def _async_producer_loop(self) -> None:
+        period_ns = int(self.policy.action_period_ns)
+        prefetch_lead_ns = int(self.policy.prefetch_lead_ns)
+        while True:
+            with self._async_cond:
+                while (
+                    not self._async_closed
+                    and (
+                        self._async_job is None
+                        or self._async_completed_chunk >= self._async_job[0]
+                    )
+                ):
+                    self._async_cond.wait(timeout=0.05)
+                if self._async_closed:
+                    return
+                assert self._async_job is not None
+                chunk_index, handoff_ns, target_obs_ns, fixed_obs = self._async_job
+            try:
+                if fixed_obs is not None:
+                    request_id = self._request_id(chunk_index, fixed_obs.observation_id)
+                    prediction = self.source.predict(
+                        fixed_obs,
+                        chunk_index,
+                        request_id,
+                        handoff_time_ns=handoff_ns,
+                    )
+                    self._validate_prediction(prediction, fixed_obs)
+                    self._record_cached_prediction(fixed_obs, prediction)
+                    with self._async_cond:
+                        self._async_latest = (chunk_index, fixed_obs, prediction)
+                        self._async_completed_chunk = chunk_index
+                        self._async_cond.notify_all()
+                    continue
+
+                speculative_done = False
+                speculative_ns = (
+                    handoff_ns - min(2 * prefetch_lead_ns, 450_000_000)
+                    if prefetch_lead_ns > 0
+                    else 0
+                )
+                while True:
+                    with self._async_cond:
+                        if self._async_closed:
+                            return
+                        if self._async_job is None or self._async_job[0] != chunk_index:
+                            break
+                    observation = self.io.wait_observation(
+                        self.last_observation_id,
+                        self.configuration.recipe.call_timeout_s,
+                        self.stop_requested,
+                    )
+                    self.last_observation_id = observation.observation_id
+                    if self.stop_requested.is_set():
+                        return
+                    if observation.stamp_ns >= handoff_ns:
+                        with self._async_cond:
+                            has_backup = (
+                                self._async_latest is not None
+                                and self._async_latest[0] == chunk_index
+                            )
+                            if has_backup:
+                                self._async_completed_chunk = chunk_index
+                                self._async_cond.notify_all()
+                                break
+                        raise ContractError(
+                            "STREAM_LATE_PREDICTION",
+                            "successor observation is not before its fixed hand-off",
+                        )
+                    reached_target = (
+                        prefetch_lead_ns <= 0 or observation.stamp_ns + period_ns > target_obs_ns
+                    )
+                    run_speculative = (
+                        not reached_target
+                        and not speculative_done
+                        and speculative_ns > 0
+                        and observation.stamp_ns + period_ns > speculative_ns
+                    )
+                    if not reached_target and not run_speculative:
+                        continue
+                    request_id = self._request_id(chunk_index, observation.observation_id)
+                    prediction = self.source.predict(
+                        observation,
+                        chunk_index,
+                        request_id,
+                        handoff_time_ns=handoff_ns,
+                    )
+                    self._validate_prediction(prediction, observation)
+                    self._record_cached_prediction(observation, prediction)
+                    with self._async_cond:
+                        self._async_latest = (chunk_index, observation, prediction)
+                        if reached_target:
+                            self._async_completed_chunk = chunk_index
+                        self._async_cond.notify_all()
+                    if reached_target:
+                        break
+                    speculative_done = True
+            except BaseException as error:
+                with self._async_cond:
+                    self._async_error = error
+                    self._async_cond.notify_all()
+                return
+
+    def _acquire_chunk_prediction(
+        self,
+        chunk_index: int,
+        anchor: object,
+        first_observation: ExactObservation | None,
+        simulation_deadline: int,
+    ) -> tuple[ExactObservation, Prediction]:
+        if not self.policy.async_inference:
+            observation, prediction = super()._acquire_chunk_prediction(
+                chunk_index, anchor, first_observation, simulation_deadline
+            )
+            self._validate_prediction(prediction, observation)
+            self._record_cached_prediction(observation, prediction)
+            return observation, prediction
+
+        self._ensure_async_producer()
+        handoff_ns = int(anchor.start_sim_time_ns)  # type: ignore[attr-defined]
+        prefetch_lead_ns = int(self.policy.prefetch_lead_ns)
+        target_obs_ns = handoff_ns - prefetch_lead_ns if prefetch_lead_ns > 0 else 0
+        fallback_margin_ns = (
+            min(100_000_000, max(50_000_000, prefetch_lead_ns // 2))
+            if prefetch_lead_ns > 0
+            else 0
+        )
+        with self._async_cond:
+            self._async_job = (chunk_index, handoff_ns, target_obs_ns, first_observation)
+            self._async_cond.notify_all()
+
+        interval = min(float(self.source.poll_interval_s), 0.005)
+        while True:
+            self._check_stop()
+            self._check_task_end()
+            with self._async_cond:
+                if self._async_error is not None:
+                    error = self._async_error
+                    self._async_error = None
+                    if isinstance(error, TaskTerminal):
+                        self.task_end = (error.runtime_reason, error.task_reason, error.state)
+                        raise _TaskComplete from error
+                    raise error
+                latest = self._async_latest
+                if (
+                    self._async_completed_chunk >= chunk_index
+                    and latest is not None
+                    and latest[0] == chunk_index
+                ):
+                    _, observation, prediction = latest
+                    break
+                if (
+                    fallback_margin_ns > 0
+                    and latest is not None
+                    and latest[0] == chunk_index
+                    and self.io.robot_time_ns() >= handoff_ns - fallback_margin_ns
+                ):
+                    _, observation, prediction = latest
+                    break
+                self._async_cond.wait(timeout=interval)
+
+        self._check_deadline(observation, simulation_deadline)
+        return observation, prediction
+
+    def _axis_motion_threshold(self, axis: int) -> float:
+        return 0.003 if self.profile.joints[axis].unit == "m" else 0.030
+
+    def _has_window_progress(
+        self,
+        positions_seq: tuple[tuple[float, ...], ...],
+        baseline: tuple[float, ...],
+    ) -> bool:
+        """Return True when the window makes net progress from anchor baseline to window end."""
+        end_positions = positions_seq[-1]
+        return any(
+            abs(end - base) >= self._axis_motion_threshold(axis)
+            for axis, (end, base) in enumerate(zip(end_positions, baseline, strict=True))
+        )
+
+    def _execution_latency_steps(self) -> int:
+        latency_ns = int(self.policy.action_execution_latency_ns)
+        if latency_ns <= 0:
+            return 0
+        period_ns = int(self.policy.action_period_ns)
+        return round(latency_ns / period_ns)
+
+    def _apply_execution_latency(
+        self,
+        window: ActionWindow,
+        exec_steps: int,
+        chunk_index: int,
+        request_id: str,
+    ) -> ActionWindow:
+        """Discard the first ``exec_steps`` predicted steps for UMI-style execution latency matching."""
+        if exec_steps <= 0:
+            return window
+        all_targets = window.source_targets
+        last_selected = window.selected_indices[-1]
+        if last_selected + exec_steps >= len(all_targets):
+            raise ContractError(
+                "INSUFFICIENT_HORIZON",
+                "prediction horizon cannot cover hand-off plus action_execution_latency_ns",
+            )
+        last_index = len(all_targets) - 1
+        matched = tuple(
+            Target(
+                all_targets[index].time_ns,
+                all_targets[min(index + exec_steps, last_index)].positions,
+            )
+            for index in range(len(all_targets))
+        )
+        self._emit(
+            "policy.latency_matched",
+            reason="LATENCY_MATCHED",
+            context=EventContext(
+                episode_id=self.episode_id,
+                request_id=request_id,
+                command_id=self.command_id,
+                clock_epoch=self.context.clock_epoch,
+                sim_time_ns=window.observation_time_ns,
+            ),
+            fields={
+                "chunk_index": chunk_index,
+                "observation_id": window.observation_id,
+                "inference_latency_ns": window.handoff_time_ns - window.observation_time_ns,
+                "execution_latency_ns": int(self.policy.action_execution_latency_ns),
+                "inference_skipped_steps": window.skipped_overlap_count,
+                "execution_skipped_steps": exec_steps,
+                "total_skipped_steps": window.skipped_overlap_count + exec_steps,
+            },
+        )
+        return ActionWindow(
+            window.observation_id,
+            window.observation_time_ns,
+            window.handoff_time_ns,
+            matched,
+            window.target_count,
+        )
+
+    def _prepare_window(
+        self,
+        window: ActionWindow,
+        observation: ExactObservation,
+        anchor: object,
+        prediction: Prediction,
+        chunk_index: int,
+        request_id: str,
+    ) -> ActionWindow:
+        """Apply latency matching, then newest-wins timestamp-invariant wait advancement."""
+        del prediction
+        exec_steps = self._execution_latency_steps()
+        matched_window = self._apply_execution_latency(window, exec_steps, chunk_index, request_id)
+        selected = matched_window.selected_source_targets
+        baseline = anchor.reference.positions  # type: ignore[attr-defined]
+        selected_positions = tuple(target.positions for target in selected)
+        if self._has_window_progress(selected_positions, baseline):
+            return matched_window
+
+        exec_offset_ns = exec_steps * int(self.policy.action_period_ns)
+        required_abs_times = tuple(
+            observation.stamp_ns + target.time_ns + exec_offset_ns for target in selected
+        )
+        with self._async_cond:
+            history = list(reversed(self._prediction_history))
+        for entry in history:
+            if entry.observation_id == observation.observation_id:
+                continue
+            if not all(t_abs in entry.by_abs_time_ns for t_abs in required_abs_times):
+                continue
+            hist_positions = tuple(
+                entry.by_abs_time_ns[t_abs] for t_abs in required_abs_times
+            )
+            if not self._has_window_progress(hist_positions, baseline):
+                continue
+            merged = list(matched_window.source_targets)
+            for idx, positions in zip(matched_window.selected_indices, hist_positions, strict=True):
+                merged[idx] = Target(matched_window.source_targets[idx].time_ns, positions)
+            self._emit(
+                "policy.wait_advance_applied",
+                reason="WAIT_ADVANCE_APPLIED",
+                context=EventContext(
+                    episode_id=self.episode_id,
+                    request_id=request_id,
+                    command_id=self.command_id,
+                    clock_epoch=self.context.clock_epoch,
+                    sim_time_ns=observation.stamp_ns,
+                ),
+                fields={
+                    "chunk_index": chunk_index,
+                    "observation_id": observation.observation_id,
+                    "source_observation_id": entry.observation_id,
+                    "source_stamp_ns": entry.stamp_ns,
+                    "handoff_sim_time_ns": int(anchor.start_sim_time_ns),  # type: ignore[attr-defined]
+                },
+            )
+            return ActionWindow(
+                matched_window.observation_id,
+                matched_window.observation_time_ns,
+                matched_window.handoff_time_ns,
+                tuple(merged),
+                matched_window.target_count,
+            )
+        return matched_window
 
     def _retime(self, window: ActionWindow, anchor: object) -> RetimedWindow | None:
         return retime_action_window(
@@ -680,6 +1149,7 @@ class PolicyStreamRunner(ContinuousStreamRunner):
             self.limits.max_accelerations,
             self.limits.max_target_deviations,
             self.retiming_axes,
+            axis_groups=self.profile.coordinated_axis_groups,
         )
 
     def run(self) -> None:
@@ -708,6 +1178,14 @@ class PolicyStreamRunner(ContinuousStreamRunner):
         first_observation_id = observation.observation_id
         first_stamp_ns = observation.stamp_ns
         last_stamp_ns = first_stamp_ns
+        if self.policy.warmup_on_settle:
+            warm_up = getattr(self.source, "warm_up", None)
+            if callable(warm_up):
+                warm_up(
+                    observation,
+                    f"{self.episode_id}-warmup-obs-{observation.observation_id}",
+                    context=self.context,
+                )
         self._emit(
             "policy.startup_settle.started",
             reason="STARTUP_SETTLE_STARTED",

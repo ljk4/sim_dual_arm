@@ -6,7 +6,7 @@ robot:
   scene: ../scene/panda_stack_learning.yaml
   control: ../../../profiles/control/panda_control_v1.yaml
   stream: ../../../profiles/control/panda_stream_v1.yaml
-  follower: ../../../profiles/control/panda_follower_v1.yaml
+  follower: ../../../profiles/control/panda_follower_inference_v1.yaml
   task: ../scene/panda_stack_task.yaml
   task_type: stack
   # Optional read-only segmentation counts on the same render snapshot.
@@ -28,8 +28,8 @@ run:
 queues:
   owner: 64
   planner: 4
-  render_snapshots: 4
-  render_outputs: 8
+  render_snapshots: 32
+  render_outputs: 32
   captures: 32
   events: 1024
   feedback: 64

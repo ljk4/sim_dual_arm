@@ -8,7 +8,6 @@ from robot_contracts.action_chunks import ActionWindow, ChunkAnchor
 from robot_contracts.models import JointSpec, Target
 from robot_contracts.trajectory.spline import ReferenceSample
 from robot_trajectory.transition_retiming import (
-    gripper_axes,
     reachable_bounds,
     retime_action_window,
 )
@@ -21,6 +20,7 @@ JOINT_NAMES = (
 )
 AMAX = tuple(1.0 if "gripper" not in name else 0.5 for name in JOINT_NAMES)
 BUDGET = tuple(0.3 if "gripper" not in name else 0.04 for name in JOINT_NAMES)
+LINEAR_AXES = (7, 15)
 
 
 def _joints() -> tuple[JointSpec, ...]:
@@ -64,7 +64,7 @@ def test_retimes_a_stationary_start_on_the_first_selected_point():
         [0.0] * 15 + [0.04],
     )
     result = retime_action_window(
-        window, anchor, _joints(), AMAX, BUDGET, gripper_axes(JOINT_NAMES))
+        window, anchor, _joints(), AMAX, BUDGET, LINEAR_AXES)
     assert result.retimed
     assert [axis.name for axis in result.axes] == ["right_gripper_width"]
     axis = result.axes[0]
@@ -91,7 +91,7 @@ def test_retimes_a_reverse_switch_from_a_closing_velocity():
     )
     budgets = tuple(0.3 if "gripper" not in name else 0.01 for name in JOINT_NAMES)
     result = retime_action_window(
-        window, anchor, _joints(), AMAX, budgets, gripper_axes(JOINT_NAMES))
+        window, anchor, _joints(), AMAX, budgets, LINEAR_AXES)
     assert result.retimed
     axis = next(item for item in result.axes if item.name == "left_gripper_width")
     assert axis.original_excess == pytest.approx(0.019716277049734998)
@@ -123,7 +123,7 @@ def test_keeps_targets_that_are_reachable_within_the_budget():
     window = _right_gripper_window(right)
     anchor = _anchor([0.0] * 15 + [0.0222], [0.0] * 15 + [0.04])
     result = retime_action_window(
-        window, anchor, _joints(), AMAX, BUDGET, gripper_axes(JOINT_NAMES))
+        window, anchor, _joints(), AMAX, BUDGET, LINEAR_AXES)
     assert not result.retimed
     assert result.axes == ()
     assert result.window is window
@@ -134,7 +134,7 @@ def test_window_internal_direction_change_keeps_times_and_unselected_tail():
     window = _right_gripper_window(right)
     anchor = _anchor([0.0] * 15 + [0.0222], [0.0] * 15 + [0.04])
     result = retime_action_window(
-        window, anchor, _joints(), AMAX, BUDGET, gripper_axes(JOINT_NAMES))
+        window, anchor, _joints(), AMAX, BUDGET, LINEAR_AXES)
     assert result.retimed
     changed = [
         index for index, (before, after) in enumerate(
@@ -162,7 +162,7 @@ def test_only_profile_gripper_axes_are_retimed():
     window = ActionWindow(1, 0, 1_050_000_000, tuple(source), 20)
     anchor = _anchor([0.0] * 15 + [0.0222], [0.0] * 16)
     result = retime_action_window(
-        window, anchor, _joints(), AMAX, BUDGET, gripper_axes(JOINT_NAMES))
+        window, anchor, _joints(), AMAX, BUDGET, LINEAR_AXES)
     assert [axis.name for axis in result.axes] == ["right_gripper_width"]
     assert result.window.source_targets[21].positions[0] == pytest.approx(1.0)
 
@@ -171,13 +171,72 @@ def test_retiming_is_deterministic_and_stateless():
     window = _right_gripper_window([0.079865] * 20)
     anchor = _anchor([0.0] * 15 + [0.022205447806916776], [0.0] * 15 + [0.04])
     first = retime_action_window(
-        window, anchor, _joints(), AMAX, BUDGET, gripper_axes(JOINT_NAMES))
+        window, anchor, _joints(), AMAX, BUDGET, LINEAR_AXES)
     second = retime_action_window(
-        window, anchor, _joints(), AMAX, BUDGET, gripper_axes(JOINT_NAMES))
+        window, anchor, _joints(), AMAX, BUDGET, LINEAR_AXES)
     assert first.window == second.window
     assert first.axes == second.axes
     # The input window remains the original prediction.
     assert window.source_targets[21].positions[15] == pytest.approx(0.079865)
+
+
+def test_coordinated_arm_group_scales_all_moving_arm_axes_proportionally():
+    import math
+    from robot_contracts.models import coordinated_axis_groups
+
+    joints = _joints()
+    groups = coordinated_axis_groups(joints)
+    assert groups == ((0, 1, 2, 3, 4, 5, 6), (8, 9, 10, 11, 12, 13, 14))
+
+    initial = [0.0] * 16
+    initial[15] = 0.08
+    # right_joint3 (index 10) moves 0.80 rad in 1.0 s (beyond 0.48 reachable & 0.25 stop bound);
+    # right_joint1 (8), right_joint2 (9), right_joint4 (11) stay within their own budgets;
+    # left_joint1 (0) and right_gripper_width (15) belong to other groups / independent axes.
+    end_targets = list(initial)
+    end_targets[0] = 0.10
+    end_targets[8] = 0.20
+    end_targets[9] = -0.16
+    end_targets[10] = 0.80
+    end_targets[11] = 0.12
+
+    source = []
+    for index in range(60):
+        values = list(initial)
+        if 21 <= index <= 40:
+            values = list(end_targets)
+        source.append(Target((index + 1) * 50_000_000, tuple(values)))
+    window = ActionWindow(1, 0, 1_050_000_000, tuple(source), 20)
+    anchor = _anchor(initial, [0.0] * 16)
+    all_axes = tuple(range(16))
+
+    result = retime_action_window(
+        window, anchor, joints, AMAX, BUDGET, all_axes, axis_groups=groups
+    )
+    assert result.retimed
+    retimed_names = [item.name for item in result.axes]
+    assert set(retimed_names) == {
+        "right_joint1",
+        "right_joint2",
+        "right_joint3",
+        "right_joint4",
+    }
+
+    expected_alpha = 0.25 / 0.80
+    adapted_end = result.window.targets[-1].positions
+    assert adapted_end[0] == pytest.approx(0.10)
+    assert adapted_end[15] == pytest.approx(0.08)
+    assert adapted_end[10] == pytest.approx(0.25)
+    assert adapted_end[8] == pytest.approx(0.20 * expected_alpha)
+    assert adapted_end[9] == pytest.approx(-0.16 * expected_alpha)
+    assert adapted_end[11] == pytest.approx(0.12 * expected_alpha)
+
+    orig_vec = [end_targets[i] - initial[i] for i in range(8, 15)]
+    adap_vec = [adapted_end[i] - initial[i] for i in range(8, 15)]
+    dot = sum(a * b for a, b in zip(orig_vec, adap_vec, strict=True))
+    norm_orig = math.sqrt(sum(a * a for a in orig_vec))
+    norm_adap = math.sqrt(sum(b * b for b in adap_vec))
+    assert dot / (norm_orig * norm_adap) == pytest.approx(1.0)
 
 
 @pytest.mark.parametrize(

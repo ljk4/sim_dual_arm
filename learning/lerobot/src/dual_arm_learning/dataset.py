@@ -85,7 +85,7 @@ def _resolve_episodes(
     return parsed
 
 
-def _prepare_output(config: DatasetConfig, replace: bool, synthetic: bool) -> Path:
+def _validate_output_target(config: DatasetConfig, replace: bool, synthetic: bool) -> Path:
     output = config.output_root
     if output.exists():
         if not replace:
@@ -105,6 +105,12 @@ def _prepare_output(config: DatasetConfig, replace: bool, synthetic: bool) -> Pa
         existing = load_json_document(manifest_path) if manifest_path.is_file() else {}
         if existing.get("status") == "complete" and not synthetic:
             raise ExportError(f"{output}: complete dataset exists; refusing to overwrite")
+    return output
+
+
+def _prepare_output(config: DatasetConfig, replace: bool, synthetic: bool) -> Path:
+    output = _validate_output_target(config, replace, synthetic)
+    if output.exists():
         shutil.rmtree(output)
     output.parent.mkdir(parents=True, exist_ok=True)
     return output
@@ -193,6 +199,7 @@ def convert(
     ``synthetic=True`` is only for fixture tests.  It is recorded in the
     manifest and never claims the formal episodes were collected.
     """
+    _validate_output_target(config, replace, synthetic)
     select = load_json_document(select_path)
     profile_doc, joint_names, camera_names = _profile_document(config)
     profile_hash = canonical_hash(profile_doc)

@@ -683,6 +683,23 @@ def test_policy_left_release_can_take_longer_than_hold_loss_tolerance():
     assert state.metrics["handover_sequence"]["complete"] is True
 
 
+def test_right_grip_micro_adjustment_while_left_holds_does_not_fail():
+    runtime = _runtime(())
+    time_ns = _complete_policy_dual_phase(runtime)
+    state, time_ns = _run(
+        runtime,
+        lambda now: _airborne(
+            now, left_open=CLOSE, left_holding=True, right_open=CLOSE, right_holding=False
+        ),
+        0.6,
+        time_ns,
+    )
+    assert state.phase == "RUNNING", state.metrics
+    state, _time_ns = _run(runtime, _right_airborne, 0.6, time_ns)
+    assert state.phase == "RUNNING", state.metrics
+    assert state.metrics["handover_sequence"]["complete"] is True
+
+
 def test_sequence_timer_does_not_accumulate_across_an_interruption():
     runtime = _runtime(())
     state, time_ns = _run(runtime, _left_airborne, 0.4, 0)
@@ -922,6 +939,51 @@ def test_established_left_reference_is_preserved_after_a_short_loss():
     sequence = state.metrics["handover_sequence"]
     assert sequence["left_stable_sim_time_ns"] == left_proof
     assert sequence["dual_airborne_stable"] is False
+
+
+def test_continuous_left_hold_refreshes_dual_reference_after_alignment():
+    runtime = _runtime(())
+    time_ns = 0
+    state, time_ns = _run(runtime, _left_airborne, 0.6, time_ns)
+    assert state.phase == "RUNNING", state.metrics
+    assert state.metrics["handover_sequence"]["left_airborne_stable"] is True
+    assert state.metrics["handover_sequence"]["phase"] == "dual"
+
+    # Left shifts slightly relative to the block mid-carry without ever dropping it
+    # (> 5 mm relative drift vs left-phase entry) before right closes to co-hold.
+    def _shifted_left(ts: int) -> HandoverObservation:
+        return _airborne(
+            ts,
+            left_open=CLOSE,
+            left_holding=True,
+            left_tcp_offset=(0.0, 0.052, 0.035),
+        )
+
+    def _dual_shifted(ts: int) -> HandoverObservation:
+        return _airborne(
+            ts,
+            left_open=CLOSE,
+            left_holding=True,
+            right_open=CLOSE,
+            right_holding=True,
+            left_tcp_offset=(0.0, 0.052, 0.035),
+            right_tcp_offset=(0.0, -0.052, 0.035),
+        )
+
+    state, time_ns = _run(runtime, _shifted_left, 0.3, time_ns)
+    assert state.phase == "RUNNING", state.metrics
+
+    state, time_ns = _run(runtime, _dual_shifted, 0.6, time_ns)
+    assert state.phase == "RUNNING", state.metrics
+    sequence = state.metrics["handover_sequence"]
+    assert sequence["dual_airborne_stable"] is True
+    assert sequence["dual_hold_elapsed_s"] >= 0.5
+
+    state, time_ns = _run(runtime, _right_airborne, 0.6, time_ns)
+    assert state.phase == "RUNNING", state.metrics
+    state, time_ns = _run(runtime, _placed, 1.4, time_ns)
+    assert state.phase == "SUCCEEDED", state.metrics
+    assert state.succeeded is True
 
 
 def test_reset_clears_the_handover_proof():

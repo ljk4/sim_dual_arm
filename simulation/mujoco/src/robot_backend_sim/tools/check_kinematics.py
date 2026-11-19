@@ -331,14 +331,15 @@ def _execute_checks(arguments, run_dir: Path, report: dict, logger):
     except probe_environment.ProbeFailure as error:
         raise KinematicsCheckFailure(error.reason, error.message) from error
     report["dependencies"] = dependencies
-    report["source"] = {"model_directory": str(assets.MODEL_DIR), "code": code_provenance()}
+    model_dir = str(assets.robot_model_path(scene_config.robot.assembly).parent)
+    report["source"] = {"model_directory": model_dir, "code": code_provenance()}
     scene = _build_scene(scene_config)
     report["scene"] = _scene_info(scene, scene_config)
     _emit(
         logger,
         "model_loaded",
-        "local Panda model compiled into the scene",
-        {"model_directory": str(assets.MODEL_DIR)},
+        "local robot model compiled into the scene",
+        {"model_directory": model_dir},
     )
     renderer = _make_renderer(scene, scene_config)
     budget = ArtifactBudget(kinematics_config.budgets.max_png_bytes)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import BeforeValidator, Field, model_validator
 from robot_contracts.validation import (
@@ -21,7 +21,9 @@ from robot_contracts.validation import (
 )
 
 from robot_backend_sim.panda_sim.robot_config import PANDA_JOINT_RANGES
-from robot_backend_sim.panda_sim.stack.scene_config import SceneConfig
+
+if TYPE_CHECKING:
+    from robot_backend_sim.panda_sim.stack.scene_config import SceneConfig
 
 __all__ = [
     "PHASES", "BudgetConfig", "ClearanceConfig", "IKConfig", "KinematicsCheckConfig",

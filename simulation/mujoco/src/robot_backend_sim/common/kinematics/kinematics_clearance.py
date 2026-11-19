@@ -349,8 +349,8 @@ def _check_finite_and_frozen(
     model: object,
     qpos: object,
     initial_qpos: object,
-    right_addresses: tuple[int, ...],
-    right_joint_ids: tuple[int, ...],
+    free_qpos_addresses: tuple[int, ...],
+    joint_ids: tuple[int, ...],
 ) -> None:
     import numpy as np
 
@@ -359,14 +359,14 @@ def _check_finite_and_frozen(
         raise KinematicsError(
             "ik_state_invalid", "solved qpos is not a finite vector of model.nq values"
         )
-    free_addresses = set(right_addresses)
+    free_addresses = set(free_qpos_addresses)
     deviation = _frozen_deviation(values, np.asarray(initial_qpos), free_addresses)
     if deviation > 1e-8:
         raise KinematicsError(
             "frozen_qpos_changed",
-            f"non-right-arm qpos changed by {deviation:.3e} (quaternion rounding allowed)",
+            f"frozen qpos changed by {deviation:.3e} (quaternion rounding allowed)",
         )
-    for joint_id in right_joint_ids:
+    for joint_id in joint_ids:
         if int(model.jnt_limited[joint_id]) == 0:
             continue
         address = int(model.jnt_qposadr[joint_id])

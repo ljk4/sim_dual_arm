@@ -11,7 +11,8 @@ from robot_backend_sim.common.config.follower_config import load_follower_config
 
 ROOT = Path(__file__).resolve().parents[2]
 SCENARIO = ROOT / "shared/scenarios/panda_sim/stack"
-FOLLOWER = SCENARIO / "profiles/control/panda_follower_v1.yaml"
+TEACHER_FOLLOWER = SCENARIO / "profiles/control/panda_follower_v1.yaml"
+INFERENCE_FOLLOWER = SCENARIO / "profiles/control/panda_follower_inference_v1.yaml"
 BACKEND_CHUNKED = SCENARIO / "configs/simulation/backend/backend_stack_act_chunked.yaml"
 RUNTIME_CHUNKED = SCENARIO / "configs/runtime/policy_rollout.yaml"
 RUNTIME_TEACHER = SCENARIO / "configs/runtime/teacher_collect.yaml"
@@ -42,27 +43,34 @@ def load_runtime(template: Path, directory: Path):
 
 
 def test_single_follower_source_owns_target_count_and_deviation_budget():
-    config = load_follower_config(FOLLOWER)
-    assert config.target_count == 20
-    assert config.target_count * 50_000_000 == 1_000_000_000
-    assert config.max_target_deviations == ((0.50,) * 7 + (0.06,) + (0.50,) * 7 + (0.06,))
-    assert config.max_terminal_tail_duration_s == 3.0
+    teacher = load_follower_config(TEACHER_FOLLOWER)
+    assert teacher.target_count == 10
+    assert teacher.target_count * 50_000_000 == 500_000_000
+    inference = load_follower_config(INFERENCE_FOLLOWER)
+    assert inference.target_count == 20
+    assert inference.target_count * 50_000_000 == 1_000_000_000
+    assert inference.max_target_deviations == ((0.50,) * 7 + (0.06,) + (0.50,) * 7 + (0.06,))
+    assert inference.max_terminal_tail_duration_s == 3.0
 
 
 def test_policy_backend_references_the_single_follower_source():
     chunked = load_backend_config(BACKEND_CHUNKED)
-    assert chunked.follower_path == FOLLOWER.resolve()
+    assert chunked.follower_path == INFERENCE_FOLLOWER.resolve()
     assert chunked.task_mode == "inference"
     assert chunked.realtime_speed == 0.5
     assert chunked.chunk_history_capacity == 512
 
 
 def test_runtime_configs_reference_the_single_follower_source():
-    for template in (RUNTIME_CHUNKED, RUNTIME_TEACHER):
+    expected = {
+        RUNTIME_CHUNKED: INFERENCE_FOLLOWER,
+        RUNTIME_TEACHER: TEACHER_FOLLOWER,
+    }
+    for template, follower_file in expected.items():
         document = yaml.safe_load(template.read_text(encoding="utf-8"))
         assert "target_count" not in document.get("policy", {})
         assert "target_count" not in document.get("teacher", {})
-        assert (template.parent / document["follower_config"]).resolve() == FOLLOWER.resolve()
+        assert (template.parent / document["follower_config"]).resolve() == follower_file.resolve()
 
 
 def test_chunked_runtime_keeps_the_60x16_interface_and_covers_the_task(tmp_path):
@@ -74,7 +82,7 @@ def test_chunked_runtime_keeps_the_60x16_interface_and_covers_the_task(tmp_path)
     assert runtime.recipe.action_source == "policy"
     assert runtime.recipe.teacher is None
 
-    loaded_follower = load_follower_config(FOLLOWER)
+    loaded_follower = load_follower_config(INFERENCE_FOLLOWER)
     assert follower.target_count == loaded_follower.target_count == 20
     assert policy.chunk_size == 60
     assert policy.action_period_ns == 50_000_000
@@ -84,7 +92,9 @@ def test_chunked_runtime_keeps_the_60x16_interface_and_covers_the_task(tmp_path)
     assert window_ns == 1_000_000_000
     assert policy.max_chunks == 256
     assert policy.max_chunks * window_ns == 256_000_000_000
-    assert policy.startup_settle_sim_ns == 2_000_000_000
+    assert policy.startup_settle_sim_ns == 3_000_000_000
+    assert policy.warmup_on_settle is True
+    assert policy.async_inference is True
     assert policy.max_chunks * window_ns >= policy.task_sim_budget_ns
     assert policy.total_sim_deadline_ns == policy.task_sim_budget_ns == 90_000_000_000
     assert policy.total_wall_deadline_s == 360.0

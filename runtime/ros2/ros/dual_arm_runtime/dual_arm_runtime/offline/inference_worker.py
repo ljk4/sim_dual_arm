@@ -162,11 +162,13 @@ def _classification(
     }
 
 
-def _format_duration(seconds: float) -> str:
-    total = max(0, int(seconds))
+def _format_duration(seconds: float | None) -> str:
+    if seconds is None:
+        return "--:--:--"
+    total = max(0, round(seconds))
     minutes, secs = divmod(total, 60)
     hours, minutes = divmod(minutes, 60)
-    return f"{hours:02d}:{minutes:02d}:{secs:02d}" if hours else f"{minutes:02d}:{secs:02d}"
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
 
 class InferencePool:
@@ -216,11 +218,18 @@ class InferencePool:
         fraction = min(1.0, done / total)
         filled = int(20 * fraction)
         bar = "█" * filled + "░" * (20 - filled)
-        elapsed = _format_duration(time.monotonic() - self.started)
+        elapsed_s = time.monotonic() - self.started
+        if done >= self.args.count:
+            eta_s: float | None = 0.0
+        elif done > 0:
+            eta_s = elapsed_s * (self.args.count - done) / done
+        else:
+            eta_s = None
         limit = self.args.max_consecutive_failures or "-"
         line = (
             f"并行推理 [{bar}] {done}/{self.args.count} | 在途 {active} "
-            f"| 成功 {succeeded} | 最大连败 {failures}/{limit} | {elapsed}"
+            f"| 成功 {succeeded} | 最大连败 {failures}/{limit} "
+            f"| 用时 {_format_duration(elapsed_s)} | 剩余 {_format_duration(eta_s)}"
         )
         if self._is_tty():
             sys.stdout.write(f"\r\033[K{line}")
@@ -374,9 +383,13 @@ class InferencePool:
         for thread in threads:
             thread.start()
         try:
+            last_render = 0.0
             for thread in threads:
                 while thread.is_alive():
                     thread.join(timeout=0.2)
+                    if self._is_tty() and time.monotonic() - last_render >= 0.5:
+                        self._render_progress()
+                        last_render = time.monotonic()
         except KeyboardInterrupt:
             self.stopped.set()
             for thread in threads:

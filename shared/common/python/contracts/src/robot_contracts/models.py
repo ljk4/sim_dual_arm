@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 import re
 from typing import Annotated
 
@@ -16,7 +17,15 @@ from .validation import (
     contract_error,
 )
 
-__all__ = ["CameraSpec", "ContractError", "JointSpec", "RobotProfile", "RunContext", "Target"]
+__all__ = [
+    "CameraSpec",
+    "ContractError",
+    "JointSpec",
+    "RobotProfile",
+    "RunContext",
+    "Target",
+    "coordinated_axis_groups",
+]
 MAX_JOINTS, MAX_CAMERAS = 64, 8
 _SAFE_CAMERA_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 FloatVector = Annotated[tuple[StrictFloat, ...], BeforeValidator(as_tuple),
@@ -93,6 +102,23 @@ class RobotProfile(StrictContractModel):
     joint_names = property(lambda self: tuple(joint.name for joint in self.joints))
     camera_names = property(lambda self: tuple(camera.name for camera in self.cameras))
     initial_positions = property(lambda self: tuple(joint.initial for joint in self.joints))
+
+    @property
+    def coordinated_axis_groups(self) -> tuple[tuple[int, ...], ...]:
+        """Group revolute manipulator joints by side prefix; linear axes stay independent."""
+        return coordinated_axis_groups(self.joints)
+
+
+def coordinated_axis_groups(joints: Sequence[JointSpec]) -> tuple[tuple[int, ...], ...]:
+    """Derive per-limb revolute joint index groups from canonical ``<prefix>_joint*`` names."""
+    groups: dict[str, list[int]] = {}
+    for index, joint in enumerate(joints):
+        if joint.unit != "rad":
+            continue
+        prefix, sep, _ = joint.name.partition("_joint")
+        if sep and prefix:
+            groups.setdefault(prefix, []).append(index)
+    return tuple(tuple(indices) for indices in groups.values() if len(indices) > 1)
 
 
 class Target(StrictContractModel):

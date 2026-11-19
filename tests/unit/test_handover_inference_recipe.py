@@ -21,18 +21,32 @@ def _load_task(path: Path):
     return load_handover_task_config(path)
 
 
-def test_teacher_plan_budget_only_applies_when_teacher_is_enabled():
+def test_teacher_plan_budget_only_applies_when_teacher_is_enabled(tmp_path):
     teacher_task = _load_task(TASK)
     assert teacher_task.teacher.enabled is True
     assert teacher_task.teacher.max_plan_duration_s < teacher_task.success.max_task_sim_duration_s
 
     inference = _load_task(INFERENCE_TASK)
     assert inference.teacher.enabled is False
-    assert inference.success.max_task_sim_duration_s == 10.0
-    assert inference.success.max_task_wall_duration_s == 60.0
-    # The unchanged plan-duration value proves the check follows the switch
-    # instead of the literal duration.
-    assert inference.teacher.max_plan_duration_s > inference.success.max_task_sim_duration_s
+    assert inference.success.max_task_sim_duration_s == 180.0
+    assert inference.success.max_task_wall_duration_s == 420.0
+
+    # Verify the budget check follows teacher.enabled rather than literal duration.
+    document = yaml.safe_load(INFERENCE_TASK.read_text(encoding="utf-8"))
+    document["planning_config"] = str((INFERENCE_TASK.parent / document["planning_config"]).resolve())
+    document["teacher"]["max_plan_duration_s"] = 200.0
+    disabled_path = tmp_path / "inference_disabled.yaml"
+    disabled_path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+    loaded = _load_task(disabled_path)
+    assert loaded.teacher.max_plan_duration_s > loaded.success.max_task_sim_duration_s
+
+    document["teacher"]["enabled"] = True
+    enabled_path = tmp_path / "inference_enabled.yaml"
+    enabled_path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+    from robot_contracts.validation import StrictMappingError
+
+    with pytest.raises(StrictMappingError, match="max_plan_duration_s"):
+        _load_task(enabled_path)
 
 
 def _runtime_config(tmp_path: Path) -> Path:
@@ -60,7 +74,9 @@ def test_runtime_policy_recipe_declares_bounded_task_execution(tmp_path):
     assert stream.task_sim_budget_ns == 180_000_000_000
     assert stream.task_stop_margin_s == 1.0
     assert stream.total_wall_deadline_s == 420.0
-    assert stream.startup_settle_sim_ns == 2_000_000_000
+    assert stream.startup_settle_sim_ns == 3_000_000_000
+    assert stream.warmup_on_settle is True
+    assert stream.async_inference is True
     follower = policy.recipe.follower
     assert follower is not None
     covered = stream.max_chunks * follower.target_count * stream.action_period_ns

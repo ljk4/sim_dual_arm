@@ -133,6 +133,8 @@ class RecordingPool:
             worker["id"]: 0 for worker in workers
         }
         self.started = time.monotonic()
+        self._last_progress_render = 0.0
+        self._run_id_counter: dict[str, int] = {}
         self.reason, self.exit_code = "target_reached", 0
         self.allocation_error = ""
 
@@ -173,12 +175,16 @@ class RecordingPool:
         )
         check_environment(self.args.project_root, self.config, self.output)
         run_id_prefix = worker.get("run_id_prefix") or f"record-{worker['id']}"
+        base_run_id = f"{run_id_prefix}_{time.strftime('%Y%m%d_%H%M%S')}"
+        count = self._run_id_counter.get(base_run_id, 0) + 1
+        self._run_id_counter[base_run_id] = count
+        attempt_run_id = base_run_id if count == 1 else f"{base_run_id}_{count}"
         attempt = campaign._reserve(
             self.ledger,
             self.config,
             run_args,
             self.output,
-            f"{run_id_prefix}-{time.time_ns()}",
+            attempt_run_id,
             self.args.project_root,
         )
         self.attempted += 1
@@ -257,11 +263,20 @@ class RecordingPool:
     def _is_tty(self) -> bool:
         return sys.stdout.isatty() or os.environ.get("RECORD_PROGRESS_TTY") == "1"
 
-    def _format_duration(self, seconds: float) -> str:
-        total = max(0, int(seconds))
+    def _format_duration(self, seconds: float | None) -> str:
+        if seconds is None:
+            return "--:--:--"
+        total = max(0, round(seconds))
         minutes, secs = divmod(total, 60)
         hours, minutes = divmod(minutes, 60)
-        return f"{hours:02d}:{minutes:02d}:{secs:02d}" if hours else f"{minutes:02d}:{secs:02d}"
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+    def _estimated_remaining(self, elapsed: float) -> float | None:
+        if self.qualified >= self.args.count:
+            return 0.0
+        if self.qualified <= 0:
+            return None
+        return elapsed * (self.args.count - self.qualified) / self.qualified
 
     def _render_progress(self, *, force: bool = False) -> None:
         is_tty = self._is_tty()
@@ -273,12 +288,15 @@ class RecordingPool:
         filled = int(width * ratio)
         bar = "█" * filled + "░" * (width - filled)
         elapsed = time.monotonic() - self.started
+        eta = self._estimated_remaining(elapsed)
         line = (
             f"并行采集 [{bar}] {self.qualified}/{self.args.count} "
             f"| 在途 {len(self.active)} "
             f"| 最大连败 {self.consecutive_failures}/{self.args.max_consecutive_failures} "
-            f"| {self._format_duration(elapsed)}"
+            f"| 用时 {self._format_duration(elapsed)} "
+            f"| 剩余 {self._format_duration(eta)}"
         )
+        self._last_progress_render = time.monotonic()
         if is_tty:
             sys.stdout.write(f"\r\033[K{line}")
             sys.stdout.flush()
@@ -363,6 +381,8 @@ class RecordingPool:
                     if self.allocation_error or self.attempted == before_launch:
                         self.reason, self.exit_code = "campaign_stopped", 2
                 if self.active and self.exit_code == 0:
+                    if self._is_tty() and time.monotonic() - self._last_progress_render >= 0.5:
+                        self._render_progress()
                     time.sleep(0.05)
         except KeyboardInterrupt:
             self.reason, self.exit_code = "interrupted", 130

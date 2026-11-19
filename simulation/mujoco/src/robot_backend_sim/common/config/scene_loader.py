@@ -1,26 +1,23 @@
 """Load one simulation scene recipe by its explicit robot assembly selection.
 
-Both scene recipes declare ``robot.assembly``.  The value selects the strict
-configuration model and the scene/IO adapter; a task name or file location is
-never used to infer the robot.
+Scene recipes declare ``robot.assembly``.  The value selects the strict
+configuration model through :mod:`robot_backend_sim.common.plugins`; a task name
+or file location is never used to infer the robot, and ``common/`` never
+hardcodes any robot name.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from robot_contracts.validation import StrictMappingError, UniqueKeyError, read_unique_yaml
 
-from robot_backend_sim.marvin_sim.handover.scene_config import MarvinSceneConfig, load_marvin_scene_config
-from robot_backend_sim.panda_sim.stack.scene_config import SceneConfig, load_scene_config
+from robot_backend_sim.common.plugins import get_robot_plugin
 
 __all__ = ["SceneConfigLike", "load_scene_config_for"]
 
-SceneConfigLike = SceneConfig | MarvinSceneConfig
-_LOADERS = {
-    "panda": load_scene_config,
-    "marvin": load_marvin_scene_config,
-}
+SceneConfigLike = Any
 
 
 def load_scene_config_for(path: Path | str) -> SceneConfigLike:
@@ -36,9 +33,9 @@ def load_scene_config_for(path: Path | str) -> SceneConfigLike:
     if not isinstance(assembly, str):
         raise StrictMappingError(source, "robot.assembly", "must select a robot assembly")
     try:
-        loader = _LOADERS[assembly]
+        plugin = get_robot_plugin(assembly)
     except KeyError as error:
         raise StrictMappingError(
             source, "robot.assembly", f"unsupported robot assembly {assembly!r}"
         ) from error
-    return loader(source)
+    return plugin.load_scene_config(source)

@@ -36,11 +36,6 @@ from ..validation import (
 FOLLOWER_SAMPLER_VERSION = "follower-sampler-v1"
 FOLLOWER_NORMALIZATION_VERSION = "hard-boundary-normalization-v1"
 FOLLOWER_REFERENCE_DIGEST_VERSION = "follower-reference-v2"
-# The previous v1 digest covered the same content under the producer-specific
-# field name ``ruckig_duration_ns``.  It is used only to verify recorded legacy
-# records whose stored definition differs from the installed one by that name.
-FOLLOWER_REFERENCE_LEGACY_DIGEST_VERSION = "follower-reference-v1"
-_LEGACY_DURATION_FIELD = "ruckig_duration_ns"
 FOLLOWER_REFERENCE_KINDS = (REQUEST_STREAM_FIRST, REQUEST_STREAM_NEXT)
 DIGEST_HEX_LENGTH = 64
 _UINT64_MAX = 2**64 - 1
@@ -70,21 +65,6 @@ def compute_follower_reference_digest(record: FollowerReference) -> str:
     if not isinstance(record, FollowerReference):
         raise _invalid("record", "must be a FollowerReference")
     return _digest_of(follower_reference_digest_payload(record))
-
-
-def follower_reference_legacy_digest_payload(record: FollowerReference) -> dict[str, object]:
-    """Return the v1 canonical document, which named the curve duration after Ruckig."""
-    document = follower_reference_digest_payload(record)
-    document["digest_version"] = FOLLOWER_REFERENCE_LEGACY_DIGEST_VERSION
-    document[_LEGACY_DURATION_FIELD] = document.pop("curve_duration_ns")
-    return document
-
-
-def compute_legacy_follower_reference_digest(record: FollowerReference) -> str:
-    """SHA-256 over the same record under the previous v1 digest payload."""
-    if not isinstance(record, FollowerReference):
-        raise _invalid("record", "must be a FollowerReference")
-    return _digest_of(follower_reference_legacy_digest_payload(record))
 
 
 class FollowerAppliedSample(StrictContractModel):

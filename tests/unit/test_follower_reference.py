@@ -22,12 +22,10 @@ from robot_contracts.stream_request import REQUEST_STREAM_FIRST, StreamRequest, 
 from robot_contracts.trajectory.follower_reference import (
     FOLLOWER_NORMALIZATION_VERSION,
     FOLLOWER_REFERENCE_DIGEST_VERSION,
-    FOLLOWER_REFERENCE_LEGACY_DIGEST_VERSION,
     FOLLOWER_SAMPLER_VERSION,
     FollowerReference,
     FollowerValidationLimits,
     compute_follower_reference_digest,
-    compute_legacy_follower_reference_digest,
 )
 from robot_contracts.trajectory.spline import CubicSegment, ReferencePlan, ReferenceSample
 from robot_trajectory.follower import PreparedFollowerPlan
@@ -317,11 +315,8 @@ def test_producer_identity_must_be_a_non_empty_string():
     assert caught.value.reason == "INVALID_FOLLOWER_REFERENCE"
 
 
-def test_legacy_digest_payload_covers_the_previous_field_name():
+def test_digest_payload_uses_curve_duration_field():
     record = reference()
-    legacy = compute_legacy_follower_reference_digest(record)
-    assert legacy != record.reference_digest
-    assert FOLLOWER_REFERENCE_LEGACY_DIGEST_VERSION != FOLLOWER_REFERENCE_DIGEST_VERSION
     document = record.to_document()
     assert "curve_duration_ns" in document
     assert "ruckig_duration_ns" not in document

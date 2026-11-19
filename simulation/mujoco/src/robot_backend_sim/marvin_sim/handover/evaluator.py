@@ -332,6 +332,9 @@ class HandoverTaskRuntime:
             "right": None,
         }
         self._sequence_references: dict[str, _StabilityReference] = {}
+        self._dual_left_reference_refreshed = False
+        self._left_held_without_drop = False
+        self._right_solo_reference_refreshed = False
 
     # -------------------------------------------------------------- properties
     @property
@@ -492,6 +495,9 @@ class HandoverTaskRuntime:
             "right": None,
         }
         self._sequence_references = {}
+        self._dual_left_reference_refreshed = False
+        self._left_held_without_drop = False
+        self._right_solo_reference_refreshed = False
 
     def start(
         self,
@@ -677,18 +683,42 @@ class HandoverTaskRuntime:
             self._remember_sequence_reference(observation, _LEFT)
         elif self._sequence_times["left"] is None:
             self._sequence_references.pop(_LEFT, None)
+        if self._sequence_phase == "dual" and (not left_holding or externally_supported):
+            self._left_held_without_drop = False
         airborne_dual_candidate = (
             left_holding
             and right_holding
             and not externally_supported
             and self._sequence_times["left"] is not None
         )
+        if (
+            self._sequence_phase == "dual"
+            and airborne_dual_candidate
+            and self._left_held_without_drop
+            and not self._dual_left_reference_refreshed
+        ):
+            # Left arm reaches handover after mid-lift proof; align once on continuous entry
+            # into dual hold, while refusing refresh if hold was ever lost since left proof.
+            position, rotation = relative_block_pose(observation, _LEFT)
+            self._sequence_references[_LEFT] = _StabilityReference(position, rotation)
+            self._dual_left_reference_refreshed = True
         if airborne_dual_candidate or (
             right_holding and self._sequence_times["dual"] is not None
         ):
             self._remember_sequence_reference(observation, _RIGHT)
         elif self._sequence_times["dual"] is None:
             self._sequence_references.pop(_RIGHT, None)
+            self._right_solo_reference_refreshed = False
+        if (
+            self._sequence_phase == "right"
+            and not observation.left_contacts
+            and right_holding
+            and not externally_supported
+            and not self._right_solo_reference_refreshed
+        ):
+            position, rotation = relative_block_pose(observation, _RIGHT)
+            self._sequence_references[_RIGHT] = _StabilityReference(position, rotation)
+            self._right_solo_reference_refreshed = True
 
         phase = self._sequence_phase
         if phase == "left":
@@ -747,6 +777,8 @@ class HandoverTaskRuntime:
             self._sequence_since_ns = None
             if phase == "left":
                 self._sequence_phase = "dual"
+                self._left_held_without_drop = True
+                self._dual_left_reference_refreshed = False
             elif phase == "dual":
                 self._sequence_phase = "right"
             else:
@@ -1034,13 +1066,31 @@ class HandoverTaskRuntime:
             step = self._plan.steps[min(self._step_index, len(self._plan.steps) - 1)]
             return self._established[side] and side in step.holders
         times = self._sequence_times
+        minimum = self.config.planning.diagnostics.contact_force_min_n
+        left_holding = observation.holding(_LEFT, minimum)
+        right_holding = observation.holding(_RIGHT, minimum)
+        right_engaged = (
+            bool(observation.right_contacts)
+            or observation.right_opening_m
+            < self.config.gates.release_opening_m
+            - self.config.gates.gripper_position_tolerance_m
+        )
+        in_handoff_transfer = (
+            times["dual"] is not None
+            and times["release"] is None
+            and times["right"] is None
+        )
         if side == _LEFT:
-            # The stable airborne dual hold establishes the right hand as a
-            # holder. Left contact may then end during the opening ramp, before
-            # full opening and low speed establish the separate release proof.
-            # Right hold loss remains guarded throughout that transition.
-            return times["left"] is not None and times["dual"] is None
+            # Before dual hold is proved, left owns the block.  Once dual hold
+            # is proved, left stays guarded only while right is micro-adjusting
+            # its pinch force without full holding force; once right holds,
+            # left may open freely.
+            if times["left"] is not None and times["dual"] is None:
+                return True
+            return in_handoff_transfer and right_engaged and not right_holding
         if times["dual"] is None:
+            return False
+        if in_handoff_transfer and left_holding and right_engaged:
             return False
         contained, _message = _containment(self.layout, observation)
         bottom = observation.support_upward_force(self.binding.box_bottom_geom_names)

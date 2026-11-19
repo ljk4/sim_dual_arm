@@ -14,7 +14,6 @@ import json
 import os
 import sys
 import time
-import uuid
 from pathlib import Path
 
 from robot_contracts.project_paths import project_path
@@ -107,12 +106,6 @@ def _parser() -> argparse.ArgumentParser:
         help="model directory or model.safetensors; defaults to the newest act_* model",
     )
     parser.add_argument(
-        "--bundle",
-        dest="model_path",
-        type=Path,
-        help=argparse.SUPPRESS,
-    )
-    parser.add_argument(
         "--set",
         dest="overrides",
         action="append",
@@ -174,7 +167,7 @@ def _snapshot(
 
 
 def _default_run_id() -> str:
-    return f"policy-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{os.getpid()}"
+    return f"policy_{time.strftime('%Y%m%d_%H%M%S')}"
 
 
 def _serve(

@@ -166,7 +166,16 @@ def _configuration_sources(config) -> dict[str, dict[str, str]]:
 
 
 def _default_run_suffix() -> str:
-    return f"{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{os.getpid()}"
+    return time.strftime("%Y%m%d_%H%M%S")
+
+
+def _unique_run_id(run_root: Path, base: str) -> str:
+    if not (run_root / base).exists():
+        return base
+    suffix = 2
+    while (run_root / f"{base}_{suffix}").exists():
+        suffix += 1
+    return f"{base}_{suffix}"
 
 
 def _validate_arguments(parsed: argparse.Namespace, target: tuple[str, str] | None) -> str:
@@ -175,7 +184,7 @@ def _validate_arguments(parsed: argparse.Namespace, target: tuple[str, str] | No
     if target is not None:
         parsed.role = parsed.role or "teacher"
         robot, task = target
-        return parsed.run_id or f"{robot}-{task}-{parsed.role}-{_default_run_suffix()}"
+        return parsed.run_id or f"{robot}-{task}-{parsed.role}_{_default_run_suffix()}"
     if parsed.role is not None:
         raise SystemExit("--role requires --robot/--task")
     if parsed.shared_root is not None:
@@ -183,7 +192,7 @@ def _validate_arguments(parsed: argparse.Namespace, target: tuple[str, str] | No
     if parsed.config is None:
         raise SystemExit("either --robot/--task or --config is required")
     stem = re.sub(r"[^A-Za-z0-9._-]", "-", parsed.config.stem)
-    return parsed.run_id or f"backend-{stem or 'run'}-{_default_run_suffix()}"
+    return parsed.run_id or f"backend-{stem or 'run'}_{_default_run_suffix()}"
 
 
 def _project_root() -> Path:
@@ -227,9 +236,10 @@ def _write_snapshot(run_dir: Path, document: dict[str, Any]) -> Path:
 
 def _prepare_run(parsed: argparse.Namespace):
     target = _target(parsed)
-    run_id = _validate_run_id(_validate_arguments(parsed, target))
     robot, task = target if target is not None else (None, None)
     run_root = (parsed.run_root or _default_run_root(robot, task)).resolve()
+    raw_run_id = _validate_run_id(_validate_arguments(parsed, target))
+    run_id = raw_run_id if parsed.run_id is not None else _unique_run_id(run_root, raw_run_id)
     run_dir = (run_root / run_id).resolve()
     if not _inside(run_dir, run_root) or run_dir == run_root:
         raise SystemExit("run directory escapes run root")
@@ -353,6 +363,12 @@ def _serve_node(config, logger, run_id: str, signals, executor) -> tuple[object,
         node = BackendNode(config, log=logger)
         executor.add_node(node)
         _emit_backend_start(logger, config, run_id)
+        role_text = config.task_mode or "robot"
+        print(
+            f"仿真后端已就绪，正在等待连接 (namespace={config.namespace}, role={role_text}, "
+            f"seed={config.seed}, run_id={run_id}) — 按 Ctrl-C 停止",
+            flush=True,
+        )
         while rclpy.ok() and not signals.requested and not node.should_stop:
             executor.spin_once(timeout_sec=0.05)
         if node.should_stop:
@@ -467,6 +483,7 @@ def run(argv: list[str] | None = None) -> int:
         "summary": _summary_document(summary),
     }
     _write_json(run_dir / "status.json", status)
+    print(f"仿真后端已停止 (run_id={run_id}, exit_code={exit_code})", flush=True)
     return exit_code
 
 

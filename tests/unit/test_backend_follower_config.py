@@ -55,7 +55,11 @@ def test_follower_config_resolves_relative_follower_file_and_queue():
     config = load_backend_config(FOLLOWER)
     assert config.follower_path == FOLLOWER_PARAMS.resolve()
     assert config.follower_reference_queue_capacity == 64
-    assert load_follower_config(config.follower_path).target_count == 20
+    assert load_follower_config(config.follower_path).target_count == 10
+    assert (
+        load_follower_config(PROFILES / "control/panda_follower_inference_v1.yaml").target_count
+        == 20
+    )
     expected_scene = SCENARIO / "configs/simulation/scene/panda_stack.yaml"
     assert config.scene_path == expected_scene.resolve()
 

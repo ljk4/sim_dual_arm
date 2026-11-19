@@ -82,6 +82,15 @@ class ChunkedPolicyPipeline:
         if self._ensemble is not None:
             self._ensemble.reset()
 
+    def warm_up(self) -> None:
+        """Warm up the adapter on the active RPC worker thread without recording state."""
+        warm_up = getattr(self.adapter, "warm_up", None)
+        if callable(warm_up):
+            previous = getattr(self.adapter, "predictions", None)
+            warm_up()
+            if isinstance(previous, int) and previous > 0:
+                self.adapter.predictions = previous
+
     def _prepare_inputs(
         self,
         cameras: tuple[ProviderCameraSample, ...],

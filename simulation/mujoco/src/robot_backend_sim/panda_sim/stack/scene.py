@@ -227,7 +227,7 @@ def _check_model_shape(model: mujoco.MjModel, config: SceneConfig) -> None:
 
 def build_scene(config: SceneConfig) -> Scene:
     """Attach two local Pandas and compile the scene once."""
-    _, panda_xml = assets.model_paths()
+    panda_xml = assets.robot_model_path(config.robot.assembly)
     if not panda_xml.is_file():
         raise SceneBuildError(f"Panda model is missing: {panda_xml}")
 

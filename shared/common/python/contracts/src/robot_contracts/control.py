@@ -51,15 +51,6 @@ def _invalid(reason: str, detail: str) -> ContractError:
     return ContractError(reason, detail)
 
 
-def _integer(value: object, location: str, minimum: int, maximum: int) -> int:
-    if isinstance(value, bool) or not isinstance(value, Integral):
-        raise _invalid("INVALID_CONTROL_IDENTITY", f"{location}: must be an integer")
-    result = int(value)
-    if result < minimum or result > maximum:
-        raise _invalid("INVALID_CONTROL_IDENTITY", f"{location}: must be in {minimum}..{maximum}")
-    return result
-
-
 def _text(value: object, location: str, *, allow_empty: bool = False) -> str:
     if not isinstance(value, str):
         raise _invalid("INVALID_CONTROL_IDENTITY", f"{location}: must be a string")
