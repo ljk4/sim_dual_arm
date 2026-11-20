@@ -4,9 +4,9 @@ robot:
   profile: ../../../profiles/robots/marvin_stack_v1/profile.json
   schemas: ../../../../../../common/interfaces/schemas
   scene: ../scene/marvin_stack.yaml
-  control: ../../../profiles/control/marvin_control_v1.yaml
+  control: ../../../../handover/profiles/control/marvin_control_v1.yaml
   stream: ../../../profiles/control/marvin_stream_v1.yaml
-  follower: ../../../profiles/control/marvin_follower_v1.yaml
+  follower: ../../../../handover/profiles/control/marvin_follower_v1.yaml
   task: ../scene/marvin_stack_task.yaml
   task_type: stack
   task_mode: teacher

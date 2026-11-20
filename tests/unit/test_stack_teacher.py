@@ -18,16 +18,16 @@ for source in (SIM_SRC, CONTRACTS):
 pytest.importorskip("mujoco")
 pytest.importorskip("mink")
 import numpy as np  # noqa: E402
-from robot_backend_sim.marvin_sim.stack.kinematics_config import load_kinematics_config  # noqa: E402
 from robot_backend_sim.common.config.motion_config import load_control_config  # noqa: E402
-from robot_backend_sim.marvin_sim.stack.scene_config import load_marvin_stack_scene_config  # noqa: E402
 from robot_backend_sim.common.kinematics.common import extract_object_pose  # noqa: E402
-from robot_backend_sim.marvin_sim.stack.scene import build_marvin_stack_scene  # noqa: E402
 from robot_backend_sim.marvin_sim.stack.config import load_task_config  # noqa: E402
 from robot_backend_sim.marvin_sim.stack.gate import (  # noqa: E402
     TeacherFeedback,
     TeacherProgress,
 )
+from robot_backend_sim.marvin_sim.stack.kinematics_config import load_kinematics_config  # noqa: E402
+from robot_backend_sim.marvin_sim.stack.scene import build_marvin_stack_scene  # noqa: E402
+from robot_backend_sim.marvin_sim.stack.scene_config import load_marvin_stack_scene_config  # noqa: E402
 from robot_backend_sim.marvin_sim.stack.teacher import (  # noqa: E402
     TeacherError,
     TeacherSnapshot,
@@ -36,6 +36,7 @@ from robot_backend_sim.marvin_sim.stack.teacher import (  # noqa: E402
 )
 from robot_contracts.models import RunContext  # noqa: E402
 from robot_contracts.profiles import load_profile  # noqa: E402
+from scenario_fixtures import MARVIN_SHARED_PROFILES  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -43,22 +44,20 @@ def fixture():
     scene_config = load_marvin_stack_scene_config(
         SCENARIO / "configs/simulation/scene/marvin_stack.yaml"
     )
-    scene = build_marvin_stack_scene(
-        scene_config,
-    )
+    scene = build_marvin_stack_scene(scene_config)
     scene.reset(0)
     task_config = load_task_config(SCENARIO / "configs/simulation/scene/marvin_stack_task.yaml")
     profile = load_profile(
         PROFILES / "robots/marvin_stack_v1/profile.json",
         ROOT / "shared/common/interfaces/schemas",
     )
-    control = load_control_config(PROFILES / "control/marvin_control_v1.yaml")
+    control = load_control_config(MARVIN_SHARED_PROFILES / "control/marvin_control_v1.yaml")
     kinematics = load_kinematics_config(
         SCENARIO / "configs/simulation/checks/kinematics_check.yaml", scene_config
     )
-    indices = scene.indices
     qpos = tuple(float(value) for value in scene.data.qpos)
-    source = extract_object_pose(qpos, indices.environment.object_free_joint_qpos["source"], "source")
+    source_address = scene.indices.environment.object_free_joint_qpos["source"]
+    source = extract_object_pose(qpos, source_address, "source")
     snapshot = TeacherSnapshot(
         context=RunContext("robot", profile.digest, "backend", "time", 0, "episode", 1),
         task_epoch=1,
@@ -481,7 +480,6 @@ def test_handoff_start_sim_time_ns_holds_start_until_handoff_and_binds_gate(fixt
     )
     progress = TeacherProgress(plan, task_config)
     progress.actual_start_ns = 1_000_000_000
-    progress.actual_starts_ns.append(1_000_000_000)
     handoff_ns = 1_500_000_000
     progress.bind_motion_start(0, handoff_ns)
     assert progress.actual_start_ns == handoff_ns

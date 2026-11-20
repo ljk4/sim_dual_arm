@@ -16,6 +16,7 @@ from dual_arm_runtime.teacher_source import TeacherStreamRunner, TeacherTargetSo
 from robot_contracts.action_chunks import ChunkAnchor
 from robot_contracts.models import ContractError, RunContext, Target
 from robot_contracts.trajectory.spline import ReferenceSample
+from scenario_fixtures import MARVIN_SHARED_PROFILES
 
 ROOT = Path(__file__).resolve().parents[2]
 POLICY_CONFIG = ROOT / "tests/fixtures/simulation/policy_unit.yaml"
@@ -937,8 +938,7 @@ def test_wait_advance_preserves_timestamps_and_prefers_newest_active_prediction(
     ):
         value[field] = str((POLICY_CONFIG.parent / value[field]).resolve())
     value["follower_config"] = str(
-        ROOT / "shared/scenarios/marvin_sim/stack/profiles/control"
-        / "marvin_follower_inference_v1.yaml"
+        MARVIN_SHARED_PROFILES / "control/marvin_follower_inference_v1.yaml"
     )
     value["policy"]["startup_settle_sim_ns"] = 0
     value["policy"]["async_inference"] = False
@@ -1030,7 +1030,9 @@ def test_wait_advance_preserves_timestamps_and_prefers_newest_active_prediction(
     assert chunk2_cmd.observation_time_ns + chunk2_selected[0].time_ns == 2_300_000_000
     assert chunk2_cmd.observation_time_ns + chunk2_selected[-1].time_ns == 3_250_000_000
     assert chunk2_selected[-1].positions[0] == pytest.approx(base0 + 0.08)
-    wa_events = [fields for event, fields in events_fallback if event == "policy.wait_advance_applied"]
+    wa_events = [
+        fields for event, fields in events_fallback if event == "policy.wait_advance_applied"
+    ]
     assert len(wa_events) == 1
     assert wa_events[0]["fields"]["source_observation_id"] == 1
     assert wa_events[0]["fields"]["observation_id"] == chunk2_cmd.trajectory.observation_id
@@ -1101,7 +1103,7 @@ def test_latency_matching_discards_inference_and_execution_latency_steps(tmp_pat
     )
     runner.run()
 
-    # obs=1.00s, handoff=1.25s -> 5 inference/lead steps skipped (idx 0..4), plus 2 execution steps -> idx 7.
+    # The 250 ms inference and lead time skips 5 samples. Execution skips 2 more.
     selected = io.commands[0].window.selected_source_targets
     assert selected[0].positions[0] == pytest.approx(base0 + 0.002 * 7)
     lm_events = [fields for event, fields in log.events if event == "policy.latency_matched"]

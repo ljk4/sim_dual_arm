@@ -38,7 +38,6 @@ except ImportError as error:  # pragma: no cover - host without ROS
     pytest.skip(f"ROS unavailable: {error}", allow_module_level=True)
 
 ROOT = Path(__file__).resolve().parents[2]
-PROFILES = ROOT / "shared/scenarios/marvin_sim/stack/profiles"
 for source in (
     ROOT / "simulation/mujoco/src",
     ROOT / "shared/common/python/contracts/src",
@@ -47,6 +46,7 @@ for source in (
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
 
+from robot_backend_sim.common.config.backend_config import load_backend_config  # noqa: E402
 from robot_backend_sim.common.config.follower_config import load_follower_config  # noqa: E402
 from robot_backend_sim.common.config.motion_config import load_control_config  # noqa: E402
 from robot_backend_sim.common.control.control_state import ChunkStatus  # noqa: E402
@@ -57,12 +57,11 @@ from robot_backend_sim.common.follower.follower_protocol import (  # noqa: E402
 )
 from test_backend_ros import Stack, _profile_context, acquire  # noqa: E402
 
-PROFILE_PATH = PROFILES / "robots/marvin_stack_v1/profile.json"
-SCHEMAS = ROOT / "shared/common/interfaces/schemas"
 FOLLOWER_CONFIG = ROOT / "tests/fixtures/simulation/backend_follower.yaml"
-CONTROL = load_control_config(PROFILES / "control/marvin_control_v1.yaml")
-FOLLOWER = load_follower_config(PROFILES / "control/marvin_follower_v1.yaml")
-PROFILE = load_profile(PROFILE_PATH, SCHEMAS)
+BACKEND = load_backend_config(FOLLOWER_CONFIG)
+CONTROL = load_control_config(BACKEND.control_path)
+FOLLOWER = load_follower_config(BACKEND.follower_path)
+PROFILE = load_profile(BACKEND.profile_path, BACKEND.schemas_path)
 BASE = PROFILE.initial_positions
 COUNT = len(BASE)
 GRID_NS = 2_000_000
@@ -259,9 +258,8 @@ def test_three_follower_blocks_over_real_ros_services(tmp_path):
     try:
         stack.wait_ready()
         assert "bounded_target_follower_v1" in stack.info.capabilities
-        profile = load_profile(PROFILE_PATH, SCHEMAS)
         context = _profile_context(
-            profile, stack.info, episode="follower-ros-episode", control_epoch=1
+            PROFILE, stack.info, episode="follower-ros-episode", control_epoch=1
         )
         lease = acquire(stack, context)
         stack.wait_for(lambda: bool(stack.states), timeout=10.0)
@@ -404,7 +402,7 @@ def test_three_follower_blocks_over_real_ros_services(tmp_path):
         for record in records.values():
             assert len(record.request.trajectory.targets) == 60
             assert len(record.window.source_targets) == 60
-            validate(record, profile, limits)
+            validate(record, PROFILE, limits)
 
         stack.wait_for(lambda: len(stack.follower_references) >= 3, timeout=10.0)
         published = [follower_reference_from_message(item) for item in stack.follower_references]

@@ -18,11 +18,11 @@ from robot_backend_sim.marvin_sim.assembly import gripper_opening  # noqa: E402
 from robot_backend_sim.marvin_sim.stack.kinematics_config import (  # noqa: E402
     MARVIN_ARM_JOINT_RANGES,
 )
-from robot_backend_sim.marvin_sim.stack.scene_config import (  # noqa: E402
-    load_marvin_stack_scene_config,
-)
 from robot_backend_sim.marvin_sim.stack.scene import (  # noqa: E402
     build_marvin_stack_scene,
+)
+from robot_backend_sim.marvin_sim.stack.scene_config import (  # noqa: E402
+    load_marvin_stack_scene_config,
 )
 
 CONFIG_PATH = ROOT / "shared/scenarios/marvin_sim/stack/configs/simulation/scene/marvin_stack.yaml"
@@ -58,7 +58,8 @@ def test_model_has_dual_marvin_names_dof_and_cameras(scene):
             assert model.joint(name).name == name
             link = f"Arm_{prefix}{finger}_Link"
             assert model.body(link).name == link
-        assert model.actuator(f"Arm_{prefix}_gripper_actuator").name == f"Arm_{prefix}_gripper_actuator"
+        gripper_actuator = f"Arm_{prefix}_gripper_actuator"
+        assert model.actuator(gripper_actuator).name == gripper_actuator
         assert model.body(f"Arm_{prefix}9_Link").name == f"Arm_{prefix}9_Link"
         assert model.site(f"Arm_{prefix}_tcp").name == f"Arm_{prefix}_tcp"
         assert len(scene.indices.robot.arm_joint_qpos[side]) == 7

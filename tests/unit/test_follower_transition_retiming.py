@@ -7,7 +7,6 @@ import re
 from pathlib import Path
 
 import pytest
-
 from robot_backend_sim.common.config.follower_config import FollowerConfig
 from robot_backend_sim.common.config.motion_config import ControlConfig
 from robot_backend_sim.common.follower.follower_plan import prepare_follower_plan
@@ -34,7 +33,7 @@ STACK = {
     "original_deviation": 0.055660997126913504,
     "original_target_deviation": 0.05565938197175449,
 }
-MARVIN = {
+HANDOVER = {
     "profile": (ROOT / "shared/scenarios/marvin_sim/handover/profiles/robots"
                 / "marvin_handover_v1/profile.json"),
     "axis": "left_gripper_width",
@@ -48,8 +47,10 @@ MARVIN = {
     "original_deviation": 0.019727525391288196,
     "original_target_deviation": 0.019716277049734998,
 }
-CASES = [pytest.param(STACK, id="stack-opening-transition"),
-         pytest.param(MARVIN, id="marvin-clip002-chunk13")]
+CASES = [
+    pytest.param(STACK, id="stack-opening-transition"),
+    pytest.param(HANDOVER, id="handover-closing-transition"),
+]
 
 
 def _control(profile: RobotProfile) -> ControlConfig:
@@ -69,14 +70,12 @@ def _control(profile: RobotProfile) -> ControlConfig:
     )
 
 
-def _follower(profile: RobotProfile, axis: str, budget: float) -> FollowerConfig:
-    deviations = [0.3] * 16
-    deviations[profile.joint_names.index("left_gripper_width")] = budget
-    deviations[profile.joint_names.index("right_gripper_width")] = budget
+def _follower(profile: RobotProfile, budget: float) -> FollowerConfig:
+    deviations = tuple(budget if joint.unit == "m" else 0.3 for joint in profile.joints)
     return FollowerConfig(
         joint_names=profile.joint_names,
         target_count=20,
-        max_target_deviations=tuple(deviations),
+        max_target_deviations=deviations,
         max_terminal_tail_duration_s=3.0,
     )
 
@@ -112,7 +111,7 @@ def test_original_gripper_transition_is_still_rejected(case):
     with pytest.raises(ContractError) as error:
         prepare_follower_plan(
             _anchor(case, profile), _window(case, profile), profile, _control(profile),
-            _follower(profile, case["axis"], case["budget"]), is_final=False,
+            _follower(profile, case["budget"]), is_final=False,
             duration_grid_ns=2_000_000,
         )
     assert error.value.reason == "FOLLOWER_DEVIATION_EXCEEDED"
@@ -125,7 +124,7 @@ def test_original_gripper_transition_is_still_rejected(case):
 def test_retimed_gripper_transition_is_executable_and_reports_both_deviations(case):
     profile = load_profile(case["profile"], SCHEMAS)
     control = _control(profile)
-    follower = _follower(profile, case["axis"], case["budget"])
+    follower = _follower(profile, case["budget"])
     anchor = _anchor(case, profile)
     window = _window(case, profile)
     linear_axes = tuple(
@@ -145,7 +144,7 @@ def test_retimed_gripper_transition_is_executable_and_reports_both_deviations(ca
     # The executed reference still differs from the original model target by
     # the documented unavoidable amount; that original deviation is not hidden.
     worst = 0.0
-    for index, target in zip(window.selected_indices, window.targets, strict=True):
+    for target in window.targets:
         reference = sample_reference_interval(prepared.plan, target.time_ns)
-        worst = max(worst, abs(reference.positions[axis] - case["targets"][index - 21]))
+        worst = max(worst, abs(reference.positions[axis] - target.positions[axis]))
     assert worst == pytest.approx(case["original_target_deviation"], abs=1e-4)

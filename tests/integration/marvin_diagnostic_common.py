@@ -61,11 +61,11 @@ if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
 from robot_backend_sim.common.config.follower_config import load_follower_config  # noqa: E402
-from robot_backend_sim.marvin_sim.handover.scene_config import load_marvin_scene_config  # noqa: E402
 from robot_backend_sim.common.config.scenario_config import ROBOT_REFERENCE_FIELDS  # noqa: E402
-from robot_backend_sim.marvin_sim.handover.scene import build_marvin_scene  # noqa: E402
 from robot_backend_sim.marvin_sim.handover.config import load_handover_plan_config  # noqa: E402
 from robot_backend_sim.marvin_sim.handover.plan import plan_handover  # noqa: E402
+from robot_backend_sim.marvin_sim.handover.scene import build_marvin_scene  # noqa: E402
+from robot_backend_sim.marvin_sim.handover.scene_config import load_marvin_scene_config  # noqa: E402
 
 SCENARIO = ROOT / "shared/scenarios/marvin_sim/handover"
 RECIPE = Path(
@@ -74,7 +74,7 @@ RECIPE = Path(
         str(SCENARIO / "configs/simulation/backend/backend_marvin_control.yaml"),
     )
 )
-EVIDENCE_DIR = Path(os.environ.get("P02B_EVIDENCE_DIR", "/data/marvin_sim/handover/diagnostics/p02b"))
+EVIDENCE_DIR = Path(os.environ.get("P02B_EVIDENCE_DIR", "/data/marvin_sim/handover/debug/p02b"))
 SCENE_PATH = SCENARIO / "configs/simulation/scene/marvin_handover.yaml"
 PLANNING_PATH = SCENARIO / "configs/simulation/planning/handover_paths.yaml"
 PROFILE_PATH = SCENARIO / "profiles/robots/marvin_handover_v1/profile.json"
@@ -410,14 +410,19 @@ class Driver:
         maximum_delta = max(
             abs(last - first) for first, last in zip(start, target, strict=True)
         )
-        # The follower fits a 1 s, 20-point curve; keep each window small
-        # enough for the 1.0 rad/s^2 arm acceleration and the 0.05 rad
-        # reference-deviation budget rather than relying on the nominal
-        # segment duration alone.
+        # A smoothstep window reaches 1.5 times its average speed. Split
+        # gripper motion using its own profile limit, separate from the arms.
+        gripper_windows = max(
+            math.ceil(1.5 * abs(last - first) / (joint.max_velocity * MAX_WINDOW_S))
+            for joint, first, last in zip(PROFILE.joints, start, target, strict=True)
+            if joint.unit == "m"
+        )
+        # Small arm steps also leave room for acceleration and tracking.
         count = max(
             1,
             math.ceil(duration_s / MAX_WINDOW_S),
             math.ceil(maximum_delta / 0.10),
+            gripper_windows,
         )
         records: list[dict[str, object]] = []
         for index in range(1, count + 1):

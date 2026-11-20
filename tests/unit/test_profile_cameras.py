@@ -12,13 +12,14 @@ from robot_contracts.profiles import (
     semantic_hash,
     validate_bindings,
 )
+from scenario_fixtures import MARVIN_SHARED_PROFILES
 
 ROOT = Path(__file__).resolve().parents[2]
 PROFILES = ROOT / "shared/scenarios/marvin_sim/stack/profiles"
 SCHEMAS = ROOT / "shared/common/interfaces/schemas"
 STACK_PROFILE = PROFILES / "robots/marvin_stack_v1/profile.json"
-STACK_OBSERVATION = PROFILES / "observations/marvin_rgb_joint_v1.json"
-STACK_ACTION = PROFILES / "actions/marvin_joint_position_v1.json"
+STACK_OBSERVATION = MARVIN_SHARED_PROFILES / "observations/marvin_rgb_joint_v1.json"
+STACK_ACTION = MARVIN_SHARED_PROFILES / "actions/marvin_joint_position_v1.json"
 
 
 def _stack_document():

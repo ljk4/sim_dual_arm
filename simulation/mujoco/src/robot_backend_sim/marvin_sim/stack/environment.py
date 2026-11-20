@@ -21,9 +21,7 @@ from robot_backend_sim.marvin_sim.stack.scene_config import StackEnvironmentConf
 __all__ = [
     "StackBinding",
     "add_stack_environment",
-    "base_world_point",
     "bind_stack_environment",
-    "combined_yaw_quaternion",
 ]
 
 

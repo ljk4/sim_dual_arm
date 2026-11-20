@@ -118,7 +118,7 @@ def artifact_paths(robot: str, task: str, project_root: Path) -> dict[str, Path]
     return {
         "select": base / "datasets" / "raw" / "formal-select.json",
         "dataset": base / "datasets" / "lerobot",
-        "cache": base / "datasets" / ".cache",
+        "cache": base / "debug" / "learning-cache",
         "models": base / "models",
         "logs": base / "logs",
         "training_logs": base / "logs" / "training",

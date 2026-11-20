@@ -13,7 +13,6 @@ from robot_backend_sim.common.physics.scene_container import SceneBuildError
 from robot_backend_sim.marvin_sim.assembly import (
     MarvinBinding,
     UrdfSemantics,
-    add_marvin_robot,
     bind_marvin_robot,
     read_urdf_semantics,
 )
@@ -31,20 +30,13 @@ from robot_backend_sim.marvin_sim.stack.environment import (
     add_stack_environment,
     bind_stack_environment,
 )
-from robot_backend_sim.marvin_sim.stack.scene_config import (
-    MarvinStackSceneConfig,
-    load_marvin_stack_scene_config,
-)
+from robot_backend_sim.marvin_sim.stack.scene_config import MarvinStackSceneConfig
 
 __all__ = [
     "MarvinStackScene",
     "MarvinStackSceneIndices",
     "build_marvin_stack_scene",
-    "load_and_build",
 ]
-
-_ASSEMBLIES = {"marvin": add_marvin_robot}
-_ENVIRONMENTS = {"stack": add_stack_environment}
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,15 +108,12 @@ def build_marvin_stack_scene(config: MarvinStackSceneConfig) -> MarvinStackScene
     """Assemble, compile and bind one Marvin stack scene."""
     if config.urdf_path is None:
         raise SceneBuildError("scene config has no resolved URDF path")
-    if config.robot.assembly not in _ASSEMBLIES:
+    if config.robot.assembly != "marvin":
         raise SceneBuildError(f"unsupported robot assembly {config.robot.assembly!r}")
-    environment = _ENVIRONMENTS.get(config.task.environment)
-    if environment is None:
-        raise SceneBuildError(
-            f"unsupported task environment {config.task.environment!r}"
-        )
+    if config.task.environment != "stack":
+        raise SceneBuildError(f"unsupported task environment {config.task.environment!r}")
     spec = create_marvin_spec(config.physics, config.robot, config.urdf_path)
-    environment(
+    add_stack_environment(
         spec,
         config.task,
         config.physics.object_friction,
@@ -147,7 +136,3 @@ def build_marvin_stack_scene(config: MarvinStackSceneConfig) -> MarvinStackScene
     scene = MarvinStackScene(model, data, config, indices)
     scene.reset(0)
     return scene
-
-
-def load_and_build(path: str) -> MarvinStackScene:
-    return build_marvin_stack_scene(load_marvin_stack_scene_config(path))

@@ -29,6 +29,7 @@ from robot_backend_sim.common.control.control_state import (  # noqa: E402
     PreparedControlCommand,
 )
 from robot_backend_sim.common.follower.follower_plan import prepare_follower_plan  # noqa: E402
+from scenario_fixtures import MARVIN_SHARED_PROFILES  # noqa: E402
 
 ruckig = pytest.importorskip("ruckig")
 
@@ -36,8 +37,8 @@ PROFILE = load_profile(
     PROFILES / "robots/marvin_stack_v1/profile.json",
     ROOT / "shared/common/interfaces/schemas/v1",
 )
-CONTROL = load_control_config(PROFILES / "control/marvin_control_v1.yaml")
-FOLLOWER = load_follower_config(PROFILES / "control/marvin_follower_v1.yaml")
+CONTROL = load_control_config(MARVIN_SHARED_PROFILES / "control/marvin_control_v1.yaml")
+FOLLOWER = load_follower_config(MARVIN_SHARED_PROFILES / "control/marvin_follower_v1.yaml")
 PROFILE_DIGEST = PROFILE.digest
 BASE = PROFILE.initial_positions
 JOINT_COUNT = len(BASE)

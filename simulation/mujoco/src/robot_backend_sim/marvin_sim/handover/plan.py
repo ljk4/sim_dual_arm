@@ -16,8 +16,12 @@ from typing import Any
 
 import numpy as np
 
-from robot_backend_sim.marvin_sim.handover.scene_config import MarvinSceneConfig
 from robot_backend_sim.common.kinematics.common import sample_joint_path
+from robot_backend_sim.common.kinematics.kinematics_clearance import ClearancePoint, KinematicsError
+from robot_backend_sim.common.physics.robot_geometry import ArmChain
+from robot_backend_sim.marvin_sim.handover.config import HandoverPlanConfig
+from robot_backend_sim.marvin_sim.handover.scene import MarvinScene
+from robot_backend_sim.marvin_sim.handover.scene_config import MarvinSceneConfig
 from robot_backend_sim.marvin_sim.kinematics import (
     BlockEnvelope,
     CarriedBlock,
@@ -32,11 +36,7 @@ from robot_backend_sim.marvin_sim.kinematics import (
     solve_targets,
     tcp_matrix,
 )
-from robot_backend_sim.common.kinematics.kinematics_clearance import ClearancePoint, KinematicsError
-from robot_backend_sim.marvin_sim.handover.environment import base_world_point
-from robot_backend_sim.marvin_sim.handover.scene import MarvinScene
-from robot_backend_sim.common.physics.robot_geometry import ArmChain
-from robot_backend_sim.marvin_sim.handover.config import HandoverPlanConfig
+from robot_backend_sim.marvin_sim.scene_base import base_world_point
 
 __all__ = [
     "CoordinationPoint",

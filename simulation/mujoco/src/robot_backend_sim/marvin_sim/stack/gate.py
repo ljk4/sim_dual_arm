@@ -52,7 +52,6 @@ class TeacherProgress:
         self.config = config
         self.phase_index = 0
         self.actual_start_ns = -1
-        self.actual_starts_ns: list[int] = []
         self.stable_since_ns: int | None = None
         self.hold_lost_since_ns: int | None = None
         self.last_wait_s = 0.0
@@ -62,8 +61,6 @@ class TeacherProgress:
     def bind_motion_start(self, step_index: int, start_ns: int) -> None:
         if step_index == self.phase_index and start_ns > 0:
             self.actual_start_ns = int(start_ns)
-            if self.actual_starts_ns and len(self.actual_starts_ns) > step_index:
-                self.actual_starts_ns[step_index] = int(start_ns)
             self.stable_since_ns = None
 
     def fact(self) -> StackGateFact:
@@ -97,8 +94,6 @@ class TeacherProgress:
         segment = segments[self.phase_index]
         if self.actual_start_ns < 0:
             self.actual_start_ns = feedback.sim_time_ns
-            if not self.actual_starts_ns:
-                self.actual_starts_ns.append(self.actual_start_ns)
 
         gates = self.config.gates
         duration_ns = round(segment.duration_s * 1e9)
@@ -215,7 +210,6 @@ class TeacherProgress:
         ):
             self.phase_index += 1
             self.actual_start_ns = feedback.sim_time_ns
-            self.actual_starts_ns.append(feedback.sim_time_ns)
             self.stable_since_ns = None
             self.hold_lost_since_ns = None
             self.last_wait_s = 0.0

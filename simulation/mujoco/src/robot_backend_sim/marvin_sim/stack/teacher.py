@@ -89,7 +89,6 @@ class StackPlan:
     plan_digest: str
     segments: tuple[StackPlanSegment, ...]
     duration_ns: int
-    open_total_m: float
     velocities: tuple[float, ...]
     accelerations: tuple[float, ...]
     ik_results: tuple[IKResult, ...]
@@ -509,7 +508,6 @@ def build_teacher_plan(
         plan_digest=digest,
         segments=tuple(segments),
         duration_ns=round(total_s * 1e9),
-        open_total_m=open_total,
         velocities=velocity_limits,
         accelerations=acceleration_limits,
         ik_results=ik_results,

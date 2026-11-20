@@ -13,7 +13,7 @@ task_text: >-
 profile: shared/scenarios/marvin_sim/stack/profiles/robots/marvin_stack_v1/profile.json
 select: var/marvin_sim/stack/datasets/raw/formal-select.json
 output_root: var/marvin_sim/stack/datasets/lerobot
-cache_root: var/marvin_sim/stack/datasets/.cache
+cache_root: var/marvin_sim/stack/debug/learning-cache
 attempt_export_glob: "export"
 verify_png_pixels: true
 require_quality: true

@@ -27,9 +27,7 @@ __all__ = [
     "BOX_GEOM_NAMES",
     "HandoverBinding",
     "add_handover_environment",
-    "base_world_point",
     "bind_handover_environment",
-    "combined_yaw_quaternion",
 ]
 
 BOX_BOTTOM_GEOM = "box_bottom"

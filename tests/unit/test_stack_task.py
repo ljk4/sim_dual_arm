@@ -22,7 +22,9 @@ from robot_backend_sim.marvin_sim.stack.evaluator import (  # noqa: E402
 )
 from robot_contracts.models import ContractError, RunContext  # noqa: E402
 
-CONFIG_PATH = ROOT / "shared/scenarios/marvin_sim/stack/configs/simulation/scene/marvin_stack_task.yaml"
+CONFIG_PATH = (
+    ROOT / "shared/scenarios/marvin_sim/stack/configs/simulation/scene/marvin_stack_task.yaml"
+)
 TABLE_TOP = 0.78
 TARGET_Z = TABLE_TOP + 0.03
 SOURCE_Z = TARGET_Z + 0.03 + 0.02

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import math
 from pathlib import Path
 from typing import Annotated
@@ -181,7 +180,6 @@ class CapacityConfig(StrictMappingModel):
 class StackTaskConfig(StrictMappingModel):
     source: Path = Path("")
     planning_config: Path = Path("")
-    file_sha256: Annotated[str, Field(pattern=_SHA256)] = "0" * 64
     config_digest: Annotated[str, Field(pattern=_SHA256)] = "0" * 64
     schema_version: Annotated[int, Field(strict=True, ge=1, le=1)]
     objects: ObjectsConfig
@@ -302,7 +300,6 @@ def validate_scene_geometry(
 def load_task_config(path: Path | str) -> StackTaskConfig:
     source_path = Path(path).resolve()
     try:
-        raw_bytes = source_path.read_bytes()
         document = read_unique_yaml(source_path)
     except OSError as error:
         raise StackTaskConfigError(source_path, "<file>", str(error)) from error
@@ -323,7 +320,6 @@ def load_task_config(path: Path | str) -> StackTaskConfig:
             source_path, "planning_config", f"file does not exist: {planning_path}"
         )
     planning_text = planning_path.read_text(encoding="utf-8")
-    file_sha256 = hashlib.sha256(raw_bytes).hexdigest()
     digest = semantic_hash(
         {
             "task": document,
@@ -334,7 +330,6 @@ def load_task_config(path: Path | str) -> StackTaskConfig:
         **{key: value for key, value in document.items() if key != "planning_config"},
         "source": source_path,
         "planning_config": planning_path,
-        "file_sha256": file_sha256,
         "config_digest": digest,
     }
     return validate_config_model(

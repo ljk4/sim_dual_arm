@@ -16,7 +16,8 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 SHARED = ROOT / "shared"
-MARVIN_PROFILES = SHARED / "scenarios/marvin_sim/stack/profiles"
+MARVIN_STACK_PROFILES = SHARED / "scenarios/marvin_sim/stack/profiles"
+MARVIN_SHARED_PROFILES = SHARED / "scenarios/marvin_sim/handover/profiles"
 
 
 def sha(path: Path) -> str:
@@ -83,15 +84,15 @@ def _copy_profile_documents(root: Path) -> None:
     profiles = root / "profiles"
     profiles.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(
-        MARVIN_PROFILES / "robots/marvin_stack_v1/profile.json",
+        MARVIN_STACK_PROFILES / "robots/marvin_stack_v1/profile.json",
         profiles / "robot.json",
     )
     shutil.copyfile(
-        MARVIN_PROFILES / "observations/marvin_rgb_joint_v1.json",
+        MARVIN_SHARED_PROFILES / "observations/marvin_rgb_joint_v1.json",
         profiles / "observation.json",
     )
     shutil.copyfile(
-        MARVIN_PROFILES / "actions/marvin_joint_position_v1.json",
+        MARVIN_SHARED_PROFILES / "actions/marvin_joint_position_v1.json",
         profiles / "action.json",
     )
 

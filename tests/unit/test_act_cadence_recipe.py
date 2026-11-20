@@ -8,11 +8,12 @@ import yaml
 from dual_arm_runtime.runtime_config import load_runtime_configuration
 from robot_backend_sim.common.config.backend_config import load_backend_config
 from robot_backend_sim.common.config.follower_config import load_follower_config
+from scenario_fixtures import MARVIN_SHARED_PROFILES
 
 ROOT = Path(__file__).resolve().parents[2]
 SCENARIO = ROOT / "shared/scenarios/marvin_sim/stack"
-TEACHER_FOLLOWER = SCENARIO / "profiles/control/marvin_follower_v1.yaml"
-INFERENCE_FOLLOWER = SCENARIO / "profiles/control/marvin_follower_inference_v1.yaml"
+TEACHER_FOLLOWER = MARVIN_SHARED_PROFILES / "control/marvin_follower_v1.yaml"
+INFERENCE_FOLLOWER = MARVIN_SHARED_PROFILES / "control/marvin_follower_inference_v1.yaml"
 BACKEND_CHUNKED = SCENARIO / "configs/simulation/backend/backend_stack_policy.yaml"
 RUNTIME_CHUNKED = SCENARIO / "configs/runtime/policy_rollout.yaml"
 RUNTIME_TEACHER = SCENARIO / "configs/runtime/teacher_collect.yaml"

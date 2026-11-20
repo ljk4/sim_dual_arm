@@ -217,7 +217,8 @@ def test_targets_use_snapshot_centres_and_configured_heights(config):
     )
     # Arm_R_tcp local -Y approaches at tilt=20 deg downward (-cos(20) along world Z).
     rotation = targets[0].rotation
-    assert -rotation[2][1] == pytest.approx(-math.cos(math.radians(config.targets.approach_tilt_deg)))
+    tilt = math.radians(config.targets.approach_tilt_deg)
+    assert -rotation[2][1] == pytest.approx(-math.cos(tilt))
     determinant = (
         rotation[0][0] * (rotation[1][1] * rotation[2][2] - rotation[1][2] * rotation[2][1])
         - rotation[0][1] * (rotation[1][0] * rotation[2][2] - rotation[1][2] * rotation[2][0])

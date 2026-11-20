@@ -21,8 +21,6 @@ from collections.abc import Mapping, Sequence
 
 from robot_contracts.models import ContractError, JointSpec, RobotProfile
 
-from robot_backend_sim.marvin_sim.assembly import MarvinBinding, gripper_opening
-from robot_backend_sim.marvin_sim.scene_base import MarvinSceneBase
 from robot_backend_sim.common.physics.robot_io import (
     PUBLIC_JOINT_NAMES,
     Measurement,
@@ -36,6 +34,8 @@ from robot_backend_sim.common.physics.robot_io import (
     validate_profile_contract,
     validate_targets,
 )
+from robot_backend_sim.marvin_sim.assembly import MarvinBinding, gripper_opening
+from robot_backend_sim.marvin_sim.scene_base import MarvinSceneBase
 
 __all__ = ["MarvinIO", "JOINT_NAMES"]
 

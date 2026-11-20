@@ -34,7 +34,7 @@ shared/
 - ROS 2 接口：[`common/interfaces/ros/robot_api_msgs/README.md`](common/interfaces/ros/robot_api_msgs/README.md)（`robot_api_msgs` 0.3.0、`FollowerReference.curve_duration_ns`、反馈能力）。
 - Policy 协议：[`common/interfaces/policy/README.md`](common/interfaces/policy/README.md)。
 - 结构与 manifest 版本：[`common/interfaces/schemas/README.md`](common/interfaces/schemas/README.md)。
-- 方案选择记录：`ResolvedReference.record()` 统一生成 `field/declared/path/sha256`，有语义摘要时附 `semantic_sha256`；`--scenario` 启动时后端写出的 `run.json` 记录 `selection`（binding、配方与档案路径及摘要）与 `--set` 覆盖项，runtime 快照记录 `selection`/`overrides`；worker 清单通过顶层 `selection.profiles` 记录档案，不逐 worker 复制。
+- 方案选择记录使用 `ResolvedReference.record()` 生成 `field/declared/path/sha256`，有语义摘要时附 `semantic_sha256`。`--robot <robot> --task <task>` 启动时，后端和 runtime 快照记录配方选择与覆盖项，worker 清单在顶层 `selection.profiles` 记录档案。
 - 历史读取：旧轨迹按已知字段改名验证定义，并核对旧摘要。入口与边界见 [Robot API](common/interfaces/ros/robot_api_msgs/README.md)和[离线处理](../runtime/ros2/ros/dual_arm_runtime/dual_arm_runtime/offline/README.md)。
 
 历史产物保留原路径与原语义；兼容读取只覆盖真实存在且需要保留的格式，不通过旧根目录软链接或转发包维持源码入口。

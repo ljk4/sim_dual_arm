@@ -180,7 +180,7 @@ def test_profile_schema_matches_models():
 
 
 def test_all_profile_documents_validate():
-    documents = sorted((ROOT / "shared/scenarios/marvin_sim/stack/profiles").rglob("*.json"))
+    documents = sorted((ROOT / "shared/scenarios/marvin_sim").glob("*/profiles/**/*.json"))
     assert documents
     for path in documents:
         document = json.loads(path.read_text())

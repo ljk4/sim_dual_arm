@@ -52,7 +52,6 @@ def test_repository_task_config_has_all_thresholds_and_capacity():
     assert config.capacity.max_episode_chunks >= config.capacity.expected_chunks
     assert config.capacity.backend_chunk_history >= config.capacity.max_episode_chunks
     assert len(config.config_digest) == 64
-    assert len(config.file_sha256) == 64
 
 
 @pytest.mark.parametrize(

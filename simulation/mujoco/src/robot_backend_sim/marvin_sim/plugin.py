@@ -72,7 +72,7 @@ def _create_handover_plugin(
 def _create_stack_plugin(
     task_path: object, *, task_mode: str | None, scene_config: object
 ) -> Any:
-    from robot_backend_sim.marvin_sim.stack import StackTaskPlugin
+    from robot_backend_sim.marvin_sim.stack.plugin import StackTaskPlugin
 
     return StackTaskPlugin.from_path(
         task_path, task_mode=task_mode, scene_config=scene_config

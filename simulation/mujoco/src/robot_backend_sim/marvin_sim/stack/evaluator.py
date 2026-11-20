@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import mujoco
@@ -245,19 +245,11 @@ def _right_finger_source_evidence(
             per_finger_force[fid] = per_finger_force.get(fid, 0.0) + _normal_force(
                 model, data, index
             )
-    if not per_finger_force:
-        max_speed = (
-            max(abs(float(data.qvel[a])) for a in binding.right_finger_dof_addresses)
-            if binding.right_finger_dof_addresses
-            else 0.0
-        )
-        return 0, 0.0, max_speed
-    max_speed = (
-        max(abs(float(data.qvel[a])) for a in binding.right_finger_dof_addresses)
-        if binding.right_finger_dof_addresses
-        else 0.0
+    max_speed = max(
+        (abs(float(data.qvel[a])) for a in binding.right_finger_dof_addresses),
+        default=0.0,
     )
-    return len(per_finger_force), min(per_finger_force.values()), max_speed
+    return len(per_finger_force), min(per_finger_force.values(), default=0.0), max_speed
 
 
 def _object_state(data: Any, qpos_addr: int, dof_addr: int) -> ObjectState:
@@ -271,7 +263,9 @@ def _object_state(data: Any, qpos_addr: int, dof_addr: int) -> ObjectState:
     )
 
 
-def _support_upward_component(model: Any, contact: Any, upper_body_id: int, lower_body_id: int) -> float:
+def _support_upward_component(
+    model: Any, contact: Any, upper_body_id: int, lower_body_id: int
+) -> float:
     b1 = int(model.geom_bodyid[int(contact.geom1)])
     b2 = int(model.geom_bodyid[int(contact.geom2)])
     nz = float(contact.frame[2])
@@ -468,7 +462,8 @@ def evaluate_task(
             observation.source_target_normal_force_n,
             success.min_support_normal_force_n,
             "N",
-            f"force={observation.source_target_normal_force_n:.3f}N nz={observation.source_target_vertical_component:.3f}",
+            f"force={observation.source_target_normal_force_n:.3f}N "
+            f"nz={observation.source_target_vertical_component:.3f}",
         ),
         TaskCondition(
             "target_on_table",
@@ -811,7 +806,11 @@ class StackTaskRuntime:
             raise _error("TASK_NOT_PREPARED", "prepare task before starting")
         if self._state != "PREPARED":
             raise _error("START_CONFLICT", f"cannot start task from state {self._state}")
-        if self._context != context or task_epoch != self._task_epoch or plan_digest != self._plan_digest:
+        if (
+            self._context != context
+            or task_epoch != self._task_epoch
+            or plan_digest != self._plan_digest
+        ):
             raise _error("START_CONFLICT", "start context, epoch or plan_digest differs")
         self._state = "RUNNING"
         self._seq += 1
@@ -822,7 +821,6 @@ class StackTaskRuntime:
         self._completed_ns = None
         if self._progress is not None:
             self._progress.actual_start_ns = int(sim_time_ns)
-            self._progress.actual_starts_ns = [int(sim_time_ns)]
         state = self.state
         self._start_cache[request_id] = _StartFact(request_id, content_digest, state)
         return state, False

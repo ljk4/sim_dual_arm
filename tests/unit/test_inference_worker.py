@@ -7,7 +7,6 @@ import os
 from pathlib import Path
 
 import yaml
-
 from dual_arm_runtime.offline.inference_worker import (
     _classification,
     _stage_state,

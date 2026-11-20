@@ -30,8 +30,6 @@ def write_document(tmp_path: Path, document: dict) -> Path:
     (directory / "marvin_control.yaml").write_text("control: x\n", encoding="utf-8")
     (directory / "marvin_stream.yaml").write_text("stream: x\n", encoding="utf-8")
     (directory / "marvin_follower.yaml").write_text("follower: x\n", encoding="utf-8")
-    (directory / "marvin_stack_task.yaml").write_text("task: x\n", encoding="utf-8")
-    (directory / "kinematics_check.yaml").write_text("ik: x\n", encoding="utf-8")
     profile = directory / "profile.json"
     profile.write_text("{}\n", encoding="utf-8")
     schemas = directory / "schemas"
@@ -39,7 +37,7 @@ def write_document(tmp_path: Path, document: dict) -> Path:
     return path
 
 
-def document_with_paths(tmp_path: Path) -> dict:
+def document_with_paths() -> dict:
     document = copy.deepcopy(DEFAULT_DOCUMENT)
     document["robot"].update(
         {
@@ -55,7 +53,7 @@ def document_with_paths(tmp_path: Path) -> dict:
 
 
 def test_valid_config_resolves_every_path_against_the_config_file(tmp_path):
-    path = write_document(tmp_path, document_with_paths(tmp_path))
+    path = write_document(tmp_path, document_with_paths())
     config = load_backend_config(path)
     assert config.source == path.resolve()
     assert config.profile_path == (path.parent / "profile.json").resolve()
@@ -78,7 +76,7 @@ def test_repository_config_loads():
 
 
 def test_visualization_can_be_disabled_without_disabling_cameras(tmp_path):
-    document = document_with_paths(tmp_path)
+    document = document_with_paths()
     document["robot"]["visualization_enabled"] = False
     config = load_backend_config(write_document(tmp_path, document))
     assert config.visualization_enabled is False
@@ -86,7 +84,7 @@ def test_visualization_can_be_disabled_without_disabling_cameras(tmp_path):
 
 
 def test_unknown_key_is_rejected(tmp_path):
-    document = document_with_paths(tmp_path)
+    document = document_with_paths()
     document["run"]["unknown"] = 1
     with pytest.raises(BackendConfigError) as caught:
         load_backend_config(write_document(tmp_path, document))
@@ -94,7 +92,7 @@ def test_unknown_key_is_rejected(tmp_path):
 
 
 def test_unknown_nested_key_is_rejected(tmp_path):
-    document = document_with_paths(tmp_path)
+    document = document_with_paths()
     document["logging"]["extra"] = True
     with pytest.raises(BackendConfigError) as caught:
         load_backend_config(write_document(tmp_path, document))
@@ -102,7 +100,7 @@ def test_unknown_nested_key_is_rejected(tmp_path):
 
 
 def test_duplicate_key_is_rejected(tmp_path):
-    path = write_document(tmp_path, document_with_paths(tmp_path))
+    path = write_document(tmp_path, document_with_paths())
     text = path.read_text(encoding="utf-8").replace(
         "  capture_hz: 20.0\n", "  capture_hz: 20.0\n  capture_hz: 10.0\n"
     )
@@ -117,7 +115,7 @@ def test_duplicate_key_is_rejected(tmp_path):
     ("realtime_speed", 0.0), ("max_catchup_steps", 0),
 ])
 def test_run_values_are_strict(tmp_path, field, value):
-    document = document_with_paths(tmp_path)
+    document = document_with_paths()
     document["run"][field] = value
     with pytest.raises(BackendConfigError) as caught:
         load_backend_config(write_document(tmp_path, document))
@@ -126,28 +124,28 @@ def test_run_values_are_strict(tmp_path, field, value):
 
 @pytest.mark.parametrize("value", [0, 5000, True])
 def test_queue_bounds_are_strict(tmp_path, value):
-    document = document_with_paths(tmp_path)
+    document = document_with_paths()
     document["queues"]["owner"] = value
     with pytest.raises(BackendConfigError, match="queues.owner"):
         load_backend_config(write_document(tmp_path, document))
 
 
 def test_boolean_cannot_stand_in_for_a_number(tmp_path):
-    document = document_with_paths(tmp_path)
+    document = document_with_paths()
     document["limits"]["shutdown_s"] = True
     with pytest.raises(BackendConfigError, match="limits.shutdown_s"):
         load_backend_config(write_document(tmp_path, document))
 
 
 def test_log_cross_field_bounds_are_rejected(tmp_path):
-    document = document_with_paths(tmp_path)
+    document = document_with_paths()
     document["logging"]["max_event_bytes"] = 100
     with pytest.raises(BackendConfigError, match="logging"):
         load_backend_config(write_document(tmp_path, document))
 
 
 def test_missing_referenced_file_is_rejected(tmp_path):
-    document = document_with_paths(tmp_path)
+    document = document_with_paths()
     document["robot"]["scene"] = "missing.yaml"
     with pytest.raises(BackendConfigError, match="robot.scene: must be an existing file"):
         load_backend_config(write_document(tmp_path, document))
@@ -158,7 +156,7 @@ def test_missing_referenced_file_is_rejected(tmp_path):
     ["", "robot", "/", "/robot/", "/robot//arm", "/robot-arm"],
 )
 def test_namespace_must_be_a_non_empty_ros_name(tmp_path, namespace):
-    document = document_with_paths(tmp_path)
+    document = document_with_paths()
     document["robot"]["namespace"] = namespace
     with pytest.raises(BackendConfigError, match="robot.namespace"):
         load_backend_config(write_document(tmp_path, document))

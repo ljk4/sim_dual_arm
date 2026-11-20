@@ -36,6 +36,7 @@ from robot_backend_sim.common.follower.follower_protocol import (  # noqa: E402
     prepare_follower_request,
     validation_limits,
 )
+from scenario_fixtures import MARVIN_SHARED_PROFILES  # noqa: E402
 
 ruckig = pytest.importorskip("ruckig")
 
@@ -43,8 +44,8 @@ PROFILE = load_profile(
     PROFILES / "robots/marvin_stack_v1/profile.json",
     ROOT / "shared/common/interfaces/schemas/v1",
 )
-CONTROL = load_control_config(PROFILES / "control/marvin_control_v1.yaml")
-FOLLOWER = load_follower_config(PROFILES / "control/marvin_follower_v1.yaml")
+CONTROL = load_control_config(MARVIN_SHARED_PROFILES / "control/marvin_control_v1.yaml")
+FOLLOWER = load_follower_config(MARVIN_SHARED_PROFILES / "control/marvin_follower_v1.yaml")
 BASE = PROFILE.initial_positions
 COUNT = len(BASE)
 GRID_NS = 2_000_000

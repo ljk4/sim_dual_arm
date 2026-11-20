@@ -41,10 +41,10 @@ paths:
     - shared/scenarios/marvin_sim/stack/extensions/ros/marvin_stack_api_msgs/srv/GetTeacherChunk.srv
     - shared/scenarios/marvin_sim/stack/extensions/ros/marvin_stack_api_msgs/msg/TeacherCapability.msg
     - shared/scenarios/marvin_sim/stack/profiles/robots/marvin_stack_v1/profile.json
-    - shared/scenarios/marvin_sim/stack/profiles/observations/marvin_rgb_joint_v1.json
-    - shared/scenarios/marvin_sim/stack/profiles/actions/marvin_joint_position_v1.json
-    - shared/scenarios/marvin_sim/stack/profiles/control/marvin_control_v1.yaml
-    - shared/scenarios/marvin_sim/stack/profiles/control/marvin_follower_v1.yaml
+    - shared/scenarios/marvin_sim/handover/profiles/observations/marvin_rgb_joint_v1.json
+    - shared/scenarios/marvin_sim/handover/profiles/actions/marvin_joint_position_v1.json
+    - shared/scenarios/marvin_sim/handover/profiles/control/marvin_control_v1.yaml
+    - shared/scenarios/marvin_sim/handover/profiles/control/marvin_follower_v1.yaml
     - runtime/ros2/docker/docker-compose.yml
   sdk_marker: build/ros-dev/contracts.json
 

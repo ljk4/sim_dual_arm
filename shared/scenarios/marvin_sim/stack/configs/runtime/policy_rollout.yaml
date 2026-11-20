@@ -1,10 +1,10 @@
 # Marvin stack ACT Policy execution & recording configuration.
 schema_version: 1
 robot_profile: ../../profiles/robots/marvin_stack_v1/profile.json
-observation_schema: ../../profiles/observations/marvin_rgb_joint_v1.json
-action_schema: ../../profiles/actions/marvin_joint_position_v1.json
-control_constraints: ../../profiles/control/marvin_control_v1.yaml
-follower_config: ../../profiles/control/marvin_follower_inference_v1.yaml
+observation_schema: ../../../handover/profiles/observations/marvin_rgb_joint_v1.json
+action_schema: ../../../handover/profiles/actions/marvin_joint_position_v1.json
+control_constraints: ../../../handover/profiles/control/marvin_control_v1.yaml
+follower_config: ../../../handover/profiles/control/marvin_follower_inference_v1.yaml
 robot_namespace: /robot
 
 action_source: policy

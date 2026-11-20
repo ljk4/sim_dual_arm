@@ -17,12 +17,12 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim.marvin_sim.stack.kinematics_config import load_kinematics_config  # noqa: E402
-from robot_backend_sim.marvin_sim.stack.scene_config import load_marvin_stack_scene_config  # noqa: E402
 from robot_backend_sim.common.kinematics import common, kinematics_clearance  # noqa: E402
-from robot_backend_sim.marvin_sim.stack import plan as stack_plan  # noqa: E402
-from robot_backend_sim.marvin_sim.stack.scene import build_marvin_stack_scene  # noqa: E402
 from robot_backend_sim.common.render.rendering import SceneRenderer  # noqa: E402
+from robot_backend_sim.marvin_sim.stack import plan as stack_plan  # noqa: E402
+from robot_backend_sim.marvin_sim.stack.kinematics_config import load_kinematics_config  # noqa: E402
+from robot_backend_sim.marvin_sim.stack.scene import build_marvin_stack_scene  # noqa: E402
+from robot_backend_sim.marvin_sim.stack.scene_config import load_marvin_stack_scene_config  # noqa: E402
 from robot_backend_sim.tools import check_kinematics, check_kinematics_report  # noqa: E402
 
 CONFIG_PATH = SCENARIO / "configs/simulation/scene/marvin_stack.yaml"
@@ -64,7 +64,8 @@ def initial_state(scene, scene_config, seed: int = 11):
     scene.reset(seed)
     qpos = scene.data.qpos.copy()
     object_addresses = {
-        obj.name: scene.indices.environment.object_free_joint_qpos[obj.name] for obj in scene_config.objects
+        obj.name: scene.indices.environment.object_free_joint_qpos[obj.name]
+        for obj in scene_config.objects
     }
     poses = {
         name: common.extract_object_pose(qpos, address, name)

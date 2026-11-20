@@ -27,6 +27,7 @@ from robot_backend_sim.common.config.follower_config import load_follower_config
 from robot_backend_sim.common.config.motion_config import load_control_config  # noqa: E402
 from robot_backend_sim.common.follower.follower_plan import prepare_follower_plan  # noqa: E402
 from robot_backend_sim.common.motion.ruckig_export import export_ruckig_reference  # noqa: E402
+from scenario_fixtures import MARVIN_SHARED_PROFILES  # noqa: E402
 
 ruckig = pytest.importorskip("ruckig")
 
@@ -34,11 +35,10 @@ PROFILE = load_profile(
     PROFILES / "robots/marvin_stack_v1/profile.json",
     ROOT / "shared/common/interfaces/schemas/v1",
 )
-CONTROL = load_control_config(PROFILES / "control/marvin_control_v1.yaml")
+CONTROL = load_control_config(MARVIN_SHARED_PROFILES / "control/marvin_control_v1.yaml")
 # These trajectory fixtures use ten-point windows independently of scenario cadence.
-FOLLOWER = load_follower_config(PROFILES / "control/marvin_follower_v1.yaml").model_copy(
-    update={"target_count": 10}
-)
+FOLLOWER_PATH = MARVIN_SHARED_PROFILES / "control/marvin_follower_v1.yaml"
+FOLLOWER = load_follower_config(FOLLOWER_PATH).model_copy(update={"target_count": 10})
 BASE = PROFILE.initial_positions
 JOINT_COUNT = len(BASE)
 

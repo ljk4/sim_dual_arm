@@ -3,8 +3,8 @@ schema_version: 1
 
 model:
   robot_profile_path: ../../profiles/robots/marvin_stack_v1/profile.json
-  observation_schema_path: ../../profiles/observations/marvin_rgb_joint_v1.json
-  action_schema_path: ../../profiles/actions/marvin_joint_position_v1.json
+  observation_schema_path: ../../../handover/profiles/observations/marvin_rgb_joint_v1.json
+  action_schema_path: ../../../handover/profiles/actions/marvin_joint_position_v1.json
   device: cuda
   require_formal: true
   max_prediction_corrections:

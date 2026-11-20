@@ -20,8 +20,8 @@ learning:
 
 profiles:
   robot: profiles/robots/marvin_stack_v1/profile.json
-  observation: profiles/observations/marvin_rgb_joint_v1.json
-  action: profiles/actions/marvin_joint_position_v1.json
+  observation: ../handover/profiles/observations/marvin_rgb_joint_v1.json
+  action: ../handover/profiles/actions/marvin_joint_position_v1.json
 
 recipes:
   simulation_teacher: configs/simulation/backend/backend_stack_teacher.yaml

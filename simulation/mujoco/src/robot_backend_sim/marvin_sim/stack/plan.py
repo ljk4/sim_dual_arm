@@ -25,7 +25,6 @@ from robot_backend_sim.marvin_sim.kinematics import (
     PathCheck,
     check_joint_path,
     object_pair_set,
-    relative_block_pose,
     robot_pair_set,
     solve_targets,
 )
@@ -195,7 +194,11 @@ def build_targets(
     return (
         KeyPoseTarget(
             "pregrasp",
-            (float(grasp_pos[0]), float(grasp_pos[1]), float(grasp_pos[2] + config.pregrasp_height_m)),
+            (
+                float(grasp_pos[0]),
+                float(grasp_pos[1]),
+                float(grasp_pos[2] + config.pregrasp_height_m),
+            ),
             grasp_rot_t,
         ),
         KeyPoseTarget(
@@ -210,7 +213,11 @@ def build_targets(
         ),
         KeyPoseTarget(
             "place_hover",
-            (float(place_pos[0]), float(place_pos[1]), float(place_pos[2] + config.place_hover_height_m)),
+            (
+                float(place_pos[0]),
+                float(place_pos[1]),
+                float(place_pos[2] + config.place_hover_height_m),
+            ),
             place_rot_t,
         ),
         KeyPoseTarget(
@@ -220,7 +227,11 @@ def build_targets(
         ),
         KeyPoseTarget(
             "retreat",
-            (float(place_pos[0]), float(place_pos[1]), float(place_pos[2] + config.retreat_height_m)),
+            (
+                float(place_pos[0]),
+                float(place_pos[1]),
+                float(place_pos[2] + config.retreat_height_m),
+            ),
             place_rot_t,
         ),
     )

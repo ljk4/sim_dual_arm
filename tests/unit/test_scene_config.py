@@ -22,7 +22,9 @@ from robot_backend_sim.marvin_sim.stack.scene_config import (  # noqa: E402
 from robot_contracts.profiles import load_profile, semantic_hash  # noqa: E402
 
 CONFIG_PATH = ROOT / "shared/scenarios/marvin_sim/stack/configs/simulation/scene/marvin_stack.yaml"
-PROFILE_PATH = ROOT / "shared/scenarios/marvin_sim/stack/profiles/robots/marvin_stack_v1/profile.json"
+PROFILE_PATH = (
+    ROOT / "shared/scenarios/marvin_sim/stack/profiles/robots/marvin_stack_v1/profile.json"
+)
 SCHEMAS = ROOT / "shared/common/interfaces/schemas"
 DEFAULT_DOCUMENT = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
 

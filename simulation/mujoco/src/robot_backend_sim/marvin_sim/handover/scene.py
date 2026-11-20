@@ -18,24 +18,20 @@ from robot_backend_sim.common.physics.scene_container import SceneBuildError
 from robot_backend_sim.marvin_sim.assembly import (
     MarvinBinding,
     UrdfSemantics,
-    add_marvin_robot,
     bind_marvin_robot,
     read_urdf_semantics,
 )
 from robot_backend_sim.marvin_sim.handover.environment import (
     HandoverBinding,
     add_handover_environment,
-    base_world_point,
     bind_handover_environment,
-    combined_yaw_quaternion,
 )
-from robot_backend_sim.marvin_sim.handover.scene_config import (
-    MarvinSceneConfig,
-    load_marvin_scene_config,
-)
+from robot_backend_sim.marvin_sim.handover.scene_config import MarvinSceneConfig
 from robot_backend_sim.marvin_sim.scene_base import (
     MarvinSceneBase,
     add_marvin_cameras,
+    base_world_point,
+    combined_yaw_quaternion,
     compile_marvin_spec,
     create_marvin_spec,
     validate_marvin_cameras,
@@ -46,9 +42,6 @@ __all__ = [
     "MarvinSceneIndices",
     "build_marvin_scene",
 ]
-
-_ASSEMBLIES = {"marvin": add_marvin_robot}
-_ENVIRONMENTS = {"handover": add_handover_environment}
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,15 +98,12 @@ def build_marvin_scene(config: MarvinSceneConfig) -> MarvinScene:
     """Assemble, compile and bind one Marvin handover scene."""
     if config.urdf_path is None:
         raise SceneBuildError("scene config has no resolved URDF path")
-    if config.robot.assembly not in _ASSEMBLIES:
+    if config.robot.assembly != "marvin":
         raise SceneBuildError(f"unsupported robot assembly {config.robot.assembly!r}")
-    environment = _ENVIRONMENTS.get(config.task.environment)
-    if environment is None:
-        raise SceneBuildError(
-            f"unsupported task environment {config.task.environment!r}"
-        )
+    if config.task.environment != "handover":
+        raise SceneBuildError(f"unsupported task environment {config.task.environment!r}")
     spec = create_marvin_spec(config.physics, config.robot, config.urdf_path)
-    environment(
+    add_handover_environment(
         spec,
         config.task,
         config.physics.object_friction,
@@ -135,7 +125,3 @@ def build_marvin_scene(config: MarvinSceneConfig) -> MarvinScene:
     scene = MarvinScene(model, data, config, indices)
     scene.reset(0)
     return scene
-
-
-def load_and_build(path: str) -> MarvinScene:
-    return build_marvin_scene(load_marvin_scene_config(path))

@@ -64,10 +64,10 @@
 # referenced profile and the Policy service configuration.
 schema_version: 1
 robot_profile: ../../../shared/scenarios/marvin_sim/stack/profiles/robots/marvin_stack_v1/profile.json
-observation_schema: ../../../shared/scenarios/marvin_sim/stack/profiles/observations/marvin_rgb_joint_v1.json
-action_schema: ../../../shared/scenarios/marvin_sim/stack/profiles/actions/marvin_joint_position_v1.json
-control_constraints: ../../../shared/scenarios/marvin_sim/stack/profiles/control/marvin_control_v1.yaml
-follower_config: ../../../shared/scenarios/marvin_sim/stack/profiles/control/marvin_follower_v1.yaml
+observation_schema: ../../../shared/scenarios/marvin_sim/handover/profiles/observations/marvin_rgb_joint_v1.json
+action_schema: ../../../shared/scenarios/marvin_sim/handover/profiles/actions/marvin_joint_position_v1.json
+control_constraints: ../../../shared/scenarios/marvin_sim/handover/profiles/control/marvin_control_v1.yaml
+follower_config: ../../../shared/scenarios/marvin_sim/handover/profiles/control/marvin_follower_v1.yaml
 robot_namespace: /robot
 
 action_source: policy

@@ -15,10 +15,12 @@ Marvin 固定基座双臂平台上的单臂堆叠方案（右臂将红色 4 cm `
 | --- | --- |
 | `binding.yaml` | 方案绑定与三端配方选择（`--robot marvin_sim --task stack`） |
 | `extensions/ros/marvin_stack_api_msgs/` | `marvin_stack_api_msgs` ROS 2 IDL 扩展 |
-| `profiles/` | `marvin_stack_v1` 机器人档案、三路相机标定与 16 维控制参数 |
+| `profiles/` | `marvin_stack_v1` 机器人档案、三路相机标定与本任务的连续流超时 |
 | `configs/simulation/scene/marvin_stack.yaml` | 物理、Marvin 装配参数、桌块与三路相机声明 |
 | `configs/simulation/scene/marvin_stack_task.yaml` | 14 项堆叠成功判据、阶段门禁与 Teacher 参数 |
 | `configs/simulation/checks/` | 67 布局静态可见性与运动学/净空检查配置 |
 | `configs/simulation/backend/` | direct / teacher / policy 三类后端启动配方 |
 | `configs/runtime/` | Teacher 采集、Policy 推理、阶段评估与 50 条正式 campaign 预算 |
 | `configs/learning/` | ACT 45/5 数据转换、采样过滤、训练与推理服务配置 |
+
+堆叠与交接共用 Marvin 的 [观测档案](../handover/profiles/observations/marvin_rgb_joint_v1.json)、[动作档案](../handover/profiles/actions/marvin_joint_position_v1.json)、[运动限值](../handover/profiles/control/marvin_control_v1.yaml)、[Teacher 跟随参数](../handover/profiles/control/marvin_follower_v1.yaml)和 [Policy 跟随参数](../handover/profiles/control/marvin_follower_inference_v1.yaml)。方案绑定与启动配方直接引用这五份文件。

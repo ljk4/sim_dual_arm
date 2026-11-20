@@ -113,7 +113,9 @@ def test_probe_log_directory_uses_its_actual_instance_identity(tmp_path, monkeyp
         lambda: {"python": {"version": "3.12"}, "packages": {}, "imports": {}},
     )
     monkeypatch.setattr(probe, "_verify_mounted_source", lambda *_args: None)
-    monkeypatch.setattr(probe, "_check_model", lambda: {"stats": {"nq": 9, "nv": 9, "nu": 8}})
+    monkeypatch.setattr(
+        probe, "_check_model", lambda: ({"stats": {"nq": 9, "nv": 9, "nu": 8}}, object())
+    )
     monkeypatch.setattr(probe, "_check_qp", lambda: {"max_abs_error": 0.0})
     monkeypatch.setattr(
         probe,

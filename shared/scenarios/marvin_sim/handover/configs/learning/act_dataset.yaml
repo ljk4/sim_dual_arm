@@ -14,7 +14,7 @@ task_text: >-
 profile: shared/scenarios/marvin_sim/handover/profiles/robots/marvin_handover_v1/profile.json
 select: var/marvin_sim/handover/datasets/raw/formal-select.json
 output_root: var/marvin_sim/handover/datasets/lerobot
-cache_root: var/marvin_sim/handover/datasets/.cache
+cache_root: var/marvin_sim/handover/debug/learning-cache
 # The campaign writes each accepted export directly at <attempt>/export.
 attempt_export_glob: "export"
 verify_png_pixels: true

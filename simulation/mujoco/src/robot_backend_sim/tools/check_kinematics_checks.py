@@ -12,8 +12,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from robot_backend_sim.common.kinematics import common
-from robot_backend_sim.common.kinematics.common import extract_object_pose
 from robot_backend_sim.common.kinematics import kinematics_clearance as kinematics
+from robot_backend_sim.common.kinematics.common import extract_object_pose
 from robot_backend_sim.common.render import visibility
 from robot_backend_sim.marvin_sim.scene_base import (
     base_world_point,
@@ -43,8 +43,9 @@ from robot_backend_sim.tools.check_kinematics_common import (
 )
 
 if TYPE_CHECKING:
-    from robot_backend_sim.marvin_sim.stack.scene import MarvinStackScene
     from robot_backend_sim.common.render.rendering import SceneRenderer, Snapshot
+    from robot_backend_sim.marvin_sim.stack.plan import KeyPoseTarget
+    from robot_backend_sim.marvin_sim.stack.scene import MarvinStackScene
 
 
 def _apply_updates(qpos: object, updates: dict[int, tuple[float, ...]]) -> object:

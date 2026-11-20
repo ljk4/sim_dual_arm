@@ -15,8 +15,6 @@ for source in (SIM_SRC, CONTRACTS):
 
 pytest.importorskip("mujoco")
 import mujoco  # noqa: E402
-from robot_backend_sim.marvin_sim.stack.scene_config import load_marvin_stack_scene_config  # noqa: E402
-from robot_backend_sim.marvin_sim.stack.scene import build_marvin_stack_scene  # noqa: E402
 from robot_backend_sim.marvin_sim.stack.config import load_task_config  # noqa: E402
 from robot_backend_sim.marvin_sim.stack.evaluator import (  # noqa: E402
     StackTaskRuntime,
@@ -24,17 +22,18 @@ from robot_backend_sim.marvin_sim.stack.evaluator import (  # noqa: E402
     evaluate_task,
     make_task_binding,
 )
+from robot_backend_sim.marvin_sim.stack.scene import build_marvin_stack_scene  # noqa: E402
+from robot_backend_sim.marvin_sim.stack.scene_config import load_marvin_stack_scene_config  # noqa: E402
 from robot_contracts.models import RunContext  # noqa: E402
 
 
 @pytest.fixture(scope="module")
 def scene_fixture():
-    scene_config = load_marvin_stack_scene_config(SCENARIO / "configs/simulation/scene/marvin_stack.yaml")
-    scene = build_marvin_stack_scene(
-        scene_config,
-    )
+    recipes = SCENARIO / "configs/simulation/scene"
+    scene_config = load_marvin_stack_scene_config(recipes / "marvin_stack.yaml")
+    scene = build_marvin_stack_scene(scene_config)
     scene.reset(0)
-    task_config = load_task_config(SCENARIO / "configs/simulation/scene/marvin_stack_task.yaml")
+    task_config = load_task_config(recipes / "marvin_stack_task.yaml")
     binding = make_task_binding(
         scene.model,
         task_config,

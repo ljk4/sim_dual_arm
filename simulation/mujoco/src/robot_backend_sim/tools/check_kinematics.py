@@ -18,26 +18,26 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from robot_backend_sim.common.physics import assets
+from robot_backend_sim.common.runtime.diagnostics import code_provenance, sha256_file
+from robot_backend_sim.marvin_sim.stack import visibility
+from robot_backend_sim.marvin_sim.stack.diagnostics import scene_config_document
 from robot_backend_sim.marvin_sim.stack.kinematics_config import (
     KinematicsCheckConfig,
     KinematicsConfigError,
     load_kinematics_config,
 )
+from robot_backend_sim.marvin_sim.stack.plan import KinematicsError
 from robot_backend_sim.marvin_sim.stack.scene_config import (
     MarvinStackSceneConfig,
     StackSceneConfigError,
     load_marvin_stack_scene_config,
 )
-from robot_backend_sim.marvin_sim.stack.plan import KinematicsError
-from robot_backend_sim.common.physics import assets
-from robot_backend_sim.marvin_sim.stack import visibility
 from robot_backend_sim.marvin_sim.stack.visibility import (
     SceneCheckConfig,
     SceneCheckConfigError,
     load_check_config,
 )
-from robot_backend_sim.common.runtime.diagnostics import code_provenance, sha256_file
-from robot_backend_sim.marvin_sim.stack.diagnostics import scene_config_document
 
 if TYPE_CHECKING:
 

@@ -26,6 +26,7 @@ for source in (ROOT / "simulation/mujoco/src", ROOT / "shared/common/python/cont
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
 
+from robot_backend_sim.common.config.backend_config import load_backend_config  # noqa: E402
 from robot_backend_sim.common.config.follower_config import load_follower_config  # noqa: E402
 from robot_backend_sim.common.config.motion_config import load_control_config  # noqa: E402
 from robot_backend_sim.common.config.stream_config import StreamConfig  # noqa: E402
@@ -57,11 +58,7 @@ def replace(value, **changes):
 
 
 SCENARIO = ROOT / "shared/scenarios/marvin_sim/stack"
-SCENE_PATH = SCENARIO / "configs/simulation/scene/marvin_stack.yaml"
-CONTROL_PATH = SCENARIO / "profiles/control/marvin_control_v1.yaml"
-FOLLOWER_PATH = SCENARIO / "profiles/control/marvin_follower_v1.yaml"
-PROFILE_PATH = SCENARIO / "profiles/robots/marvin_stack_v1/profile.json"
-SCHEMAS = ROOT / "shared/common/interfaces/schemas"
+BACKEND = load_backend_config(SCENARIO / "configs/simulation/backend/backend.yaml")
 DT_NS = 2_000_000
 LEASE_NS = 10_000_000_000
 FIRST_START_NS = 250_000_000
@@ -70,29 +67,30 @@ TERMINAL = frozenset({"COMPLETED", "CANCELED", "FAILED"})
 REPORT_DIR = Path(
     os.environ.get("FOLLOWER_REPORT_DIR", ROOT / "var/marvin_sim/stack/debug/follower-execution")
 )
-BASE_POSITIONS = load_profile(PROFILE_PATH, SCHEMAS).initial_positions
+PROFILE = load_profile(BACKEND.profile_path, BACKEND.schemas_path)
+BASE_POSITIONS = PROFILE.initial_positions
 
 
 @pytest.fixture(scope="module")
 def scene_config():
-    return load_marvin_stack_scene_config(SCENE_PATH)
+    return load_marvin_stack_scene_config(BACKEND.scene_path)
 
 
 @pytest.fixture(scope="module")
 def profile():
-    return load_profile(PROFILE_PATH, SCHEMAS)
+    return PROFILE
 
 
 @pytest.fixture(scope="module")
 def control_config():
-    return load_control_config(CONTROL_PATH)
+    return load_control_config(BACKEND.control_path)
 
 
 @pytest.fixture(scope="module")
 def follower_config():
     # This regression exercises eleven 5-target handoffs over a 60-point source.
     # Production now uses ten targets; keep this fixture independent of that recipe.
-    return replace(load_follower_config(FOLLOWER_PATH), target_count=5)
+    return replace(load_follower_config(BACKEND.follower_path), target_count=5)
 
 
 @pytest.fixture(scope="module")

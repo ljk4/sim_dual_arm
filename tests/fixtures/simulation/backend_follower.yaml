@@ -8,9 +8,9 @@ robot:
   profile: ../../../shared/scenarios/marvin_sim/stack/profiles/robots/marvin_stack_v1/profile.json
   schemas: ../../../shared/common/interfaces/schemas
   scene: ../../../shared/scenarios/marvin_sim/stack/configs/simulation/scene/marvin_stack.yaml
-  control: ../../../shared/scenarios/marvin_sim/stack/profiles/control/marvin_control_v1.yaml
+  control: ../../../shared/scenarios/marvin_sim/handover/profiles/control/marvin_control_v1.yaml
   stream: ../../../shared/scenarios/marvin_sim/stack/profiles/control/marvin_stream_v1.yaml
-  follower: ../../../shared/scenarios/marvin_sim/stack/profiles/control/marvin_follower_v1.yaml
+  follower: ../../../shared/scenarios/marvin_sim/handover/profiles/control/marvin_follower_v1.yaml
 
 run:
   seed: 0

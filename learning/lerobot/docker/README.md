@@ -11,9 +11,8 @@
 # 宿主机：构建并启动 learning 容器，然后进入终端
 ./env.sh up learning
 ./env.sh enter learning
-
-# 容器内：运行单元测试
-scripts/test.sh -q tests/unit
 ```
 
 > 启动 `scripts/server_policy.sh` 前，须先在 `runtime` 容器运行过 `scripts/build_sdk.sh` 生成 `/build/generated/policy-sdk`。
+
+运行测试见[测试执行方式](../../../tests/README.md#执行方式)。

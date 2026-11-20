@@ -96,8 +96,9 @@ class StackEnvironmentConfig(StrictMappingModel):
         table_half_y = self.table.size_xy[1] / 2.0
         for field_name, obj in (("source", self.source), ("target", self.target)):
             radius = math.hypot(*obj.half_extents[:2])
-            reach_x = abs(obj.nominal_xy[0] - self.table.center_xy[0]) + obj.randomization.xy_m + radius
-            reach_y = abs(obj.nominal_xy[1] - self.table.center_xy[1]) + obj.randomization.xy_m + radius
+            randomization = obj.randomization.xy_m
+            reach_x = abs(obj.nominal_xy[0] - self.table.center_xy[0]) + randomization + radius
+            reach_y = abs(obj.nominal_xy[1] - self.table.center_xy[1]) + randomization + radius
             if reach_x > table_half_x + 1e-9 or reach_y > table_half_y + 1e-9:
                 raise contract_error(
                     f"{field_name}.nominal_xy",

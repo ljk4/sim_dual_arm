@@ -10,6 +10,7 @@ pb2 = pytest.importorskip("dual_arm_policy.v1.policy_pb2")
 from dual_arm_learning.policy_service import PolicyService  # noqa: E402
 from dual_arm_learning.policy_types import PolicyError  # noqa: E402
 from fake_provider import FakeProvider, load_fake_config  # noqa: E402
+from scenario_fixtures import MARVIN_SHARED_PROFILES  # noqa: E402
 
 CONFIG = ROOT / "tests/fakes/policy/fake_policy.yaml"
 
@@ -17,8 +18,8 @@ CONFIG = ROOT / "tests/fakes/policy/fake_policy.yaml"
 def documents():
     return (
         (PROFILES / "robots/marvin_stack_v1/profile.json").read_bytes(),
-        (PROFILES / "observations/marvin_rgb_joint_v1.json").read_bytes(),
-        (PROFILES / "actions/marvin_joint_position_v1.json").read_bytes(),
+        (MARVIN_SHARED_PROFILES / "observations/marvin_rgb_joint_v1.json").read_bytes(),
+        (MARVIN_SHARED_PROFILES / "actions/marvin_joint_position_v1.json").read_bytes(),
     )
 
 

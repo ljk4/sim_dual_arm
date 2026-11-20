@@ -21,10 +21,11 @@ from robot_backend_sim.common.config.backend_config import (  # noqa: E402
     load_backend_config,
 )
 from robot_backend_sim.common.config.follower_config import load_follower_config  # noqa: E402
+from scenario_fixtures import MARVIN_SHARED_PROFILES  # noqa: E402
 
 BASE = SCENARIO / "configs/simulation/backend/backend.yaml"
 FOLLOWER = ROOT / "tests/fixtures/simulation/backend_follower.yaml"
-FOLLOWER_PARAMS = PROFILES / "control/marvin_follower_v1.yaml"
+FOLLOWER_PARAMS = MARVIN_SHARED_PROFILES / "control/marvin_follower_v1.yaml"
 
 
 def write_variant(tmp_path: Path, mutate) -> Path:
@@ -34,7 +35,7 @@ def write_variant(tmp_path: Path, mutate) -> Path:
             "profile": str(PROFILES / "robots/marvin_stack_v1/profile.json"),
             "schemas": str(ROOT / "shared/common/interfaces/schemas"),
             "scene": str(SCENARIO / "configs/simulation/scene/marvin_stack.yaml"),
-            "control": str(PROFILES / "control/marvin_control_v1.yaml"),
+            "control": str(MARVIN_SHARED_PROFILES / "control/marvin_control_v1.yaml"),
             "stream": str(PROFILES / "control/marvin_stream_v1.yaml"),
             "follower": str(FOLLOWER_PARAMS),
         }
@@ -57,10 +58,8 @@ def test_follower_config_resolves_relative_follower_file_and_queue():
     assert config.follower_path == FOLLOWER_PARAMS.resolve()
     assert config.follower_reference_queue_capacity == 64
     assert load_follower_config(config.follower_path).target_count == 10
-    assert (
-        load_follower_config(PROFILES / "control/marvin_follower_inference_v1.yaml").target_count
-        == 20
-    )
+    inference = MARVIN_SHARED_PROFILES / "control/marvin_follower_inference_v1.yaml"
+    assert load_follower_config(inference).target_count == 20
     expected_scene = SCENARIO / "configs/simulation/scene/marvin_stack.yaml"
     assert config.scene_path == expected_scene.resolve()
     assert load_backend_config(BASE).follower_path == FOLLOWER_PARAMS.resolve()

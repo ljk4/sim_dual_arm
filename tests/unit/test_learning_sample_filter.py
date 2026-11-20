@@ -7,8 +7,6 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from model_helpers import replace
-
 from dual_arm_learning.config import load_training_config
 from dual_arm_learning.dataset import canonical_hash, file_sha256
 from dual_arm_learning.sample_filter import (
@@ -19,6 +17,7 @@ from dual_arm_learning.sample_filter import (
     load_filter_rule,
 )
 from dual_arm_learning.training import TrainingError, _sample_filter
+from model_helpers import replace
 
 pa = pytest.importorskip("pyarrow")
 pq = pytest.importorskip("pyarrow.parquet")
