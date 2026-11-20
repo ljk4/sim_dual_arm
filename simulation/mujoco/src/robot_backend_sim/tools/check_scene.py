@@ -18,16 +18,28 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from robot_backend_sim.panda_sim.stack.scene_config import SceneConfig, SceneConfigError, load_scene_config
 from robot_backend_sim.common.physics import assets
-from robot_backend_sim.panda_sim.stack import visibility
-from robot_backend_sim.panda_sim.stack.visibility import SceneCheckConfig, SceneCheckConfigError, load_check_config
 from robot_backend_sim.common.runtime.diagnostics import code_provenance as _shared_code_provenance
-from robot_backend_sim.common.runtime.diagnostics import python_source_manifest as _python_source_manifest  # noqa: F401
-from robot_backend_sim.panda_sim.stack.diagnostics import scene_config_document as _scene_config_document
+from robot_backend_sim.common.runtime.diagnostics import (
+    python_source_manifest as _python_source_manifest,  # noqa: F401
+)
 from robot_backend_sim.common.runtime.diagnostics import sha256_file as _sha256_file
 from robot_backend_sim.common.runtime.diagnostics import utc_now as _utc_now
 from robot_backend_sim.common.runtime.diagnostics import write_json_atomic as _write_json_atomic
+from robot_backend_sim.marvin_sim.stack import visibility
+from robot_backend_sim.marvin_sim.stack.diagnostics import (
+    scene_config_document as _scene_config_document,
+)
+from robot_backend_sim.marvin_sim.stack.scene_config import (
+    MarvinStackSceneConfig,
+    StackSceneConfigError,
+    load_marvin_stack_scene_config,
+)
+from robot_backend_sim.marvin_sim.stack.visibility import (
+    SceneCheckConfig,
+    SceneCheckConfigError,
+    load_check_config,
+)
 from robot_backend_sim.tools import probe_environment
 from robot_backend_sim.tools.check_scene_common import SceneCheckFailure, SceneCheckUsageError
 from robot_backend_sim.tools.check_scene_views import (
@@ -49,9 +61,9 @@ KIND = "scene"
 REPORT_SCHEMA_VERSION = 1
 _SHARED_ROOT = Path(os.environ.get("SHARED_ROOT", "/shared"))
 _SHARED_RECIPES = (
-    _SHARED_ROOT / "scenarios/panda_sim/stack/configs/simulation"
+    _SHARED_ROOT / "scenarios/marvin_sim/stack/configs/simulation"
 )
-DEFAULT_SCENE_CONFIG = _SHARED_RECIPES / "scene/panda_stack.yaml"
+DEFAULT_SCENE_CONFIG = _SHARED_RECIPES / "scene/marvin_stack.yaml"
 DEFAULT_CHECK_CONFIG = _SHARED_RECIPES / "checks/scene_check.yaml"
 _RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _LABEL_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -156,10 +168,10 @@ def _check_config_document(config: SceneCheckConfig) -> dict[str, object]:
 
 def _load_configs(
     arguments: SceneCheckArguments,
-) -> tuple[SceneConfig, SceneCheckConfig]:
+) -> tuple[MarvinStackSceneConfig, SceneCheckConfig]:
     try:
-        scene_config = load_scene_config(arguments.scene_config)
-    except SceneConfigError as error:
+        scene_config = load_marvin_stack_scene_config(arguments.scene_config)
+    except StackSceneConfigError as error:
         raise SceneCheckFailure("scene_config_invalid", str(error)) from error
     try:
         check_config = load_check_config(arguments.check_config, scene_config)
@@ -175,16 +187,19 @@ def _code_provenance() -> dict[str, object]:
         raise SceneCheckFailure("source_provenance_failed", str(error)) from error
 
 
-def _build_scene(scene_config: SceneConfig) -> object:
-    from robot_backend_sim.panda_sim.stack.scene import SceneBuildError, build_scene
+def _build_scene(scene_config: MarvinStackSceneConfig) -> object:
+    from robot_backend_sim.marvin_sim.stack.scene import (
+        SceneBuildError,
+        build_marvin_stack_scene,
+    )
 
     try:
-        return build_scene(scene_config)
+        return build_marvin_stack_scene(scene_config)
     except SceneBuildError as error:
         raise SceneCheckFailure("scene_build_failed", str(error)) from error
 
 
-def _scene_info(scene: object, scene_config: SceneConfig) -> dict[str, object]:
+def _scene_info(scene: object, scene_config: MarvinStackSceneConfig) -> dict[str, object]:
     model = scene.model
     try:
         object_geom_ids = {
@@ -218,7 +233,7 @@ def _scene_info(scene: object, scene_config: SceneConfig) -> dict[str, object]:
     }
 
 
-def _make_renderer(scene: object, scene_config: SceneConfig) -> object:
+def _make_renderer(scene: object, scene_config: MarvinStackSceneConfig) -> object:
     from robot_backend_sim.common.render.rendering import SceneRenderer, SceneRenderError
 
     first = scene_config.cameras[0]
@@ -258,7 +273,7 @@ def _layout_result(
     run_dir: Path,
     layout,
     scene: object,
-    scene_config: SceneConfig,
+    scene_config: MarvinStackSceneConfig,
     check_config: SceneCheckConfig,
     renderer: object,
     logger: object,
@@ -279,12 +294,11 @@ def _layout_result(
         rgb = renderer.render_rgb(snapshot)
         rgb_paths = _save_rgb_images(run_dir, layout, rgb)
         segmentation = renderer.render_segmentation(snapshot)
-        result = visibility.summarize_layout(
-            layout,
+        result = visibility.evaluate_layout_visibility(
+            layout.layout_id,
             segmentation,
             object_geom_ids,
-            check_config.min_visible_pixels,
-            check_config.camera_resolutions,
+            check_config,
         )
     except Exception as error:
         if isinstance(error, SceneCheckFailure):
@@ -311,7 +325,7 @@ def _layout_result(
 def _run_layouts(
     run_dir: Path,
     scene: object,
-    scene_config: SceneConfig,
+    scene_config: MarvinStackSceneConfig,
     check_config: SceneCheckConfig,
     renderer: object,
     logger: object,
@@ -533,7 +547,7 @@ def _classify_failure(logger, error: BaseException) -> SceneCheckFailure:
         return error
     if isinstance(error, probe_environment.ProbeFailure):
         return SceneCheckFailure(error.reason, error.message)
-    if isinstance(error, SceneConfigError):
+    if isinstance(error, StackSceneConfigError):
         return SceneCheckFailure("scene_config_invalid", str(error))
     if isinstance(error, SceneCheckConfigError):
         return SceneCheckFailure("check_config_invalid", str(error))

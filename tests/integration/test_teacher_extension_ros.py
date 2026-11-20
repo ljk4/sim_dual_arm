@@ -24,7 +24,7 @@ from robot_backend_sim.common.ros.teacher_extension import (  # noqa: E402
 from robot_contracts.models import ContractError  # noqa: E402
 
 CAPABILITIES = (
-    "panda_stack_api_msgs.teacher_chunk.v1",
+    "marvin_stack_api_msgs.teacher_chunk.v1",
     "marvin_handover_api_msgs.teacher_chunk.v1",
 )
 

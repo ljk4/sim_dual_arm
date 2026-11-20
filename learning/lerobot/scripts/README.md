@@ -8,14 +8,14 @@
 
 ```bash
 # 机器人/任务模式
-scripts/convert.sh --robot panda_sim --task stack
-scripts/train.sh --robot panda_sim --task stack --mode smoke
-scripts/server_policy.sh --robot panda_sim --task stack
+scripts/convert.sh --robot marvin_sim --task stack
+scripts/train.sh --robot marvin_sim --task stack --mode smoke
+scripts/server_policy.sh --robot marvin_sim --task stack
 
 # 直接配置模式
 scripts/server_policy.sh \
-  --config /shared/scenarios/panda_sim/stack/configs/learning/policy_temporal.yaml \
-  --model /data/panda_sim/stack/models/act_20260101_000000
+  --config /shared/scenarios/marvin_sim/stack/configs/learning/policy.yaml \
+  --model /data/marvin_sim/stack/models/act_20260101_000000
 ```
 
 在宿主机直接执行这些脚本会报错退出（返回码 2），请先进入 `learning` 容器运行。

@@ -16,8 +16,8 @@ from dual_arm_learning.policy_config import (  # noqa: E402
 from fake_provider import load_fake_config
 
 ROOT = Path(__file__).resolve().parents[2]
-CONFIG = ROOT / "shared/scenarios/panda_sim/stack/configs/learning/policy_temporal.yaml"
-FAKE = ROOT / "learning/lerobot/configs/fake_policy.yaml"
+CONFIG = ROOT / "shared/scenarios/marvin_sim/stack/configs/learning/policy.yaml"
+FAKE = ROOT / "tests/fakes/policy/fake_policy.yaml"
 
 
 def resolve(model: Path, *, require_formal: bool = False):

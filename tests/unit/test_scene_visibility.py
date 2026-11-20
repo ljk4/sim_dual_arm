@@ -10,19 +10,22 @@ from types import SimpleNamespace
 import pytest
 import yaml
 from model_helpers import replace
+from pydantic import ValidationError
 
 ROOT = Path(__file__).resolve().parents[2]
 SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim.panda_sim.stack.scene_config import load_scene_config  # noqa: E402
 from robot_backend_sim.common.render import visibility  # noqa: E402
-from robot_backend_sim.panda_sim.stack import visibility as panda_visibility
+from robot_backend_sim.marvin_sim.stack import visibility as marvin_visibility  # noqa: E402
+from robot_backend_sim.marvin_sim.stack.scene_config import (  # noqa: E402
+    load_marvin_stack_scene_config,
+)
 from robot_backend_sim.tools import check_scene  # noqa: E402
 
-SCENE_CONFIG = ROOT / "shared/scenarios/panda_sim/stack/configs/simulation/scene/panda_stack.yaml"
-CHECK_CONFIG = ROOT / "shared/scenarios/panda_sim/stack/configs/simulation/checks/scene_check.yaml"
+SCENE_CONFIG = ROOT / "shared/scenarios/marvin_sim/stack/configs/simulation/scene/marvin_stack.yaml"
+CHECK_CONFIG = ROOT / "shared/scenarios/marvin_sim/stack/configs/simulation/checks/scene_check.yaml"
 
 
 def write_yaml(tmp_path: Path, document: dict) -> Path:
@@ -36,7 +39,7 @@ def default_document() -> dict:
 
 
 def scene_config():
-    return load_scene_config(SCENE_CONFIG)
+    return load_marvin_stack_scene_config(SCENE_CONFIG)
 
 
 def mutated(tmp_path: Path, mutate) -> Path:
@@ -56,7 +59,7 @@ def set_value(*path, value):
 
 
 def test_default_check_config_is_typed_frozen_and_cross_checked():
-    config = panda_visibility.load_check_config(CHECK_CONFIG, scene_config())
+    config = marvin_visibility.load_check_config(CHECK_CONFIG, scene_config())
 
     assert config.schema_version == 1
     assert config.seeds == (11, 23, 37)
@@ -64,22 +67,23 @@ def test_default_check_config_is_typed_frozen_and_cross_checked():
     assert config.object_names == ("source", "target")
     assert config.boundary_layout_count == 64
     assert config.layout_count == 67
-    assert config.threshold("global", "source") == 64
-    assert config.threshold("left_wrist", "target") == 32
+    assert config.threshold("global", "source") == 32
+    assert config.threshold("left_wrist", "target") == 16
+    assert config.threshold("right_wrist", "source") == 32
     assert config.throughput.warmup_groups == 3
     assert config.throughput.measure_groups == 20
     assert config.camera_resolutions["right_wrist"] == (320, 240)
 
     with pytest.raises(TypeError):
         config.min_visible_pixels["global"]["source"] = 1  # type: ignore[index]
-    with pytest.raises((AttributeError, TypeError)):
+    with pytest.raises(ValidationError):
         config.seeds = (1,)  # type: ignore[misc]
 
 
 def test_boundary_layouts_cover_both_objects_jointly_and_within_domains():
     scene = scene_config()
-    config = panda_visibility.load_check_config(CHECK_CONFIG, scene)
-    layouts = panda_visibility.build_layouts(config, scene)
+    config = marvin_visibility.load_check_config(CHECK_CONFIG, scene)
+    layouts = marvin_visibility.build_layouts(config, scene)
 
     assert len(layouts) == 67
     seeds = [layout for layout in layouts if layout.kind == "seed"]
@@ -120,28 +124,18 @@ def test_boundary_layouts_cover_both_objects_jointly_and_within_domains():
     [
         (set_value("schema_version", value=2), "schema_version"),
         (set_value("seeds", value=[]), "seeds"),
-        (set_value("seeds", value=[1, 1]), "seeds[1]"),
-        (set_value("seeds", value=[True]), "seeds[0]"),
-        (set_value("boundary_xy_corners", value=[[-1, -1]]), "boundary_xy_corners"),
-        (
-            set_value("boundary_xy_corners", value=[[-1, -1], [-1, 1], [1, -1], [1, 2]]),
-            "boundary_xy_corners[3][1]",
-        ),
-        (
-            set_value("boundary_xy_corners", value=[[-1, -1], [-1, 1], [1, -1], [1, -1]]),
-            "boundary_xy_corners[3]",
-        ),
-        (set_value("boundary_yaw_signs", value=[-1, -1]), "boundary_yaw_signs[1]"),
-        (set_value("max_layouts", value=10), "max_layouts"),
-        (set_value("max_layouts", value=101), "max_layouts"),
+        (set_value("seeds", value=[1, 1, 2]), "seeds"),
+        (set_value("seeds", value=[True, 1, 2]), "seeds"),
         (set_value("throughput", "measure_groups", value=0), "throughput.measure_groups"),
         (set_value("throughput", "warmup_groups", value=True), "throughput.warmup_groups"),
+        (set_value("throughput", "max_elapsed_s", value=0.0), "throughput.max_elapsed_s"),
+        (set_value("throughput", "min_fps", value=0.0), "throughput.min_fps"),
     ],
 )
 def test_check_config_rejects_invalid_typed_values(tmp_path, mutate, field):
     path = mutated(tmp_path, mutate)
-    with pytest.raises(panda_visibility.SceneCheckConfigError) as caught:
-        panda_visibility.load_check_config(path, scene_config())
+    with pytest.raises(marvin_visibility.SceneCheckConfigError) as caught:
+        marvin_visibility.load_check_config(path, scene_config())
     assert caught.value.field == field
     assert str(path) in str(caught.value)
 
@@ -152,46 +146,46 @@ def test_check_config_rejects_invalid_typed_values(tmp_path, mutate, field):
 )
 def test_thresholds_reject_bool_zero_negative_nonfinite_and_huge(tmp_path, value):
     path = mutated(tmp_path, set_value("min_visible_pixels", "global", "source", value=value))
-    with pytest.raises(panda_visibility.SceneCheckConfigError) as caught:
-        panda_visibility.load_check_config(path, scene_config())
+    with pytest.raises(marvin_visibility.SceneCheckConfigError) as caught:
+        marvin_visibility.load_check_config(path, scene_config())
     assert caught.value.field == "min_visible_pixels.global.source"
 
 
 def test_threshold_names_must_match_scene_cameras_and_objects(tmp_path):
     unknown_camera = mutated(tmp_path, set_value("min_visible_pixels", "overhead", value={}))
-    with pytest.raises(panda_visibility.SceneCheckConfigError) as caught:
-        panda_visibility.load_check_config(unknown_camera, scene_config())
+    with pytest.raises(marvin_visibility.SceneCheckConfigError) as caught:
+        marvin_visibility.load_check_config(unknown_camera, scene_config())
     assert caught.value.field == "min_visible_pixels"
 
     duplicate_object = mutated(
         tmp_path,
-        set_value("min_visible_pixels", "global", value={"source": 64, "target": 64, "other": 1}),
+        set_value("min_visible_pixels", "global", value={"source": 32, "target": 64, "other": 1}),
     )
-    with pytest.raises(panda_visibility.SceneCheckConfigError) as caught:
-        panda_visibility.load_check_config(duplicate_object, scene_config())
+    with pytest.raises(marvin_visibility.SceneCheckConfigError) as caught:
+        marvin_visibility.load_check_config(duplicate_object, scene_config())
     assert caught.value.field == "min_visible_pixels.global"
 
     missing_object = mutated(
         tmp_path,
-        set_value("min_visible_pixels", "global", value={"source": 64}),
+        set_value("min_visible_pixels", "global", value={"source": 32}),
     )
-    with pytest.raises(panda_visibility.SceneCheckConfigError) as caught:
-        panda_visibility.load_check_config(missing_object, scene_config())
+    with pytest.raises(marvin_visibility.SceneCheckConfigError) as caught:
+        marvin_visibility.load_check_config(missing_object, scene_config())
     assert caught.value.field == "min_visible_pixels.global"
 
 
 def test_unknown_and_duplicate_yaml_keys_are_rejected(tmp_path):
     path = mutated(tmp_path, set_value("unexpected", value=1))
-    with pytest.raises(panda_visibility.SceneCheckConfigError) as caught:
-        panda_visibility.load_check_config(path, scene_config())
+    with pytest.raises(marvin_visibility.SceneCheckConfigError) as caught:
+        marvin_visibility.load_check_config(path, scene_config())
     assert caught.value.field == "unexpected"
 
     duplicate = tmp_path / "duplicate.yaml"
     duplicate.write_text(
-        CHECK_CONFIG.read_text(encoding="utf-8") + "\nseeds: [1]\n", encoding="utf-8"
+        CHECK_CONFIG.read_text(encoding="utf-8") + "\nseeds: [1, 2, 3]\n", encoding="utf-8"
     )
-    with pytest.raises(panda_visibility.SceneCheckConfigError, match="duplicate key"):
-        panda_visibility.load_check_config(duplicate, scene_config())
+    with pytest.raises(marvin_visibility.SceneCheckConfigError, match="duplicate key"):
+        marvin_visibility.load_check_config(duplicate, scene_config())
 
 
 def test_pixel_count_uses_exact_objid_and_objtype_not_colors():
@@ -210,23 +204,19 @@ def test_pixel_count_uses_exact_objid_and_objtype_not_colors():
 
 
 def test_zero_pixels_fails_a_camera_and_layout():
-    layout = panda_visibility.LayoutSpec("seed-1", "seed", 1, ())
+    check_config = marvin_visibility.load_check_config(CHECK_CONFIG, scene_config())
     segmentation = [
         [[0, 0], [0, 0], [0, 0]],
         [[0, 0], [0, 0], [0, 0]],
     ]
-    thresholds = {
-        camera: {"source": 1, "target": 1} for camera in ("global", "left_wrist", "right_wrist")
-    }
-    result = panda_visibility.summarize_layout(
-        layout,
-        {camera: segmentation for camera in thresholds},
+    result = marvin_visibility.evaluate_layout_visibility(
+        "seed-1",
+        {camera: segmentation for camera in check_config.camera_names},
         {"source": 100, "target": 101},
-        thresholds,
-        {camera: (3, 2) for camera in thresholds},
+        check_config,
     )
     assert result.total_pixels == 0
-    assert result.minimum_margin == -1
+    assert result.minimum_margin == -64
     assert result.passed is False
     assert all(camera.passed is False for camera in result.cameras)
 
@@ -234,7 +224,7 @@ def test_zero_pixels_fails_a_camera_and_layout():
 def test_contact_sheet_uses_first_and_worst_layouts(tmp_path):
     from PIL import Image
 
-    config = panda_visibility.load_check_config(CHECK_CONFIG, scene_config())
+    config = marvin_visibility.load_check_config(CHECK_CONFIG, scene_config())
     run_dir = tmp_path / "run"
     results = []
     for index, (layout_id, total) in enumerate((("seed-11", 300), ("boundary-007", 40))):
@@ -291,7 +281,7 @@ def test_save_rgb_images_writes_three_real_pngs_and_protects_layout_directory(tm
     from PIL import Image
 
     run_dir = tmp_path / "run"
-    layout = panda_visibility.LayoutSpec("seed-11", "seed", 11, ())
+    layout = marvin_visibility.LayoutSpec(layout_id="seed-11", kind="seed", seed=11, placements=())
     rgb = {
         camera: _TestRGB(40 + index, 30, (10 + index, 20, 30))
         for index, camera in enumerate(("global", "left_wrist", "right_wrist"))
@@ -318,7 +308,7 @@ def test_save_rgb_images_write_error_is_artifact_write_failed(tmp_path, monkeypa
     from PIL import Image
 
     run_dir = tmp_path / "run"
-    layout = panda_visibility.LayoutSpec("seed-11", "seed", 11, ())
+    layout = marvin_visibility.LayoutSpec(layout_id="seed-11", kind="seed", seed=11, placements=())
     rgb = {camera: _TestRGB(8, 6, (1, 2, 3)) for camera in ("global", "left_wrist")}
 
     def fail_save(*_args, **_kwargs):
@@ -334,9 +324,9 @@ def test_save_rgb_images_write_error_is_artifact_write_failed(tmp_path, monkeypa
 def test_contact_sheet_write_error_has_clear_reason(tmp_path, monkeypatch):
     from PIL import Image
 
-    config = panda_visibility.load_check_config(CHECK_CONFIG, scene_config())
+    config = marvin_visibility.load_check_config(CHECK_CONFIG, scene_config())
     run_dir = tmp_path / "run"
-    layout = panda_visibility.LayoutSpec("seed-11", "seed", 11, ())
+    layout = marvin_visibility.LayoutSpec(layout_id="seed-11", kind="seed", seed=11, placements=())
     paths = check_scene._save_rgb_images(
         run_dir,
         layout,
@@ -423,15 +413,15 @@ class FakeScene:
     def __init__(self) -> None:
         self.model = FakeModel()
         self.indices = SimpleNamespace(
-            environment=SimpleNamespace(object_free_joint_qpos={"source": 7, "target": 14})
+            environment=SimpleNamespace(object_free_joint_qpos={"source": 18, "target": 25})
         )
         self.data = SimpleNamespace(qpos=[0.0] * 32)
         self.reset(11)
 
     def reset(self, seed: int) -> None:
         qpos = [0.0] * 32
-        qpos[7:14] = [0.20 + seed / 1000, 0.55, 0.77, 1.0, 0.0, 0.0, 0.0]
-        qpos[14:21] = [0.36, 0.55, 0.78, 1.0, 0.0, 0.0, 0.0]
+        qpos[18:25] = [0.55 + seed / 1000, -0.08, 0.80, 1.0, 0.0, 0.0, 0.0]
+        qpos[25:32] = [0.55, -0.30, 0.81, 1.0, 0.0, 0.0, 0.0]
         self.data.qpos = qpos
 
 
@@ -464,22 +454,22 @@ class FakeRenderer:
             raise RuntimeError("renderer close boom")
 
 
-def fake_summary(layout, _segmentation, geom_ids, thresholds, resolutions):
+def fake_evaluate_layout_visibility(layout_id, _segmentations, geom_ids, check_config):
     cameras = []
-    for camera, objects in thresholds.items():
+    for camera in check_config.camera_names:
         items = tuple(
-            panda_visibility.ObjectVisibility(
+            marvin_visibility.ObjectVisibility(
                 object=name,
                 geom_id=geom_ids[name],
-                pixels=thresholds[camera][name],
-                threshold=thresholds[camera][name],
+                pixels=check_config.threshold(camera, name),
+                threshold=check_config.threshold(camera, name),
                 passed=True,
             )
-            for name in objects
+            for name in check_config.object_names
         )
-        width, height = resolutions[camera]
+        width, height = check_config.camera_resolutions[camera]
         cameras.append(
-            panda_visibility.CameraVisibility(
+            marvin_visibility.CameraVisibility(
                 camera=camera,
                 width=width,
                 height=height,
@@ -489,9 +479,8 @@ def fake_summary(layout, _segmentation, geom_ids, thresholds, resolutions):
             )
         )
     total = sum(camera.total_pixels for camera in cameras)
-    return panda_visibility.LayoutVisibility(
-        layout_id=layout.layout_id,
-        kind=layout.kind,
+    return marvin_visibility.LayoutVisibility(
+        layout_id=layout_id,
         cameras=tuple(cameras),
         total_pixels=total,
         minimum_margin=0,
@@ -509,7 +498,11 @@ def install_success_fakes(monkeypatch, tmp_path, *, renderer=None):
     monkeypatch.setattr(check_scene.probe_environment, "_verify_mounted_source", lambda *a: None)
     monkeypatch.setattr(check_scene, "_build_scene", lambda _config: FakeScene())
     monkeypatch.setattr(check_scene, "_make_renderer", lambda _scene, _config: renderer)
-    monkeypatch.setattr(check_scene.visibility, "summarize_layout", fake_summary)
+    monkeypatch.setattr(
+        check_scene.visibility,
+        "evaluate_layout_visibility",
+        fake_evaluate_layout_visibility,
+    )
     monkeypatch.setattr(
         check_scene,
         "_save_rgb_images",

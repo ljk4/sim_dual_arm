@@ -5,7 +5,6 @@ import sys
 from pathlib import Path
 
 import pytest
-from model_helpers import replace
 
 mujoco = pytest.importorskip("mujoco")
 np = pytest.importorskip("numpy")
@@ -15,17 +14,24 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim.panda_sim.robot_config import PANDA_JOINT_RANGES  # noqa: E402
-from robot_backend_sim.panda_sim.stack.scene_config import load_scene_config  # noqa: E402
-from robot_backend_sim.panda_sim.stack.scene import Scene, build_scene  # noqa: E402
+from robot_backend_sim.marvin_sim.assembly import gripper_opening  # noqa: E402
+from robot_backend_sim.marvin_sim.stack.kinematics_config import (  # noqa: E402
+    MARVIN_ARM_JOINT_RANGES,
+)
+from robot_backend_sim.marvin_sim.stack.scene import (  # noqa: E402
+    build_marvin_stack_scene,
+)
+from robot_backend_sim.marvin_sim.stack.scene_config import (  # noqa: E402
+    load_marvin_stack_scene_config,
+)
 
-CONFIG_PATH = ROOT / "shared/scenarios/panda_sim/stack/configs/simulation/scene/panda_stack.yaml"
+CONFIG_PATH = ROOT / "shared/scenarios/marvin_sim/stack/configs/simulation/scene/marvin_stack.yaml"
 
 
 @pytest.fixture(scope="module")
 def scene():
-    config = load_scene_config(CONFIG_PATH)
-    return build_scene(
+    config = load_marvin_stack_scene_config(CONFIG_PATH)
+    return build_marvin_stack_scene(
         config,
     )
 
@@ -35,34 +41,39 @@ def object_qpos(scene, name: str):
     return scene.data.qpos[address : address + 7]
 
 
-def test_model_has_dual_panda_names_dof_and_cameras(scene):
+def test_model_has_dual_marvin_names_dof_and_cameras(scene):
     model = scene.model
     assert (model.nq, model.nv, model.nu, model.ncam, model.nkey) == (32, 30, 16, 3, 0)
     assert model.ntendon == 2
     assert model.neq == 2
 
-    for side in ("left", "right"):
+    for side, prefix in (("left", "L"), ("right", "R")):
         for joint in range(1, 8):
-            assert model.joint(f"{side}_joint{joint}").name == f"{side}_joint{joint}"
-        for finger in (1, 2):
-            assert (
-                model.joint(f"{side}_finger_joint{finger}").name == f"{side}_finger_joint{finger}"
-            )
-        for actuator in range(1, 9):
-            assert model.actuator(f"{side}_actuator{actuator}").name == f"{side}_actuator{actuator}"
-        assert model.body(f"{side}_hand").name == f"{side}_hand"
-        assert model.site(f"{side}_tcp").name == f"{side}_tcp"
+            name = f"Arm_{prefix}{joint}_Joint"
+            assert model.joint(name).name == name
+            actuator = f"Arm_{prefix}{joint}_Actuator"
+            assert model.actuator(actuator).name == actuator
+        for finger in (10, 11):
+            name = f"Arm_{prefix}{finger}_Joint"
+            assert model.joint(name).name == name
+            link = f"Arm_{prefix}{finger}_Link"
+            assert model.body(link).name == link
+        gripper_actuator = f"Arm_{prefix}_gripper_actuator"
+        assert model.actuator(gripper_actuator).name == gripper_actuator
+        assert model.body(f"Arm_{prefix}9_Link").name == f"Arm_{prefix}9_Link"
+        assert model.site(f"Arm_{prefix}_tcp").name == f"Arm_{prefix}_tcp"
         assert len(scene.indices.robot.arm_joint_qpos[side]) == 7
         assert len(scene.indices.robot.finger_joint_qpos[side]) == 2
 
     assert np.all(model.cam_targetbodyid == -1)
     assert np.all(model.cam_mode == mujoco.mjtCamLight.mjCAMLIGHT_FIXED)
-    assert model.cam_bodyid[scene.indices.camera_ids["global"]] == model.body("column").id
-    assert model.cam_bodyid[scene.indices.camera_ids["left_wrist"]] == model.body("left_hand").id
-    assert model.cam_bodyid[scene.indices.camera_ids["right_wrist"]] == model.body("right_hand").id
+    assert model.cam_bodyid[scene.indices.camera_ids["global"]] == model.body("camera_mount").id
+    assert model.cam_bodyid[scene.indices.camera_ids["left_wrist"]] == model.body("Arm_L9_Link").id
+    assert model.cam_bodyid[scene.indices.camera_ids["right_wrist"]] == model.body("Arm_R9_Link").id
     assert np.all(model.eq_type != mujoco.mjtEq.mjEQ_WELD)
-    for side, sign in (("left", -1.0), ("right", 1.0)):
-        np.testing.assert_allclose(model.body(f"{side}_link0").pos, [0.25 * sign, 0.0, 1.0])
+    np.testing.assert_allclose(
+        model.body("ZJ_Robot_link").pos, list(scene.config.robot.base_position)
+    )
     assert [camera.name for camera in scene.config.cameras] == [
         "global",
         "left_wrist",
@@ -74,11 +85,11 @@ def test_model_has_dual_panda_names_dof_and_cameras(scene):
 def test_joint_ranges_and_initial_values_match_fixed_upstream(scene):
     scene.reset(0)
     model = scene.model
-    home = scene.config.reset.home_joint_positions
-    for side in ("left", "right"):
-        for index, (lower, upper) in enumerate(PANDA_JOINT_RANGES, start=1):
-            joint = model.joint(f"{side}_joint{index}")
-            np.testing.assert_allclose(model.jnt_range[joint.id], [lower, upper])
+    home = scene.config.robot.home_joint_positions
+    for side, prefix in (("left", "L"), ("right", "R")):
+        for index, (lower, upper) in enumerate(MARVIN_ARM_JOINT_RANGES, start=1):
+            joint = model.joint(f"Arm_{prefix}{index}_Joint")
+            np.testing.assert_allclose(model.jnt_range[joint.id], [lower, upper], atol=1e-4)
             assert model.jnt_limited[joint.id] == 1
             position = home[index - 1]
             assert lower <= position <= upper
@@ -108,7 +119,7 @@ def test_same_seed_reset_restores_complete_state(scene):
     expected_qpos = scene.data.qpos.copy()
     expected_ctrl = scene.data.ctrl.copy()
     expected_sites = {
-        side: scene.data.site(scene.indices.robot.tcp_site_ids[f"{side}_tcp"]).xpos.copy()
+        side: scene.data.site(scene.indices.robot.tcp_site_ids[side]).xpos.copy()
         for side in ("left", "right")
     }
     expected_bodies = {
@@ -136,7 +147,7 @@ def test_same_seed_reset_restores_complete_state(scene):
     assert not np.any(scene.data.qacc_warmstart)
     for side, expected in expected_sites.items():
         np.testing.assert_array_equal(
-            scene.data.site(scene.indices.robot.tcp_site_ids[f"{side}_tcp"]).xpos, expected
+            scene.data.site(scene.indices.robot.tcp_site_ids[side]).xpos, expected
         )
     for name, expected in expected_bodies.items():
         np.testing.assert_array_equal(scene.data.body(name).xpos, expected)
@@ -155,7 +166,12 @@ def test_different_seeds_vary_objects_within_configured_domain(scene):
             assert abs(x - obj.nominal_xy[0]) <= obj.randomization.xy_m + 1e-9
             assert abs(y - obj.nominal_xy[1]) <= obj.randomization.xy_m + 1e-9
             assert abs(yaw) <= math.radians(obj.randomization.yaw_deg) + 1e-9
-            assert z == pytest.approx(scene.config.table.top_z + obj.half_extents[2])
+            expected_z = (
+                scene.config.robot.base_position[2]
+                + scene.config.table.top_z
+                + obj.half_extents[2]
+            )
+            assert z == pytest.approx(expected_z)
             assert math.sqrt(float(np.dot(quaternion, quaternion))) == pytest.approx(1.0)
             seed_sample.append((x, y, yaw))
         samples.append(seed_sample)
@@ -176,7 +192,11 @@ def test_default_objects_rest_on_table_for_short_run(scene):
     for obj in scene.config.objects:
         qpos = object_qpos(scene, obj.name)
         start = initial[obj.name]
-        expected_z = scene.config.table.top_z + obj.half_extents[2]
+        expected_z = (
+            scene.config.robot.base_position[2]
+            + scene.config.table.top_z
+            + obj.half_extents[2]
+        )
         assert abs(qpos[2] - expected_z) <= 0.01
         assert abs(qpos[0] - start[0]) <= 0.03
         assert abs(qpos[1] - start[1]) <= 0.03
@@ -185,16 +205,18 @@ def test_default_objects_rest_on_table_for_short_run(scene):
         assert np.linalg.norm(speed[:3]) <= 0.2
 
 
-def test_gripper_initialization_uses_continuous_vendor_command(scene):
-    half_open = replace(scene.config, reset=replace(scene.config.reset, gripper_total_opening=0.04))
-    half_data = mujoco.MjData(scene.model)
-    half_scene = Scene(scene.model, half_data, half_open, scene.indices)
-    half_scene.reset(0)
-
+def test_gripper_initialization_uses_tendon_closure_command(scene):
     scene.reset(0)
+    assert scene.gripper_open_total == pytest.approx(0.0814)
+    assert scene.gripper_closed_total == pytest.approx(0.0014)
+    assert scene.gripper_ctrl(scene.gripper_open_total) == pytest.approx(0.0)
+    assert scene.gripper_ctrl(scene.gripper_closed_total) == pytest.approx(0.08)
+    assert scene.gripper_ctrl(0.0414) == pytest.approx(0.04)
     for side in ("left", "right"):
         gripper = scene.indices.robot.gripper_actuator_ids[side]
-        assert scene.data.ctrl[gripper] == pytest.approx(255.0)
-        assert half_data.ctrl[gripper] == pytest.approx(127.5)
+        assert scene.data.ctrl[gripper] == pytest.approx(0.0)
         for address in scene.indices.robot.finger_joint_qpos[side]:
-            assert half_data.qpos[address] == pytest.approx(0.02)
+            assert scene.data.qpos[address] == pytest.approx(0.0)
+        assert gripper_opening(scene.model, scene.data, scene.indices.robot, side) == pytest.approx(
+            scene.gripper_open_total, abs=1e-4
+        )

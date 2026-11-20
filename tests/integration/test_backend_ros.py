@@ -50,19 +50,20 @@ except ImportError as error:  # pragma: no cover - host without ROS
     pytest.skip(f"ROS unavailable: {error}", allow_module_level=True)
 
 ROOT = Path(__file__).resolve().parents[2]
-SCENARIO = ROOT / "shared/scenarios/panda_sim/stack"
+SCENARIO = ROOT / "shared/scenarios/marvin_sim/stack"
 PROFILES = SCENARIO / "profiles"
 SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
 from robot_backend_sim.common.config.backend_config import load_backend_config  # noqa: E402
+from robot_backend_sim.common.config.scenario_config import ROBOT_REFERENCE_FIELDS  # noqa: E402
 from robot_backend_sim.common.ros.node import BackendNode  # noqa: E402
 from robot_backend_sim.common.ros.ros_bridge import RosFutureBridge  # noqa: E402
 from robot_backend_sim.common.runtime.worker import Worker  # noqa: E402
 
 CONFIG = SCENARIO / "configs/simulation/backend/backend.yaml"
-PROFILE_PATH = PROFILES / "robots/panda_stack_v1/profile.json"
+PROFILE_PATH = PROFILES / "robots/marvin_stack_v1/profile.json"
 SCHEMAS = ROOT / "shared/common/interfaces/schemas"
 
 
@@ -74,19 +75,11 @@ def _config_for(
     config_path: Path = CONFIG,
 ) -> Path:
     document = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    document["robot"].update(
-        {
-            "namespace": namespace,
-            "profile": str(PROFILE_PATH),
-            "schemas": str(SCHEMAS),
-            "scene": str(SCENARIO / "configs/simulation/scene/panda_stack.yaml"),
-            "control": str(PROFILES / "control/panda_control_v1.yaml"),
-            "stream": str(PROFILES / "control/panda_stream_v1.yaml"),
-        }
-    )
-    follower = document["robot"].get("follower")
-    if follower is not None and not Path(follower).is_absolute():
-        document["robot"]["follower"] = str((config_path.parent / Path(follower)).resolve())
+    robot = document["robot"]
+    for field in ROBOT_REFERENCE_FIELDS:
+        if field in robot:
+            robot[field] = str((config_path.parent / robot[field]).resolve())
+    robot["namespace"] = namespace
     document["run"]["realtime_speed"] = speed
     path = tmp_path / f"backend-{uuid.uuid4().hex[:8]}.yaml"
     path.write_text(yaml.safe_dump(document), encoding="utf-8")

@@ -21,10 +21,10 @@ from robot_backend_sim.common.config.scenario_config import (
 from scenario_fixtures import ROOT, build_scenario
 
 SIM_RECIPE = (
-    ROOT / "shared/scenarios/panda_sim/stack/configs/simulation/backend/backend_stack_teacher.yaml"
+    ROOT / "shared/scenarios/marvin_sim/stack/configs/simulation/backend/backend_stack_teacher.yaml"
 )
-RUNTIME_TEACHER = ROOT / "shared/scenarios/panda_sim/stack/configs/runtime/teacher_collect.yaml"
-RUNTIME_POLICY = ROOT / "shared/scenarios/panda_sim/stack/configs/runtime/policy_rollout.yaml"
+RUNTIME_TEACHER = ROOT / "shared/scenarios/marvin_sim/stack/configs/runtime/teacher_collect.yaml"
+RUNTIME_POLICY = ROOT / "shared/scenarios/marvin_sim/stack/configs/runtime/policy_rollout.yaml"
 
 
 def _shared(tmp_path: Path):
@@ -155,7 +155,7 @@ def test_runtime_teacher_scenario_injects_api_and_checks_budget(tmp_path):
         seed=5,
         overrides=["observation.max_age_ns=250000000"],
     )
-    assert resolved.document["teacher_api"] == "panda_stack_api_msgs.teacher_chunk.v1"
+    assert resolved.document["teacher_api"] == "marvin_stack_api_msgs.teacher_chunk.v1"
     configuration = load_runtime_configuration_document(
         resolved.document,
         source=resolved.source,

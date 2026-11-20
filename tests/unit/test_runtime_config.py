@@ -146,7 +146,7 @@ def test_teacher_task_budget_is_bounded_and_covered_by_chunks(tmp_path):
     value["follower_config"] = str(fixture_follower)
     value.pop("policy")
     value["action_source"] = "teacher"
-    value["teacher_api"] = "panda_stack_api_msgs.teacher_chunk.v1"
+    value["teacher_api"] = "marvin_stack_api_msgs.teacher_chunk.v1"
     value["teacher"] = {
         "chunk_size": 60,
         "action_period_ns": 50_000_000,
@@ -167,7 +167,7 @@ def test_teacher_task_budget_is_bounded_and_covered_by_chunks(tmp_path):
     configuration = load_runtime_configuration(path, ROOT)
     assert configuration.recipe.teacher.task_sim_budget_ns == 180_000_000_000
     assert configuration.recipe.teacher.max_chunks == 400
-    assert "panda_stack_api_msgs.teacher_chunk.v1" in (configuration.required_capabilities)
+    assert "marvin_stack_api_msgs.teacher_chunk.v1" in (configuration.required_capabilities)
 
     # 180 s at a ten-point, 50 ms window needs 360 chunks.
     value["teacher"]["max_chunks"] = 359

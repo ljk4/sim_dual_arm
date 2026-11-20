@@ -180,7 +180,7 @@ def test_profile_schema_matches_models():
 
 
 def test_all_profile_documents_validate():
-    documents = sorted((ROOT / "shared/scenarios/panda_sim/stack/profiles").rglob("*.json"))
+    documents = sorted((ROOT / "shared/scenarios/marvin_sim").glob("*/profiles/**/*.json"))
     assert documents
     for path in documents:
         document = json.loads(path.read_text())
@@ -193,8 +193,8 @@ def test_all_profile_documents_validate():
             name = "observation" if path.parent.name == "observations" else "action"
             schema = _document(f"{name}.schema.json")
         else:
-            # The one calibration attachment is scene metadata; its identity is protected by a hash.
-            assert path.name == "right_wrist_calibration.json", path
+            # Calibration metadata is checked against the owning profile.
+            assert path.name == f"{document['name']}_calibration.json", path
             profile = load_profile(path.parent / "profile.json", SCHEMAS)
             camera = next(camera for camera in profile.cameras if camera.name == document["name"])
             assert camera.calibration_digest == semantic_hash(document)
@@ -252,11 +252,11 @@ def test_teacher_service_is_a_scenario_extension_not_a_common_package():
     common = ROOT / "shared/common/interfaces/ros/sim_api_msgs"
     extension = (
         ROOT
-        / "shared/scenarios/panda_sim/stack/extensions/ros/panda_stack_api_msgs"
+        / "shared/scenarios/marvin_sim/stack/extensions/ros/marvin_stack_api_msgs"
     )
     assert not (common / "srv/GetTeacherChunk.srv").exists()
     assert "GetTeacherChunk" not in (common / "CMakeLists.txt").read_text()
     assert (extension / "srv/GetTeacherChunk.srv").is_file()
     assert "srv/GetTeacherChunk.srv" in (extension / "CMakeLists.txt").read_text()
     capability = (extension / "msg/TeacherCapability.msg").read_text()
-    assert "panda_stack_api_msgs.teacher_chunk.v1" in capability
+    assert "marvin_stack_api_msgs.teacher_chunk.v1" in capability

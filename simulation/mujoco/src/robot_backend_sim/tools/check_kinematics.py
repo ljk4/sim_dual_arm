@@ -18,18 +18,26 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from robot_backend_sim.panda_sim.kinematics_config import (
+from robot_backend_sim.common.physics import assets
+from robot_backend_sim.common.runtime.diagnostics import code_provenance, sha256_file
+from robot_backend_sim.marvin_sim.stack import visibility
+from robot_backend_sim.marvin_sim.stack.diagnostics import scene_config_document
+from robot_backend_sim.marvin_sim.stack.kinematics_config import (
     KinematicsCheckConfig,
     KinematicsConfigError,
     load_kinematics_config,
 )
-from robot_backend_sim.panda_sim.stack.scene_config import SceneConfig, SceneConfigError, load_scene_config
-from robot_backend_sim.panda_sim.kinematics import KinematicsError
-from robot_backend_sim.common.physics import assets
-from robot_backend_sim.panda_sim.stack import visibility
-from robot_backend_sim.panda_sim.stack.visibility import SceneCheckConfig, SceneCheckConfigError, load_check_config
-from robot_backend_sim.common.runtime.diagnostics import code_provenance, sha256_file
-from robot_backend_sim.panda_sim.stack.diagnostics import scene_config_document
+from robot_backend_sim.marvin_sim.stack.plan import KinematicsError
+from robot_backend_sim.marvin_sim.stack.scene_config import (
+    MarvinStackSceneConfig,
+    StackSceneConfigError,
+    load_marvin_stack_scene_config,
+)
+from robot_backend_sim.marvin_sim.stack.visibility import (
+    SceneCheckConfig,
+    SceneCheckConfigError,
+    load_check_config,
+)
 
 if TYPE_CHECKING:
 
@@ -57,9 +65,9 @@ KIND = "kinematics"
 REPORT_SCHEMA_VERSION = 1
 _SHARED_ROOT = Path(os.environ.get("SHARED_ROOT", "/shared"))
 _SHARED_RECIPES = (
-    _SHARED_ROOT / "scenarios/panda_sim/stack/configs/simulation"
+    _SHARED_ROOT / "scenarios/marvin_sim/stack/configs/simulation"
 )
-DEFAULT_SCENE_CONFIG = _SHARED_RECIPES / "scene/panda_stack.yaml"
+DEFAULT_SCENE_CONFIG = _SHARED_RECIPES / "scene/marvin_stack.yaml"
 DEFAULT_CHECK_CONFIG = _SHARED_RECIPES / "checks/scene_check.yaml"
 DEFAULT_KINEMATICS_CONFIG = _SHARED_RECIPES / "checks/kinematics_check.yaml"
 _RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -129,10 +137,10 @@ def parse_arguments(argv: list[str] | None = None) -> KinematicsCheckArguments:
 
 def _load_configs(
     arguments: KinematicsCheckArguments,
-) -> tuple[SceneConfig, SceneCheckConfig, KinematicsCheckConfig]:
+) -> tuple[MarvinStackSceneConfig, SceneCheckConfig, KinematicsCheckConfig]:
     try:
-        scene_config = load_scene_config(arguments.scene_config)
-    except SceneConfigError as error:
+        scene_config = load_marvin_stack_scene_config(arguments.scene_config)
+    except StackSceneConfigError as error:
         raise KinematicsCheckFailure("scene_config_invalid", str(error)) from error
     try:
         check_config = load_check_config(arguments.check_config, scene_config)
@@ -178,7 +186,7 @@ def _kinematics_config_document(config: KinematicsCheckConfig) -> dict[str, obje
             "collision_detection_distance_m": config.clearance.collision_detection_distance_m,
             "sample_step_rad": config.clearance.sample_step_rad,
             "max_samples_per_segment": config.clearance.max_samples_per_segment,
-            "max_total_samples": config.clearance.max_total_samples,
+            "max_total_samples": config.budgets.max_total_samples,
         },
         "targets": {
             "pregrasp_height_m": config.targets.pregrasp_height_m,
@@ -193,7 +201,7 @@ def _kinematics_config_document(config: KinematicsCheckConfig) -> dict[str, obje
                 {
                     "camera": rule.camera,
                     "object": rule.object,
-                    "phases": list(rule.phases),
+                    "phase": rule.phase,
                     "mode": rule.mode,
                     "min_pixels": rule.min_pixels,
                 }
@@ -202,7 +210,7 @@ def _kinematics_config_document(config: KinematicsCheckConfig) -> dict[str, obje
         },
         "budgets": {
             "max_layouts": config.budgets.max_layouts,
-            "max_png_bytes": config.budgets.max_png_bytes,
+            "max_png_bytes": config.budgets.max_png_total_bytes,
             "max_report_bytes": config.budgets.max_report_bytes,
         },
         "camera_names": list(config.camera_names),
@@ -213,23 +221,26 @@ def _kinematics_config_document(config: KinematicsCheckConfig) -> dict[str, obje
     }
 
 
-def _build_scene(scene_config: SceneConfig) -> object:
-    from robot_backend_sim.panda_sim.stack.scene import SceneBuildError, build_scene
+def _build_scene(scene_config: MarvinStackSceneConfig) -> object:
+    from robot_backend_sim.marvin_sim.stack.scene import (
+        SceneBuildError,
+        build_marvin_stack_scene,
+    )
 
     try:
-        return build_scene(scene_config)
+        return build_marvin_stack_scene(scene_config)
     except SceneBuildError as error:
         raise KinematicsCheckFailure("scene_build_failed", str(error)) from error
 
 
-def _scene_info(scene: object, scene_config: SceneConfig) -> dict[str, object]:
+def _scene_info(scene: object, scene_config: MarvinStackSceneConfig) -> dict[str, object]:
     model = scene.model
     try:
         object_geom_ids = {
             obj.name: int(model.geom(f"{obj.name}_geom").id) for obj in scene_config.objects
         }
         table_geom_id = int(model.geom("table_top").id)
-        tcp_site_id = int(model.site("right_tcp").id)
+        tcp_site_id = int(model.site("Arm_R_tcp").id)
         camera_ids = {
             camera.name: int(model.camera(camera.name).id) for camera in scene_config.cameras
         }
@@ -257,7 +268,7 @@ def _scene_info(scene: object, scene_config: SceneConfig) -> dict[str, object]:
     }
 
 
-def _make_renderer(scene: object, scene_config: SceneConfig) -> object:
+def _make_renderer(scene: object, scene_config: MarvinStackSceneConfig) -> object:
     from robot_backend_sim.common.render.rendering import SceneRenderer
 
     first = scene_config.cameras[0]
@@ -342,7 +353,7 @@ def _execute_checks(arguments, run_dir: Path, report: dict, logger):
         {"model_directory": model_dir},
     )
     renderer = _make_renderer(scene, scene_config)
-    budget = ArtifactBudget(kinematics_config.budgets.max_png_bytes)
+    budget = ArtifactBudget(kinematics_config.budgets.max_png_total_bytes)
     results, layout_failure = _run_layouts(
         run_dir,
         scene,
@@ -380,7 +391,7 @@ def _classify_failure(logger, error: BaseException) -> KinematicsCheckFailure:
         return error
     if isinstance(error, KinematicsError):
         return KinematicsCheckFailure(error.reason, error.message)
-    if isinstance(error, SceneConfigError):
+    if isinstance(error, StackSceneConfigError):
         return KinematicsCheckFailure("scene_config_invalid", str(error))
     if isinstance(error, SceneCheckConfigError):
         return KinematicsCheckFailure("check_config_invalid", str(error))

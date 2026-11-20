@@ -10,7 +10,7 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-SCENARIO = ROOT / "shared/scenarios/panda_sim/stack"
+SCENARIO = ROOT / "shared/scenarios/marvin_sim/stack"
 PROFILES = SCENARIO / "profiles"
 SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
@@ -21,21 +21,22 @@ from robot_backend_sim.common.config.backend_config import (  # noqa: E402
     load_backend_config,
 )
 from robot_backend_sim.common.config.follower_config import load_follower_config  # noqa: E402
+from scenario_fixtures import MARVIN_SHARED_PROFILES  # noqa: E402
 
 BASE = SCENARIO / "configs/simulation/backend/backend.yaml"
 FOLLOWER = ROOT / "tests/fixtures/simulation/backend_follower.yaml"
-FOLLOWER_PARAMS = PROFILES / "control/panda_follower_v1.yaml"
+FOLLOWER_PARAMS = MARVIN_SHARED_PROFILES / "control/marvin_follower_v1.yaml"
 
 
 def write_variant(tmp_path: Path, mutate) -> Path:
     document = copy.deepcopy(yaml.safe_load(FOLLOWER.read_text(encoding="utf-8")))
     document["robot"].update(
         {
-            "profile": str(PROFILES / "robots/panda_stack_v1/profile.json"),
+            "profile": str(PROFILES / "robots/marvin_stack_v1/profile.json"),
             "schemas": str(ROOT / "shared/common/interfaces/schemas"),
-            "scene": str(SCENARIO / "configs/simulation/scene/panda_stack.yaml"),
-            "control": str(PROFILES / "control/panda_control_v1.yaml"),
-            "stream": str(PROFILES / "control/panda_stream_v1.yaml"),
+            "scene": str(SCENARIO / "configs/simulation/scene/marvin_stack.yaml"),
+            "control": str(MARVIN_SHARED_PROFILES / "control/marvin_control_v1.yaml"),
+            "stream": str(PROFILES / "control/marvin_stream_v1.yaml"),
             "follower": str(FOLLOWER_PARAMS),
         }
     )
@@ -45,8 +46,9 @@ def write_variant(tmp_path: Path, mutate) -> Path:
     return path
 
 
-def test_base_config_keeps_follower_disabled():
-    config = load_backend_config(BASE)
+def test_config_without_a_follower_file_keeps_follower_disabled(tmp_path):
+    path = write_variant(tmp_path, lambda document: document["robot"].pop("follower"))
+    config = load_backend_config(path)
     assert config.follower_path is None
     assert config.follower_reference_queue_capacity == config.accepted_reference_queue_capacity
 
@@ -56,12 +58,11 @@ def test_follower_config_resolves_relative_follower_file_and_queue():
     assert config.follower_path == FOLLOWER_PARAMS.resolve()
     assert config.follower_reference_queue_capacity == 64
     assert load_follower_config(config.follower_path).target_count == 10
-    assert (
-        load_follower_config(PROFILES / "control/panda_follower_inference_v1.yaml").target_count
-        == 20
-    )
-    expected_scene = SCENARIO / "configs/simulation/scene/panda_stack.yaml"
+    inference = MARVIN_SHARED_PROFILES / "control/marvin_follower_inference_v1.yaml"
+    assert load_follower_config(inference).target_count == 20
+    expected_scene = SCENARIO / "configs/simulation/scene/marvin_stack.yaml"
     assert config.scene_path == expected_scene.resolve()
+    assert load_backend_config(BASE).follower_path == FOLLOWER_PARAMS.resolve()
 
 
 def test_missing_follower_file_is_rejected_not_disabled(tmp_path):

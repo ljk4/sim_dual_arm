@@ -6,14 +6,14 @@ import yaml
 from dual_arm_runtime.offline.campaign_ledger import CampaignError  # noqa: E402
 from dual_arm_runtime.offline.record_workers import prepare_workers  # noqa: E402
 
-PROFILE_REL = "shared/scenarios/panda_sim/stack/profiles/profile.json"
+PROFILE_REL = "shared/scenarios/marvin_sim/stack/profiles/profile.json"
 
 
 @pytest.fixture
 def templates(tmp_path):
     runtime = tmp_path / "runtime.yaml"
     runtime.write_text(yaml.safe_dump({"action_source": "teacher",
-                                      "teacher_api": "panda_stack_api_msgs.teacher_chunk.v1",
+                                      "teacher_api": "marvin_stack_api_msgs.teacher_chunk.v1",
                                       "robot_namespace": "/robot",
                                       "robot_profile": PROFILE_REL}))
     backend = tmp_path / "backend.yaml"

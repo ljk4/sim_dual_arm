@@ -51,13 +51,13 @@ def test_selection_returns_binding_recipes_profiles_and_capabilities(tmp_path):
     assert selection["capabilities"] == {
         "backend": "simulation/mujoco",
         "runtime": "ros2",
-        "teacher": "panda_stack_api_msgs.teacher_chunk.v1",
-        "teacher_package": "panda_stack_api_msgs",
+        "teacher": "marvin_stack_api_msgs.teacher_chunk.v1",
+        "teacher_package": "marvin_stack_api_msgs",
         "teacher_package_path": str(
-            (tree.scenario.root / "extensions/ros/panda_stack_api_msgs").resolve()
+            (tree.scenario.root / "extensions/ros/marvin_stack_api_msgs").resolve()
         ),
     }
-    assert selection["interfaces"]["teacher_api"] == ("panda_stack_api_msgs.teacher_chunk.v1")
+    assert selection["interfaces"]["teacher_api"] == ("marvin_stack_api_msgs.teacher_chunk.v1")
 
 
 @pytest.mark.parametrize(
@@ -113,14 +113,14 @@ def test_parallel_selection_requires_render_quality(tmp_path):
 
 def test_missing_teacher_service_definition_is_rejected(tmp_path):
     tree = build_collection_tree(tmp_path)
-    (tree.scenario.root / "extensions/ros/panda_stack_api_msgs/srv/GetTeacherChunk.srv").unlink()
+    (tree.scenario.root / "extensions/ros/marvin_stack_api_msgs/srv/GetTeacherChunk.srv").unlink()
     with pytest.raises(CampaignError, match="no selected extension declares"):
         _select(tree)
 
 
 def test_teacher_capability_must_match_the_selected_extension(tmp_path):
     tree = build_collection_tree(tmp_path)
-    tree.scenario.document["interfaces"]["teacher_api"] = "panda_stack_api_msgs.teacher_chunk.v2"
+    tree.scenario.document["interfaces"]["teacher_api"] = "marvin_stack_api_msgs.teacher_chunk.v2"
     tree.scenario.write()
     with pytest.raises(CampaignError, match="no selected extension declares"):
         _select(tree)
@@ -128,7 +128,7 @@ def test_teacher_capability_must_match_the_selected_extension(tmp_path):
     tree = build_collection_tree(tmp_path / "second")
     _rewrite(
         tree.runtime_recipe,
-        lambda document: document.update(teacher_api="panda_stack_api_msgs.teacher_chunk.v2"),
+        lambda document: document.update(teacher_api="marvin_stack_api_msgs.teacher_chunk.v2"),
     )
     with pytest.raises(CampaignError, match="teacher_api .* differs from binding"):
         _select(tree)
@@ -371,12 +371,14 @@ def test_export_campaign_config_selection_and_conflict(tmp_path):
 
 
 def test_real_campaign_required_paths_use_the_actual_teacher_package():
-    path = ROOT / "shared/scenarios/panda_sim/stack/configs/runtime/experiments/stack_campaign.yaml"
+    path = (
+        ROOT / "shared/scenarios/marvin_sim/stack/configs/runtime/experiments/stack_campaign.yaml"
+    )
     document = yaml.safe_load(path.read_text())
     required = document["paths"]["required_paths"]
     teacher = [item for item in required if item.endswith("GetTeacherChunk.srv")]
     assert teacher == [
-        "shared/scenarios/panda_sim/stack/extensions/ros/panda_stack_api_msgs/srv/GetTeacherChunk.srv"
+        "shared/scenarios/marvin_sim/stack/extensions/ros/marvin_stack_api_msgs/srv/GetTeacherChunk.srv"
     ]
     for item in required:
         assert (ROOT / item).exists(), item

@@ -8,7 +8,7 @@ Marvin 固定根双臂方案：左手抓取物块、空中交接给右手、再�
 
 | 路径 | 内容 |
 | --- | --- |
-| `binding.yaml` | 方案选择：仿真/mujoco/handover、runtime/ros2、Teacher 能力、三份配方与扩展包；binding 不声明模型，推理时由 `--bundle` 显式提供 |
+| `binding.yaml` | 三端方案、档案、配方与 Teacher 扩展包选择 |
 | `configs/simulation/scene/marvin_handover.yaml` | 机器人装配选择、任务环境、执行器/复位数值和相机安装 |
 | `configs/simulation/backend/backend_marvin_control.yaml` | 无任务插件的 direct backend 配方；`task`/`task_mode` 省略 |
 | `configs/simulation/backend/backend_marvin_teacher.yaml` | 任务插件与 Teacher 后端（`task_type: handover`、`task_mode: teacher`），启用分割质量计数 |
@@ -21,7 +21,7 @@ Marvin 固定根双臂方案：左手抓取物块、空中交接给右手、再�
 | `configs/runtime/teacher_collect.yaml` | runtime Teacher 采集配方（180 s 任务预算、能力标识） |
 | `configs/runtime/policy_eval.yaml` | runtime Policy 执行配方（180 s 任务预算、1 s 停止余量、420 s 墙钟） |
 | `configs/learning/act_dataset.yaml` | 正式数据转换：50 条、45/5 划分、validation `[9,19,29,39,49]`、`diagnostic: false` |
-| `configs/learning/act_training.yaml` | ACT full 5000 步、预算台账与 checkpoint 路径 |
+| `configs/learning/act_training.yaml` | ACT full 5000 步、训练日志与模型路径 |
 | `configs/learning/policy.yaml` | ACT Policy 服务；首轮关闭时间融合，按实测为 `left_joint7` 与两夹爪配置逐轴修正额度 |
 | `configs/runtime/experiments/handover_campaign.yaml` | 正式采集预算（50 条 / 最多 100 次尝试）、种子、台账、阶段质量规则、导出标签上限与独立路径 |
 | `extensions/ros/marvin_handover_api_msgs/` | 60×16 交接 Teacher IDL、能力标识与包构建文件 |
@@ -33,7 +33,7 @@ Marvin 固定根双臂方案：左手抓取物块、空中交接给右手、再�
 | `profiles/observations/marvin_rgb_joint_v1.json` | 三路 RGB + 16 维机器人状态 |
 | `profiles/actions/marvin_joint_position_v1.json` | 16 维关节位置动作 |
 
-Marvin 的原始 URDF/STL 归 simulation 的 [`assets/marvin/`](../../../simulation/mujoco/assets/marvin/README.md)；本方案不保存第二份运行时资产。
+Marvin 的原始 URDF/STL 位于仿真端 [`assets/marvin/`](../../../../simulation/mujoco/assets/marvin/README.md)。堆叠方案复用本目录的控制、跟随、观测与动作档案。
 
 ## 选择方式
 
@@ -46,7 +46,7 @@ task:
   environment: handover
 ```
 
-装配入口按这两个字段组合机器人装配与任务环境；`task.environment=handover` 不用于推断机器人型号。`robot.assembly` 由 simulation 的资产定位解析为本端固定版本模型，recipe 不写模型文件路径。binding 的 `recipes.dataset`、`recipes.training`、`recipes.policy_service`、`recipes.runtime_policy` 与 `recipes.simulation_policy` 指向本方案正式配方；binding 不声明模型，推理时通过 `--bundle` 提供已验证 Bundle。
+仿真端根据 `robot.assembly` 定位模型，根据 `task.environment` 选择任务环境。binding 的 `recipes.dataset`、`recipes.training`、`recipes.policy_service`、`recipes.runtime_policy` 与 `recipes.simulation_policy` 指向本方案正式配方。
 
 本方案接口包为 `robot_api_msgs`、`sim_api_msgs` 与 `marvin_handover_api_msgs`，已包含在全量 SDK 构建中；一次 `build-ros-sdk` 即服务全部方案，切换方案无需重建：
 
@@ -74,33 +74,33 @@ python3 -m robot_backend_sim.tools.check_marvin_scene \
   --scene-config /shared/scenarios/marvin_sim/handover/configs/simulation/scene/marvin_handover.yaml \
   --profile /shared/scenarios/marvin_sim/handover/profiles/robots/marvin_handover_v1/profile.json \
   --schemas /shared/common/interfaces/schemas \
-  --report-root /data/marvin_sim/handover/diagnostics/marvin \
+  --report-root /data/marvin_sim/handover/debug/marvin \
   --run-id marvin-p01a
 ```
 
-报告写入容器 `/data/marvin_sim/handover/diagnostics/marvin/<run-id>/report.json`，渲染图像写入同一运行目录的 `artifacts/renders/`。检查内容包括：宿主机/容器资产路径解析、编译模型形状与命名绑定、源 URDF 质量/主惯量对照、equality 枚举、TCP/指面/开度测量、静置步进、14 个臂关节低幅方向、左右隔离、夹爪三态开度与联动、桌面/物块/开口箱碰撞、同臂/跨臂/桌/箱/手指有效碰撞探针、开口射线和三路渲染。
+每次检查在 `/data/marvin_sim/handover/debug/marvin/<run-id>/` 保存 `report.json` 和 `artifacts/renders/`，记录编译模型、关节和夹爪测量、接触、净空及三路渲染结果。
 
 ## 操作入口
 
-所有入口都直接以 `--scenario marvin_sim/handover` 读取本目录 `binding.yaml`；不生成 `/data/prepared/` 中间目录，`--scenario` 与 `--config` 互斥，重复 `--set dot.path=value` 可覆盖配方中已存在的键。
+使用 `--robot marvin_sim --task handover` 从本目录的 binding 选择配方，或用 `--config` 指定配方。重复 `--set dot.path=value` 可覆盖配方中已存在的键。
 
 ### 采集
 
 ```bash
 # simulation 容器：直接启动 Teacher 后端
-scripts/backend.sh --scenario marvin_sim/handover --role teacher \
+scripts/backend.sh --robot marvin_sim --task handover --role teacher \
   --seed 0 --run-id teacher-backend
 
 # runtime 容器：试采与正式采集（默认后端日志为 /data/marvin_sim/handover/logs/backend/teacher-backend/log）
-scripts/record.sh --scenario marvin_sim/handover \
+scripts/record.sh --robot marvin_sim --task handover \
   --purpose pilot --count 1 --max-consecutive-failures 1
 
 # 宿主机项目根目录：并行补足 50 条正式数据
-./record_parallel.sh --scenario marvin_sim/handover \
+./record_parallel.sh --robot marvin_sim --task handover \
   --purpose formal --target-total 50 --workers auto
 
 # runtime 容器：查看采集与筛选状态
-scripts/record.sh status --scenario marvin_sim/handover
+scripts/record.sh status --robot marvin_sim --task handover
 ```
 
 正式采集达到 campaign 目标时也会自动原子写出 `var/marvin_sim/handover/datasets/raw/formal-select.json`。质量规则按本任务阶段声明：左手抓取看左腕/全局，空中交接看物块与左右腕，运输/放置看右腕/全局与箱口；`left_grasp`、`dual_hold`、`left_release`、`right_release` 为必需阶段，缺失即导出不合格。
@@ -108,54 +108,46 @@ scripts/record.sh status --scenario marvin_sim/handover
 ### 数据转换与训练
 
 ```bash
-# learning 容器：50 条正式转换（45/5）、full 5000 步训练、bundle
-scripts/convert.sh --scenario marvin_sim/handover
-scripts/train.sh --scenario marvin_sim/handover --mode full
-scripts/bundle.sh --scenario marvin_sim/handover --mode full \
-  --run /data/marvin_sim/handover/models/<actual-run> \
-  --output /data/marvin_sim/handover/models/bundles/<new-bundle>
+# learning 容器：转换正式数据（45/5），训练 5000 步
+scripts/convert.sh --robot marvin_sim --task handover
+scripts/train.sh --robot marvin_sim --task handover --mode full
 ```
 
-`act_dataset.yaml` 使用 `diagnostic: false`，按 50 条正式数据做 45/5 划分；骨干权重与 Panda 共用 `third_party/weights/resnet18-f37072fd.pth`。
+`act_dataset.yaml` 按 50 条正式数据做 45/5 划分。训练将 `model.safetensors` 和 `training_args.yaml` 写入 `/data/marvin_sim/handover/models/act_<时间戳>/`。
 
 ### 推理
 
 ```bash
-# learning 容器：启动 Policy 服务（binding 不声明模型，须由 --bundle 提供）
-scripts/server_policy.sh --scenario marvin_sim/handover \
-  --bundle /data/marvin_sim/handover/models/bundles/<bundle>
+# learning 容器：从 models/ 选择最新模型，可用 --model 指定目录
+scripts/server_policy.sh --robot marvin_sim --task handover
 
 # simulation 容器：推理后端（不使用 Teacher）
-scripts/backend.sh --scenario marvin_sim/handover --role policy \
-  --bundle /data/marvin_sim/handover/models/bundles/<bundle> \
+scripts/backend.sh --robot marvin_sim --task handover --role policy \
   --seed 5100 --run-id policy-backend
 
 # runtime 容器：交互式一局或非交互式单局
-scripts/client_interactive.sh --scenario marvin_sim/handover \
-  --bundle /data/marvin_sim/handover/models/bundles/<bundle> \
+scripts/client_interactive.sh --robot marvin_sim --task handover \
   --seed 5100 --run-id policy-interactive
-scripts/server_policy.sh --scenario marvin_sim/handover \
-  --bundle /data/marvin_sim/handover/models/bundles/<bundle> \
+scripts/client_policy.sh --robot marvin_sim --task handover \
   --reset-seed 5100 --run-id policy-run
 
-# runtime 容器：批量推理，每批最多 10 次（需保持上方 policy.sh 与 backend.sh 在线）
-# 本机项目根目录（需保持 learning 策略服务在线）
+# 宿主机根目录：学习端策略服务在线时运行批量推理
 ./inference_parallel.sh --robot marvin_sim --task handover \
   --count 10 --seed-start 5100
 ```
 
-本轮 evaluation 种子分配为 5100–5219，累计 120 次；失败、拒绝和取消同样占用次数。task 模式使用 180 s 评价预算、1 s 停止余量和 420 s 墙钟；每批最多 10 次，验收要求至少一次真实交接与入箱成功，并从录制中核对左手抬升、空中共持、左手释放后右手持稳的完整顺序。
+本轮 evaluation 种子为 5100–5219，累计 120 次。失败、拒绝和取消同样占用次数。任务使用 180 s 仿真预算、1 s 停止余量和 420 s 墙钟预算，每批最多 10 次。验收要求至少一次交接与入箱成功，并从录制核对左手抬升、空中共持、左手释放后右手持稳及入箱完成。
 
 ## 物理诊断入口
 
 | 诊断 | 仓库入口 |
 | --- | --- |
-| 左手独立抓取与持稳 | [test_marvin_left_hold_ros.py](../../../tests/integration/test_marvin_left_hold_ros.py) |
-| 右手独立抓取与持稳 | [test_marvin_right_hold_ros.py](../../../tests/integration/test_marvin_right_hold_ros.py) |
-| 共持全过程与抬升 | [test_marvin_dual_hold_ros.py](../../../tests/integration/test_marvin_dual_hold_ros.py) |
-| 带物受控停止 | [test_marvin_stop_hold_ros.py](../../../tests/integration/test_marvin_stop_hold_ros.py) |
-| 连续空中交接、退手与入箱释放 | [test_marvin_transfer_ros.py](../../../tests/integration/test_marvin_transfer_ros.py) |
+| 左手独立抓取与持稳 | [test_marvin_left_hold_ros.py](../../../../tests/integration/test_marvin_left_hold_ros.py) |
+| 右手独立抓取与持稳 | [test_marvin_right_hold_ros.py](../../../../tests/integration/test_marvin_right_hold_ros.py) |
+| 共持全过程与抬升 | [test_marvin_dual_hold_ros.py](../../../../tests/integration/test_marvin_dual_hold_ros.py) |
+| 带物受控停止 | [test_marvin_stop_hold_ros.py](../../../../tests/integration/test_marvin_stop_hold_ros.py) |
+| 连续空中交接、退手与入箱释放 | [test_marvin_transfer_ros.py](../../../../tests/integration/test_marvin_transfer_ros.py) |
 
 `READY_POSE` 仅是离线渲染用的诊断位姿，不是任务抓取位姿。当前箱位、物块初态、相机安装、交接区和抓持区由场景与任务/运动学配方声明。
 
-目录导航：[公共层与方案绑定](../../README.md) · [根 README](../../../README.md)
+目录导航：[公共层与方案绑定](../../../README.md) · [根 README](../../../../README.md)

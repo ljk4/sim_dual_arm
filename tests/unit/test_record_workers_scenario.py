@@ -55,7 +55,7 @@ def test_workers_receive_binding_recipes_independent_identity_and_overrides(tmp_
         }
         assert worker["recipes"]["runtime_teacher"]["sha256"] == sha(tree.runtime_recipe)
         assert worker["recipes"]["simulation_teacher"]["sha256"] == sha(tree.backend_recipe)
-        assert worker["teacher_api"] == "panda_stack_api_msgs.teacher_chunk.v1"
+        assert worker["teacher_api"] == "marvin_stack_api_msgs.teacher_chunk.v1"
         assert worker["overrides"] == {
             "domain_id": worker["domain_id"],
             "namespace": worker["namespace"],
@@ -152,7 +152,7 @@ def test_worker_plan_rejects_tampered_teacher_capability(tmp_path):
         _selection(tree),
     )
     document = json.loads(manifest.read_text())
-    document["workers"][1]["teacher_api"] = "panda_stack_api_msgs.teacher_chunk.v2"
+    document["workers"][1]["teacher_api"] = "marvin_stack_api_msgs.teacher_chunk.v2"
     manifest.write_text(json.dumps(document))
     with pytest.raises(CampaignError, match="share the selected Teacher capability"):
         record_pool.load_worker_plan(manifest)

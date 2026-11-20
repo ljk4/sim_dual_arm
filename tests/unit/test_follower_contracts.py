@@ -21,7 +21,14 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-CONFIG_PATH = ROOT / "shared/scenarios/panda_sim/stack/profiles/control/panda_follower_v1.yaml"
+from robot_backend_sim.common.config.follower_config import (  # noqa: E402
+    FollowerConfigError,
+    load_follower_config,
+    parse_follower_config,
+)
+from scenario_fixtures import MARVIN_SHARED_PROFILES  # noqa: E402
+
+CONFIG_PATH = MARVIN_SHARED_PROFILES / "control/marvin_follower_v1.yaml"
 PRODUCER = "fixture-producer/v1"
 
 
@@ -266,25 +273,15 @@ def test_flags_validate_shape_and_types():
 DEFAULT_DOCUMENT = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
 
 
-def changed(**changes: object) -> dict[str, object]:
-    document = copy.deepcopy(DEFAULT_DOCUMENT)
-    document.update(changes)
-    return document
-
-
 def test_follower_config_values_and_round_trip(tmp_path):
-    from robot_backend_sim.common.config.follower_config import load_follower_config, parse_follower_config
-
     config = load_follower_config(CONFIG_PATH)
     assert config.target_count == 10
-    assert config.max_target_deviations == (
-        (0.50,) * 7 + (0.06,) + (0.50,) * 7 + (0.06,)
-    )
+    assert config.max_target_deviations == ((0.05,) * 7 + (0.01,)) * 2
     assert config.max_terminal_tail_duration_s == pytest.approx(3.0)
     assert config.max_terminal_tail_duration_ns == 3_000_000_000
     snapshot = config.to_document()
     snapshot["max_target_deviations"][0] = 99.0
-    assert config.max_target_deviations[0] == 0.50
+    assert config.max_target_deviations[0] == 0.05
     assert parse_follower_config(config.to_document(), "<snapshot>") == config
 
     path = tmp_path / "follower.yaml"
@@ -316,9 +313,7 @@ def test_follower_config_values_and_round_trip(tmp_path):
     ),
 )
 def test_follower_config_strictly_rejects_bad_documents(mutate, field):
-    from robot_backend_sim.common.config.follower_config import FollowerConfigError, parse_follower_config
-
-    document = changed()
+    document = copy.deepcopy(DEFAULT_DOCUMENT)
     mutate(document)
     with pytest.raises(FollowerConfigError) as caught:
         parse_follower_config(document, "<test>")
@@ -326,9 +321,7 @@ def test_follower_config_strictly_rejects_bad_documents(mutate, field):
 
 
 def test_follower_joint_order_is_bound_to_the_selected_robot_profile():
-    from robot_backend_sim.common.config.follower_config import parse_follower_config
-
-    document = changed()
+    document = copy.deepcopy(DEFAULT_DOCUMENT)
     expected_order = tuple(document["joint_names"])
     document["joint_names"].reverse()
     config = parse_follower_config(document, "<test>")
@@ -338,8 +331,6 @@ def test_follower_joint_order_is_bound_to_the_selected_robot_profile():
 
 
 def test_follower_config_rejects_duplicate_keys(tmp_path):
-    from robot_backend_sim.common.config.follower_config import FollowerConfigError, load_follower_config
-
     path = tmp_path / "duplicate.yaml"
     path.write_text(
         CONFIG_PATH.read_text(encoding="utf-8") + "\ntarget_count: 10\n",

@@ -12,7 +12,7 @@ import math
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import BeforeValidator, Field, StrictInt, model_validator
+from pydantic import BeforeValidator, Field, model_validator
 from robot_contracts.validation import (
     NonEmptyStr,
     PositiveFloat,
@@ -29,11 +29,18 @@ from robot_contracts.validation import (
 from robot_backend_sim.common.config.camera_config import (
     CAMERA_NAMES,
     CameraConfig,
-    Unit,
     Vec3,
 )
 from robot_backend_sim.common.physics.assets import robot_model_path
 from robot_backend_sim.marvin_sim.robot_config import MarvinRobotConfig
+from robot_backend_sim.marvin_sim.scene_base import (
+    CAMERA_PARENTS,
+    CameraMountConfig,
+    PhysicsConfig,
+    Rgba,
+    TableConfig,
+    Vec2,
+)
 
 __all__ = [
     "CAMERA_PARENTS",
@@ -48,57 +55,10 @@ __all__ = [
 ]
 
 MarvinSceneConfigError = StrictMappingError
-CAMERA_PARENTS = {
-    "global": "camera_mount",
-    "left_wrist": "Arm_L9_Link",
-    "right_wrist": "Arm_R9_Link",
-}
 _OBJECT_NAME_PATTERN = r"^[A-Za-z][A-Za-z0-9_]*$"
 _RESERVED_BODY_NAMES = frozenset(
     {"world", "table", "box", "camera_mount", "ZJ_Robot_link"}
 )
-
-Vec2 = Annotated[tuple[StrictFloat, StrictFloat], BeforeValidator(as_tuple)]
-Rgba = Annotated[tuple[Unit, Unit, Unit, Unit], BeforeValidator(as_tuple)]
-
-
-class PhysicsConfig(StrictMappingModel):
-    timestep: Annotated[PositiveFloat, Field(ge=1e-5, le=0.01)]
-    gravity: Vec3
-    integrator: Literal["euler", "implicit", "implicitfast", "rk4"]
-    cone: Literal["pyramidal", "elliptic"]
-    impratio: PositiveFloat
-    noslip_iterations: Annotated[StrictInt, Field(ge=0)]
-    object_contact_dim: Literal[3, 4, 6]
-    object_friction: Vec3
-
-    @model_validator(mode="after")
-    def _physics(self) -> PhysicsConfig:
-        if self.gravity[2] >= 0.0:
-            raise contract_error("gravity[2]", "must point downward")
-        if self.object_friction[0] <= 0.0:
-            raise contract_error("object_friction[0]", "sliding friction must be positive")
-        for index, value in enumerate(self.object_friction):
-            if value < 0.0:
-                raise contract_error(f"object_friction[{index}]", "must be non-negative")
-        return self
-
-
-class TableConfig(StrictMappingModel):
-    center_xy: Vec2
-    size_xy: Vec2
-    top_z: Annotated[PositiveFloat, Field(ge=0.01, le=3.0)]
-    thickness: Annotated[PositiveFloat, Field(ge=0.001, le=0.5)]
-    rgba: Rgba
-
-    @model_validator(mode="after")
-    def _table(self) -> TableConfig:
-        for index, value in enumerate(self.size_xy):
-            if not 0.05 <= value <= 5.0:
-                raise contract_error(f"size_xy[{index}]", "must be between 0.05 and 5.0")
-        if self.thickness > self.top_z:
-            raise contract_error("thickness", "must not exceed top_z")
-        return self
 
 
 class BlockConfig(StrictMappingModel):
@@ -154,10 +114,6 @@ class BoxConfig(StrictMappingModel):
     @property
     def inner_height(self) -> float:
         return self.height - self.bottom_thickness
-
-
-class CameraMountConfig(StrictMappingModel):
-    position: Vec3
 
 
 class TaskConfig(StrictMappingModel):

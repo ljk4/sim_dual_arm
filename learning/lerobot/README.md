@@ -45,9 +45,9 @@ export PYTHONPATH="$PROJECT_ROOT/learning/lerobot/src:$PROJECT_ROOT/shared/commo
 之后在仓库根目录直接运行：
 
 ```bash
-bash learning/lerobot/scripts/convert.sh --robot panda_sim --task stack
-bash learning/lerobot/scripts/train.sh --robot panda_sim --task stack --mode full
-bash learning/lerobot/scripts/server_policy.sh --robot panda_sim --task stack
+bash learning/lerobot/scripts/convert.sh --robot marvin_sim --task stack
+bash learning/lerobot/scripts/train.sh --robot marvin_sim --task stack --mode full
+bash learning/lerobot/scripts/server_policy.sh --robot marvin_sim --task stack
 ```
 
 `server_policy.sh` 默认监听 `0.0.0.0:50051`。云服务器安全组只需放行 SSH；学习端与运行端之间通过 SSH 隧道通信（见下节），不要直接对公网开放 50051。
@@ -62,8 +62,8 @@ bash learning/lerobot/scripts/server_policy.sh --robot panda_sim --task stack
 1. **同步数据**：在本机采集完成后，把训练输入同步到云服务器（模型与数据集都按 `var/<robot>/<task>/` 结构存放）：
 
    ```bash
-   rsync -av --delete var/panda_sim/stack/datasets/ \
-     user@cloud:/home/user/sim_dual_arm/var/panda_sim/stack/datasets/
+   rsync -av --delete var/marvin_sim/stack/datasets/ \
+     user@cloud:/home/user/sim_dual_arm/var/marvin_sim/stack/datasets/
    ```
 
 2. **云端转换与训练**：在云服务器执行上面的 `convert.sh` 与 `train.sh`；训练产物写入 `var/<robot>/<task>/models/act_<时间戳>/`。
@@ -71,7 +71,7 @@ bash learning/lerobot/scripts/server_policy.sh --robot panda_sim --task stack
 3. **云端启动策略服务**（保持运行）：
 
    ```bash
-   bash learning/lerobot/scripts/server_policy.sh --robot panda_sim --task stack
+   bash learning/lerobot/scripts/server_policy.sh --robot marvin_sim --task stack
    ```
 
 4. **本机建立 SSH 本地转发**（保持运行，`50051` 为云端服务端口）：
@@ -83,15 +83,15 @@ bash learning/lerobot/scripts/server_policy.sh --robot panda_sim --task stack
 5. **本机运行端指向隧道**：运行端容器通过 `host.docker.internal` 访问宿主机端口（Compose 已声明 `extra_hosts`）。启动推理脚本时追加：
 
    ```bash
-   scripts/client_policy.sh --robot panda_sim --task stack \
+   scripts/client_policy.sh --robot marvin_sim --task stack \
      --seed 20000 --set policy.endpoint=host.docker.internal:50051
-   scripts/client_interactive.sh --robot panda_sim --task stack \
+   scripts/client_interactive.sh --robot marvin_sim --task stack \
      --seed 20000 --set policy.endpoint=host.docker.internal:50051
    ```
 
    若策略服务改为在云服务器的 Docker 容器中运行，用 `docker compose` 的 `ports: ["50051:50051"]`（只绑定 `127.0.0.1`）暴露服务，再按第 4 步建立隧道即可。
 
-6. **批量并行推理**：在**本机项目根目录**执行 `./inference_parallel.sh --robot panda_sim --task stack --count 10 --workers auto`；它会自行启动多个隔离的仿真后端并复用云端策略服务。
+6. **批量并行推理**：在**本机项目根目录**执行 `./inference_parallel.sh --robot marvin_sim --task stack --count 10 --workers auto`；它会自行启动多个隔离的仿真后端并复用云端策略服务。
 
 > `ssh` 建议使用密钥登录与 `~/.ssh/config` 别名；连接中断会同时断开策略服务，长时批量评测请使用 `tmux`/`systemd` 保持隧道。
 
@@ -112,9 +112,9 @@ bash learning/lerobot/scripts/server_policy.sh --robot panda_sim --task stack
 - `scripts/test.sh`：运行容器内 `pytest` 测试。
 
 ```bash
-scripts/convert.sh --robot panda_sim --task stack
-scripts/train.sh --robot panda_sim --task stack --mode full
-scripts/server_policy.sh --robot panda_sim --task stack
+scripts/convert.sh --robot marvin_sim --task stack
+scripts/train.sh --robot marvin_sim --task stack --mode full
+scripts/server_policy.sh --robot marvin_sim --task stack
 ```
 
 > `convert.sh` 和 `train.sh` 启动时会打印配置文件与有效参数，终端使用原地刷新的单行进度条，详细日志写入启动时提示的日志文件。

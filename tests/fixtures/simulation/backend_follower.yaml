@@ -1,16 +1,16 @@
 # Runnable ROS backend with the bounded-target follower entry enabled.
 # Deployment choices only; the referenced scene/control/stream/profile and
-# panda_follower files remain the single sources of physics, controller,
+# marvin_follower files remain the single sources of physics, controller,
 # calibration and follower-budget parameters.  Every path is relative to this
 # file.  SI time units are seconds unless a field says otherwise.
 robot:
   namespace: /robot
-  profile: ../../../shared/scenarios/panda_sim/stack/profiles/robots/panda_stack_v1/profile.json
+  profile: ../../../shared/scenarios/marvin_sim/stack/profiles/robots/marvin_stack_v1/profile.json
   schemas: ../../../shared/common/interfaces/schemas
-  scene: ../../../shared/scenarios/panda_sim/stack/configs/simulation/scene/panda_stack.yaml
-  control: ../../../shared/scenarios/panda_sim/stack/profiles/control/panda_control_v1.yaml
-  stream: ../../../shared/scenarios/panda_sim/stack/profiles/control/panda_stream_v1.yaml
-  follower: ../../../shared/scenarios/panda_sim/stack/profiles/control/panda_follower_v1.yaml
+  scene: ../../../shared/scenarios/marvin_sim/stack/configs/simulation/scene/marvin_stack.yaml
+  control: ../../../shared/scenarios/marvin_sim/handover/profiles/control/marvin_control_v1.yaml
+  stream: ../../../shared/scenarios/marvin_sim/stack/profiles/control/marvin_stream_v1.yaml
+  follower: ../../../shared/scenarios/marvin_sim/handover/profiles/control/marvin_follower_v1.yaml
 
 run:
   seed: 0

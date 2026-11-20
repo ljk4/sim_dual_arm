@@ -16,10 +16,11 @@ from dual_arm_runtime.teacher_source import TeacherStreamRunner, TeacherTargetSo
 from robot_contracts.action_chunks import ChunkAnchor
 from robot_contracts.models import ContractError, RunContext, Target
 from robot_contracts.trajectory.spline import ReferenceSample
+from scenario_fixtures import MARVIN_SHARED_PROFILES
 
 ROOT = Path(__file__).resolve().parents[2]
 POLICY_CONFIG = ROOT / "tests/fixtures/simulation/policy_unit.yaml"
-TEACHER_CONFIG = ROOT / "shared/scenarios/panda_sim/stack/configs/runtime/teacher_collect.yaml"
+TEACHER_CONFIG = ROOT / "shared/scenarios/marvin_sim/stack/configs/runtime/teacher_collect.yaml"
 MODEL_DIGEST = "a" * 64
 
 
@@ -225,7 +226,7 @@ def policy_configuration(tmp_path, *, settle_ns, startup_timeout_s=None):
 
 def _runner(configuration, io, control, log=None, *, stop=None, clock=None):
     profile = configuration.profile
-    context = RunContext("panda_stack", profile.digest, "backend", "sim", 1, "episode", 1)
+    context = RunContext("marvin_stack", profile.digest, "backend", "sim", 1, "episode", 1)
     io.context = context
     return PolicyStreamRunner(
         configuration,
@@ -271,7 +272,7 @@ def test_eight_chunks_use_fresh_captures_keep_raw_60_and_settle_only_last(tmp_pa
     configuration = policy_configuration(tmp_path, settle_ns=0)
     profile = configuration.profile
     policy = configuration.recipe.policy
-    context = RunContext("panda_stack", profile.digest, "backend", "sim", 1, "episode", 1)
+    context = RunContext("marvin_stack", profile.digest, "backend", "sim", 1, "episode", 1)
     io = _IO(profile)
     control = _Control(profile)
     runner = PolicyStreamRunner(
@@ -583,7 +584,7 @@ def test_gripper_transition_is_retimed_before_submission(tmp_path):
             )
 
     io = _IO(profile)
-    context = RunContext("panda_stack", profile.digest, "backend", "sim", 1, "episode", 1)
+    context = RunContext("marvin_stack", profile.digest, "backend", "sim", 1, "episode", 1)
     io.context = context
     log = _Log()
     runner = PolicyStreamRunner(
@@ -607,7 +608,9 @@ def test_gripper_transition_is_retimed_before_submission(tmp_path):
     assert first.trajectory.targets[5].positions[0] == pytest.approx(initial[0])
     # Every unselected prediction point stays exactly as predicted.
     for index in list(range(0, 5)) + list(range(10, 60)):
-        assert first.trajectory.targets[index].positions[gripper] == pytest.approx(0.08)
+        assert first.trajectory.targets[index].positions[gripper] == pytest.approx(
+            profile.joints[gripper].initial
+        )
     retimed = [fields for event, fields in log.events if event == "follower.chunk_retimed"]
     assert retimed
     assert retimed[0]["fields"]["axis"] == "right_gripper_width"
@@ -760,7 +763,7 @@ def test_startup_settle_warms_up_policy_before_source_begin(tmp_path, monkeypatc
             events.append(("reset", reset_id))
             return context
 
-    context = RunContext("panda_stack", profile.digest, "backend", "sim", 1, "episode", 1)
+    context = RunContext("marvin_stack", profile.digest, "backend", "sim", 1, "episode", 1)
     io.context = context
     runner = PolicyStreamRunner(
         configuration,
@@ -825,7 +828,7 @@ def test_async_inference_and_prefetch_lead_use_fresh_observation_and_worker_thre
             predict_threads.append(threading.get_ident())
             return super().predict(context, session_id, request_id, observation, deadline_s)
 
-    context = RunContext("panda_stack", profile.digest, "backend", "sim", 1, "episode", 1)
+    context = RunContext("marvin_stack", profile.digest, "backend", "sim", 1, "episode", 1)
     io.context = context
     runner = PolicyStreamRunner(
         configuration,
@@ -900,7 +903,7 @@ def test_async_inference_falls_back_to_speculative_backup_when_target_rpc_stalls
             return super().predict(context, session_id, request_id, observation, deadline_s)
 
     io = _AdvancingIO(profile)
-    context = RunContext("panda_stack", profile.digest, "backend", "sim", 1, "episode", 1)
+    context = RunContext("marvin_stack", profile.digest, "backend", "sim", 1, "episode", 1)
     io.context = context
     runner = PolicyStreamRunner(
         configuration,
@@ -935,7 +938,7 @@ def test_wait_advance_preserves_timestamps_and_prefers_newest_active_prediction(
     ):
         value[field] = str((POLICY_CONFIG.parent / value[field]).resolve())
     value["follower_config"] = str(
-        ROOT / "shared/scenarios/panda_sim/stack/profiles/control/panda_follower_inference_v1.yaml"
+        MARVIN_SHARED_PROFILES / "control/marvin_follower_inference_v1.yaml"
     )
     value["policy"]["startup_settle_sim_ns"] = 0
     value["policy"]["async_inference"] = False
@@ -997,7 +1000,7 @@ def test_wait_advance_preserves_timestamps_and_prefers_newest_active_prediction(
                     1_000,
                 )
 
-        context = RunContext("panda_stack", profile.digest, "backend", "sim", 1, "episode", 1)
+        context = RunContext("marvin_stack", profile.digest, "backend", "sim", 1, "episode", 1)
         io.context = context
         runner = PolicyStreamRunner(
             configuration,
@@ -1027,7 +1030,9 @@ def test_wait_advance_preserves_timestamps_and_prefers_newest_active_prediction(
     assert chunk2_cmd.observation_time_ns + chunk2_selected[0].time_ns == 2_300_000_000
     assert chunk2_cmd.observation_time_ns + chunk2_selected[-1].time_ns == 3_250_000_000
     assert chunk2_selected[-1].positions[0] == pytest.approx(base0 + 0.08)
-    wa_events = [fields for event, fields in events_fallback if event == "policy.wait_advance_applied"]
+    wa_events = [
+        fields for event, fields in events_fallback if event == "policy.wait_advance_applied"
+    ]
     assert len(wa_events) == 1
     assert wa_events[0]["fields"]["source_observation_id"] == 1
     assert wa_events[0]["fields"]["observation_id"] == chunk2_cmd.trajectory.observation_id
@@ -1081,7 +1086,7 @@ def test_latency_matching_discards_inference_and_execution_latency_steps(tmp_pat
 
     io = _IO(profile)
     log = _Log()
-    context = RunContext("panda_stack", profile.digest, "backend", "sim", 1, "episode", 1)
+    context = RunContext("marvin_stack", profile.digest, "backend", "sim", 1, "episode", 1)
     io.context = context
     runner = PolicyStreamRunner(
         configuration,
@@ -1098,7 +1103,7 @@ def test_latency_matching_discards_inference_and_execution_latency_steps(tmp_pat
     )
     runner.run()
 
-    # obs=1.00s, handoff=1.25s -> 5 inference/lead steps skipped (idx 0..4), plus 2 execution steps -> idx 7.
+    # The 250 ms inference and lead time skips 5 samples. Execution skips 2 more.
     selected = io.commands[0].window.selected_source_targets
     assert selected[0].positions[0] == pytest.approx(base0 + 0.002 * 7)
     lm_events = [fields for event, fields in log.events if event == "policy.latency_matched"]

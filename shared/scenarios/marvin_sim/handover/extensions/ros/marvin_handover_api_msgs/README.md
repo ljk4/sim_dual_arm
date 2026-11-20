@@ -7,6 +7,6 @@
 `msg/TeacherCapability.msg` 和方案 binding 的 `interfaces.teacher_api` 声明；
 运行端只按该标识选择适配，不按方案名推断。
 
-阶段码是交接任务自身约定，与 `panda_stack_api_msgs` 的九阶段码不通用。
+阶段码是交接任务自身约定，与堆叠任务的九阶段码（`0–8`）不通用。
 
 目录导航：[方案说明](../../../README.md)

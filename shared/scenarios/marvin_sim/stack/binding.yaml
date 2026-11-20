@@ -1,0 +1,51 @@
+# Scenario binding v1 for the fixed-base Marvin stack task.
+schema_version: 1
+robot_id: marvin_sim
+task_id: stack
+description: >-
+  Fixed-base dual-Marvin single-arm cube stacking: MuJoCo simulation, ROS 2
+  program teacher and LeRobot ACT learning recipes.
+
+backend:
+  kind: simulation
+  implementation: mujoco
+  task_type: stack
+
+runtime:
+  implementation: ros2
+
+learning:
+  implementation: lerobot
+  adapter: act
+
+profiles:
+  robot: profiles/robots/marvin_stack_v1/profile.json
+  observation: ../handover/profiles/observations/marvin_rgb_joint_v1.json
+  action: ../handover/profiles/actions/marvin_joint_position_v1.json
+
+recipes:
+  simulation_teacher: configs/simulation/backend/backend_stack_teacher.yaml
+  simulation_policy: configs/simulation/backend/backend_stack_policy.yaml
+  runtime_teacher: configs/runtime/teacher_collect.yaml
+  runtime_policy: configs/runtime/policy_rollout.yaml
+  campaign: configs/runtime/experiments/stack_campaign.yaml
+  dataset: configs/learning/act_dataset.yaml
+  training: configs/learning/act_training.yaml
+  policy_service: configs/learning/policy.yaml
+  evaluation: configs/runtime/evaluation.yaml
+
+interfaces:
+  common_ros:
+    - robot_api_msgs
+    - sim_api_msgs
+  extension_ros:
+    - extensions/ros/marvin_stack_api_msgs
+  teacher_api: marvin_stack_api_msgs.teacher_chunk.v1
+  policy_api: bimanual.policy.v1
+
+source_roots:
+  - ../../..
+artifact_roots:
+  - /data
+
+references: []

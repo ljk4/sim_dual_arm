@@ -1,0 +1,31 @@
+# Offline batch-evaluation failure stage classification for Marvin stack.
+schema_version: 1
+stages:
+  - name: grasp
+    label: 抓取/抬起
+    conditions:
+      - source_not_on_table
+  - name: place
+    label: 搬运/对齐放置
+    conditions:
+      - source_on_target_height
+      - source_xy_inside_target
+      - source_target_vertical_contact
+      - target_on_table
+      - source_tilt
+      - target_tilt
+      - source_linear_speed
+      - target_linear_speed
+      - source_angular_speed
+      - target_angular_speed
+  - name: release
+    label: 释放/撤离
+    conditions:
+      - no_finger_contact
+      - right_gripper_opening
+      - right_tcp_clearance
+  - name: stable
+    label: 稳定确认
+    succeeded: true
+dropped_prefix: DROPPED
+dropped_label: 搬运/放置（掉落）

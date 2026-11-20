@@ -15,7 +15,7 @@ from robot_backend_sim.common.config.motion_config import CONTROL_JOINT_NAMES
 from robot_backend_sim.common.config.stream_config import StreamConfig, StreamConfigError
 from robot_backend_sim.common.physics.contacts import FingerContactEvidence, GripperContactEvidence
 from robot_backend_sim.common.physics.gripper_contact import ContactUnloader, GripperContactTracker
-from robot_backend_sim.panda_sim.io import Measurement
+from robot_backend_sim.common.physics.robot_io import Measurement
 
 
 def evidence(object_name="source"):

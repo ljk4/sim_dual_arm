@@ -1,0 +1,72 @@
+# Marvin stack task evaluation, gate thresholds and Teacher configuration.
+schema_version: 1
+planning_config: ../checks/kinematics_check.yaml
+
+objects:
+  source_half_extents_m: [0.02, 0.02, 0.02]
+  target_half_extents_m: [0.03, 0.03, 0.03]
+
+success:
+  stable_duration_s: 2.0
+  max_task_sim_duration_s: 90.0
+  max_task_wall_duration_s: 300.0
+  support_xy_margin_m: 0.002
+  support_height_tolerance_m: 0.005
+  min_support_normal_force_n: 0.05
+  min_target_table_normal_force_n: 0.1
+  max_source_table_normal_force_n: 0.001
+  min_vertical_normal_component: 0.9
+  max_tilt_rad: 0.25
+  max_linear_speed_m_s: 0.02
+  max_angular_speed_rad_s: 0.2
+  min_gripper_opening_m: 0.070
+  min_right_tcp_to_source_m: 0.08
+
+gates:
+  stable_duration_s: 0.2
+  phase_extra_timeout_s: 8.0
+  hold_min_force_n: 0.2
+  hold_loss_tolerance_s: 0.2
+  lift_height_m: 0.08
+  arm_position_tolerance_rad: 0.015
+  arm_velocity_tolerance_rad_s: 0.02
+  gripper_position_tolerance_m: 0.002
+  gripper_velocity_tolerance_m_s: 0.005
+  finger_max_speed_m_s: 0.005
+  place_xy_tolerance_m: 0.015
+  place_z_tolerance_m: 0.015
+  release_opening_m: 0.075
+  retreat_min_tcp_to_source_m: 0.08
+
+teacher:
+  enabled: true
+  plan_wall_timeout_s: 30.0
+  chunk_size: 60
+  action_period_ns: 50000000
+  max_plan_duration_s: 60.0
+  max_joint_velocity_fraction: 0.85
+  max_joint_acceleration_fraction: 0.80
+  gripper_velocity_m_s: 0.04
+  gripper_acceleration_m_s2: 0.5
+  close_gripper_opening_m: 0.030
+  lift_height_m: 0.14
+  phase_min_duration_s:
+    pregrasp: 0.5
+    grasp: 0.5
+    close: 0.5
+    lift: 0.5
+    transport: 0.5
+    lower: 0.5
+    open: 0.5
+    retreat: 0.5
+    stable: 2.0
+  chunk_cache_entries: 256
+
+capacity:
+  expected_chunks: 256
+  expected_references: 256
+  expected_events: 1024
+  max_episode_chunks: 256
+  max_teacher_requests: 256
+  rpc_cache_entries: 256
+  backend_chunk_history: 256

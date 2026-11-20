@@ -1,0 +1,37 @@
+# Marvin stack formal LeRobot dataset conversion (50 episodes: 45 train / 5 val).
+schema_version: 1
+fps: 20
+chunk_size: 60
+action_lead_ns: 50000000
+state_dim: 16
+camera_names: [global, left_wrist, right_wrist]
+camera_width: 320
+camera_height: 240
+task_text: >-
+  Pick up the red source cube with the right arm and stack it onto the blue
+  target cube.
+profile: shared/scenarios/marvin_sim/stack/profiles/robots/marvin_stack_v1/profile.json
+select: var/marvin_sim/stack/datasets/raw/formal-select.json
+output_root: var/marvin_sim/stack/datasets/lerobot
+cache_root: var/marvin_sim/stack/debug/learning-cache
+attempt_export_glob: "export"
+verify_png_pixels: true
+require_quality: true
+diagnostic: false
+expected:
+  formal_episodes: 50
+  training_episodes: 45
+  validation_episodes: 5
+  validation_positions: [9, 19, 29, 39, 49]
+lerobot:
+  source_revision: 7e241bd630a3719a56157a497ce5d08f244784f1
+  rgb_encoder:
+    vcodec: h264
+    g: 2
+    crf: 18
+    preset: veryfast
+  video_backend: pyav
+  video_files_size_mb: 256
+  data_files_size_mb: 256
+  encoder_threads: 4
+  image_writer_threads: 4

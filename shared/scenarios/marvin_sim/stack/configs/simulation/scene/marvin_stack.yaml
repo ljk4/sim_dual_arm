@@ -1,0 +1,82 @@
+# Fixed-base Marvin stack scene baseline.
+physics:
+  timestep: 0.002
+  gravity: [0.0, 0.0, -9.81]
+  integrator: implicitfast
+  cone: elliptic
+  impratio: 10.0
+  noslip_iterations: 3
+  object_contact_dim: 4
+  object_friction: [1.0, 0.02, 0.0001]
+
+robot:
+  assembly: marvin
+  base_position: [0.0, 0.0, 0.0]
+  base_yaw_deg: 0.0
+  home_joint_positions: [0.75, -1.55, 1.65, -1.35, 0.6, -0.3, -0.6]
+  gravity_compensation: true
+  gripper_open_total: 0.0814
+  gripper_closed_total: 0.0014
+  arm_kp: [2500.0, 2500.0, 1500.0, 1500.0, 400.0, 400.0, 400.0]
+  arm_kv: [150.0, 150.0, 90.0, 90.0, 30.0, 30.0, 30.0]
+  joint_damping: 1.0
+  joint_armature: 0.01
+  gripper_kp: 2000.0
+  gripper_kv: 50.0
+  gripper_force: 200.0
+  finger_damping: 200.0
+
+task:
+  environment: stack
+  frame: robot_base
+  table:
+    center_xy: [0.70, 0.0]
+    size_xy: [0.60, 1.00]
+    top_z: 0.78
+    thickness: 0.05
+    rgba: [0.55, 0.45, 0.32, 1.0]
+  source:
+    name: source
+    half_extents: [0.02, 0.02, 0.02]
+    nominal_xy: [0.55, -0.08]
+    nominal_yaw_deg: 0.0
+    mass: 0.04
+    rgba: [0.85, 0.18, 0.16, 1.0]
+    randomization:
+      xy_m: 0.03
+      yaw_deg: 10.0
+  target:
+    name: target
+    half_extents: [0.03, 0.03, 0.03]
+    nominal_xy: [0.55, -0.30]
+    nominal_yaw_deg: 0.0
+    mass: 0.06
+    rgba: [0.16, 0.38, 0.85, 1.0]
+    randomization:
+      xy_m: 0.03
+      yaw_deg: 10.0
+  camera_mount:
+    position: [1.05, -0.19, 1.50]
+
+cameras:
+  global:
+    parent: camera_mount
+    position: [0.0, 0.0, 0.0]
+    quaternion_wxyz: [0.6733746117887752, 0.2157930309308349, 0.2157930309308349, 0.6733746117887752]
+    fovy: 55.0
+    width: 320
+    height: 240
+  left_wrist:
+    parent: Arm_L9_Link
+    position: [0.06, -0.05, 0.0]
+    quaternion_wxyz: [0.6876957732968962, 0.0007350408261092464, 0.022208131547247864, 0.7256588606209857]
+    fovy: 95.0
+    width: 320
+    height: 240
+  right_wrist:
+    parent: Arm_R9_Link
+    position: [-0.06, -0.05, 0.0]
+    quaternion_wxyz: [-0.13371921058204453, -0.13371921058204453, 0.6943480198872284, 0.6943480198872284]
+    fovy: 95.0
+    width: 320
+    height: 240

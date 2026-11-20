@@ -21,9 +21,6 @@ from collections.abc import Mapping, Sequence
 
 from robot_contracts.models import ContractError, JointSpec, RobotProfile
 
-from robot_backend_sim.marvin_sim.assembly import MarvinBinding
-from robot_backend_sim.marvin_sim.assembly import gripper_opening
-from robot_backend_sim.marvin_sim.handover.scene import MarvinScene
 from robot_backend_sim.common.physics.robot_io import (
     PUBLIC_JOINT_NAMES,
     Measurement,
@@ -37,6 +34,8 @@ from robot_backend_sim.common.physics.robot_io import (
     validate_profile_contract,
     validate_targets,
 )
+from robot_backend_sim.marvin_sim.assembly import MarvinBinding, gripper_opening
+from robot_backend_sim.marvin_sim.scene_base import MarvinSceneBase
 
 __all__ = ["MarvinIO", "JOINT_NAMES"]
 
@@ -46,11 +45,11 @@ _ARM_COUNT = 7
 
 
 class MarvinIO(RobotIO):
-    """Validated named I/O for one compiled Marvin handover scene."""
+    """Validated named I/O for one compiled Marvin scene."""
 
     def __init__(
         self,
-        scene: MarvinScene,
+        scene: MarvinSceneBase,
         profile: RobotProfile,
         *,
         velocity_feedforward: bool = False,
@@ -87,7 +86,7 @@ class MarvinIO(RobotIO):
     def finger_bodies(self) -> Mapping[str, tuple[tuple[str, str], ...]]:
         return self._scene.robot_geometry.finger_bodies
 
-    def require_scene(self, scene: MarvinScene) -> None:
+    def require_scene(self, scene: MarvinSceneBase) -> None:
         self._check_thread()
         if scene is not self._scene:
             raise ContractError(
@@ -228,7 +227,7 @@ def _ordered_actuators(binding: MarvinBinding) -> tuple[int, ...]:
     return tuple(ids)
 
 
-def _validate_scene_contract(scene: MarvinScene, joints: tuple[JointSpec, ...]) -> None:
+def _validate_scene_contract(scene: MarvinSceneBase, joints: tuple[JointSpec, ...]) -> None:
     """Check profile limits, initial values and commands against the compiled model."""
     model = scene.model
     data = scene.data

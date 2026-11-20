@@ -63,11 +63,11 @@
 # seconds.  Three RGB cameras and the full 16-joint order are fixed by the
 # referenced profile and the Policy service configuration.
 schema_version: 1
-robot_profile: ../../../shared/scenarios/panda_sim/stack/profiles/robots/panda_stack_v1/profile.json
-observation_schema: ../../../shared/scenarios/panda_sim/stack/profiles/observations/panda_rgb_joint_v1.json
-action_schema: ../../../shared/scenarios/panda_sim/stack/profiles/actions/panda_joint_position_v1.json
-control_constraints: ../../../shared/scenarios/panda_sim/stack/profiles/control/panda_control_v1.yaml
-follower_config: ../../../shared/scenarios/panda_sim/stack/profiles/control/panda_follower_v1.yaml
+robot_profile: ../../../shared/scenarios/marvin_sim/stack/profiles/robots/marvin_stack_v1/profile.json
+observation_schema: ../../../shared/scenarios/marvin_sim/handover/profiles/observations/marvin_rgb_joint_v1.json
+action_schema: ../../../shared/scenarios/marvin_sim/handover/profiles/actions/marvin_joint_position_v1.json
+control_constraints: ../../../shared/scenarios/marvin_sim/handover/profiles/control/marvin_control_v1.yaml
+follower_config: ../../../shared/scenarios/marvin_sim/handover/profiles/control/marvin_follower_v1.yaml
 robot_namespace: /robot
 
 action_source: policy
@@ -107,7 +107,7 @@ policy:
   task_text: Follow the observed three-camera dual-arm state with small bounded joint motion.
   chunk_size: 60
   action_period_ns: 50000000
-  # Matches panda_stream.initial_lead_s: the first hand-off is 250 ms ahead.
+  # Matches marvin_stream.initial_lead_s: the first hand-off is 250 ms ahead.
   initial_lead_ns: 250000000
   max_chunks: 8
   total_sim_deadline_ns: 8000000000

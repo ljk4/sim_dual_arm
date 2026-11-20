@@ -40,7 +40,7 @@ from dual_arm_learning.policy_types import (  # noqa: E402
 from dual_arm_learning.temporal_ensemble import PERIOD_NS  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
-CONFIG = ROOT / "shared/scenarios/panda_sim/stack/configs/learning/policy_temporal.yaml"
+CONFIG = ROOT / "shared/scenarios/marvin_sim/stack/configs/learning/policy.yaml"
 
 
 @pytest.fixture(scope="module")
@@ -174,7 +174,7 @@ class BadWarmModel(ActModelAdapter):
 
 def context(config: PolicyServiceConfig, **changes) -> ProviderContext:
     values = {
-        "robot_id": "panda_stack",
+        "robot_id": "marvin_stack",
         "robot_profile_hash": config.robot_profile_hash,
         "backend_instance_id": "backend-1",
         "time_domain_id": "mujoco",
@@ -251,7 +251,9 @@ def open_request(config, ctx, open_id="open-1"):
 
 def temporal_base(bundle: Path) -> np.ndarray:
     result = initial_positions(bundle)
-    result[7] = result[15] = 0.09
+    joints = profile(bundle)["joints"]
+    for axis in (7, 15):
+        result[axis] = joints[axis]["max"] + 0.003
     return result
 
 
@@ -634,10 +636,9 @@ def test_temporal_ensemble_fuses_admitted_history_and_records_npz(bundle, tmp_pa
     with np.load(artifact_path(directory, "s1:p2"), allow_pickle=False) as stored:
         raw = stored["raw_act"]
         admitted = stored["admitted"]
-        np.testing.assert_allclose(raw[:, 7], 0.09)
-        np.testing.assert_allclose(raw[:, 15], 0.09)
-        np.testing.assert_allclose(admitted[:, 7], 0.08)
-        np.testing.assert_allclose(admitted[:, 15], 0.08)
+        for axis in (7, 15):
+            np.testing.assert_allclose(raw[:, axis], config.joint_upper_bounds[axis] + 0.003)
+            np.testing.assert_allclose(admitted[:, axis], config.joint_upper_bounds[axis])
         np.testing.assert_allclose(stored["correction"], admitted - raw)
         np.testing.assert_array_equal(stored["execution_targets"], executed)
         np.testing.assert_array_equal(stored["ensemble_counts"][:58], 2)
@@ -729,8 +730,8 @@ def test_real_recipe_quota_reaches_the_pipeline_and_legal_chunks_are_unchanged(
 ):
     config = settings_for(bundle)
     assert config.max_prediction_corrections == {
-        "left_gripper_width": 0.03,
-        "right_gripper_width": 0.03,
+        "left_gripper_width": 0.005,
+        "right_gripper_width": 0.005,
     }
     assert "gripper_max_correction_m" not in config.to_document()
     directory = tmp_path / "predictions"
@@ -752,8 +753,10 @@ def test_real_recipe_quota_reaches_the_pipeline_and_legal_chunks_are_unchanged(
         np.testing.assert_array_equal(stored["admitted"], legal.admitted)
         assert not stored["correction"].any() and bool(stored["accepted"])
 
+    gripper = config.action_joint_names.index("left_gripper_width")
+    upper = config.joint_upper_bounds[gripper]
     pipeline = ChunkedPolicyPipeline(
-        AxisChunkModel(bundle, initial_positions(bundle), {1: (7, 0.1)}),
+        AxisChunkModel(bundle, initial_positions(bundle), {1: (gripper, upper + 0.003)}),
         config,
         prediction_directory=tmp_path / "projected",
     )
@@ -764,9 +767,9 @@ def test_real_recipe_quota_reaches_the_pipeline_and_legal_chunks_are_unchanged(
         cameras=cameras(bundle, 1),
         joint_positions=tuple(initial_positions(bundle)),
     )
-    assert np.all(projected.admitted[:, 7] == 0.08)
-    assert projected.raw[0, 7] == pytest.approx(0.1, abs=1e-6)
-    assert projected.correction[0, 7] == pytest.approx(-0.02, abs=1e-6)
+    assert np.all(projected.admitted[:, gripper] == upper)
+    assert projected.raw[0, gripper] == pytest.approx(upper + 0.003, abs=1e-6)
+    assert projected.correction[0, gripper] == pytest.approx(-0.003, abs=1e-6)
 
 
 def test_named_axis_is_projected_in_both_signs_within_its_own_quota(bundle, tmp_path):
@@ -852,7 +855,9 @@ def test_policy_service_returns_only_profile_bounded_targets_after_projection(bu
     axis = config.action_joint_names.index("left_joint7")
     service = PolicyService(
         config,
-        AxisChunkModel(bundle, initial_positions(bundle), {1: (axis, 2.9035)}),
+        AxisChunkModel(
+            bundle, initial_positions(bundle), {1: (axis, config.joint_upper_bounds[axis] + 0.0062)}
+        ),
         prediction_directory=tmp_path / "predictions",
     )
     ctx = context(config)
@@ -879,7 +884,9 @@ def test_policy_service_rejects_an_over_quota_axis_without_caching_a_reply(bundl
         update={"max_prediction_corrections": marvin_like_corrections()}
     )
     axis = config.action_joint_names.index("left_joint7")
-    model = AxisChunkModel(bundle, initial_positions(bundle), {1: (axis, 2.95)})
+    model = AxisChunkModel(
+        bundle, initial_positions(bundle), {1: (axis, config.joint_upper_bounds[axis] + 0.02)}
+    )
     service = PolicyService(config, model, prediction_directory=tmp_path / "predictions")
     ctx = context(config)
     opened = service.open_session(open_request(config, ctx))
@@ -899,19 +906,14 @@ def test_policy_service_rejects_an_over_quota_axis_without_caching_a_reply(bundl
 
 def test_quota_rejection_cannot_be_hidden_by_temporal_averaging(bundle, tmp_path):
     base = temporal_base(bundle)
-    axis = settings_for(bundle).action_joint_names.index("left_joint7")
     directory = tmp_path / "predictions"
     config = fused(settings_for(bundle)).model_copy(
-        update={
-            "max_prediction_corrections": {
-                "left_joint7": 0.01,
-                "left_gripper_width": 0.03,
-                "right_gripper_width": 0.03,
-            }
-        }
+        update={"max_prediction_corrections": marvin_like_corrections()}
     )
+    axis = config.action_joint_names.index("left_joint7")
+    out_of_range = config.joint_upper_bounds[axis] + 0.02
     pipeline = ChunkedPolicyPipeline(
-        AxisChunkModel(bundle, base, {2: (axis, 4.0)}),
+        AxisChunkModel(bundle, base, {2: (axis, out_of_range)}),
         config,
         prediction_directory=directory,
     )
@@ -926,8 +928,8 @@ def test_quota_rejection_cannot_be_hidden_by_temporal_averaging(bundle, tmp_path
 
     # The fused value would be inside the profile bounds, but the individual
     # raw chunk is not: admission must run before fusion on the raw chunk.
-    weight = np.exp(0.01 * 4)
-    averaged = (weight * base[axis] + 4.0) / (1.0 + weight)
+    weight = np.exp(0.01 * 100_000_000 / PERIOD_NS)
+    averaged = (weight * base[axis] + out_of_range) / (1.0 + weight)
     assert config.joint_lower_bounds[axis] <= averaged <= config.joint_upper_bounds[axis]
 
     with pytest.raises(PolicyError, match="exceeds 0.01"):
@@ -940,7 +942,7 @@ def test_quota_rejection_cannot_be_hidden_by_temporal_averaging(bundle, tmp_path
         )
     with np.load(artifact_path(directory, "s1:p2"), allow_pickle=False) as stored:
         assert not bool(stored["accepted"])
-        assert stored["raw_act"][0, axis] == pytest.approx(4.0)
+        assert stored["raw_act"][0, axis] == pytest.approx(out_of_range)
         assert "execution_targets" not in stored.files
 
     third = pipeline.predict(

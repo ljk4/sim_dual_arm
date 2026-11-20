@@ -1,0 +1,21 @@
+# In-memory static sample filter applied during full ACT training.
+schema_version: 1
+fps: 20
+chunk_size: 60
+arms:
+  joint_indices: [0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14]
+  max_step_rad: 0.001
+  max_velocity_rad_s: 0.01
+grippers:
+  joint_indices: [7, 15]
+  max_step_m: 0.0005
+  max_velocity_m_s: 0.002
+static_runs:
+  min_frames: 15
+  edge_frames: 5
+  interior_stride: 5
+  only_gate_states: [WAITING_FOR_FEEDBACK]
+  phase_boundary_frames: 5
+  episode_boundary_frames: 5
+  min_episode_kept_frames: 60
+  reason: redundant_static_anchor

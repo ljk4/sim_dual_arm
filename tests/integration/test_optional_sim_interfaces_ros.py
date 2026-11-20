@@ -23,7 +23,7 @@ from pathlib import Path
 from types import SimpleNamespace
 class RejectSim(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname.split(".")[0] in {"sim_api_msgs", "panda_stack_api_msgs"}:
+        if fullname.split(".")[0] in {"sim_api_msgs", "marvin_stack_api_msgs"}:
             raise AssertionError("optional interface loaded: " + fullname)
 sys.meta_path.insert(0, RejectSim())
 from dual_arm_runtime.robot_control_client import RobotControlClient
@@ -31,7 +31,7 @@ from dual_arm_runtime.runtime_config import load_runtime_configuration
 from dual_arm_runtime.runtime_node import RuntimeNode
 root = Path(sys.argv[1])
 configuration = load_runtime_configuration(
-    root / "shared/scenarios/panda_sim/stack/configs/runtime/teacher_collect.yaml", root
+    root / "shared/scenarios/marvin_sim/stack/configs/runtime/teacher_collect.yaml", root
 )
 created = []
 node = SimpleNamespace(create_client=lambda service, name, **kwargs: created.append(name))
@@ -40,7 +40,7 @@ RobotControlClient(node, configuration.recipe, configuration.profile, (1.0,) * 1
 assert len(created) == 7
 assert all(not name.endswith("reset_simulation") for name in created)
 assert "sim_api_msgs" not in sys.modules
-assert "panda_stack_api_msgs" not in sys.modules
+assert "marvin_stack_api_msgs" not in sys.modules
 '''
     environment = {**os.environ, "PYTHONPATH": ":".join(str(ROOT / path) for path in (
         "shared/common/python/contracts/src",

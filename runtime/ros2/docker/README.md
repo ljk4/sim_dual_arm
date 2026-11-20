@@ -12,9 +12,10 @@
 ./env.sh up runtime
 ./env.sh enter runtime
 
-# 容器内：构建 SDK 或运行测试
+# 容器内：构建 SDK
 scripts/build_sdk.sh
-scripts/test.sh -q tests/unit
 ```
 
 > `scripts/build_sdk.sh` 会一次性编译公共与方案扩展 ROS 接口至 `build/ros-dev`，并生成 Policy SDK 至 `build/generated/policy-sdk`；切换方案无需重新编译。
+
+运行测试见[测试执行方式](../../../tests/README.md#执行方式)。

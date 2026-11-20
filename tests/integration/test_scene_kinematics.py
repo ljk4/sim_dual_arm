@@ -12,27 +12,27 @@ np = pytest.importorskip("numpy")
 pytest.importorskip("mink")
 
 ROOT = Path(__file__).resolve().parents[2]
-SCENARIO = ROOT / "shared/scenarios/panda_sim/stack"
+SCENARIO = ROOT / "shared/scenarios/marvin_sim/stack"
 SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim.panda_sim.kinematics_config import load_kinematics_config  # noqa: E402
-from robot_backend_sim.panda_sim.stack.scene_config import load_scene_config  # noqa: E402
-from robot_backend_sim.common.kinematics import common
-from robot_backend_sim.panda_sim import kinematics  # noqa: E402
-from robot_backend_sim.panda_sim.stack.scene import build_scene  # noqa: E402
+from robot_backend_sim.common.kinematics import common, kinematics_clearance  # noqa: E402
 from robot_backend_sim.common.render.rendering import SceneRenderer  # noqa: E402
+from robot_backend_sim.marvin_sim.stack import plan as stack_plan  # noqa: E402
+from robot_backend_sim.marvin_sim.stack.kinematics_config import load_kinematics_config  # noqa: E402
+from robot_backend_sim.marvin_sim.stack.scene import build_marvin_stack_scene  # noqa: E402
+from robot_backend_sim.marvin_sim.stack.scene_config import load_marvin_stack_scene_config  # noqa: E402
 from robot_backend_sim.tools import check_kinematics, check_kinematics_report  # noqa: E402
 
-CONFIG_PATH = SCENARIO / "configs/simulation/scene/panda_stack.yaml"
+CONFIG_PATH = SCENARIO / "configs/simulation/scene/marvin_stack.yaml"
 CHECK_PATH = SCENARIO / "configs/simulation/checks/scene_check.yaml"
 KINEMATICS_PATH = SCENARIO / "configs/simulation/checks/kinematics_check.yaml"
 
 
 @pytest.fixture(scope="module")
 def scene_config():
-    return load_scene_config(CONFIG_PATH)
+    return load_marvin_stack_scene_config(CONFIG_PATH)
 
 
 @pytest.fixture(scope="module")
@@ -42,7 +42,7 @@ def kinematics_config(scene_config):
 
 @pytest.fixture(scope="module")
 def scene(scene_config):
-    return build_scene(
+    return build_marvin_stack_scene(
         scene_config,
     )
 
@@ -64,7 +64,8 @@ def initial_state(scene, scene_config, seed: int = 11):
     scene.reset(seed)
     qpos = scene.data.qpos.copy()
     object_addresses = {
-        obj.name: scene.indices.environment.object_free_joint_qpos[obj.name] for obj in scene_config.objects
+        obj.name: scene.indices.environment.object_free_joint_qpos[obj.name]
+        for obj in scene_config.objects
     }
     poses = {
         name: common.extract_object_pose(qpos, address, name)
@@ -76,10 +77,10 @@ def initial_state(scene, scene_config, seed: int = 11):
 def make_targets(scene_config, kinematics_config, poses):
     source = scene_config.objects[0]
     target = scene_config.objects[1]
-    return kinematics.build_targets(
+    return stack_plan.build_targets(
         poses["source"],
         poses["target"],
-        table_top_z=scene_config.table.top_z,
+        table_top_z=scene_config.robot.base_position[2] + scene_config.table.top_z,
         source_half_z=source.half_extents[2],
         target_half_z=target.half_extents[2],
         config=kinematics_config.targets,
@@ -89,20 +90,20 @@ def make_targets(scene_config, kinematics_config, poses):
 def test_real_mink_solves_six_targets_and_freezes_every_other_dof(
     scene, scene_config, kinematics_config
 ):
+    assert kinematics_config.targets.approach_tilt_deg == 20.0
+    assert kinematics_config.targets.approach_yaw_deg == -90.0
+    assert kinematics_config.targets.place_yaw_deg == -90.0
+    assert kinematics_config.clearance.minimum_clearance_m == 0.003
+
     qpos, poses = initial_state(scene, scene_config)
     scene_data_before = {
         "qpos": scene.data.qpos.copy(),
         "qvel": scene.data.qvel.copy(),
         "time": float(scene.data.time),
     }
-    pair_set = kinematics.build_collision_pairs(
-        scene.model,
-        robot_prefixes=("left_", "right_"),
-        robot_sides={"left": ("left_",), "right": ("right_",)},
-        object_names=("source", "target"),
-    )
+    pair_set = stack_plan.stack_pair_set(scene.model)
     targets = make_targets(scene_config, kinematics_config, poses)
-    results = kinematics.solve_key_poses(
+    results = stack_plan.solve_key_poses(
         scene.model,
         qpos,
         targets,
@@ -119,7 +120,7 @@ def test_real_mink_solves_six_targets_and_freezes_every_other_dof(
         assert np.isfinite(np.asarray(result.qpos_right)).all()
     # Only the seven right hinge qpos addresses may differ from the snapshot.
     right_addresses = set(scene.indices.robot.arm_joint_qpos["right"])
-    final = np.asarray(results[-1].qpos_full)
+    final = np.asarray(results[-1].qpos)
     for address in range(scene.model.nq):
         if address not in right_addresses:
             assert final[address] == pytest.approx(qpos[address], abs=1e-8)
@@ -132,18 +133,13 @@ def test_unreachable_target_fails_instead_of_reporting_false_success(
     scene, scene_config, kinematics_config
 ):
     qpos, poses = initial_state(scene, scene_config)
-    pair_set = kinematics.build_collision_pairs(
-        scene.model,
-        robot_prefixes=("left_", "right_"),
-        robot_sides={"left": ("left_",), "right": ("right_",)},
-        object_names=("source", "target"),
-    )
+    pair_set = stack_plan.stack_pair_set(scene.model)
     target = dataclasses.replace(
         make_targets(scene_config, kinematics_config, poses)[0],
         phase="unreachable",
         position=(5.0, 5.0, 5.0),
     )
-    results = kinematics.solve_key_poses(
+    results = stack_plan.solve_key_poses(
         scene.model,
         qpos,
         (target,),
@@ -160,23 +156,18 @@ def test_real_penetrating_endpoint_is_rejected_by_path_clearance(
     scene, scene_config, kinematics_config
 ):
     qpos, _poses = initial_state(scene, scene_config)
-    pair_set = kinematics.build_collision_pairs(
-        scene.model,
-        robot_prefixes=("left_", "right_"),
-        robot_sides={"left": ("left_",), "right": ("right_",)},
-        object_names=("source", "target"),
-    )
+    pair_set = stack_plan.stack_pair_set(scene.model)
     addresses = tuple(scene.indices.robot.arm_joint_qpos["right"])
     home = tuple(float(qpos[address]) for address in addresses)
     penetrating = None
     for joint2 in (-1.5, -1.0, -0.5, 0.0):
-        for joint4 in (-3.0, -2.5, -2.0, -1.5):
-            for joint6 in (0.0, 1.0, 2.0, 3.0):
+        for joint4 in (-2.5, -2.0, -1.5, -1.0):
+            for joint6 in (-1.0, 0.0, 1.0):
                 candidate = (0.0, joint2, 0.0, joint4, 0.0, joint6, 0.0)
                 sample = np.array(qpos, copy=True)
                 for address, value in zip(addresses, candidate, strict=True):
                     sample[address] = value
-                check = kinematics.check_initial_pose(
+                check = stack_plan.check_initial_pose(
                     scene.model,
                     sample,
                     pair_set,
@@ -190,7 +181,7 @@ def test_real_penetrating_endpoint_is_rejected_by_path_clearance(
         if penetrating is not None:
             break
     assert penetrating is not None, "deterministic grid found no penetrating pose"
-    path = kinematics.check_path(
+    path = stack_plan.check_path(
         scene.model,
         qpos,
         home,
@@ -220,9 +211,9 @@ def test_plane_with_zero_rbound_is_not_culled_and_reports_penetration():
     )
     data = mujoco.MjData(max_model)
     mujoco.mj_forward(max_model, data)
-    pair_set = kinematics.CollisionPairSet(
+    pair_set = kinematics_clearance.CollisionPairSet(
         pairs=(
-            kinematics.CollisionPair(
+            kinematics_clearance.CollisionPair(
                 geom1=0,
                 geom2=1,
                 body1="world",
@@ -237,7 +228,7 @@ def test_plane_with_zero_rbound_is_not_culled_and_reports_penetration():
         total_physical_pairs=1,
         explicit_pair_count=0,
     )
-    point = kinematics.measure_clearance(
+    point = kinematics_clearance.measure_clearance(
         max_model,
         data,
         pair_set,
@@ -255,10 +246,10 @@ def test_plane_with_zero_rbound_is_not_culled_and_reports_penetration():
 def test_one_layout_end_to_end_with_real_logger_scene_renderer_and_png(
     tmp_path, scene_config, kinematics_config, monkeypatch
 ):
-    all_layouts = check_kinematics.visibility.build_layouts(
-        check_kinematics.visibility.load_check_config(CHECK_PATH, scene_config),
-        scene_config,
-    )
+    check_config = check_kinematics.visibility.load_check_config(CHECK_PATH, scene_config)
+    all_layouts = check_kinematics.visibility.build_layouts(check_config, scene_config)
+    assert check_config.max_layouts == 67
+    assert len(all_layouts) == 67
     monkeypatch.setattr(
         check_kinematics.visibility,
         "build_layouts",
@@ -266,7 +257,7 @@ def test_one_layout_end_to_end_with_real_logger_scene_renderer_and_png(
     )
 
     def load_one_layout(arguments):
-        scene = load_scene_config(arguments.scene_config)
+        scene = load_marvin_stack_scene_config(arguments.scene_config)
         layout_config = check_kinematics.visibility.load_check_config(arguments.check_config, scene)
         kin = load_kinematics_config(arguments.kinematics_config, scene)
         return scene, layout_config, kin
@@ -295,10 +286,10 @@ def test_one_layout_end_to_end_with_real_logger_scene_renderer_and_png(
     assert any(log_dir.glob("events*.jsonl"))
     for phase in (
         "pregrasp",
-        "grasp_pose",
-        "lift_pose",
+        "grasp",
+        "lift",
         "place_hover",
-        "place_pose",
+        "place",
         "retreat",
     ):
         for camera in scene_config.cameras:
@@ -308,40 +299,25 @@ def test_one_layout_end_to_end_with_real_logger_scene_renderer_and_png(
 
 
 def test_collision_pair_enumeration_records_mujoco_exclusions(scene):
-    pair_set = kinematics.build_collision_pairs(
-        scene.model,
-        robot_prefixes=("left_", "right_"),
-        robot_sides={"left": ("left_",), "right": ("right_",)},
-        object_names=("source", "target"),
-    )
+    pair_set = stack_plan.stack_pair_set(scene.model)
     assert pair_set.pairs
-    assert len(pair_set.pairs) == 1148
+    assert len(pair_set.pairs) == 259
     assert pair_set.categories.get("robot_self", 0) > 0
     assert pair_set.categories.get("robot_cross", 0) > 0
     assert pair_set.categories.get("robot_scene", 0) > 0
     assert pair_set.exclusions.get("visual_or_no_affinity", 0) > 0
     assert pair_set.exclusions.get("parent_child", 0) > 0
-    # Fixed world attachments are already welded to world in this model; the
-    # fixed-connection rule is an additional guard, not a required nonzero
-    # count for the current Panda asset.
-    assert (
-        pair_set.exclusions.get("welded_body", 0) > 0
-        or pair_set.exclusions.get("fixed_connection", 0) > 0
-    )
+    assert pair_set.exclusions.get("welded_body", 0) > 0
+    assert pair_set.exclusions.get("explicit_exclude", 0) > 0
 
 
 def test_real_segmentation_fails_an_impossible_visibility_threshold(
     scene, scene_config, kinematics_config, renderer
 ):
     qpos, poses = initial_state(scene, scene_config)
-    pair_set = kinematics.build_collision_pairs(
-        scene.model,
-        robot_prefixes=("left_", "right_"),
-        robot_sides={"left": ("left_",), "right": ("right_",)},
-        object_names=("source", "target"),
-    )
+    pair_set = stack_plan.stack_pair_set(scene.model)
     targets = make_targets(scene_config, kinematics_config, poses)
-    result = kinematics.solve_key_poses(
+    result = stack_plan.solve_key_poses(
         scene.model,
         qpos,
         targets[:1],

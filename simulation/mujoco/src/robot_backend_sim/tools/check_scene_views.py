@@ -7,14 +7,22 @@ import statistics
 import time
 from pathlib import Path
 
-from robot_backend_sim.panda_sim.stack.scene_config import SceneConfig
-from robot_backend_sim.common.render import visibility
-from robot_backend_sim.panda_sim.stack import visibility as panda_visibility
-from robot_backend_sim.panda_sim.stack.visibility import LayoutSpec, LayoutVisibility, SceneCheckConfig
+from robot_backend_sim.marvin_sim.scene_base import (
+    base_world_point,
+    combined_yaw_quaternion,
+)
+from robot_backend_sim.marvin_sim.stack.scene_config import MarvinStackSceneConfig
+from robot_backend_sim.marvin_sim.stack.visibility import (
+    LayoutSpec,
+    LayoutVisibility,
+    SceneCheckConfig,
+)
 from robot_backend_sim.tools.check_scene_common import SceneCheckFailure
 
 
-def _actual_object_poses(scene: object, scene_config: SceneConfig) -> list[dict[str, object]]:
+def _actual_object_poses(
+    scene: object, scene_config: MarvinStackSceneConfig
+) -> list[dict[str, object]]:
     poses: list[dict[str, object]] = []
     for obj in scene_config.objects:
         address = scene.indices.environment.object_free_joint_qpos[obj.name]
@@ -31,38 +39,51 @@ def _actual_object_poses(scene: object, scene_config: SceneConfig) -> list[dict[
         )
     return poses
 
+
 def _boundary_object_poses(
-    layout: LayoutSpec, scene_config: SceneConfig
+    layout: LayoutSpec, scene_config: MarvinStackSceneConfig
 ) -> list[dict[str, object]]:
     by_name = {placement.name: placement for placement in layout.placements}
     poses: list[dict[str, object]] = []
+    base = scene_config.robot
     for obj in scene_config.objects:
         placement = by_name[obj.name]
+        world = base_world_point(
+            (placement.x, placement.y, scene_config.table.top_z + obj.half_extents[2]),
+            base.base_position,
+            base.base_yaw_deg,
+        )
         poses.append(
             {
                 "name": obj.name,
-                "x": placement.x,
-                "y": placement.y,
-                "z": scene_config.table.top_z + obj.half_extents[2],
-                "yaw_deg": placement.yaw_deg,
+                "x": world[0],
+                "y": world[1],
+                "z": world[2],
+                "yaw_deg": base.base_yaw_deg + placement.yaw_deg,
             }
         )
     return poses
 
+
 def _boundary_updates(
-    layout: LayoutSpec, scene: object, scene_config: SceneConfig
+    layout: LayoutSpec, scene: object, scene_config: MarvinStackSceneConfig
 ) -> dict[int, tuple[float, ...]]:
     by_name = {placement.name: placement for placement in layout.placements}
     updates: dict[int, tuple[float, ...]] = {}
+    base = scene_config.robot
     for obj in scene_config.objects:
         placement = by_name[obj.name]
         address = scene.indices.environment.object_free_joint_qpos[obj.name]
-        z = scene_config.table.top_z + obj.half_extents[2]
+        world = base_world_point(
+            (placement.x, placement.y, scene_config.table.top_z + obj.half_extents[2]),
+            base.base_position,
+            base.base_yaw_deg,
+        )
         updates[address] = (
-            placement.x,
-            placement.y,
-            z,
-            *visibility.yaw_quaternion(placement.yaw_deg),
+            world[0],
+            world[1],
+            world[2],
+            *combined_yaw_quaternion(base.base_yaw_deg, placement.yaw_deg),
         )
     return updates
 

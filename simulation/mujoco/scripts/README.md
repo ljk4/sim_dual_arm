@@ -19,19 +19,19 @@
 
 ```bash
 # 按机器人/任务启动示教后端
-scripts/backend.sh --robot panda_sim --task stack --role teacher \
+scripts/backend.sh --robot marvin_sim --task stack --role teacher \
   --seed 0 --run-id teacher-backend
 
 # 按机器人/任务启动推理后端
-scripts/backend.sh --robot panda_sim --task stack --role policy \
+scripts/backend.sh --robot marvin_sim --task stack --role policy \
   --seed 20000 --run-id policy-backend --set run.realtime_speed=0.4
 
 # 直接配置模式
 scripts/backend.sh \
-  --config /shared/scenarios/panda_sim/stack/configs/simulation/backend/backend_stack_teacher.yaml
+  --config /shared/scenarios/marvin_sim/stack/configs/simulation/backend/backend_stack_teacher.yaml
 
-# 只读 viewer（宿主机用 ./env.sh viewer --robot panda_sim --task stack --role teacher）
-scripts/viewer.sh --robot panda_sim --task stack --role teacher
+# 只读 viewer（宿主机用 ./env.sh viewer --robot marvin_sim --task stack --role teacher）
+scripts/viewer.sh --robot marvin_sim --task stack --role teacher
 ```
 
 - 所有后端运行目录均禁止覆盖已存在路径。

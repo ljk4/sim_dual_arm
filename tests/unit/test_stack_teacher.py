@@ -7,7 +7,7 @@ import pytest
 from model_helpers import replace
 
 ROOT = Path(__file__).resolve().parents[2]
-SCENARIO = ROOT / "shared/scenarios/panda_sim/stack"
+SCENARIO = ROOT / "shared/scenarios/marvin_sim/stack"
 PROFILES = SCENARIO / "profiles"
 SIM_SRC = ROOT / "simulation/mujoco/src"
 CONTRACTS = ROOT / "shared/common/python/contracts/src"
@@ -18,70 +18,68 @@ for source in (SIM_SRC, CONTRACTS):
 pytest.importorskip("mujoco")
 pytest.importorskip("mink")
 import numpy as np  # noqa: E402
-from robot_backend_sim.panda_sim.kinematics_config import load_kinematics_config  # noqa: E402
 from robot_backend_sim.common.config.motion_config import load_control_config  # noqa: E402
-from robot_backend_sim.panda_sim.stack.scene_config import load_scene_config  # noqa: E402
 from robot_backend_sim.common.kinematics.common import extract_object_pose  # noqa: E402
-from robot_backend_sim.panda_sim.stack.scene import build_scene  # noqa: E402
-from robot_backend_sim.panda_sim.stack.config import load_task_config  # noqa: E402
-from robot_backend_sim.panda_sim.stack.teacher import (  # noqa: E402
-    TeacherError,
+from robot_backend_sim.marvin_sim.stack.config import load_task_config  # noqa: E402
+from robot_backend_sim.marvin_sim.stack.gate import (  # noqa: E402
     TeacherFeedback,
     TeacherProgress,
+)
+from robot_backend_sim.marvin_sim.stack.kinematics_config import load_kinematics_config  # noqa: E402
+from robot_backend_sim.marvin_sim.stack.scene import build_marvin_stack_scene  # noqa: E402
+from robot_backend_sim.marvin_sim.stack.scene_config import load_marvin_stack_scene_config  # noqa: E402
+from robot_backend_sim.marvin_sim.stack.teacher import (  # noqa: E402
+    TeacherError,
     TeacherSnapshot,
     build_teacher_plan,
     sample_teacher_chunk,
 )
 from robot_contracts.models import RunContext  # noqa: E402
 from robot_contracts.profiles import load_profile  # noqa: E402
+from scenario_fixtures import MARVIN_SHARED_PROFILES  # noqa: E402
 
 
 @pytest.fixture(scope="module")
 def fixture():
-    scene_config = load_scene_config(SCENARIO / "configs/simulation/scene/panda_stack.yaml")
-    scene = build_scene(
-        scene_config,
+    scene_config = load_marvin_stack_scene_config(
+        SCENARIO / "configs/simulation/scene/marvin_stack.yaml"
     )
+    scene = build_marvin_stack_scene(scene_config)
     scene.reset(0)
-    task_config = load_task_config(SCENARIO / "configs/simulation/scene/panda_stack_task.yaml")
+    task_config = load_task_config(SCENARIO / "configs/simulation/scene/marvin_stack_task.yaml")
     profile = load_profile(
-        PROFILES / "robots/panda_stack_v1/profile.json",
+        PROFILES / "robots/marvin_stack_v1/profile.json",
         ROOT / "shared/common/interfaces/schemas",
     )
-    control = load_control_config(PROFILES / "control/panda_control_v1.yaml")
+    control = load_control_config(MARVIN_SHARED_PROFILES / "control/marvin_control_v1.yaml")
     kinematics = load_kinematics_config(
         SCENARIO / "configs/simulation/checks/kinematics_check.yaml", scene_config
     )
-    indices = scene.indices
     qpos = tuple(float(value) for value in scene.data.qpos)
-    source = extract_object_pose(qpos, indices.environment.object_free_joint_qpos["source"], "source")
-    target = extract_object_pose(qpos, indices.environment.object_free_joint_qpos["target"], "target")
+    source_address = scene.indices.environment.object_free_joint_qpos["source"]
+    source = extract_object_pose(qpos, source_address, "source")
     snapshot = TeacherSnapshot(
         context=RunContext("robot", profile.digest, "backend", "time", 0, "episode", 1),
         task_epoch=1,
         sim_time_ns=0,
         qpos=qpos,
-        source=source,
-        target=target,
-        source_half_extents_m=task_config.source_half_extents_m,
-        target_half_extents_m=task_config.target_half_extents_m,
-        left_positions=tuple(qpos[address] for address in indices.robot.arm_joint_qpos["left"]),
-        right_positions=tuple(qpos[address] for address in indices.robot.arm_joint_qpos["right"]),
-        left_gripper_opening_m=float(
-            sum(qpos[address] for address in indices.robot.finger_joint_qpos["left"])
-        ),
-        right_gripper_opening_m=float(
-            sum(qpos[address] for address in indices.robot.finger_joint_qpos["right"])
-        ),
-        table_top_z_m=scene.config.table.top_z,
+        seed=0,
     )
-    return scene, task_config, profile, control, kinematics, snapshot
+    return scene, task_config, profile, control, kinematics, snapshot, source
 
 
 def test_plan_is_bounded_private_and_uses_all_phase_gates(fixture):
-    scene, task_config, profile, control, kinematics, snapshot = fixture
+    scene, task_config, profile, control, kinematics, snapshot, _source = fixture
     before = np.asarray(scene.data.qpos, dtype=float).copy()
-    plan = build_teacher_plan(scene.model, snapshot, profile, control, kinematics, task_config)
+    plan = build_teacher_plan(
+        scene.model,
+        snapshot,
+        profile,
+        control,
+        kinematics,
+        task_config,
+        scene_config=scene.config,
+    )
     after = np.asarray(scene.data.qpos, dtype=float)
     assert np.array_equal(before, after)
     assert plan.duration_s < task_config.success.max_task_sim_duration_s
@@ -98,32 +96,45 @@ def test_plan_is_bounded_private_and_uses_all_phase_gates(fixture):
         "stable",
     ]
     assert plan.segments[-1].duration_s >= task_config.success.stable_duration_s
-    # Full 0.08 m gripper travel cannot be completed in one second by this
-    # velocity-limited smoothstep curve.
+    # 0.0514 m gripper travel at 0.04 m/s cannot be completed in one second by this
+    # velocity-limited trapezoid curve.
     close = next(segment for segment in plan.segments if segment.phase == "close")
-    assert close.duration_s >= 3.0
+    assert close.duration_s >= 1.5
     # Home to a large-angle pregrasp is also velocity/acceleration limited.
     pregrasp = next(segment for segment in plan.segments if segment.phase == "pregrasp")
     assert pregrasp.duration_s >= 3.0
     open_segment = next(segment for segment in plan.segments if segment.phase == "open")
-    assert open_segment.duration_s >= 3.0
+    assert open_segment.duration_s >= 1.5
     assert len(plan.ik_results) == 6
     assert all(result.converged for result in plan.ik_results)
     assert plan.collision_results
     assert all(result.passed for result in plan.collision_results)
-    assert plan.allowed_contact_pairs
-    assert all("finger" in pair and "source" in pair for pair in plan.allowed_contact_pairs)
+    assert plan.allowed_contact_pairs == ("Arm_R10_Link:source", "Arm_R11_Link:source")
     assert (
         plan.plan_digest
         == build_teacher_plan(
-            scene.model, snapshot, profile, control, kinematics, task_config
+            scene.model,
+            snapshot,
+            profile,
+            control,
+            kinematics,
+            task_config,
+            scene_config=scene.config,
         ).plan_digest
     )
 
 
 def test_chunk_is_60x16_at_50ms_and_keeps_left_arm_fixed(fixture):
-    scene, task_config, profile, control, kinematics, snapshot = fixture
-    plan = build_teacher_plan(scene.model, snapshot, profile, control, kinematics, task_config)
+    scene, task_config, profile, control, kinematics, snapshot, source = fixture
+    plan = build_teacher_plan(
+        scene.model,
+        snapshot,
+        profile,
+        control,
+        kinematics,
+        task_config,
+        scene_config=scene.config,
+    )
     progress = TeacherProgress(plan, task_config)
     progress.actual_start_ns = 1
     feedback = TeacherFeedback(
@@ -131,12 +142,12 @@ def test_chunk_is_60x16_at_50ms_and_keeps_left_arm_fixed(fixture):
         sim_time_ns=0,
         right_positions=plan.start_positions[8:15],
         right_velocities=(0.0,) * 7,
-        right_gripper_opening_m=0.08,
+        right_gripper_opening_m=0.0814,
         right_gripper_velocity_m_s=0.0,
         right_finger_source_contacts=0,
         right_finger_source_min_force_n=0.0,
         right_finger_source_max_speed_m_s=0.0,
-        source_center=snapshot.source.center,
+        source_center=source.center,
         right_tcp_distance_m=0.5,
     )
     chunk = sample_teacher_chunk(
@@ -200,8 +211,16 @@ def test_chunk_is_60x16_at_50ms_and_keeps_left_arm_fixed(fixture):
 
 
 def test_chunk_rejects_stale_or_future_observation(fixture):
-    scene, task_config, profile, control, kinematics, snapshot = fixture
-    plan = build_teacher_plan(scene.model, snapshot, profile, control, kinematics, task_config)
+    scene, task_config, profile, control, kinematics, snapshot, source = fixture
+    plan = build_teacher_plan(
+        scene.model,
+        snapshot,
+        profile,
+        control,
+        kinematics,
+        task_config,
+        scene_config=scene.config,
+    )
     progress = TeacherProgress(plan, task_config)
     progress.actual_start_ns = 1
     feedback = TeacherFeedback(
@@ -209,12 +228,12 @@ def test_chunk_rejects_stale_or_future_observation(fixture):
         sim_time_ns=0,
         right_positions=plan.start_positions[8:15],
         right_velocities=(0.0,) * 7,
-        right_gripper_opening_m=0.08,
+        right_gripper_opening_m=0.0814,
         right_gripper_velocity_m_s=0.0,
         right_finger_source_contacts=0,
         right_finger_source_min_force_n=0.0,
         right_finger_source_max_speed_m_s=0.0,
-        source_center=snapshot.source.center,
+        source_center=source.center,
         right_tcp_distance_m=0.5,
     )
     with pytest.raises(TeacherError, match="TEACHER_FEEDBACK_MISMATCH"):
@@ -249,18 +268,26 @@ def test_chunk_rejects_stale_or_future_observation(fixture):
 
 
 def test_over_30s_plan_is_rejected_with_phase(fixture):
-    scene, task_config, profile, control, kinematics, snapshot = fixture
+    scene, task_config, profile, control, kinematics, snapshot, _source = fixture
     strict = replace(
         task_config,
         teacher=replace(task_config.teacher, max_plan_duration_s=5.0),
     )
     with pytest.raises(TeacherError, match="TEACHER_PLAN_TOO_LONG"):
-        build_teacher_plan(scene.model, snapshot, profile, control, kinematics, strict)
+        build_teacher_plan(
+            scene.model,
+            snapshot,
+            profile,
+            control,
+            kinematics,
+            strict,
+            scene_config=scene.config,
+        )
 
 
 def _feedback_for(
     plan,
-    snapshot,
+    source_center,
     *,
     capture=1,
     sim_ns=0,
@@ -268,7 +295,7 @@ def _feedback_for(
     contacts=0,
     force=0.0,
     finger_speed=0.0,
-    gripper=0.08,
+    gripper=0.0814,
     source_z=None,
     tcp_distance=0.5,
 ):
@@ -283,48 +310,64 @@ def _feedback_for(
         right_finger_source_min_force_n=force,
         right_finger_source_max_speed_m_s=finger_speed,
         source_center=(
-            snapshot.source.center
+            source_center
             if source_z is None
-            else (snapshot.source.center[0], snapshot.source.center[1], source_z)
+            else (source_center[0], source_center[1], source_z)
         ),
         right_tcp_distance_m=tcp_distance,
     )
 
 
 def test_gate_requires_measured_arm_stability(fixture):
-    scene, task_config, profile, control, kinematics, snapshot = fixture
-    plan = build_teacher_plan(scene.model, snapshot, profile, control, kinematics, task_config)
+    scene, task_config, profile, control, kinematics, snapshot, source = fixture
+    plan = build_teacher_plan(
+        scene.model,
+        snapshot,
+        profile,
+        control,
+        kinematics,
+        task_config,
+        scene_config=scene.config,
+    )
     progress = TeacherProgress(plan, task_config)
     progress.actual_start_ns = 1
-    start = _feedback_for(plan, snapshot, sim_ns=1_000_000_000)
+    start = _feedback_for(plan, source.center, sim_ns=1_000_000_000)
     progress.update(start, "RUNNING")
     assert progress.phase_index == 0
     target = plan.segments[0].end_positions[8:15]
     end_ns = round(plan.segments[0].duration_s * 1e9) + 1
-    progress.update(_feedback_for(plan, snapshot, sim_ns=end_ns, right=target), "RUNNING")
+    progress.update(_feedback_for(plan, source.center, sim_ns=end_ns, right=target), "RUNNING")
     progress.update(
-        _feedback_for(plan, snapshot, sim_ns=end_ns + 100_000_000, right=target), "RUNNING"
+        _feedback_for(plan, source.center, sim_ns=end_ns + 100_000_000, right=target), "RUNNING"
     )
     assert progress.phase_index == 0
     progress.update(
-        _feedback_for(plan, snapshot, sim_ns=end_ns + 200_000_000, right=target), "RUNNING"
+        _feedback_for(plan, source.center, sim_ns=end_ns + 200_000_000, right=target), "RUNNING"
     )
     assert progress.phase_index == 1
 
 
 def test_close_needs_two_finger_source_contact_before_lift(fixture):
-    scene, task_config, profile, control, kinematics, snapshot = fixture
-    plan = build_teacher_plan(scene.model, snapshot, profile, control, kinematics, task_config)
+    scene, task_config, profile, control, kinematics, snapshot, source = fixture
+    plan = build_teacher_plan(
+        scene.model,
+        snapshot,
+        profile,
+        control,
+        kinematics,
+        task_config,
+        scene_config=scene.config,
+    )
     progress = TeacherProgress(plan, task_config)
     progress.phase_index = 2  # close
     progress.actual_start_ns = 1
-    no_contact = _feedback_for(plan, snapshot, sim_ns=4_000_000_000, contacts=0)
+    no_contact = _feedback_for(plan, source.center, sim_ns=4_000_000_000, contacts=0)
     for delta in (0, 100_000_000, 300_000_000):
         progress.update(replace(no_contact, sim_time_ns=4_000_000_000 + delta), "RUNNING")
     assert progress.phase_index == 2
     contact = _feedback_for(
         plan,
-        snapshot,
+        source.center,
         sim_ns=5_000_000_000,
         contacts=2,
         force=1.0,
@@ -339,23 +382,31 @@ def test_close_needs_two_finger_source_contact_before_lift(fixture):
 
 
 def test_lift_requires_real_source_rise_and_grip(fixture):
-    scene, task_config, profile, control, kinematics, snapshot = fixture
-    plan = build_teacher_plan(scene.model, snapshot, profile, control, kinematics, task_config)
+    scene, task_config, profile, control, kinematics, snapshot, source = fixture
+    plan = build_teacher_plan(
+        scene.model,
+        snapshot,
+        profile,
+        control,
+        kinematics,
+        task_config,
+        scene_config=scene.config,
+    )
     progress = TeacherProgress(plan, task_config)
     progress.phase_index = 3
     progress.actual_start_ns = 6_000_000_000
-    low = _feedback_for(plan, snapshot, sim_ns=6_000_000_000, contacts=2, force=1.0)
+    low = _feedback_for(plan, source.center, sim_ns=6_000_000_000, contacts=2, force=1.0)
     progress.update(low, "RUNNING")
     progress.update(replace(low, sim_time_ns=6_200_000_000), "RUNNING")
     assert progress.phase_index == 3
     end_ns = progress.actual_start_ns + round(plan.segments[3].duration_s * 1e9)
     raised = _feedback_for(
         plan,
-        snapshot,
+        source.center,
         sim_ns=end_ns,
         contacts=2,
         force=1.0,
-        source_z=snapshot.source.center[2] + task_config.teacher.lift_height_m + 0.01,
+        source_z=source.center[2] + task_config.teacher.lift_height_m + 0.01,
         right=plan.segments[3].end_positions[8:15],
     )
     progress.update(raised, "RUNNING")
@@ -364,19 +415,35 @@ def test_lift_requires_real_source_rise_and_grip(fixture):
 
 
 def test_gate_timeout_is_bounded_and_clear(fixture):
-    scene, task_config, profile, control, kinematics, snapshot = fixture
-    plan = build_teacher_plan(scene.model, snapshot, profile, control, kinematics, task_config)
+    scene, task_config, profile, control, kinematics, snapshot, source = fixture
+    plan = build_teacher_plan(
+        scene.model,
+        snapshot,
+        profile,
+        control,
+        kinematics,
+        task_config,
+        scene_config=scene.config,
+    )
     progress = TeacherProgress(plan, task_config)
     progress.actual_start_ns = 1
-    late = _feedback_for(plan, snapshot, sim_ns=30_000_000_000)
+    late = _feedback_for(plan, source.center, sim_ns=30_000_000_000)
     fact = progress.update(late, "RUNNING")
     assert fact.status == "FAILED"
     assert fact.failure.startswith("GATE_TIMEOUT:pregrasp")
 
 
 def test_contact_cannot_cut_the_raw_closing_ramp_short(fixture):
-    scene, task_config, profile, control, kinematics, snapshot = fixture
-    plan = build_teacher_plan(scene.model, snapshot, profile, control, kinematics, task_config)
+    scene, task_config, profile, control, kinematics, snapshot, source = fixture
+    plan = build_teacher_plan(
+        scene.model,
+        snapshot,
+        profile,
+        control,
+        kinematics,
+        task_config,
+        scene_config=scene.config,
+    )
     progress = TeacherProgress(plan, task_config)
     progress.phase_index = 2
     progress.actual_start_ns = 0
@@ -384,7 +451,7 @@ def test_contact_cannot_cut_the_raw_closing_ramp_short(fixture):
     duration_ns = round(segment.duration_s * 1e9)
     feedback = _feedback_for(
         plan,
-        snapshot,
+        source.center,
         sim_ns=duration_ns // 2,
         contacts=2,
         force=1.0,
@@ -401,15 +468,22 @@ def test_contact_cannot_cut_the_raw_closing_ramp_short(fixture):
 
 
 def test_handoff_start_sim_time_ns_holds_start_until_handoff_and_binds_gate(fixture):
-    scene, task_config, profile, control, kinematics, snapshot = fixture
-    plan = build_teacher_plan(scene.model, snapshot, profile, control, kinematics, task_config)
+    scene, task_config, profile, control, kinematics, snapshot, source = fixture
+    plan = build_teacher_plan(
+        scene.model,
+        snapshot,
+        profile,
+        control,
+        kinematics,
+        task_config,
+        scene_config=scene.config,
+    )
     progress = TeacherProgress(plan, task_config)
     progress.actual_start_ns = 1_000_000_000
-    progress.actual_starts_ns.append(1_000_000_000)
     handoff_ns = 1_500_000_000
     progress.bind_motion_start(0, handoff_ns)
     assert progress.actual_start_ns == handoff_ns
-    feedback = _feedback_for(plan, snapshot, capture=21, sim_ns=1_000_000_000)
+    feedback = _feedback_for(plan, source.center, capture=21, sim_ns=1_000_000_000)
     chunk = sample_teacher_chunk(
         plan,
         gate=progress.fact(),

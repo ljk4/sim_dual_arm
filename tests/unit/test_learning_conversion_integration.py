@@ -18,7 +18,7 @@ from learning_fixtures import make_select
 from model_helpers import replace
 
 ROOT = Path(__file__).resolve().parents[2]
-SCENARIO = ROOT / "shared/scenarios/panda_sim/stack"
+SCENARIO = ROOT / "shared/scenarios/marvin_sim/stack"
 pytestmark = pytest.mark.skipif(
     os.environ.get("DSH035_HEAVY") != "1",
     reason="set DSH035_HEAVY=1 for the 50-episode synthetic conversion",
@@ -43,8 +43,7 @@ def test_two_independent_datasets_train_only_processors_and_padding(tmp_path):
     )
     assert result.returncode == 0, result.stdout + "\n" + result.stderr + log.read_text()
     assert "转换完成：训练 45 条 / 149 帧；验证 5 条 / 10 帧" in result.stdout
-    assert "45/45 条 100.0%" in result.stderr
-    assert "5/5 条 100.0%" in result.stderr
+    assert "50/50 条 100.0%" in result.stderr
     assert "libx264" not in result.stdout + result.stderr
     assert len(result.stderr.splitlines()) < 25
     assert "Traceback" not in log.read_text()
@@ -64,13 +63,13 @@ def test_two_independent_datasets_train_only_processors_and_padding(tmp_path):
         repo_id="local/conversion-train",
         root=tmp_path / "data/train",
         delta_timestamps={"action": [index / 20 for index in range(60)]},
-        video_backend="torchcodec",
+        video_backend=config.video_backend,
     )
     validation = LeRobotDataset(
         repo_id="local/conversion-validation",
         root=tmp_path / "data/validation",
         delta_timestamps={"action": [index / 20 for index in range(60)]},
-        video_backend="torchcodec",
+        video_backend=config.video_backend,
     )
     first = train[0]
     assert tuple(first["action"].shape) == (60, 16)

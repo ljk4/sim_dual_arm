@@ -33,6 +33,6 @@ float64[<=64] velocity_errors
 string reference_kind
 string tracking_quality
 int64 tracking_violation_ns
-# Optional named gripper set; empty is valid.  Side identifiers are unique but
-# are not limited to the Panda left/right pair.
+# Optional named gripper set; empty is valid.  Side identifiers are unique and
+# support multi-gripper or dual-arm configurations generically.
 robot_api_msgs/GripperFeedback[<=8] grippers

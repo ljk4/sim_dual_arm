@@ -9,8 +9,7 @@
 #   - source_roots 必须写成相对本文件目录的路径；profiles、recipes 与
 #     extension_ros 必须位于本文件目录或某个 source_root 之内。
 #   - artifact_roots 可写绝对路径（容器内通常是 /data），也可写相对路径。
-#   - 模型 bundle 不写进 binding；推理启动时用 --bundle 显式提供 learning
-#     已验证的 bundle 目录。
+#   - 学习端 Policy 服务从 models/ 选择最新模型，也可用 --model 指定模型目录。
 #   - 数值配方不写进 binding；这里只记录被选中文件的路径。
 schema_version: 1
 robot_id: replace_me

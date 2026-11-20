@@ -4,7 +4,7 @@ schema_version: 1
 mode: smoke
 seed: 20261113
 device: cuda
-cache_root: var/marvin_sim/handover/datasets/.cache
+cache_root: var/marvin_sim/handover/debug/learning-cache
 data:
   config: shared/scenarios/marvin_sim/handover/configs/learning/act_dataset.yaml
   root: var/marvin_sim/handover/datasets/lerobot

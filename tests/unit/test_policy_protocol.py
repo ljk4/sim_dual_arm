@@ -23,7 +23,7 @@ def test_source_proto_has_fixed_observation_time_and_policy_metadata():
         "right_gripper_width",
     ):
         assert name not in text
-    scenario = (ROOT / "shared/scenarios/panda_sim/stack/README.md").read_text()
+    scenario = (ROOT / "shared/scenarios/marvin_sim/stack/README.md").read_text()
     for name in (
         "left_joint1",
         "left_joint7",
@@ -34,7 +34,8 @@ def test_source_proto_has_fixed_observation_time_and_policy_metadata():
     ):
         assert name in scenario
     assert "60 点 × 16 维" in scenario
-    assert "global, left_wrist, right_wrist" in scenario
+    for name in ("global", "left_wrist", "right_wrist"):
+        assert f"`{name}`" in scenario
 
 
 def test_generated_sdk_matches_the_new_contract_when_available():

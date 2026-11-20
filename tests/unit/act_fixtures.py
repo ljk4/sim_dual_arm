@@ -19,17 +19,14 @@ from lerobot.policies.act.configuration_act import ACTConfig
 from lerobot.policies.act.modeling_act import ACTPolicy
 from lerobot.processor import make_default_pre_post_processors
 from safetensors.torch import load_file, save_file
+from scenario_fixtures import MARVIN_SHARED_PROFILES
 
 ROOT = Path(__file__).resolve().parents[2]
 PROFILE = (
-    ROOT / "shared/scenarios/panda_sim/stack/profiles/robots/panda_stack_learning_v1/profile.json"
+    ROOT / "shared/scenarios/marvin_sim/stack/profiles/robots/marvin_stack_v1/profile.json"
 )
-OBSERVATION = (
-    ROOT / "shared/scenarios/panda_sim/stack/profiles/observations/panda_rgb_joint_v1.json"
-)
-ACTION = (
-    ROOT / "shared/scenarios/panda_sim/stack/profiles/actions/panda_joint_position_v1.json"
-)
+OBSERVATION = MARVIN_SHARED_PROFILES / "observations/marvin_rgb_joint_v1.json"
+ACTION = MARVIN_SHARED_PROFILES / "actions/marvin_joint_position_v1.json"
 CAMERAS = ("global", "left_wrist", "right_wrist")
 
 

@@ -1,9 +1,9 @@
 """Robot- and task-agnostic key-pose and joint-path primitives.
 
 These helpers only validate tuples and perform arithmetic; they import neither
-MuJoCo nor a robot-specific configuration.  Panda/Marvin task planners and the
-Panda key-pose checker share them so generic trajectory sampling never depends
-on a robot assembly.
+MuJoCo nor a robot-specific configuration.  Task planners and key-pose
+checkers share them so generic trajectory sampling never depends on a specific
+robot assembly.
 """
 
 from __future__ import annotations

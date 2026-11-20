@@ -10,15 +10,15 @@
 
 ```bash
 # 首次按根 README 完成手动后端和可选 viewer 后，单路试采一次
-runtime/ros2/scripts/record.sh --robot panda_sim --task stack \
+runtime/ros2/scripts/record.sh --robot marvin_sim --task stack \
   --purpose pilot --count 1 --max-consecutive-failures 1
 
 # 本次新增 10 条合格 episode，或连续 3 次失败时结束
-runtime/ros2/scripts/record.sh --robot panda_sim --task stack \
+runtime/ros2/scripts/record.sh --robot marvin_sim --task stack \
   --count 10 --max-consecutive-failures 3
 
 # 使用 pilot 预算并修改运行时覆盖
-runtime/ros2/scripts/record.sh --robot panda_sim --task stack --purpose pilot --count 2 \
+runtime/ros2/scripts/record.sh --robot marvin_sim --task stack --purpose pilot --count 2 \
   --set observation.max_age_ns=250000000
 ```
 
@@ -26,7 +26,7 @@ runtime/ros2/scripts/record.sh --robot panda_sim --task stack --purpose pilot --
 
 `--backend-log` 默认为 `/data/<robot>/<task>/logs/backend/teacher-backend/log`（direct 模式为 `/data/_direct/logs/backend/teacher-backend/log`），与根 README 中以 `--run-id teacher-backend` 启动的手动后端一致；使用其他 `run-id` 时显式传入该端日志目录。该入口调用 `record.py`，逐局预留原有 campaign 的种子与预算，再由 `collect_attempt.py` 直接启动运行端并导出。正式采集正常达到目标（`reason=target_reached`）时，会自动原子写出 `var/<robot>/<task>/datasets/raw/formal-select.json`，并在最终 JSON 摘要中给出 `formal_select` 路径。
 
-`--config` / `--runtime-config` 可用于直接配置模式；预算、全局合格目标和已有台账仍生效，不会因批量录制重置。当前 Panda 配置最多累计 50 条合格正式数据，因此已有数据时应相应减少 `--count`。
+`--config` / `--runtime-config` 可用于直接配置模式；预算、全局合格目标和已有台账仍生效，不会因批量录制重置。当前配置最多累计 50 条合格正式数据，因此已有数据时应相应减少 `--count`。
 
 ## 宿主机并行采集 `record_parallel.sh`
 
@@ -34,11 +34,11 @@ runtime/ros2/scripts/record.sh --robot panda_sim --task stack --purpose pilot --
 
 ```bash
 # 在宿主机项目根目录执行，不在 runtime 容器内执行
-./record_parallel.sh --robot panda_sim --task stack \
+./record_parallel.sh --robot marvin_sim --task stack \
   --purpose formal --target-total 50 --workers auto
 
 # 也可只指定本次新增的合格条数
-./record_parallel.sh --robot panda_sim --task stack \
+./record_parallel.sh --robot marvin_sim --task stack \
   --count 10 --workers 4 --max-consecutive-failures 3
 ```
 
@@ -68,14 +68,14 @@ runtime/ros2/scripts/record.sh --robot panda_sim --task stack --purpose pilot --
 
 ```bash
 # 查看采集进度与数据集状态
-scripts/record.sh status --robot panda_sim --task stack
+scripts/record.sh status --robot marvin_sim --task stack
 
 # 直接以方案执行一局策略
-scripts/client_policy.sh --robot panda_sim --task stack \
+scripts/client_policy.sh --robot marvin_sim --task stack \
   --reset-seed 20000 --run-id policy-run
 
 # 交互式执行
-scripts/client_interactive.sh --robot panda_sim --task stack \
+scripts/client_interactive.sh --robot marvin_sim --task stack \
   --seed 20000 --run-id policy-interactive
 ```
 

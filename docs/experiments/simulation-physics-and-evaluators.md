@@ -8,14 +8,14 @@
 
 ### 1.1 自由物体开启 `condim=4` 扭转摩擦
 
-- **故障现象**：在 `panda_stack` 闭环推理中，右爪抓起红色源方块并搬运至目标块上方的过程中，源方块在双指间缓慢旋转 90°（`source_tilt` 从 `0.004 rad` 增至 `1.57 rad`），导致放置姿态翻转失败。
+- **故障现象**：抓取点偏心时，搬运中的源方块可能绕双指的夹持轴旋转。可用 `source_tilt` 确认翻转发生在哪个阶段。
 - **物理根因**：MuJoCo 中 geom 的默认接触维度为 `condim=3`（仅包含 1 个法向约束与 2 个切向滑动摩擦，**绕接触法向的扭转摩擦力矩恒为 0**）。即使配置了 `object_friction = [1.0, 0.02, 0.0001]`，在 `condim=3` 下第 2 项扭转摩擦系数 `0.02` 会被完全忽略；当策略抓取点相对方块重心有轻微偏心时，重力矩使方块在双指间无阻力旋转。
-- **修复方法**：在 `panda/scene.py` 与 `marvin/scene.py` 中，对 `object_friction[1] > 0` 的自由物体统一显式设置 **`condim=4`、`cone=elliptic`、`impratio=10.0`**。修复后 Panda 搬运全程源方块倾角从 `1.57 rad` 降至 **`0.00096 rad`（0.055°）**。
+- **配置**：Marvin Stack 场景为自由物体设置 `object_contact_dim: 4`，并使用 `cone: elliptic` 与 `impratio: 10.0`。
 
-### 1.2 轻质量方块堆叠禁用 `noslip_iterations`
+### 1.2 检查轻质量方块的静止支撑
 
 - **实测现象**：在 40 g 轻质量方块堆叠（box-on-box 面接触）场景下，若开启 MuJoCo 的 `noslip_iterations = 3` 后处理求解器，静态叠放在蓝块上的红块会每隔约 `0.2 s` 出现单步 `0.29–0.37 rad/s` 的角速度数值脉冲微颤，反复打断评价器要求的 `2.0 s` 连续静止计时。
-- **配置准则**：轻物体堆叠场景依靠 `condim=4` + `cone=elliptic` + `impratio=10.0` 即可保证稳定抓持与静止支撑，**不启用 `noslip_iterations`**。
+- **排查方法**：若叠放后连续稳定计时反复归零，检查源块和目标块的角速度与接触力，并核对求解器设置。
 
 ---
 
@@ -35,7 +35,7 @@
 
 ---
 
-## 3. 堆叠任务（`panda_stack`）评价器关键修复
+## 3. 堆叠任务（`marvin_sim/stack`）评价器关键修复
 
 ### 3.1 目标局部坐标系 XY 支撑投影（B02）
 
@@ -74,7 +74,7 @@
 
 ## 5. 离线汇总与结构化日志契约（B01 / B07）
 
-- **离线评估不维护第二套稳定时长阈值（B01）**：各任务的稳定支撑时长由各自在线评价器按方案配置执行（Panda `2.0 s`、Marvin `1.0 s`）并冻结在 `task_result.json` sidecar 中。`runtime/.../offline/evaluation_metrics.py` 只验证冻结的成功事实、配置摘要与时间关系完整性，移除将所有任务硬编码与 `2.0 s` 比较的耦合逻辑。
+- **稳定支撑时长（B01）**：Stack 要求连续支撑 `2.0 s`，Handover 要求 `1.0 s`。在线评价器将判定写入 `task_result.json`，离线评估核对结果、配置摘要和时间关系。
 - **日志事件上下文隔离（B07）**：`ros/node_services.py` 在记录 `backend.task.teacher_chunk` 事件时，严格使用 `EventContext(episode_id=context.episode_id, request_id=chunk.request_id)`，禁止将 `request_id` 混写入 `episode_id` 字段。
 
 ---

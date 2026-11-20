@@ -28,7 +28,7 @@ except ImportError as error:  # pragma: no cover - host without ROS
 
 def context() -> RunContext:
     return RunContext(
-        "panda-stack",
+        "test-robot",
         "profile-digest",
         "backend-instance",
         "mujoco-sim",
@@ -117,7 +117,7 @@ def cdr_round_trip(value: ExecutionFeedback) -> ExecutionFeedback:
         (gripper("z"), gripper("a"), gripper("gripper-3", (2, 5))),
         tuple(gripper(f"g{index}") for index in range(MAX_GRIPPER_FEEDBACK)),
     ),
-    ids=("empty", "single", "single-noncontiguous", "panda-pair", "named-unsorted", "eight"),
+    ids=("empty", "single", "single-noncontiguous", "dual-arm", "named-unsorted", "eight"),
 )
 def test_bounded_gripper_feedback_round_trips_through_generated_types(grippers):
     original = execution(grippers)

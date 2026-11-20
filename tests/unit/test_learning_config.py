@@ -6,7 +6,7 @@ from dual_arm_learning.config import ConfigError, load_dataset_config, load_trai
 from robot_contracts.project_paths import project_path
 
 ROOT = Path(__file__).resolve().parents[2]
-SCENARIO = ROOT / "shared/scenarios/panda_sim/stack"
+SCENARIO = ROOT / "shared/scenarios/marvin_sim/stack"
 
 
 def test_real_learning_configs_load():
@@ -22,7 +22,7 @@ def test_real_learning_configs_load():
     assert training.model.pretrained_backbone_weights is None
     assert training.lr == pytest.approx(1e-4)
     assert training.lr_backbone == pytest.approx(1e-4)
-    assert training.checkpoint.root == project_path("var/panda_sim/stack/models", ROOT)
+    assert training.checkpoint.root == project_path("var/marvin_sim/stack/models", ROOT)
     assert training.dataset.camera_names == dataset.camera_names
 
 
@@ -133,8 +133,8 @@ def test_image_shift_px_config_and_augmentation(tmp_path):
     torch = pytest.importorskip("torch")
     from dual_arm_learning.training_support import augment_image_shift
 
-    panda_cfg = load_training_config(SCENARIO / "configs/learning/act_training.yaml", ROOT)
-    assert panda_cfg.image_shift_px == 0
+    stack_cfg = load_training_config(SCENARIO / "configs/learning/act_training.yaml", ROOT)
+    assert stack_cfg.image_shift_px == 0
     marvin_cfg = load_training_config(
         ROOT / "shared/scenarios/marvin_sim/handover/configs/learning/act_training.yaml", ROOT
     )
