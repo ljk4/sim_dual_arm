@@ -51,7 +51,7 @@ def campaign_config(tmp_path: Path) -> tuple[Path, Path]:
     }
     config_path = (
         root
-        / "shared/scenarios/panda_sim/stack/configs/runtime/experiments/stack_campaign.yaml"
+        / "shared/scenarios/marvin_sim/stack/configs/runtime/experiments/stack_campaign.yaml"
     )
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")

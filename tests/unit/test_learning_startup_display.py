@@ -9,7 +9,7 @@ from dual_arm_learning.config import load_dataset_config, load_training_config
 from dual_arm_learning.scenario import select_scenario
 
 
-@pytest.mark.parametrize(("robot", "task"), [("panda_sim", "stack"), ("marvin_sim", "handover")])
+@pytest.mark.parametrize(("robot", "task"), [("marvin_sim", "stack"), ("marvin_sim", "handover")])
 @pytest.mark.parametrize("field", ["dataset", "training"])
 def test_learning_startup_prints_real_loaded_selection(robot, task, field, capsys):
     root = Path(os.environ.get("PROJECT_ROOT", Path(__file__).resolve().parents[2]))
@@ -64,7 +64,7 @@ def test_training_data_root_override_uses_data_mount(monkeypatch):
     monkeypatch.setenv("PROJECT_CONTAINER", "1")
     monkeypatch.setenv("PROJECT_ROOT", str(root))
     selection = select_scenario(
-        robot="panda_sim",
+        robot="marvin_sim",
         task="stack",
         recipe_field="training",
         stage="learning",
@@ -74,10 +74,10 @@ def test_training_data_root_override_uses_data_mount(monkeypatch):
         project_root=root,
         overrides=[],
         mode=None,
-        data_root=Path("var/panda_sim/stack/datasets/override"),
+        data_root=Path("var/marvin_sim/stack/datasets/override"),
     )
     config = cli._training_config(args, selection.recipe_path)
     assert (
         config.data_root
-        == Path(os.environ.get("DATA_ROOT", "/data")) / "panda_sim/stack/datasets/override"
+        == Path(os.environ.get("DATA_ROOT", "/data")) / "marvin_sim/stack/datasets/override"
     )

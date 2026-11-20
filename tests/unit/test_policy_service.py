@@ -4,27 +4,27 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-PROFILES = ROOT / "shared/scenarios/panda_sim/stack/profiles"
+PROFILES = ROOT / "shared/scenarios/marvin_sim/stack/profiles"
 pytest.importorskip("grpc")
 pb2 = pytest.importorskip("dual_arm_policy.v1.policy_pb2")
 from dual_arm_learning.policy_service import PolicyService  # noqa: E402
 from dual_arm_learning.policy_types import PolicyError  # noqa: E402
 from fake_provider import FakeProvider, load_fake_config  # noqa: E402
 
-CONFIG = ROOT / "learning/lerobot/configs/fake_policy.yaml"
+CONFIG = ROOT / "tests/fakes/policy/fake_policy.yaml"
 
 
 def documents():
     return (
-        (PROFILES / "robots/panda_stack_v1/profile.json").read_bytes(),
-        (PROFILES / "observations/panda_rgb_joint_v1.json").read_bytes(),
-        (PROFILES / "actions/panda_joint_position_v1.json").read_bytes(),
+        (PROFILES / "robots/marvin_stack_v1/profile.json").read_bytes(),
+        (PROFILES / "observations/marvin_rgb_joint_v1.json").read_bytes(),
+        (PROFILES / "actions/marvin_joint_position_v1.json").read_bytes(),
     )
 
 
 def context(config, **changes):
     values = {
-        "robot_id": "panda_stack",
+        "robot_id": "marvin_stack",
         "robot_profile_hash": config.robot_profile_hash,
         "backend_instance_id": "backend-1",
         "time_domain_id": "mujoco",
@@ -51,7 +51,7 @@ def open_request(config, ctx, open_id="open-1"):
 
 
 def observation(config, reference_ns=1_000_000_000):
-    profile = json.loads((PROFILES / "robots/panda_stack_v1/profile.json").read_text())
+    profile = json.loads((PROFILES / "robots/marvin_stack_v1/profile.json").read_text())
     message = pb2.Observation(
         observation_id=1,
         reference_robot_time_ns=reference_ns,

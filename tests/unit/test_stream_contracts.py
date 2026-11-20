@@ -25,7 +25,7 @@ PROFILE_DIGEST = "profile-digest"
 
 def context(**changes):
     return RunContext(
-        "panda-stack",
+        "marvin-stack",
         changes.pop("robot_profile_hash", PROFILE_DIGEST),
         "backend-instance",
         "mujoco-sim",

@@ -6,7 +6,7 @@ from dual_arm_runtime.runtime_config import load_runtime_configuration
 from robot_contracts.models import ContractError
 
 ROOT = Path(__file__).resolve().parents[2]
-TEACHER = ROOT / "shared/scenarios/panda_sim/stack/configs/runtime/teacher_collect.yaml"
+TEACHER = ROOT / "shared/scenarios/marvin_sim/stack/configs/runtime/teacher_collect.yaml"
 
 
 def test_teacher_config_is_task_terminated_and_policy_free():
@@ -62,10 +62,10 @@ def test_task_mode_rejects_a_chunk_budget_that_cannot_cover_30s(tmp_path):
 
 def test_teacher_requires_an_explicit_capability_identifier(tmp_path):
     configuration = load_runtime_configuration(TEACHER, ROOT)
-    assert configuration.recipe.teacher_api == "panda_stack_api_msgs.teacher_chunk.v1"
-    assert "panda_stack_api_msgs.teacher_chunk.v1" in configuration.required_capabilities
+    assert configuration.recipe.teacher_api == "marvin_stack_api_msgs.teacher_chunk.v1"
+    assert "marvin_stack_api_msgs.teacher_chunk.v1" in configuration.required_capabilities
     assert (
-        "panda_stack_api_msgs.teacher_chunk.v1"
+        "marvin_stack_api_msgs.teacher_chunk.v1"
         in configuration.snapshot["recipe"]["required_capabilities"]
     )
     assert "teacher_chunk" not in configuration.required_capabilities

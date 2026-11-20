@@ -73,7 +73,8 @@ def test_rgb_and_segmentation_come_from_one_immutable_snapshot(scene, renderer):
         assert image.flags.writeable is False
         assert segmentation[camera].shape == (240, 320, 2)
         assert segmentation[camera].dtype.kind in ("i", "u")
-        np.testing.assert_array_equal(image, rgb_after[camera])
+        # EGL can round a channel by one 8-bit level after switching render modes.
+        np.testing.assert_allclose(image, rgb_after[camera], rtol=0, atol=1)
 
     # Rendering only touched the renderer's private data.
     np.testing.assert_array_equal(scene.data.qpos, scene_state["qpos"])

@@ -21,8 +21,10 @@ from robot_trajectory.transition_retiming import retime_action_window
 ROOT = Path(__file__).resolve().parents[2]
 SCHEMAS = ROOT / "shared/common/interfaces/schemas"
 
-PANDA = {
-    "profile": ROOT / "shared/scenarios/panda_sim/stack/profiles/robots/panda_stack_v1/profile.json",
+STACK = {
+    "profile": (
+        ROOT / "shared/scenarios/marvin_sim/stack/profiles/robots/marvin_stack_v1/profile.json"
+    ),
     "axis": "right_gripper_width",
     "anchor_position": 0.022205447806916776,
     "anchor_velocity": 0.04,
@@ -46,7 +48,7 @@ MARVIN = {
     "original_deviation": 0.019727525391288196,
     "original_target_deviation": 0.019716277049734998,
 }
-CASES = [pytest.param(PANDA, id="panda-window20-chunk21"),
+CASES = [pytest.param(STACK, id="stack-opening-transition"),
          pytest.param(MARVIN, id="marvin-clip002-chunk13")]
 
 

@@ -1,9 +1,8 @@
 # 学习端配置说明（Configs）
 
-本目录保留学习端私有环境与测试替身；真实学习配方位于方案目录。
+本目录保存学习端容器环境。业务配方位于各方案目录，策略测试替身位于 [tests/fakes/policy](../../../tests/fakes/policy/)。
 
 - **`container.env`**：声明 `learning` 容器内源码与缓存路径、离线模式（禁止访问 Hugging Face Hub 或下载权重）与 GPU 环境变量，由 Compose `env_file` 自动加载。
-- **`fake_policy.yaml`**：仅供测试替身（Fake Policy Provider）使用的配置模板，测试归属，严禁用于正式评估。
 - **[`shared/scenarios/marvin_sim/stack/configs/learning/`](../../../shared/scenarios/marvin_sim/stack/configs/learning/)**：Marvin 堆叠的数据集转换、训练、采样过滤与 Policy 服务配方。
 - **[`shared/scenarios/marvin_sim/handover/configs/learning/`](../../../shared/scenarios/marvin_sim/handover/configs/learning/)**：Marvin 交接的数据集转换、训练、采样过滤与 Policy 服务配方。
 

@@ -18,7 +18,7 @@ from robot_trajectory.sampling import sample_reference_interval
 from robot_trajectory.spline_math import check_continuous_limits, compute_reference_extremes
 
 ROOT = Path(__file__).resolve().parents[2]
-PROFILES = ROOT / "shared/scenarios/panda_sim/stack/profiles"
+PROFILES = ROOT / "shared/scenarios/marvin_sim/stack/profiles"
 SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
@@ -31,12 +31,12 @@ from robot_backend_sim.common.motion.ruckig_export import export_ruckig_referenc
 ruckig = pytest.importorskip("ruckig")
 
 PROFILE = load_profile(
-    PROFILES / "robots/panda_stack_v1/profile.json",
+    PROFILES / "robots/marvin_stack_v1/profile.json",
     ROOT / "shared/common/interfaces/schemas/v1",
 )
-CONTROL = load_control_config(PROFILES / "control/panda_control_v1.yaml")
+CONTROL = load_control_config(PROFILES / "control/marvin_control_v1.yaml")
 # These trajectory fixtures use ten-point windows independently of scenario cadence.
-FOLLOWER = load_follower_config(PROFILES / "control/panda_follower_v1.yaml").model_copy(
+FOLLOWER = load_follower_config(PROFILES / "control/marvin_follower_v1.yaml").model_copy(
     update={"target_count": 10}
 )
 BASE = PROFILE.initial_positions
@@ -758,7 +758,8 @@ def test_nonfinal_actual_endpoint_is_inherited_by_the_successor():
 
 
 def test_terminal_speed_is_capped_while_raw_targets_are_preserved():
-    positions = (0.0, 0.006, 0.012, 0.018, 0.024, 0.030, 0.040, 0.050, 0.060, 0.090)
+    offsets = (0.0, 0.003, 0.006, 0.009, 0.012, 0.015, 0.020, 0.025, 0.029, 0.045)
+    positions = tuple(BASE[0] + offset for offset in offsets)
     source_targets = tuple(
         Target(300_000_000 + index * 50_000_000, (position,) + BASE[1:])
         for index, position in enumerate(positions)
@@ -774,9 +775,9 @@ def test_terminal_speed_is_capped_while_raw_targets_are_preserved():
         is_final=False,
     )
     raw = (positions[-1] - positions[-2]) / 0.05
-    braking_cap = math.sqrt(2.0 * CONTROL.max_accelerations[0] * positions[-1])
+    approach_cap = math.sqrt(2.0 * CONTROL.max_accelerations[0] * offsets[-1])
     assert prepared.raw_terminal_velocities[0] == pytest.approx(raw)
-    assert prepared.restricted_terminal_velocities[0] == pytest.approx(braking_cap)
+    assert prepared.restricted_terminal_velocities[0] == pytest.approx(approach_cap)
     assert prepared.flags.velocity_limited[0] is True
     assert prepared.window.targets[-1].positions[0] == positions[-1]
     assert prepared.window.source_targets == window.source_targets
@@ -793,33 +794,14 @@ def gripper_boundary_source(first_positions, remaining_position):
     return tuple(targets)
 
 
-@pytest.mark.parametrize(
-    ("name", "start", "first_positions", "remaining", "expected_raw"),
-    (
-        (
-            "min-boundary",
-            0.002,
-            tuple(0.002 - index * 0.0002 for index in range(9)) + (0.0,),
-            0.0,
-            -0.008,
-        ),
-        (
-            "max-boundary",
-            0.078,
-            tuple(0.078 + index * 0.0002 for index in range(9)) + (0.08,),
-            0.08,
-            0.008,
-        ),
-    ),
-)
-def test_gripper_joint_hard_boundary_caps_terminal_speed(
-    name,
-    start,
-    first_positions,
-    remaining,
-    expected_raw,
-):
-    source = gripper_boundary_source(first_positions, remaining)
+@pytest.mark.parametrize("boundary", ("minimum", "maximum"))
+def test_gripper_joint_hard_boundary_caps_terminal_speed(boundary):
+    gripper = PROFILE.joints[7]
+    limit = getattr(gripper, boundary)
+    direction = -1 if boundary == "minimum" else 1
+    start = limit - direction * 0.002
+    first_positions = tuple(start + direction * index * 0.0002 for index in range(9))
+    source = gripper_boundary_source((*first_positions, limit), limit)
     window = make_window(source, handoff_ns=0)
     anchor_positions = list(BASE)
     anchor_positions[7] = start
@@ -832,21 +814,20 @@ def test_gripper_joint_hard_boundary_caps_terminal_speed(
         FOLLOWER,
         is_final=False,
     )
-    assert prepared.raw_terminal_velocities[7] == pytest.approx(expected_raw)
+    assert prepared.raw_terminal_velocities[7] == pytest.approx(direction * 0.008)
     assert prepared.restricted_terminal_velocities[7] == 0.0
     assert prepared.flags.velocity_limited[7] is True
     assert prepared.flags.boundary_preserved[7] is True
-    assert prepared.actual_terminal_positions[7] >= -1e-9
-    assert prepared.actual_terminal_positions[7] <= 0.08 + 1e-9
+    assert prepared.actual_terminal_positions[7] == pytest.approx(limit, abs=1e-9)
     assert prepared.actual_terminal_velocities[7] == pytest.approx(0.0, abs=1e-9)
     assert_plan_c1_and_limits(prepared)
 
 
 def test_successive_windows_approach_each_joint_boundary_with_inherited_state():
-    for start, goals in (
-        (0.076, (0.078, 0.079, 0.0795, 0.0798, 0.08)),
-        (0.004, (0.002, 0.001, 0.0005, 0.0002, 0.0)),
-    ):
+    gripper = PROFILE.joints[7]
+    for limit, direction in ((gripper.minimum, -1), (gripper.maximum, 1)):
+        start = limit - direction * 0.004
+        goals = tuple(limit - direction * gap for gap in (0.002, 0.001, 0.0005, 0.0002, 0.0))
         current_positions = list(BASE)
         current_velocities = [0.0] * JOINT_COUNT
         current_positions[7] = start
@@ -888,8 +869,8 @@ def test_successive_windows_approach_each_joint_boundary_with_inherited_state():
                 is_final=False,
             )
             assert_plan_c1_and_limits(prepared)
-            assert prepared.actual_terminal_positions[7] >= -1e-9
-            assert prepared.actual_terminal_positions[7] <= 0.08 + 1e-9
+            assert prepared.actual_terminal_positions[7] >= gripper.minimum - 1e-9
+            assert prepared.actual_terminal_positions[7] <= gripper.maximum + 1e-9
             current_positions = list(prepared.actual_terminal_positions)
             current_velocities = list(prepared.actual_terminal_velocities)
             handoff_ns += prepared.duration_ns

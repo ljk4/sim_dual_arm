@@ -1,4 +1,4 @@
-"""Configurable fake Policy provider with no ground truth or ROS dependency."""
+"""Deterministic test-only Policy provider with optional recorded-label replay."""
 
 from __future__ import annotations
 

@@ -227,7 +227,7 @@ scripts/server_policy.sh --robot marvin_sim --task stack \
 ```bash
 scripts/inference_backend.sh \
   --robot marvin_sim --task stack \
-  --seed 20000 --run-id policy-backend
+  --seed 6000 --run-id policy-backend
 ```
 
 运行快照与日志分别位于 `/data/marvin_sim/stack/logs/backend/policy-backend/backend.yaml` 与 `/data/marvin_sim/stack/logs/backend/policy-backend/log`。后端与第 3.3 节的 Policy 服务、第 3.5 节的 runtime 需同时在线。
@@ -239,7 +239,7 @@ scripts/inference_backend.sh \
 ```bash
 scripts/client_interactive.sh \
   --robot marvin_sim --task stack \
-  --seed 20000 --run-id policy-interactive
+  --seed 6000 --run-id policy-interactive
 ```
 
 非交互式单局执行使用 `scripts/client_policy.sh`，录制默认落到 `/data/marvin_sim/stack/logs/recordings/<run-id>`；需要另选位置时再显式传 `--output`：
@@ -247,7 +247,7 @@ scripts/client_interactive.sh \
 ```bash
 scripts/client_policy.sh \
   --robot marvin_sim --task stack \
-  --reset-seed 20000 --run-id policy-run
+  --reset-seed 6000 --run-id policy-run
 ```
 
 后续测试不同随机种子时，直接传入新的种子即可，无需重新生成任何配置：
@@ -255,7 +255,7 @@ scripts/client_policy.sh \
 ```bash
 scripts/client_interactive.sh \
   --robot marvin_sim --task stack \
-  --seed 20001 --run-id policy-interactive-2
+  --seed 6001 --run-id policy-interactive-2
 ```
 
 如需无人工干预的**并行**批量仿真推理测试，在**本机项目根目录**执行（仅支持 MuJoCo 仿真后端且禁止可视化；只需保持第 3.3 节 `learning` 容器的 `scripts/server_policy.sh` 在线，入口会自动启动多路隔离的仿真后端与运行时，结束时清理）：
@@ -263,7 +263,7 @@ scripts/client_interactive.sh \
 ```bash
 ./inference_parallel.sh \
   --robot marvin_sim --task stack \
-  --count 10 --seed-start 20000 --workers auto
+  --count 10 --seed-start 6000 --workers auto
 ```
 
 `--workers auto` 按 CPU、内存与显存选择至多 4 路；也可固定并发（`--workers 4`）。`--max-consecutive-failures` 可选；任一 worker 连续失败达到上限即停止并清理在途任务。验收要求每个方案至少一次真实任务成功。

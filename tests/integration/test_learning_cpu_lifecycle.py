@@ -13,7 +13,7 @@ pytestmark = pytest.mark.skipif(
     os.environ.get("DSH035_HEAVY") != "1", reason="synthetic ACT integration"
 )
 ROOT = Path(__file__).resolve().parents[2]
-SCENARIO = ROOT / "shared/scenarios/panda_sim/stack"
+SCENARIO = ROOT / "shared/scenarios/marvin_sim/stack"
 sys.path.insert(0, str(ROOT / "tests/unit"))
 from learning_fixtures import make_select  # noqa: E402
 

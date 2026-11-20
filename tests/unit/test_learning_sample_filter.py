@@ -23,7 +23,7 @@ from dual_arm_learning.training import TrainingError, _sample_filter
 pa = pytest.importorskip("pyarrow")
 pq = pytest.importorskip("pyarrow.parquet")
 ROOT = Path(__file__).resolve().parents[2]
-SCENARIO = ROOT / "shared/scenarios/panda_sim/stack"
+SCENARIO = ROOT / "shared/scenarios/marvin_sim/stack"
 RULE = SCENARIO / "configs/learning/act_sample_filter.yaml"
 PROFILE = "a" * 64
 LEAD_NS = 50_000_000

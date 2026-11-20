@@ -17,7 +17,7 @@ from dual_arm_runtime.offline.inference_workers import prepare_workers
 
 _STACK_EVALUATION = (
     Path(os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[2])
-    / "shared/scenarios/panda_sim/stack/configs/runtime/evaluation.yaml"
+    / "shared/scenarios/marvin_sim/stack/configs/runtime/evaluation.yaml"
 )
 CONFIG = load_classification(_STACK_EVALUATION)
 
@@ -64,7 +64,7 @@ def test_failed_grasp_is_first_stage():
     stage, _reason, reached = _stage_state(
         _task("CONTROL_FAILED: TASK_TIMEOUT", {"source_not_on_table": False}), CONFIG
     )
-    assert stage == "抓取/交接"
+    assert stage == "抓取/抬起"
     assert reached["grasp"] is False
 
 
@@ -150,7 +150,7 @@ def test_prepare_workers_isolates_namespaces_and_domains(tmp_path):
             "run": {"realtime_speed": 1.0},
         },
     )
-    directory = project / "var" / "panda_sim" / "stack" / "pool"
+    directory = project / "var" / "marvin_sim" / "stack" / "pool"
     manifest = prepare_workers(
         project, directory, 2, 120, runtime, backend, 0.5
     )

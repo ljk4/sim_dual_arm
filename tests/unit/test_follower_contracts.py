@@ -21,7 +21,7 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-CONFIG_PATH = ROOT / "shared/scenarios/panda_sim/stack/profiles/control/panda_follower_v1.yaml"
+CONFIG_PATH = ROOT / "shared/scenarios/marvin_sim/stack/profiles/control/marvin_follower_v1.yaml"
 PRODUCER = "fixture-producer/v1"
 
 
@@ -277,14 +277,12 @@ def test_follower_config_values_and_round_trip(tmp_path):
 
     config = load_follower_config(CONFIG_PATH)
     assert config.target_count == 10
-    assert config.max_target_deviations == (
-        (0.50,) * 7 + (0.06,) + (0.50,) * 7 + (0.06,)
-    )
+    assert config.max_target_deviations == ((0.05,) * 7 + (0.01,)) * 2
     assert config.max_terminal_tail_duration_s == pytest.approx(3.0)
     assert config.max_terminal_tail_duration_ns == 3_000_000_000
     snapshot = config.to_document()
     snapshot["max_target_deviations"][0] = 99.0
-    assert config.max_target_deviations[0] == 0.50
+    assert config.max_target_deviations[0] == 0.05
     assert parse_follower_config(config.to_document(), "<snapshot>") == config
 
     path = tmp_path / "follower.yaml"

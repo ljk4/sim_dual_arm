@@ -11,7 +11,7 @@ from dual_arm_runtime.scenario_runtime import resolve_scenario_runtime
 
 
 @pytest.mark.parametrize(
-    ("robot", "task"), [("panda_sim", "stack"), ("marvin_sim", "handover")]
+    ("robot", "task"), [("marvin_sim", "stack"), ("marvin_sim", "handover")]
 )
 def test_teacher_startup_prints_real_loaded_configuration(robot, task, capsys):
     root = Path(os.environ.get("PROJECT_ROOT", Path(__file__).resolve().parents[2]))
@@ -44,10 +44,10 @@ def test_direct_runtime_config_uses_declared_shared_mount(monkeypatch):
     monkeypatch.setenv("PROJECT_CONTAINER", "1")
     monkeypatch.setenv("PROJECT_ROOT", str(root))
     resolved = resolve_scenario_runtime(
-        robot="panda_sim", task="stack", role="teacher", project_root=root
+        robot="marvin_sim", task="stack", role="teacher", project_root=root
     )
     config = load_runtime_configuration(
-        Path("shared/scenarios/panda_sim/stack/configs/runtime/teacher_collect.yaml"), root
+        Path("shared/scenarios/marvin_sim/stack/configs/runtime/teacher_collect.yaml"), root
     )
     assert config.configuration_source == str(resolved.selection["recipe"]["path"])
     assert config.recipe.action_source == "teacher"

@@ -8,7 +8,7 @@ from dual_arm_learning.policy_config import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
-FAKE = ROOT / "learning/lerobot/configs/fake_policy.yaml"
+FAKE = ROOT / "tests/fakes/policy/fake_policy.yaml"
 
 
 def service_document():

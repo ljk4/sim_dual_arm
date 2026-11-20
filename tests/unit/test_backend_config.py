@@ -17,7 +17,7 @@ from robot_backend_sim.common.config.backend_config import (  # noqa: E402
     load_backend_config,
 )
 
-CONFIG_PATH = ROOT / "shared/scenarios/panda_sim/stack/configs/simulation/backend/backend.yaml"
+CONFIG_PATH = ROOT / "shared/scenarios/marvin_sim/stack/configs/simulation/backend/backend.yaml"
 DEFAULT_DOCUMENT = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
 
 
@@ -26,10 +26,11 @@ def write_document(tmp_path: Path, document: dict) -> Path:
     directory.mkdir(parents=True)
     path = directory / "backend.yaml"
     path.write_text(yaml.safe_dump(document), encoding="utf-8")
-    (directory / "panda_stack.yaml").write_text("scene: x\n", encoding="utf-8")
-    (directory / "panda_control.yaml").write_text("control: x\n", encoding="utf-8")
-    (directory / "panda_stream.yaml").write_text("stream: x\n", encoding="utf-8")
-    (directory / "panda_stack_task.yaml").write_text("task: x\n", encoding="utf-8")
+    (directory / "marvin_stack.yaml").write_text("scene: x\n", encoding="utf-8")
+    (directory / "marvin_control.yaml").write_text("control: x\n", encoding="utf-8")
+    (directory / "marvin_stream.yaml").write_text("stream: x\n", encoding="utf-8")
+    (directory / "marvin_follower.yaml").write_text("follower: x\n", encoding="utf-8")
+    (directory / "marvin_stack_task.yaml").write_text("task: x\n", encoding="utf-8")
     (directory / "kinematics_check.yaml").write_text("ik: x\n", encoding="utf-8")
     profile = directory / "profile.json"
     profile.write_text("{}\n", encoding="utf-8")
@@ -44,9 +45,10 @@ def document_with_paths(tmp_path: Path) -> dict:
         {
             "profile": "profile.json",
             "schemas": "schemas",
-            "scene": "panda_stack.yaml",
-            "control": "panda_control.yaml",
-            "stream": "panda_stream.yaml",
+            "scene": "marvin_stack.yaml",
+            "control": "marvin_control.yaml",
+            "stream": "marvin_stream.yaml",
+            "follower": "marvin_follower.yaml",
         }
     )
     return document
@@ -58,9 +60,10 @@ def test_valid_config_resolves_every_path_against_the_config_file(tmp_path):
     assert config.source == path.resolve()
     assert config.profile_path == (path.parent / "profile.json").resolve()
     assert config.schemas_path == (path.parent / "schemas").resolve()
-    assert config.scene_path == (path.parent / "panda_stack.yaml").resolve()
-    assert config.control_path == (path.parent / "panda_control.yaml").resolve()
-    assert config.stream_path == (path.parent / "panda_stream.yaml").resolve()
+    assert config.scene_path == (path.parent / "marvin_stack.yaml").resolve()
+    assert config.control_path == (path.parent / "marvin_control.yaml").resolve()
+    assert config.stream_path == (path.parent / "marvin_stream.yaml").resolve()
+    assert config.follower_path == (path.parent / "marvin_follower.yaml").resolve()
     assert config.namespace == "/robot"
     assert config.realtime_speed == 1.0
     assert config.capture_hz == 20.0

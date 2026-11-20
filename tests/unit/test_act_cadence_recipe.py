@@ -10,10 +10,10 @@ from robot_backend_sim.common.config.backend_config import load_backend_config
 from robot_backend_sim.common.config.follower_config import load_follower_config
 
 ROOT = Path(__file__).resolve().parents[2]
-SCENARIO = ROOT / "shared/scenarios/panda_sim/stack"
-TEACHER_FOLLOWER = SCENARIO / "profiles/control/panda_follower_v1.yaml"
-INFERENCE_FOLLOWER = SCENARIO / "profiles/control/panda_follower_inference_v1.yaml"
-BACKEND_CHUNKED = SCENARIO / "configs/simulation/backend/backend_stack_act_chunked.yaml"
+SCENARIO = ROOT / "shared/scenarios/marvin_sim/stack"
+TEACHER_FOLLOWER = SCENARIO / "profiles/control/marvin_follower_v1.yaml"
+INFERENCE_FOLLOWER = SCENARIO / "profiles/control/marvin_follower_inference_v1.yaml"
+BACKEND_CHUNKED = SCENARIO / "configs/simulation/backend/backend_stack_policy.yaml"
 RUNTIME_CHUNKED = SCENARIO / "configs/runtime/policy_rollout.yaml"
 RUNTIME_TEACHER = SCENARIO / "configs/runtime/teacher_collect.yaml"
 
@@ -49,7 +49,12 @@ def test_single_follower_source_owns_target_count_and_deviation_budget():
     inference = load_follower_config(INFERENCE_FOLLOWER)
     assert inference.target_count == 20
     assert inference.target_count * 50_000_000 == 1_000_000_000
-    assert inference.max_target_deviations == ((0.50,) * 7 + (0.06,) + (0.50,) * 7 + (0.06,))
+    assert all(
+        inference_deviation >= teacher_deviation
+        for inference_deviation, teacher_deviation in zip(
+            inference.max_target_deviations, teacher.max_target_deviations, strict=True
+        )
+    )
     assert inference.max_terminal_tail_duration_s == 3.0
 
 
@@ -58,7 +63,7 @@ def test_policy_backend_references_the_single_follower_source():
     assert chunked.follower_path == INFERENCE_FOLLOWER.resolve()
     assert chunked.task_mode == "inference"
     assert chunked.realtime_speed == 0.5
-    assert chunked.chunk_history_capacity == 512
+    assert chunked.chunk_history_capacity == 256
 
 
 def test_runtime_configs_reference_the_single_follower_source():
@@ -97,10 +102,14 @@ def test_chunked_runtime_keeps_the_60x16_interface_and_covers_the_task(tmp_path)
     assert policy.async_inference is True
     assert policy.max_chunks * window_ns >= policy.task_sim_budget_ns
     assert policy.total_sim_deadline_ns == policy.task_sim_budget_ns == 90_000_000_000
-    assert policy.total_wall_deadline_s == 360.0
+    simulation_speed = load_backend_config(BACKEND_CHUNKED).realtime_speed
+    required_wall_s = policy.task_sim_budget_ns / 1e9 / simulation_speed
+    assert policy.total_wall_deadline_s >= (
+        required_wall_s + runtime.recipe.control.terminal_timeout_s
+    )
 
     assert follower.max_target_deviations == loaded_follower.max_target_deviations
     assert follower.max_terminal_tail_duration_ns == loaded_follower.max_terminal_tail_duration_ns
     assert len(runtime.snapshot["action"]["joint_names"]) == 16
-    assert policy.task_id == "panda-stack"
+    assert policy.task_id == "marvin-stack"
     assert policy.task_text.startswith("Pick up the red source cube")

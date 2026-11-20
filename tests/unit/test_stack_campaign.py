@@ -41,7 +41,7 @@ def _project(tmp_path):
         "quality": {"sidecar": "export/quality.json", "max_blackout_s": 0.35},
     }
     root = tmp_path / "project"
-    experiments = root / "shared/scenarios/panda_sim/stack/configs/runtime/experiments"
+    experiments = root / "shared/scenarios/marvin_sim/stack/configs/runtime/experiments"
     experiments.mkdir(parents=True)
     (experiments / "stack_campaign.yaml").write_text(
         yaml.safe_dump(config), encoding="utf-8"
@@ -50,7 +50,9 @@ def _project(tmp_path):
 
 
 def _campaign(root):
-    return root / "shared/scenarios/panda_sim/stack/configs/runtime/experiments/stack_campaign.yaml"
+    return (
+        root / "shared/scenarios/marvin_sim/stack/configs/runtime/experiments/stack_campaign.yaml"
+    )
 
 
 def _run(root, run_id):
@@ -66,7 +68,7 @@ def _run(root, run_id):
             "--run-id",
             run_id,
             "--runtime-config",
-            "shared/scenarios/panda_sim/stack/configs/runtime/teacher_collect.yaml",
+            "shared/scenarios/marvin_sim/stack/configs/runtime/teacher_collect.yaml",
             "--",
             sys.executable,
             "-c",
@@ -143,7 +145,7 @@ def test_label_replay_consumes_a_pilot_attempt_and_needs_used_seed(tmp_path):
                 "--run-id",
                 "replay",
                 "--runtime-config",
-                "shared/scenarios/panda_sim/stack/configs/runtime/teacher_collect.yaml",
+                "shared/scenarios/marvin_sim/stack/configs/runtime/teacher_collect.yaml",
                 "--",
                 sys.executable,
                 "-c",
@@ -175,7 +177,7 @@ def test_formal_is_teacher_only_and_test_is_act_only(tmp_path):
         "--run-id",
         "guard",
         "--runtime-config",
-        "shared/scenarios/panda_sim/stack/configs/runtime/teacher_collect.yaml",
+        "shared/scenarios/marvin_sim/stack/configs/runtime/teacher_collect.yaml",
     ]
     assert (
         campaign.main(
@@ -238,7 +240,7 @@ def test_formal_stops_after_fifty_qualified(tmp_path):
                 "--run-id",
                 "after-target",
                 "--runtime-config",
-                "shared/scenarios/panda_sim/stack/configs/runtime/teacher_collect.yaml",
+                "shared/scenarios/marvin_sim/stack/configs/runtime/teacher_collect.yaml",
                 "--",
                 sys.executable,
                 "-c",
@@ -264,7 +266,7 @@ def test_teacher_and_replay_cannot_consume_reserved_act_attempts(tmp_path):
     root = _project(tmp_path)
     campaign_path = (
         root
-        / "shared/scenarios/panda_sim/stack/configs/runtime/experiments/stack_campaign.yaml"
+        / "shared/scenarios/marvin_sim/stack/configs/runtime/experiments/stack_campaign.yaml"
     )
     config = yaml.safe_load(campaign_path.read_text())
     config["budget"].update(pilot_max_attempts=10, pilot_act_reserved_attempts=2)
@@ -289,7 +291,7 @@ def test_select_writes_generated_manifest_only_after_success(tmp_path):
     root = _project(tmp_path)
     config_path = (
         root
-        / "shared/scenarios/panda_sim/stack/configs/runtime/experiments/stack_campaign.yaml"
+        / "shared/scenarios/marvin_sim/stack/configs/runtime/experiments/stack_campaign.yaml"
     )
     config = yaml.safe_load(config_path.read_text())
     config["budget"].update(
@@ -470,7 +472,7 @@ def test_interrupted_terminal_backfill_preserves_history_and_fills_real_fields(t
     root, attempt_id, ledger = _terminal_project(tmp_path)
     config = (
         root
-        / "shared/scenarios/panda_sim/stack/configs/runtime/experiments/stack_campaign.yaml"
+        / "shared/scenarios/marvin_sim/stack/configs/runtime/experiments/stack_campaign.yaml"
     )
     assert (
         campaign.main(

@@ -231,7 +231,7 @@ def test_unknown_schema_version_is_rejected(scenario, version):
 @pytest.mark.parametrize(
     ("label", "mutate"),
     [
-        ("panda_defaults", lambda document: document.update(panda_defaults={})),
+        ("unused_defaults", lambda document: document.update(unused_defaults={})),
         ("extends", lambda document: document.update(extends="../other/binding.yaml")),
         (
             "defaults",
@@ -258,7 +258,7 @@ def test_unknown_fields_and_implicit_inheritance_are_rejected(scenario, label, m
         ("recipes.campaign", lambda tree: (tree.root / "configs/campaign.yaml").unlink()),
         (
             "interfaces.extension_ros[0]",
-            lambda tree: shutil.rmtree(tree.root / "extensions/ros/panda_stack_api_msgs"),
+            lambda tree: shutil.rmtree(tree.root / "extensions/ros/marvin_stack_api_msgs"),
         ),
     ],
 )
@@ -289,8 +289,8 @@ def test_missing_reference_is_rejected(scenario, field, remove):
         ),
         (
             "interfaces.extension_ros[0]",
-            lambda tree: shutil.rmtree(tree.root / "extensions/ros/panda_stack_api_msgs")
-            or (tree.root / "extensions/ros/panda_stack_api_msgs").write_text("file"),
+            lambda tree: shutil.rmtree(tree.root / "extensions/ros/marvin_stack_api_msgs")
+            or (tree.root / "extensions/ros/marvin_stack_api_msgs").write_text("file"),
             "expected a directory",
         ),
     ],
@@ -332,7 +332,7 @@ def test_reference_outside_declared_source_roots_is_rejected(scenario):
 
 def test_relative_source_roots_cover_end_and_shared_configs(tmp_path):
     repository = tmp_path / "repo"
-    scenario = build_scenario(repository / "shared/scenarios/panda_sim/stack")
+    scenario = build_scenario(repository / "shared/scenarios/marvin_sim/stack")
     end_config = repository / "runtime/ros2/configs/existing.yaml"
     end_config.parent.mkdir(parents=True)
     end_config.write_text("schema_version: 1\n", encoding="utf-8")

@@ -1,6 +1,7 @@
 # 闭环成功率回退修复与工程规范收敛任务书
 
-分支：`fix/closed-loop-and-ownership`（阶段一：开发阶段，遵循 [`AGENTS.md`](../../AGENTS.md) §1.1）  
+分支：`fix/closed-loop-and-ownership`（阶段一：开发阶段，遵循 [`AGENTS.md`](../../../AGENTS.md) §1.1）
+
 进度追踪：[progress.md](progress.md)
 
 ---

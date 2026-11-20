@@ -28,15 +28,17 @@ for source in (ROOT / "simulation/mujoco/src", ROOT / "shared/common/python/cont
 
 from robot_backend_sim.common.config.follower_config import load_follower_config  # noqa: E402
 from robot_backend_sim.common.config.motion_config import load_control_config  # noqa: E402
-from robot_backend_sim.panda_sim.stack.scene_config import load_scene_config  # noqa: E402
 from robot_backend_sim.common.config.stream_config import StreamConfig  # noqa: E402
 from robot_backend_sim.common.control.control import ControlSession  # noqa: E402
 from robot_backend_sim.common.control.control_state import PreparedControlCommand  # noqa: E402
 from robot_backend_sim.common.follower.follower_plan import prepare_follower_plan  # noqa: E402
 from robot_backend_sim.common.motion.motion_controller import MotionController, Phase  # noqa: E402
 from robot_backend_sim.common.motion.stream_schedule import next_grid_time  # noqa: E402
-from robot_backend_sim.panda_sim.io import PandaIO  # noqa: E402
-from robot_backend_sim.panda_sim.stack.scene import build_scene  # noqa: E402
+from robot_backend_sim.marvin_sim.io import MarvinIO  # noqa: E402
+from robot_backend_sim.marvin_sim.stack.scene import build_marvin_stack_scene  # noqa: E402
+from robot_backend_sim.marvin_sim.stack.scene_config import (  # noqa: E402
+    load_marvin_stack_scene_config,
+)
 from robot_contracts.action_chunks import ActionWindow  # noqa: E402
 from robot_contracts.control import ControlCommand  # noqa: E402
 from robot_contracts.models import ContractError, RunContext, Target  # noqa: E402
@@ -54,10 +56,11 @@ def replace(value, **changes):
     return _dataclass_replace(value, **changes)
 
 
-SCENE_PATH = ROOT / "shared/scenarios/panda_sim/stack/configs/simulation/scene/panda_stack.yaml"
-CONTROL_PATH = ROOT / "shared/scenarios/panda_sim/stack/profiles/control/panda_control_v1.yaml"
-FOLLOWER_PATH = ROOT / "shared/scenarios/panda_sim/stack/profiles/control/panda_follower_v1.yaml"
-PROFILE_PATH = ROOT / "shared/scenarios/panda_sim/stack/profiles/robots/panda_stack_v1/profile.json"
+SCENARIO = ROOT / "shared/scenarios/marvin_sim/stack"
+SCENE_PATH = SCENARIO / "configs/simulation/scene/marvin_stack.yaml"
+CONTROL_PATH = SCENARIO / "profiles/control/marvin_control_v1.yaml"
+FOLLOWER_PATH = SCENARIO / "profiles/control/marvin_follower_v1.yaml"
+PROFILE_PATH = SCENARIO / "profiles/robots/marvin_stack_v1/profile.json"
 SCHEMAS = ROOT / "shared/common/interfaces/schemas"
 DT_NS = 2_000_000
 LEASE_NS = 10_000_000_000
@@ -65,14 +68,14 @@ FIRST_START_NS = 250_000_000
 FINAL_CHUNK_SEQ = 11
 TERMINAL = frozenset({"COMPLETED", "CANCELED", "FAILED"})
 REPORT_DIR = Path(
-    os.environ.get("FOLLOWER_REPORT_DIR", ROOT / "var/panda_sim/stack/diagnostics/follower-execution")
+    os.environ.get("FOLLOWER_REPORT_DIR", ROOT / "var/marvin_sim/stack/debug/follower-execution")
 )
 BASE_POSITIONS = load_profile(PROFILE_PATH, SCHEMAS).initial_positions
 
 
 @pytest.fixture(scope="module")
 def scene_config():
-    return load_scene_config(SCENE_PATH)
+    return load_marvin_stack_scene_config(SCENE_PATH)
 
 
 @pytest.fixture(scope="module")
@@ -94,9 +97,7 @@ def follower_config():
 
 @pytest.fixture(scope="module")
 def scene(scene_config):
-    return build_scene(
-        scene_config,
-    )
+    return build_marvin_stack_scene(scene_config)
 
 
 @dataclass(frozen=True)
@@ -130,18 +131,15 @@ class FollowerRun:
 
 
 def linear_source(
-    amplitude: float = 0.5,
+    amplitude: float = 0.3,
     *,
     duration_ns: int = 3_000_000_000,
-    gripper_close_ns: int | None = None,
 ) -> tuple[Target, ...]:
     targets = []
     for index in range(60):
         time_ns = (index + 1) * 50_000_000
         values = list(BASE_POSITIONS)
-        values[8] = amplitude * min(1.0, time_ns / duration_ns)
-        if gripper_close_ns is not None:
-            values[15] = 0.08 * max(0.0, 1.0 - time_ns / gripper_close_ns)
+        values[8] += amplitude * min(1.0, time_ns / duration_ns)
         targets.append(Target(time_ns, tuple(values)))
     return tuple(targets)
 
@@ -151,7 +149,7 @@ def cubic_source(amplitude: float = 0.2) -> tuple[Target, ...]:
     for index in range(60):
         time_ns = (index + 1) * 50_000_000
         values = list(BASE_POSITIONS)
-        values[8] = amplitude * (time_ns / 3_000_000_000) ** 3
+        values[8] += amplitude * (time_ns / 3_000_000_000) ** 3
         targets.append(Target(time_ns, tuple(values)))
     return tuple(targets)
 
@@ -165,7 +163,7 @@ def new_controller(
     max_observation_age_s: float = 5.0,
 ):
     scene.reset(1234)
-    io = PandaIO(scene, profile)
+    io = MarvinIO(scene, profile)
     controller = ControlSession(
         scene,
         io,
@@ -617,7 +615,7 @@ def test_runtime_tracking_violation_brakes_with_tracking_timeout(
     scene, profile, control_config, follower_config
 ):
     scene.reset(1234)
-    io = PandaIO(scene, profile)
+    io = MarvinIO(scene, profile)
     controller = ControlSession(
         scene,
         io,
@@ -627,7 +625,7 @@ def test_runtime_tracking_violation_brakes_with_tracking_timeout(
     context = replace(controller.context, episode_id="follower-tracking", control_epoch=1)
     lease = controller.acquire(context, "follower-tracking", LEASE_NS, 0)
     tracked_follower = replace(follower_config, target_count=40)
-    source = linear_source(0.5)
+    source = linear_source()
     first, _plan, _window = make_packet(
         controller,
         context,
@@ -641,7 +639,16 @@ def test_runtime_tracking_violation_brakes_with_tracking_timeout(
         start_ns=FIRST_START_NS,
     )
     assert controller.submit(first, 0).accepted
-    terminal, replies, _wall = step_until_terminal(controller, 0, max_steps=3000)
+    # Simulate loss of torque on the moving axis while retaining measured
+    # MuJoCo feedback and the production tracking limits.
+    actuator = scene.indices.robot.arm_actuator_ids["right"][0]
+    force_range = scene.model.actuator_forcerange[actuator]
+    original_range = force_range.copy()
+    try:
+        force_range[:] = 0.0
+        terminal, replies, _wall = step_until_terminal(controller, 0, max_steps=3000)
+    finally:
+        force_range[:] = original_range
     assert terminal.phase == "FAILED"
     assert terminal.reason == "TRACKING_TIMEOUT"
     assert any(reply.snapshot.reference_kind == "BRAKE" for reply in replies)
@@ -884,7 +891,7 @@ def test_short_lease_expiry_brakes_with_lease_reason(
     scene, profile, control_config, follower_config
 ):
     scene.reset(1234)
-    io = PandaIO(scene, profile)
+    io = MarvinIO(scene, profile)
     controller = ControlSession(
         scene,
         io,
@@ -926,18 +933,18 @@ def test_follower_numeric_boundary_is_explicitly_normalized_not_clipped(
     scene, profile, control_config, follower_config
 ):
     scene.reset(1234)
-    io = PandaIO(scene, profile)
+    io = MarvinIO(scene, profile)
     raw_closed = list(profile.initial_positions)
-    raw_closed[7] = -2.849e-11
+    raw_closed[7] = profile.joints[7].minimum - 2.849e-11
     with pytest.raises(ContractError) as caught:
         io.apply_targets(raw_closed)
     assert caught.value.reason == "JOINT_LIMIT"
     closed = normalize_follower_positions(tuple(raw_closed), profile.joints)
     io.apply_targets(closed.applied_positions)
-    assert closed.corrections[7] == -2.849e-11
+    assert closed.corrections[7] == pytest.approx(-2.849e-11)
 
     raw_open = list(profile.initial_positions)
-    raw_open[15] = 0.08000000002849
+    raw_open[15] = profile.joints[15].maximum + 2.849e-11
     with pytest.raises(ContractError) as caught:
         io.apply_targets(raw_open)
     assert caught.value.reason == "JOINT_LIMIT"
@@ -1009,7 +1016,7 @@ def test_raw_out_of_bounds_and_excess_deviation_are_rejected(
     fast = []
     for index in range(60):
         values = list(profile.initial_positions)
-        values[0] = min(1.0, (index + 1) * 0.05 / 0.25)
+        values[0] += min(1.0, (index + 1) * 0.05 / 0.25)
         fast.append(Target((index + 1) * 50_000_000, tuple(values)))
     window_fast = ActionWindow(
         1,
@@ -1037,30 +1044,38 @@ def test_follower_final_contact_keeps_raw_closing_target_and_real_opening(
 ):
     scene.reset(1234)
     install_contact_source(scene)
-    io = PandaIO(scene, profile)
-    close = list(io.measure().positions)
-    close[15] = 0.0
-    for _ in range(500):
-        io.apply_targets(close)
-        mujoco.mj_step(scene.model, scene.data)
-        mujoco.mj_forward(scene.model, scene.data)
+    io = MarvinIO(scene, profile)
+    closed_width = profile.joints[15].minimum
+    close = (*profile.initial_positions[:15], closed_width)
+    source_body = scene.model.body(scene.config.task.source.name).id
+    # Support the floating cube while the fingers close, then let the physical
+    # grasp support it for the entire follower stream.
+    gravity_compensation = scene.model.body_gravcomp[source_body]
+    scene.model.body_gravcomp[source_body] = 1.0
+    try:
+        for _ in range(500):
+            io.apply_targets(close)
+            mujoco.mj_step(scene.model, scene.data)
+            mujoco.mj_forward(scene.model, scene.data)
+    finally:
+        scene.model.body_gravcomp[source_body] = gravity_compensation
     measured_contact = io.measure()
-    assert measured_contact.positions[15] == pytest.approx(0.03985, abs=0.0015)
+    measured_width = measured_contact.positions[15]
+    assert closed_width + control_config.position_tolerances[15] < measured_width
+    assert measured_width < profile.joints[15].maximum
 
-    initial = list(profile.initial_positions)
-    initial[15] = 0.0
     stream_config = StreamConfig(0.25, 0.05, 5.0, 120.0, 3.0, 2.0)
     motion = MotionController(
         scene,
         io,
         control_config,
-        initial_reference=tuple(initial),
+        initial_reference=close,
         stream_config=stream_config,
     )
     now_ns = round(float(scene.data.time) * 1_000_000_000)
     start_ns = next_grid_time(now_ns, stream_config.initial_lead_ns, DT_NS)
     anchor = motion.chunk_anchor(start_ns)
-    source = linear_source(0.0, gripper_close_ns=1)
+    source = tuple(Target(index * 50_000_000, close) for index in range(1, 61))
     window = ActionWindow(
         1,
         0,
@@ -1077,8 +1092,8 @@ def test_follower_final_contact_keeps_raw_closing_target_and_real_opening(
         is_final=True,
         duration_grid_ns=DT_NS,
     )
-    assert window.targets[-1].positions[15] == 0.0
-    assert prepared.actual_terminal_positions[15] == pytest.approx(0.0, abs=1e-9)
+    assert window.targets[-1].positions[15] == closed_width
+    assert prepared.actual_terminal_positions[15] == pytest.approx(closed_width, abs=1e-9)
     motion.start_stream(prepared, 0)
     wall = 0
     snapshot = motion.step(wall)
@@ -1091,9 +1106,9 @@ def test_follower_final_contact_keeps_raw_closing_target_and_real_opening(
     right = next(item for item in snapshot.grippers if item.side == "right")
     assert right.mode == "CONTACT"
     assert right.contact_object == "source"
-    assert right.final_reference_m == 0.0
-    assert snapshot.measured_positions[15] == pytest.approx(0.03985, abs=0.002)
-    assert snapshot.reference_positions[15] == pytest.approx(0.0, abs=1e-9)
+    assert right.final_reference_m == closed_width
+    assert snapshot.measured_positions[15] == pytest.approx(measured_width, abs=0.002)
+    assert snapshot.reference_positions[15] == pytest.approx(closed_width, abs=1e-9)
     assert right.target_error_m < -control_config.position_tolerances[15]
     for finger in right.fingers:
         assert finger.force_for("source") >= control_config.contact_force_min_n
@@ -1105,7 +1120,7 @@ def install_contact_source(scene) -> None:
     model = scene.model
     data = scene.data
     mujoco.mj_forward(model, data)
-    tcp = int(scene.indices.robot.tcp_site_ids["right_tcp"])
+    tcp = int(scene.indices.robot.tcp_site_ids["right"])
     position = np.asarray(data.site_xpos[tcp], dtype=float)
     matrix = np.asarray(data.site_xmat[tcp], dtype=float)
     quaternion = np.zeros(4, dtype=float)
@@ -1114,8 +1129,4 @@ def install_contact_source(scene) -> None:
     data.qpos[address : address + 7] = (*position, *quaternion)
     free_dof = int(model.joint("source_free").dofadr[0])
     data.qvel[free_dof : free_dof + 6] = 0.0
-    for name in ("right_finger_joint1", "right_finger_joint2"):
-        joint = model.joint(name)
-        data.qpos[int(joint.qposadr[0])] = 0.02
-        data.qvel[int(joint.dofadr[0])] = 0.0
     mujoco.mj_forward(model, data)

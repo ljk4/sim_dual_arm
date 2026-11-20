@@ -20,7 +20,7 @@ from robot_contracts.trajectory.spline import ReferenceSample
 from robot_trajectory.follower_reference import validate
 
 ROOT = Path(__file__).resolve().parents[2]
-PROFILES = ROOT / "shared/scenarios/panda_sim/stack/profiles"
+PROFILES = ROOT / "shared/scenarios/marvin_sim/stack/profiles"
 for source in (ROOT / "simulation/mujoco/src", ROOT / "shared/common/python/contracts/src"):
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
@@ -40,11 +40,11 @@ from robot_backend_sim.common.follower.follower_protocol import (  # noqa: E402
 ruckig = pytest.importorskip("ruckig")
 
 PROFILE = load_profile(
-    PROFILES / "robots/panda_stack_v1/profile.json",
+    PROFILES / "robots/marvin_stack_v1/profile.json",
     ROOT / "shared/common/interfaces/schemas/v1",
 )
-CONTROL = load_control_config(PROFILES / "control/panda_control_v1.yaml")
-FOLLOWER = load_follower_config(PROFILES / "control/panda_follower_v1.yaml")
+CONTROL = load_control_config(PROFILES / "control/marvin_control_v1.yaml")
+FOLLOWER = load_follower_config(PROFILES / "control/marvin_follower_v1.yaml")
 BASE = PROFILE.initial_positions
 COUNT = len(BASE)
 GRID_NS = 2_000_000

@@ -14,7 +14,7 @@ from robot_contracts.trajectory.spline import ReferenceSample
 from robot_trajectory.follower import PreparedFollowerPlan, normalize_follower_positions
 
 ROOT = Path(__file__).resolve().parents[2]
-PROFILES = ROOT / "shared/scenarios/panda_sim/stack/profiles"
+PROFILES = ROOT / "shared/scenarios/marvin_sim/stack/profiles"
 for source in (ROOT / "simulation/mujoco/src", ROOT / "shared/common/python/contracts/src"):
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
@@ -32,11 +32,11 @@ from robot_contracts.profiles import load_profile  # noqa: E402
 ruckig = pytest.importorskip("ruckig")
 
 PROFILE = load_profile(
-    PROFILES / "robots/panda_stack_v1/profile.json",
+    PROFILES / "robots/marvin_stack_v1/profile.json",
     ROOT / "shared/common/interfaces/schemas/v1",
 )
-CONTROL = load_control_config(PROFILES / "control/panda_control_v1.yaml")
-FOLLOWER = load_follower_config(PROFILES / "control/panda_follower_v1.yaml")
+CONTROL = load_control_config(PROFILES / "control/marvin_control_v1.yaml")
+FOLLOWER = load_follower_config(PROFILES / "control/marvin_follower_v1.yaml")
 BASE = PROFILE.initial_positions
 JOINT_COUNT = len(BASE)
 GRID_NS = 2_000_000
@@ -64,7 +64,7 @@ def command(observation_id: int = 1) -> ControlCommand:
     )
 
 
-def linear_source(amplitude: float = 1.0, *, tail: float | None = None) -> tuple[Target, ...]:
+def linear_source(amplitude: float = 0.4, *, tail: float | None = None) -> tuple[Target, ...]:
     targets = []
     for index in range(60):
         seconds = (index + 1) * 0.05
@@ -72,7 +72,7 @@ def linear_source(amplitude: float = 1.0, *, tail: float | None = None) -> tuple
         if tail is not None and index == 59:
             position = tail
         values = list(BASE)
-        values[0] = position
+        values[0] += position
         targets.append(Target(round(seconds * 1_000_000_000), tuple(values)))
     return tuple(targets)
 
@@ -170,12 +170,12 @@ def test_follower_fingerprint_covers_unselected_tail_and_follower_limits() -> No
 
 def final_extension_source() -> tuple[Target, ...]:
     """A moving target at the window end forces a bounded settling extension."""
-    return linear_source(1.0)
+    return linear_source()
 
 
 def test_follower_fingerprint_covers_coefficients_anchor_and_extension() -> None:
     first = packet(follower_plan())
-    shifted = packet(follower_plan(source=linear_source(0.8), handoff_ns=300_000_000))
+    shifted = packet(follower_plan(source=linear_source(0.35), handoff_ns=300_000_000))
     final = packet(follower_plan(source=final_extension_source(), handoff_ns=0, is_final=True))
     assert first.fingerprint != shifted.fingerprint
     assert first.fingerprint != final.fingerprint
@@ -194,17 +194,19 @@ def test_follower_fingerprint_covers_algorithm_version() -> None:
 
 def test_follower_fingerprint_payload_keeps_all_terminal_and_deviation_evidence() -> None:
     closing = []
-    openings = tuple(0.002 - index * 0.0002 for index in range(9)) + (0.0,)
+    minimum = PROFILE.joints[7].minimum
+    initial = minimum + 0.002
+    openings = tuple(initial - index * 0.0002 for index in range(9)) + (minimum,)
     for index, opening in enumerate(openings):
         values = list(BASE)
         values[7] = opening
         closing.append(Target((index + 1) * 50_000_000, tuple(values)))
     for index in range(len(openings), 60):
         values = list(BASE)
-        values[7] = 0.0
+        values[7] = minimum
         closing.append(Target((index + 1) * 50_000_000, tuple(values)))
     start = list(BASE)
-    start[7] = 0.002
+    start[7] = initial
     prepared = follower_plan(source=tuple(closing), handoff_ns=0, positions=tuple(start))
     payload = control_state_module._fingerprint_payload(prepared)
     assert payload["kind"] == "FOLLOWER"

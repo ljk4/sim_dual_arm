@@ -6,7 +6,7 @@ from dual_arm_learning.config import load_training_config
 
 torch = pytest.importorskip("torch")
 ROOT = Path(__file__).resolve().parents[2]
-SCENARIO = ROOT / "shared/scenarios/panda_sim/stack"
+SCENARIO = ROOT / "shared/scenarios/marvin_sim/stack"
 
 
 class _Policy:

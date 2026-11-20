@@ -14,15 +14,15 @@ from robot_contracts.profiles import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
-PROFILES = ROOT / "shared/scenarios/panda_sim/stack/profiles"
+PROFILES = ROOT / "shared/scenarios/marvin_sim/stack/profiles"
 SCHEMAS = ROOT / "shared/common/interfaces/schemas"
-PANDA_PROFILE = PROFILES / "robots/panda_stack_v1/profile.json"
-PANDA_OBSERVATION = PROFILES / "observations/panda_rgb_joint_v1.json"
-PANDA_ACTION = PROFILES / "actions/panda_joint_position_v1.json"
+STACK_PROFILE = PROFILES / "robots/marvin_stack_v1/profile.json"
+STACK_OBSERVATION = PROFILES / "observations/marvin_rgb_joint_v1.json"
+STACK_ACTION = PROFILES / "actions/marvin_joint_position_v1.json"
 
 
-def _panda_document():
-    return deepcopy(load_document(PANDA_PROFILE))
+def _stack_document():
+    return deepcopy(load_document(STACK_PROFILE))
 
 
 def _write(tmp_path, document, name="profile.json"):
@@ -32,7 +32,7 @@ def _write(tmp_path, document, name="profile.json"):
 
 
 def test_v2_profile_supports_one_camera_and_preserves_the_source_hash(tmp_path):
-    document = _panda_document()
+    document = _stack_document()
     document["cameras"] = document["cameras"][:1]
     path = _write(tmp_path, document)
     profile = load_profile(path, SCHEMAS)
@@ -44,8 +44,8 @@ def test_v2_profile_supports_one_camera_and_preserves_the_source_hash(tmp_path):
 
 
 def test_v2_profile_is_an_immutable_multi_camera_view():
-    raw = _panda_document()
-    profile = load_profile(PANDA_PROFILE, SCHEMAS)
+    raw = _stack_document()
+    profile = load_profile(STACK_PROFILE, SCHEMAS)
     cameras = normalize_cameras(raw)
 
     assert profile.test_only is False
@@ -57,16 +57,16 @@ def test_v2_profile_is_an_immutable_multi_camera_view():
     raw["cameras"][0]["name"] = "mutated"
     raw["joints"][0]["initial"] = 9.0
     assert profile.cameras[0].name == "global"
-    assert profile.joints[0].initial == 0.0
+    assert profile.joints[0].initial == 0.75
 
     with pytest.raises(ValidationError):
         profile.cameras[0].name = "changed"
 
 
-def test_panda_bindings_have_si_units_and_exact_orders():
-    profile = load_profile(PANDA_PROFILE, SCHEMAS)
-    observation = load_document(PANDA_OBSERVATION)
-    action = load_document(PANDA_ACTION)
+def test_stack_bindings_have_si_units_and_exact_orders():
+    profile = load_profile(STACK_PROFILE, SCHEMAS)
+    observation = load_document(STACK_OBSERVATION)
+    action = load_document(STACK_ACTION)
 
     validate_bindings(profile, observation, action, SCHEMAS)
 
@@ -79,11 +79,11 @@ def test_panda_bindings_have_si_units_and_exact_orders():
     assert profile.joint_names == expected
     assert tuple(observation["camera_names"]) == ("global", "left_wrist", "right_wrist")
     assert [joint.unit for joint in profile.joints] == ["rad"] * 7 + ["m"] + ["rad"] * 7 + ["m"]
-    assert profile.joints[7].minimum == 0.0
-    assert profile.joints[7].maximum == 0.08
-    assert profile.joints[7].initial == 0.08
-    assert profile.joints[0].minimum == -2.8973
-    assert profile.joints[3].maximum == -0.0698
+    assert profile.joints[7].minimum == 0.0014
+    assert profile.joints[7].maximum == 0.0814
+    assert profile.joints[7].initial == 0.0814
+    assert profile.joints[0].minimum == -3.1067
+    assert profile.joints[3].maximum == 1.0472
     assert profile.joints[0].max_velocity == 0.8
     assert profile.joints[7].max_velocity == 0.04
     assert [(camera.width, camera.height) for camera in profile.cameras] == [
@@ -95,7 +95,7 @@ def test_panda_bindings_have_si_units_and_exact_orders():
 
 @pytest.mark.parametrize("version", [True, False, "2", 0, 1, 2.0, 3, None])
 def test_non_v2_profile_version_is_rejected(tmp_path, version):
-    document = _panda_document()
+    document = _stack_document()
     document["schema_version"] = version
     path = _write(tmp_path, document)
 
@@ -107,7 +107,7 @@ def test_non_v2_profile_version_is_rejected(tmp_path, version):
 
 @pytest.mark.parametrize("change", ["name", "frame_id"])
 def test_duplicate_camera_identity_is_rejected(tmp_path, change):
-    document = _panda_document()
+    document = _stack_document()
     if change == "name":
         document["cameras"][1]["name"] = document["cameras"][0]["name"]
         fragment = "duplicate camera names"
@@ -121,11 +121,11 @@ def test_duplicate_camera_identity_is_rejected(tmp_path, change):
 
 
 def test_duplicate_profile_field_is_rejected(tmp_path):
-    raw = json.dumps(_panda_document())
+    raw = json.dumps(_stack_document())
     path = tmp_path / "duplicate.json"
     duplicate = raw.replace(
-        '"robot_id": "panda_stack"',
-        '"robot_id": "panda_stack", "robot_id": "other"',
+        '"robot_id": "marvin_stack"',
+        '"robot_id": "marvin_stack", "robot_id": "other"',
     )
     path.write_text(duplicate)
 
@@ -136,12 +136,12 @@ def test_duplicate_profile_field_is_rejected(tmp_path):
 
 
 def test_unknown_camera_field_and_missing_digest_are_rejected(tmp_path):
-    with_unknown = _panda_document()
+    with_unknown = _stack_document()
     with_unknown["cameras"][0]["lens"] = "wide"
     with pytest.raises(ContractError, match="lens"):
         load_profile(_write(tmp_path, with_unknown, "unknown.json"), SCHEMAS)
 
-    without_digest = _panda_document()
+    without_digest = _stack_document()
     del without_digest["cameras"][0]["calibration_digest"]
     with pytest.raises(ContractError, match="calibration_digest"):
         load_profile(_write(tmp_path, without_digest, "missing.json"), SCHEMAS)
@@ -160,14 +160,14 @@ def test_unknown_camera_field_and_missing_digest_are_rejected(tmp_path):
     ],
 )
 def test_invalid_camera_values_are_rejected(tmp_path, field, value):
-    document = _panda_document()
+    document = _stack_document()
     document["cameras"][0][field] = value
     with pytest.raises(ContractError, match=field):
         load_profile(_write(tmp_path, document), SCHEMAS)
 
 
 def test_more_than_eight_cameras_are_rejected(tmp_path):
-    document = _panda_document()
+    document = _stack_document()
     template = document["cameras"][0]
     document["cameras"] = [
         {**template, "name": f"camera{index}", "frame_id": f"camera{index}_frame"}
@@ -179,9 +179,9 @@ def test_more_than_eight_cameras_are_rejected(tmp_path):
 
 @pytest.mark.parametrize("change", ["joint_order", "camera_order", "camera_missing"])
 def test_binding_mismatch_is_rejected(change):
-    profile = load_profile(PANDA_PROFILE, SCHEMAS)
-    observation = load_document(PANDA_OBSERVATION)
-    action = load_document(PANDA_ACTION)
+    profile = load_profile(STACK_PROFILE, SCHEMAS)
+    observation = load_document(STACK_OBSERVATION)
+    action = load_document(STACK_ACTION)
     if change == "joint_order":
         observation["joint_names"].reverse()
     elif change == "camera_order":
@@ -193,9 +193,11 @@ def test_binding_mismatch_is_rejected(change):
 
 
 def test_camera_digest_is_the_scene_description_semantic_hash():
-    scene_path = ROOT / "shared/scenarios/panda_sim/stack/configs/simulation/scene/panda_stack.yaml"
+    scene_path = (
+        ROOT / "shared/scenarios/marvin_sim/stack/configs/simulation/scene/marvin_stack.yaml"
+    )
     raw_cameras = load_document(scene_path)["cameras"]
-    profile = load_profile(PANDA_PROFILE, SCHEMAS)
+    profile = load_profile(STACK_PROFILE, SCHEMAS)
     for camera in profile.cameras:
         description = {"name": camera.name, **raw_cameras[camera.name]}
         assert camera.calibration_digest == semantic_hash(description)
@@ -203,7 +205,7 @@ def test_camera_digest_is_the_scene_description_semantic_hash():
 
 @pytest.mark.parametrize("field", ["min", "max", "max_velocity", "initial"])
 def test_unrepresentable_joint_number_is_a_contract_error(tmp_path, field):
-    document = _panda_document()
+    document = _stack_document()
     document["joints"][0][field] = 10**3500
     path = _write(tmp_path, document)
 
@@ -220,7 +222,7 @@ def test_unrepresentable_joint_number_is_a_contract_error(tmp_path, field):
     ["../wrong", "bad/name", "bad name", ".hidden", "9camera", "camera-name", "x" * 65],
 )
 def test_v2_camera_name_must_be_a_ros_topic_basename(tmp_path, name):
-    document = _panda_document()
+    document = _stack_document()
     document["cameras"][0]["name"] = name
     path = _write(tmp_path, document)
 
@@ -232,7 +234,7 @@ def test_v2_camera_name_must_be_a_ros_topic_basename(tmp_path, name):
 
 @pytest.mark.parametrize("name", ["_camera", "camera_1", "Global", "x" * 64])
 def test_v2_camera_name_accepts_safe_topic_basenames(tmp_path, name):
-    document = _panda_document()
+    document = _stack_document()
     document["cameras"][0]["name"] = name
     path = _write(tmp_path, document)
 
@@ -240,7 +242,7 @@ def test_v2_camera_name_accepts_safe_topic_basenames(tmp_path, name):
 
 
 def test_legacy_camera_object_is_rejected_by_file_and_model_loaders(tmp_path):
-    document = _panda_document()
+    document = _stack_document()
     document["camera"] = document.pop("cameras")[0]
     path = _write(tmp_path, document)
 
@@ -254,7 +256,7 @@ def test_legacy_camera_object_is_rejected_by_file_and_model_loaders(tmp_path):
 
 @pytest.mark.parametrize("version", [1, True, 2.0])
 def test_direct_profile_model_rejects_non_v2_versions(version):
-    document = _panda_document()
+    document = _stack_document()
     document["schema_version"] = version
     with pytest.raises(ContractError, match="schema_version"):
         RobotProfile.validate_dict(document)
@@ -262,7 +264,7 @@ def test_direct_profile_model_rejects_non_v2_versions(version):
 
 @pytest.mark.parametrize("digest", [None, "", "0" * 63])
 def test_direct_camera_model_requires_a_calibration_digest(digest):
-    document = _panda_document()["cameras"][0]
+    document = _stack_document()["cameras"][0]
     if digest is None:
         del document["calibration_digest"]
     else:
@@ -272,7 +274,7 @@ def test_direct_camera_model_requires_a_calibration_digest(digest):
 
 
 def test_profile_model_defaults_to_v2_but_files_require_an_explicit_version(tmp_path):
-    document = _panda_document()
+    document = _stack_document()
     del document["schema_version"]
     assert RobotProfile.validate_dict(document).schema_version == 2
     with pytest.raises(ContractError, match="schema_version"):

@@ -13,6 +13,8 @@ git show <commit>:docs/history/dsh-048.md
 
 ## 1. 阶段演进主线
 
+闭环恢复专项的[历史任务书](closed-loop-recovery/taskbook.md)与[验收记录](closed-loop-recovery/progress.md)保存在本目录。
+
 - **S1：运行身份、日志与录制基础（DSH-001～013）**：建立不可变类型配置、控制租约客户端与 Episode 生命周期管理、有界结构化日志（`robot_run_logging`）、单写线程有界 MCAP 录制与流式分块哈希审计，将运行状态、录制完整性与物理任务结果解耦。
 - **S2：MuJoCo 双 Panda 仿真环境（DSH-014～017）**：锁定 Python 依赖哈希与 Menagerie Panda 资产，构建双 Panda 堆叠场景、三路相机（全局 + 左右腕）、确定性复位、关键位姿 IK 净空检查与静态可见性门禁。
 - **S3：有界跟随控制与动作块执行（DSH-018～032）**：实现双 Panda 16 维 SI 执行器映射、分段三次样条验证、Ruckig 有界跟随规划（`SubmitFollower`）、双指接触完成判定、跨块平滑接续与 gRPC Policy 推理闭环。

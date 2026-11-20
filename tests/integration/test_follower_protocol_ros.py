@@ -38,7 +38,7 @@ except ImportError as error:  # pragma: no cover - host without ROS
     pytest.skip(f"ROS unavailable: {error}", allow_module_level=True)
 
 ROOT = Path(__file__).resolve().parents[2]
-PROFILES = ROOT / "shared/scenarios/panda_sim/stack/profiles"
+PROFILES = ROOT / "shared/scenarios/marvin_sim/stack/profiles"
 for source in (
     ROOT / "simulation/mujoco/src",
     ROOT / "shared/common/python/contracts/src",
@@ -57,11 +57,11 @@ from robot_backend_sim.common.follower.follower_protocol import (  # noqa: E402
 )
 from test_backend_ros import Stack, _profile_context, acquire  # noqa: E402
 
-PROFILE_PATH = PROFILES / "robots/panda_stack_v1/profile.json"
+PROFILE_PATH = PROFILES / "robots/marvin_stack_v1/profile.json"
 SCHEMAS = ROOT / "shared/common/interfaces/schemas"
 FOLLOWER_CONFIG = ROOT / "tests/fixtures/simulation/backend_follower.yaml"
-CONTROL = load_control_config(PROFILES / "control/panda_control_v1.yaml")
-FOLLOWER = load_follower_config(PROFILES / "control/panda_follower_v1.yaml")
+CONTROL = load_control_config(PROFILES / "control/marvin_control_v1.yaml")
+FOLLOWER = load_follower_config(PROFILES / "control/marvin_follower_v1.yaml")
 PROFILE = load_profile(PROFILE_PATH, SCHEMAS)
 BASE = PROFILE.initial_positions
 COUNT = len(BASE)

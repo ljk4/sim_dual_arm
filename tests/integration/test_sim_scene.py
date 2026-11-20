@@ -5,7 +5,6 @@ import sys
 from pathlib import Path
 
 import pytest
-from model_helpers import replace
 
 mujoco = pytest.importorskip("mujoco")
 np = pytest.importorskip("numpy")

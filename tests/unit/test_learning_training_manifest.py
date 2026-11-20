@@ -11,7 +11,7 @@ from dual_arm_learning.training import TrainingError, masked_l1, verify_dataset_
 from model_helpers import replace
 
 ROOT = Path(__file__).resolve().parents[2]
-SCENARIO = ROOT / "shared/scenarios/panda_sim/stack"
+SCENARIO = ROOT / "shared/scenarios/marvin_sim/stack"
 
 
 def _write(path: Path, value: object) -> None:

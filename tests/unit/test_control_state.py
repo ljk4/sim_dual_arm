@@ -11,7 +11,7 @@ from robot_contracts.trajectory.spline import ReferenceSample
 from robot_trajectory.follower import PreparedFollowerPlan
 
 ROOT = Path(__file__).resolve().parents[2]
-PROFILES = ROOT / "shared/scenarios/panda_sim/stack/profiles"
+PROFILES = ROOT / "shared/scenarios/marvin_sim/stack/profiles"
 SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
@@ -33,11 +33,11 @@ from robot_backend_sim.common.follower.follower_plan import prepare_follower_pla
 ruckig = pytest.importorskip("ruckig")
 
 PROFILE = load_profile(
-    PROFILES / "robots/panda_stack_v1/profile.json",
+    PROFILES / "robots/marvin_stack_v1/profile.json",
     ROOT / "shared/common/interfaces/schemas/v1",
 )
-CONTROL = load_control_config(PROFILES / "control/panda_control_v1.yaml")
-FOLLOWER = load_follower_config(PROFILES / "control/panda_follower_v1.yaml")
+CONTROL = load_control_config(PROFILES / "control/marvin_control_v1.yaml")
+FOLLOWER = load_follower_config(PROFILES / "control/marvin_follower_v1.yaml")
 PROFILE_DIGEST = PROFILE.digest
 BASE = PROFILE.initial_positions
 JOINT_COUNT = len(BASE)
@@ -62,7 +62,7 @@ def command(**changes) -> ControlCommand:
 
 
 def chunk_at(
-    position: float,
+    displacement: float,
     *,
     observation_id: int = 1,
     settle_at_end: bool = True,
@@ -70,7 +70,7 @@ def chunk_at(
     targets = []
     for index in range(FOLLOWER.target_count):
         values = list(BASE)
-        values[0] = position * (index + 1) / FOLLOWER.target_count
+        values[0] += displacement * (index + 1) / FOLLOWER.target_count
         targets.append(Target((index + 1) * 50_000_000, tuple(values)))
     window = ActionWindow(
         observation_id,

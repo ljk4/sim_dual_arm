@@ -22,11 +22,11 @@ from robot_backend_sim.common.config.motion_config import (  # noqa: E402
 )
 from robot_contracts.models import ContractError  # noqa: E402
 
-CONFIG_PATH = ROOT / "shared/scenarios/panda_sim/stack/profiles/control/panda_control_v1.yaml"
+CONFIG_PATH = ROOT / "shared/scenarios/marvin_sim/stack/profiles/control/marvin_control_v1.yaml"
 DEFAULT_DOCUMENT = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
 
 
-def write_document(tmp_path: Path, document: object, name: str = "panda_control.yaml") -> Path:
+def write_document(tmp_path: Path, document: object, name: str = "marvin_control.yaml") -> Path:
     path = tmp_path / name
     path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
     return path
@@ -42,8 +42,8 @@ def test_candidate_initial_values_and_si_configuration():
     config = load_control_config(CONFIG_PATH)
     assert config.joint_names == CONTROL_JOINT_NAMES
     assert config.max_accelerations == ((1.0,) * 7 + (0.5,) + (1.0,) * 7 + (0.5,))
-    assert config.position_tolerances == ((0.012,) * 7 + (0.002,) + (0.012,) * 7 + (0.002,))
-    assert config.velocity_tolerances == ((0.025,) * 7 + (0.004,) + (0.025,) * 7 + (0.004,))
+    assert config.position_tolerances == ((0.010,) * 7 + (0.001,)) * 2
+    assert config.velocity_tolerances == ((0.020,) * 7 + (0.005,)) * 2
     assert config.stable_duration_s == pytest.approx(0.2)
     assert config.stable_duration_ns == 200_000_000
     assert config.settle_timeout_ns == 2_000_000_000
