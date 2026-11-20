@@ -16,5 +16,5 @@ ASSET_ROOT = Path(__file__).resolve().parents[4] / "assets"
 
 
 def robot_model_path(assembly: str) -> Path:
-    """Resolve the fixed-version model selected by ``robot.assembly``."""
+    """Resolve the model selected by ``robot.assembly``."""
     return get_robot_plugin(assembly).model_path

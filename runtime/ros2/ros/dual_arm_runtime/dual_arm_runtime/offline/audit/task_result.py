@@ -8,8 +8,6 @@ from robot_contracts.episodes import TaskOutcome, TaskResult
 
 from .records import TaskFact
 
-TASK_FACT_SCHEMA_VERSION = 1
-
 
 def task_result_from_fact(fact: TaskFact | None) -> TaskResult:
     """Map a frozen TaskState message; absent truth stays not_evaluated."""
@@ -42,7 +40,6 @@ def task_fact_document(
     """Return the bounded JSON sidecar written next to the MCAP manifest."""
     if fact is None:
         return {
-            "schema_version": TASK_FACT_SCHEMA_VERSION,
             "evaluated": False,
             "action_source": action_source,
             "test_only": bool(test_only),
@@ -52,7 +49,6 @@ def task_fact_document(
     phase = str(getattr(fact, "phase", ""))
     failure_reason = str(getattr(fact, "failure_reason", ""))
     return {
-        "schema_version": TASK_FACT_SCHEMA_VERSION,
         "evaluated": True,
         "action_source": action_source,
         "test_only": bool(test_only),
@@ -83,7 +79,6 @@ def task_fact_document(
 
 
 __all__ = [
-    "TASK_FACT_SCHEMA_VERSION",
     "task_fact_document",
     "task_result_for_runtime",
     "task_result_from_fact",

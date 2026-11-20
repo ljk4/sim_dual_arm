@@ -1,6 +1,5 @@
 # Marvin 交接正式训练：显式 --mode full 时训练 5000 步。
 # 模型结构与 ACT 适配保持一致；batch/worker 按本机 6 GiB GPU 实测设置。
-schema_version: 1
 mode: smoke
 seed: 20261113
 device: cuda
@@ -46,8 +45,6 @@ training:
   log_every_steps: 10
   val_every_steps: 1000
   val_batches: 512
-  # 固定场景布局下做 ±4 px 随机平移增强，缓解视觉骨干对腕部视角像素坐标过拟合。
-  image_shift_px: 4
   deterministic: true
 modes:
   smoke:

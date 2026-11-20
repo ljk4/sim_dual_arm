@@ -2,7 +2,7 @@
 # record: the follower curve is not required to pass through every
 # raw prediction.  The complete raw StreamCommand (including any unselected
 # tail) is retained in `request`; the explicit curve, limits, terminal speeds,
-# versions and acceptance times are copied verbatim.
+# producer algorithm and acceptance times are copied verbatim.
 robot_api_msgs/StreamCommand request
 uint64 motion_seq
 int64 accepted_sim_time_ns
@@ -34,9 +34,5 @@ uint64 extension_ns
 bool[<=64] velocity_limited
 bool[<=64] acceleration_limited
 bool[<=64] boundary_preserved
-# Producer identity is retained as recorded.  sampler_version and
-# normalization_version are the shared conventions the numeric checks use.
-string algorithm_version
-string sampler_version
-string normalization_version
+string algorithm
 string reference_digest

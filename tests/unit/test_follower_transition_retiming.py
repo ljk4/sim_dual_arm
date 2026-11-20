@@ -1,5 +1,4 @@
-"""Real-Ruckig regression: unreachable gripper transitions stay rejected,
-and the explicit retimed request is the one that is accepted."""
+"""Verify the follower deviation gate before and after Runtime retiming."""
 
 from __future__ import annotations
 
@@ -7,9 +6,9 @@ import re
 from pathlib import Path
 
 import pytest
+from follower_fixtures import generate_prepared_follower
 from robot_backend_sim.common.config.follower_config import FollowerConfig
 from robot_backend_sim.common.config.motion_config import ControlConfig
-from robot_backend_sim.common.follower.follower_plan import prepare_follower_plan
 from robot_contracts.action_chunks import ActionWindow, ChunkAnchor
 from robot_contracts.models import ContractError, RobotProfile, Target
 from robot_contracts.profiles import load_profile
@@ -22,7 +21,7 @@ SCHEMAS = ROOT / "shared/common/interfaces/schemas"
 
 STACK = {
     "profile": (
-        ROOT / "shared/scenarios/marvin_sim/stack/profiles/robots/marvin_stack_v1/profile.json"
+        ROOT / "shared/scenarios/marvin_sim/stack/profiles/robots/marvin_stack/profile.json"
     ),
     "axis": "right_gripper_width",
     "anchor_position": 0.022205447806916776,
@@ -30,12 +29,11 @@ STACK = {
     "targets": [0.0798648298, 0.0799270198, 0.0799685493, 0.08, 0.08, 0.08, 0.08, 0.08,
                 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08],
     "budget": 0.04,
-    "original_deviation": 0.055660997126913504,
     "original_target_deviation": 0.05565938197175449,
 }
 HANDOVER = {
     "profile": (ROOT / "shared/scenarios/marvin_sim/handover/profiles/robots"
-                / "marvin_handover_v1/profile.json"),
+                / "marvin_handover/profile.json"),
     "axis": "left_gripper_width",
     "anchor_position": 0.062495712249460864,
     "anchor_velocity": -0.02887703449999999,
@@ -44,7 +42,6 @@ HANDOVER = {
                 0.0752321482, 0.0736427903, 0.0721163824, 0.0712288246, 0.0688857734,
                 0.0675751567, 0.0655966103, 0.0638245493, 0.0624155514, 0.0610159598],
     "budget": 0.01,
-    "original_deviation": 0.019727525391288196,
     "original_target_deviation": 0.019716277049734998,
 }
 CASES = [
@@ -109,7 +106,7 @@ def _anchor(case, profile: RobotProfile) -> ChunkAnchor:
 def test_original_gripper_transition_is_still_rejected(case):
     profile = load_profile(case["profile"], SCHEMAS)
     with pytest.raises(ContractError) as error:
-        prepare_follower_plan(
+        generate_prepared_follower(
             _anchor(case, profile), _window(case, profile), profile, _control(profile),
             _follower(profile, case["budget"]), is_final=False,
             duration_grid_ns=2_000_000,
@@ -117,7 +114,7 @@ def test_original_gripper_transition_is_still_rejected(case):
     assert error.value.reason == "FOLLOWER_DEVIATION_EXCEEDED"
     assert case["axis"] in str(error.value)
     measured = float(re.search(r"deviation ([0-9.eE+-]+) exceeds", str(error.value)).group(1))
-    assert measured == pytest.approx(case["original_deviation"], rel=1e-6)
+    assert measured > case["budget"]
 
 
 @pytest.mark.parametrize("case", CASES)
@@ -134,7 +131,7 @@ def test_retimed_gripper_transition_is_executable_and_reports_both_deviations(ca
         window, anchor, profile.joints, control.max_accelerations,
         follower.max_target_deviations, linear_axes)
     assert retimed.retimed
-    prepared = prepare_follower_plan(
+    prepared = generate_prepared_follower(
         anchor, retimed.window, profile, control, follower, is_final=False,
         duration_grid_ns=2_000_000,
     )

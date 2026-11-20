@@ -158,7 +158,6 @@ def _empty_document(
     max_blackout_ns: int, min_ratio: float, phase_observations: dict, rules: dict[str, Any]
 ) -> dict:
     return {
-        "schema_version": 1,
         "qualified": False,
         "phase_based": bool(phase_observations),
         "failure_reasons": ["no quality rules configured"],
@@ -312,7 +311,6 @@ def quality_summary(
         bool(timelines) and not failures and bool(rule_report) and phase_based
     )
     return {
-        "schema_version": 1,
         "qualified": qualified,
         "phase_based": phase_based,
         "action_source": action_source,

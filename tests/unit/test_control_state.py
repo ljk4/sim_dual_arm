@@ -16,6 +16,7 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
+from follower_fixtures import generate_prepared_follower  # noqa: E402
 from robot_backend_sim.common.config.follower_config import load_follower_config  # noqa: E402
 from robot_backend_sim.common.config.motion_config import load_control_config  # noqa: E402
 from robot_backend_sim.common.control.control_state import (  # noqa: E402
@@ -28,17 +29,14 @@ from robot_backend_sim.common.control.control_state import (  # noqa: E402
     LeaseBook,
     PreparedControlCommand,
 )
-from robot_backend_sim.common.follower.follower_plan import prepare_follower_plan  # noqa: E402
 from scenario_fixtures import MARVIN_SHARED_PROFILES  # noqa: E402
 
-ruckig = pytest.importorskip("ruckig")
-
 PROFILE = load_profile(
-    PROFILES / "robots/marvin_stack_v1/profile.json",
-    ROOT / "shared/common/interfaces/schemas/v1",
+    PROFILES / "robots/marvin_stack/profile.json",
+    ROOT / "shared/common/interfaces/schemas",
 )
-CONTROL = load_control_config(MARVIN_SHARED_PROFILES / "control/marvin_control_v1.yaml")
-FOLLOWER = load_follower_config(MARVIN_SHARED_PROFILES / "control/marvin_follower_v1.yaml")
+CONTROL = load_control_config(MARVIN_SHARED_PROFILES / "control/marvin_control.yaml")
+FOLLOWER = load_follower_config(MARVIN_SHARED_PROFILES / "control/marvin_follower.yaml")
 PROFILE_DIGEST = PROFILE.digest
 BASE = PROFILE.initial_positions
 JOINT_COUNT = len(BASE)
@@ -87,7 +85,7 @@ def chunk_at(
         ReferenceSample(BASE, (0.0,) * JOINT_COUNT, (0.0,) * JOINT_COUNT),
         PROFILE_DIGEST,
     )
-    return prepare_follower_plan(
+    return generate_prepared_follower(
         anchor,
         window,
         PROFILE,

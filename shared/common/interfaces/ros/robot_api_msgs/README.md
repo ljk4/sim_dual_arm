@@ -7,14 +7,13 @@
 
 [`CMakeLists.txt`](CMakeLists.txt) 是接口编译与安装的唯一入口。修改接口定义后，须在 `runtime` 容器内重新运行 `scripts/build_sdk.sh`。
 
-## 版本与能力
+## 后端能力
 
-当前包版本 **0.3.0**（[`package.xml`](package.xml)），能力标识 **`execution_feedback.gripper_set.v1`**：
+后端声明 `bounded_target_follower` 与 `execution_feedback.gripper_set` 能力，Runtime 启动时核对所需能力。
 
 - `ExecutionFeedback.grippers` 为 `GripperFeedback[<=8]`，`GripperFeedback.fingers` 为 `FingerFeedback[<=8]`；夹爪允许 0～8 个，每个夹爪允许 1～8 个手指。Marvin 的“恰好左右双指”规则在 `simulation` 实现侧，不在公共消息中。
-- `FollowerReference.curve_duration_ns` 是生产者完整曲线的总时长（`uint64`）。0.3.0 只把该字段从 `ruckig_duration_ns` 改名，CDR 类型、顺序和边界未变；字段关系与校验以 [`robot_contracts`](../../../python/contracts/src/robot_contracts/trajectory/follower_reference.py) 为准。
-- 当前消费者要求所需能力由后端明确声明；接口包版本、生成类型与已记录消息定义须匹配实际使用格式。
+- `SubmitFollower` 接收原始窗口及 Runtime 生成的 `ReferenceSegment` 系数。后端校验后广播已接受的 `FollowerReference`。字段关系与校验见 [`robot_contracts`](../../../python/contracts/src/robot_contracts/trajectory/follower_reference.py)。
 
-旧轨迹的 CDR 布局不变：读取前[核对完整定义](../../../../../runtime/ros2/ros/dual_arm_runtime/dual_arm_runtime/offline/follower_definition.py)，仅接受已知字段改名，再由当前生成类型解码，用 v1 摘要载荷校验并重建当前记录。其他未知布局明确拒绝。使用方式见[离线导出与审计](../../../../../runtime/ros2/ros/dual_arm_runtime/dual_arm_runtime/offline/README.md)。
+离线读取时[核对定义](../../../../../runtime/ros2/ros/dual_arm_runtime/dual_arm_runtime/offline/follower_definition.py)，按记录的 CDR 布局解码并校验生效参考的摘要。使用方式见[离线导出与审计](../../../../../runtime/ros2/ros/dual_arm_runtime/dual_arm_runtime/offline/README.md)。
 
 目录导航：[上级目录](../README.md)

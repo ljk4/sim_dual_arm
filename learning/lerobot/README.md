@@ -28,7 +28,7 @@ uv pip install -e third_party/src/lerobot-act-v0.6.1
 uv pip install pydantic pyyaml jsonschema pillow pyarrow safetensors grpcio grpcio-tools av
 ```
 
-Policy gRPC SDK 由运行端容器生成：先执行 `./env.sh runtime` 进入 `runtime` 容器并运行 `scripts/build_sdk.sh`，再把 `build/generated/policy-sdk/dual_arm_policy` 复制到云服务器的同名相对路径（`<repo>/build/generated/policy-sdk`）。训练权重 `third_party/weights/resnet18-f37072fd.pth` 也必须存在。
+在 Runtime 容器运行 `scripts/build_sdk.sh --policy-only` 生成 Policy gRPC SDK。把 `build/generated/policy-sdk/` 整个目录复制到云服务器仓库的同名路径，保留 `dual_arm_policy` 包和 `source.sha256`。训练使用本地权重 `third_party/weights/resnet18-f37072fd.pth`。
 
 云服务器上没有项目容器，脚本内的 `setup.sh` 需要一个显式环境。把下面内容写入 `~/.bashrc`（路径按实际仓库位置调整）：
 
@@ -84,14 +84,14 @@ bash learning/lerobot/scripts/server_policy.sh --robot marvin_sim --task stack
 
    ```bash
    scripts/client_policy.sh --robot marvin_sim --task stack \
-     --seed 20000 --set policy.endpoint=host.docker.internal:50051
+     --reset-seed 20000 --policy-endpoint host.docker.internal:50051
    scripts/client_interactive.sh --robot marvin_sim --task stack \
-     --seed 20000 --set policy.endpoint=host.docker.internal:50051
+     --seed 20000 --policy-endpoint host.docker.internal:50051
    ```
 
    若策略服务改为在云服务器的 Docker 容器中运行，用 `docker compose` 的 `ports: ["50051:50051"]`（只绑定 `127.0.0.1`）暴露服务，再按第 4 步建立隧道即可。
 
-6. **批量并行推理**：在**本机项目根目录**执行 `./inference_parallel.sh --robot marvin_sim --task stack --count 10 --workers auto`；它会自行启动多个隔离的仿真后端并复用云端策略服务。
+6. **批量并行推理**。在本机项目根目录执行 `./inference_parallel.sh --robot marvin_sim --task stack --count 10 --workers auto --policy-endpoint host.docker.internal:50051`。各仿真 worker 独立运行，复用同一个云端策略服务。
 
 > `ssh` 建议使用密钥登录与 `~/.ssh/config` 别名；连接中断会同时断开策略服务，长时批量评测请使用 `tmux`/`systemd` 保持隧道。
 
@@ -104,7 +104,7 @@ bash learning/lerobot/scripts/server_policy.sh --robot marvin_sim --task stack
 
 ## 常用脚本
 
-在 `learning` 容器内执行，所有脚本均要求二选一传入 `--robot <robot> --task <task>` 或 `--config <recipe>`，并支持 `--set dot.path=value` 覆盖参数：
+在 `learning` 容器内执行，使用 `--robot <robot> --task <task>` 或 `--config <recipe>` 选择配方。训练模式、步数上限、模型路径和设备等常用设置有专用参数，其余参数在对应配方中修改。
 
 - `scripts/convert.sh`：将合格采集数据转换为训练/验证 LeRobot 数据集（输出到 `var/<robot>/<task>/datasets/lerobot/`）。
 - `scripts/train.sh`：训练 ACT 模型，直接写出 `var/<robot>/<task>/models/act_<时间戳>/model.safetensors` 与 `training_args.yaml`；训练日志、指标和终态摘要输出到 `var/<robot>/<task>/logs/training/act_<时间戳>/`。

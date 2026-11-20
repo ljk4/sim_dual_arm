@@ -1,8 +1,6 @@
 # follower
 
-受限跟随规划及协议。
-
-模块：`follower_plan.py`、`follower_protocol.py`。
+`follower_protocol.py` 校验运行端提交的受限跟随曲线，并生成接受后的参考反馈。
 
 本子包不依赖 ROS。
 

@@ -184,14 +184,14 @@ def test_bundle_override_is_relative_to_the_caller_cwd(scenario, monkeypatch):
 
 def test_duplicate_yaml_key_is_rejected(scenario):
     text = yaml.safe_dump(scenario.document, sort_keys=False)
-    text = text.replace("schema_version: 1\n", "schema_version: 1\nschema_version: 1\n", 1)
+    text += f"robot_id: {scenario.document['robot_id']}\n"
     scenario.binding_path.write_text(text, encoding="utf-8")
 
     with pytest.raises(BindingError) as caught:
         _load(scenario)
     assert caught.value.reason == "BINDING_SCHEMA"
     assert "duplicate key" in str(caught.value)
-    assert "schema_version" in str(caught.value)
+    assert "robot_id" in str(caught.value)
     assert str(scenario.binding_path) in str(caught.value)
 
 
@@ -212,19 +212,6 @@ def test_missing_required_fields_are_rejected(scenario, mutate, location):
         _load(scenario)
     assert caught.value.reason == "BINDING_SCHEMA"
     assert location in str(caught.value)
-    assert str(scenario.binding_path) in str(caught.value)
-
-
-@pytest.mark.parametrize("version", [0, 2, True, "1", 1.0])
-def test_unknown_schema_version_is_rejected(scenario, version):
-    document = scenario.copy()
-    document["schema_version"] = version
-    _write(scenario, document)
-
-    with pytest.raises(BindingError) as caught:
-        _load(scenario)
-    assert caught.value.reason == "BINDING_SCHEMA"
-    assert "schema_version" in str(caught.value)
     assert str(scenario.binding_path) in str(caught.value)
 
 
@@ -335,10 +322,10 @@ def test_relative_source_roots_cover_end_and_shared_configs(tmp_path):
     scenario = build_scenario(repository / "shared/scenarios/marvin_sim/stack")
     end_config = repository / "runtime/ros2/configs/existing.yaml"
     end_config.parent.mkdir(parents=True)
-    end_config.write_text("schema_version: 1\n", encoding="utf-8")
+    end_config.write_text("{}\n", encoding="utf-8")
     shared_config = repository / "shared/common/configs/shared.yaml"
     shared_config.parent.mkdir(parents=True)
-    shared_config.write_text("schema_version: 1\n", encoding="utf-8")
+    shared_config.write_text("{}\n", encoding="utf-8")
 
     document = scenario.copy()
     document["source_roots"] = [

@@ -1,10 +1,9 @@
-"""Planning and feedback adaptation for bounded-follower requests.
+"""Admission and feedback adaptation for bounded-follower requests.
 
 This module is the follower counterpart of :mod:`robot_backend_sim.common.runtime.protocol`.
-It compiles one already validated raw :class:`StreamRequest` into the existing
-``PreparedControlCommand`` envelope and freezes accepted evidence as a
-:class:`FollowerReference`.  It never runs physics, reads a scene/clock or
-publishes ROS messages, and it never mutates the frozen stream request.
+It validates the submitted reference against its :class:`StreamRequest`
+and local limits, producing a ``PreparedControlCommand``. Accepted evidence
+is frozen as a :class:`FollowerReference`.
 """
 
 from __future__ import annotations
@@ -15,7 +14,8 @@ from robot_contracts.trajectory.follower_reference import (
     FollowerReference,
     FollowerValidationLimits,
 )
-from robot_trajectory.follower import PreparedFollowerPlan
+from robot_contracts.trajectory.spline import ReferencePlan
+from robot_trajectory.follower import PreparedFollowerPlan, prepare_submitted_follower
 from robot_trajectory.follower_reference import follower_reference_from_prepared
 
 from robot_backend_sim.common.config.follower_config import FollowerConfig
@@ -25,7 +25,6 @@ from robot_backend_sim.common.control.control_state import (
     ControlStatus,
     PreparedControlCommand,
 )
-from robot_backend_sim.common.follower.follower_plan import prepare_follower_plan
 
 __all__ = [
     "follower_reference",
@@ -65,58 +64,22 @@ def validation_limits(
 
 def prepare_follower_request(
     request: StreamRequest,
+    plan: ReferencePlan,
     profile: RobotProfile,
     control_config: ControlConfig,
     follower_config: FollowerConfig,
     *,
     duration_grid_ns: int | None = _GRID_NS,
-    is_final: bool | None = None,
 ) -> PreparedControlCommand:
-    """Compile one raw follower request with exactly one Ruckig plan.
-
-    ``request.kind`` must be ``STREAM_FIRST`` or ``STREAM_NEXT``.  By default
-    ``request.settle_at_end`` is the explicit final-block flag: a true value
-    asks the DSH-030 planner to extend to zero terminal velocity, exactly like a
-    strict final stream chunk.  The caller may pass ``is_final`` explicitly when
-    it has additional terminal knowledge; the two values must agree.
-    """
-    if not isinstance(request, StreamRequest):
-        raise _invalid("INVALID_FOLLOWER_REQUEST", "request must be a StreamRequest")
-    if request.kind not in (REQUEST_STREAM_FIRST, REQUEST_STREAM_NEXT):
-        raise _invalid(
-            "INVALID_FOLLOWER_REQUEST",
-            "follower requests allow only STREAM_FIRST or STREAM_NEXT",
-        )
-    if request.anchor is None or request.window is None:
-        raise _invalid("INVALID_FOLLOWER_REQUEST", "follower request needs an anchor/window")
-    if not isinstance(profile, RobotProfile):
-        raise _invalid("PROFILE_MISMATCH", "profile must be a RobotProfile")
-    if not isinstance(control_config, ControlConfig):
-        raise _invalid("INVALID_FOLLOWER_REQUEST", "control_config must be ControlConfig")
-    if not isinstance(follower_config, FollowerConfig):
-        raise _invalid("INVALID_FOLLOWER_REQUEST", "follower_config must be FollowerConfig")
-
-    final = request.settle_at_end if is_final is None else is_final
-    if not isinstance(final, bool):
-        raise _invalid("INVALID_FOLLOWER_REQUEST", "is_final must be a bool")
-    if final != request.settle_at_end:
-        raise _invalid(
-            "INVALID_FOLLOWER_REQUEST",
-            "is_final must agree with the raw request settle_at_end flag",
-        )
-    if request.trajectory.joint_names != tuple(profile.joint_names):
-        raise _invalid("PROFILE_MISMATCH", "request joint order differs from profile")
-    if request.trajectory.context.robot_profile_hash != profile.digest:
-        raise _invalid("PROFILE_MISMATCH", "request profile digest differs from profile")
-
-    prepared = prepare_follower_plan(
-        request.anchor,
-        request.window,
+    """Validate a producer's precomputed follower plan without solving again."""
+    limits = validation_limits(
+        control_config, follower_config, duration_grid_ns=duration_grid_ns
+    )
+    prepared = prepare_submitted_follower(
+        request,
+        plan,
         profile,
-        control_config,
-        follower_config,
-        is_final=final,
-        duration_grid_ns=duration_grid_ns,
+        limits,
     )
     return PreparedControlCommand(request.command, prepared, request=request)
 

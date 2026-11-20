@@ -32,7 +32,7 @@ _SHARED_ROOT = Path(os.environ.get("SHARED_ROOT", "/shared"))
 _SCENARIO = _SHARED_ROOT / "scenarios/marvin_sim/handover"
 DEFAULT_SCENE_CONFIG = _SCENARIO / "configs/simulation/scene/marvin_handover.yaml"
 DEFAULT_PLANNING_CONFIG = _SCENARIO / "configs/simulation/planning/handover_paths.yaml"
-DEFAULT_PROFILE = _SCENARIO / "profiles/robots/marvin_handover_v1/profile.json"
+DEFAULT_PROFILE = _SCENARIO / "profiles/robots/marvin_handover/profile.json"
 DEFAULT_SCHEMAS = _SHARED_ROOT / "common/interfaces/schemas"
 DEFAULT_REPORT_ROOT = (
     Path(os.environ.get("DATA_ROOT", "/data")) / "marvin_sim/handover/debug/handover"
@@ -117,7 +117,6 @@ def run(arguments: HandoverCheckArguments) -> int:
         max_velocities=_velocities(profile),
     )
     document = {
-        "schema_version": 1,
         "kind": "handover_paths",
         "run_id": arguments.run_id,
         "created_at_utc": utc_now(),

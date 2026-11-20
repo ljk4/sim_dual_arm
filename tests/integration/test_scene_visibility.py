@@ -81,7 +81,10 @@ def test_rgb_and_segmentation_come_from_one_immutable_snapshot(scene, renderer):
     np.testing.assert_array_equal(scene.data.qvel, scene_state["qvel"])
     assert scene.data.time == scene_state["time"]
 
-    # The old snapshot is independent of the physics data's latest reset.
+    # The old snapshot is independent of later changes to the physics data.
+    scene.data.joint("source_free").qpos[0] += 0.01
+    mujoco.mj_forward(scene.model, scene.data)
+    assert not np.array_equal(renderer.capture(scene.data).state, original_state)
     scene.reset(23)
     np.testing.assert_array_equal(snapshot.state, original_state)
 
@@ -121,13 +124,7 @@ def test_snapshot_time_matches_reported_state_and_mismatch_is_rejected(scene, re
     scene.reset(11)
 
 
-def test_full_check_entry_with_one_real_layout(tmp_path, monkeypatch):
-    real_build_layouts = marvin_visibility.build_layouts
-    monkeypatch.setattr(
-        marvin_visibility,
-        "build_layouts",
-        lambda config, scene: real_build_layouts(config, scene)[:1],
-    )
+def test_full_check_entry_with_nominal_layout(tmp_path):
     arguments = check_scene.SceneCheckArguments(
         scene_config=CONFIG_PATH,
         check_config=CHECK_PATH,
@@ -148,6 +145,7 @@ def test_full_check_entry_with_one_real_layout(tmp_path, monkeypatch):
     assert report["throughput"]["measured_groups"] == 20
     assert report["gl"]["nvidia"] is True
     layout = report["layouts"][0]
+    assert layout["layout_id"] == "nominal"
     assert set(layout["rgb"]) == {"global", "left_wrist", "right_wrist"}
     for relative in layout["rgb"].values():
         assert (arguments.report_root / arguments.run_id / relative).is_file()

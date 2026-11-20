@@ -35,7 +35,7 @@ from robot_contracts.task_state import TaskState
 from robot_run_logging import EventContext, EventLogger, LogSettings
 
 ROOT = Path(__file__).resolve().parents[2]
-SCHEMAS = ROOT / "shared/common/interfaces/schemas/v1"
+SCHEMAS = ROOT / "shared/common/interfaces/schemas"
 
 
 def _document(name):
@@ -119,7 +119,7 @@ def test_ros_bounded_feedback_bounds_match_the_contract():
     (Target, "JointTarget", {"time_ns": "time_from_observation_ns"}),
 ])
 def test_proto_fields_match_models(model, message, rename):
-    text = (ROOT / "shared/common/interfaces/policy/v1/policy.proto").read_text()
+    text = (ROOT / "shared/common/interfaces/policy/policy.proto").read_text()
     fields = _proto_fields(text, message)
     _same_fields({rename.get(name, name) for name in model.model_fields}, fields)
     for name, field in model.model_json_schema()["properties"].items():
@@ -166,7 +166,7 @@ def test_episode_result_schema_matches_models(model, section, optional):
 def test_profile_schema_matches_models():
     schema = _document("robot_profile.schema.json")
     # digest is derived from the source document, never part of that hashed document.
-    _schema_pair(RobotProfile, schema, excluded=("digest",), optional=("schema_version",))
+    _schema_pair(RobotProfile, schema, excluded=("digest",))
     # File schemas restrict physical units; JointSpec also supports synthetic test axes.
     _schema_pair(
         JointSpec,
@@ -174,9 +174,6 @@ def test_profile_schema_matches_models():
         enum_differences={"unit": (None, ["rad", "m"])},
     )
     _schema_pair(CameraSpec, schema["properties"]["cameras"]["items"])
-    assert schema["properties"]["schema_version"]["const"] == 2
-    version = RobotProfile.model_json_schema()["properties"]["schema_version"]
-    assert version["minimum"] == version["maximum"] == version["default"] == 2
 
 
 def test_all_profile_documents_validate():
@@ -229,7 +226,7 @@ def test_pair_check_detects_a_deleted_field(format):
         with pytest.raises(AssertionError):
             _same_fields(RunContext.model_fields, _ros_fields(changed))
     elif format == "proto":
-        text = (ROOT / "shared/common/interfaces/policy/v1/policy.proto").read_text()
+        text = (ROOT / "shared/common/interfaces/policy/policy.proto").read_text()
         changed = text.replace("string robot_id = 1;", "")
         with pytest.raises(AssertionError):
             _same_fields(RunContext.model_fields, _proto_fields(changed, "RunContext"))
@@ -259,4 +256,4 @@ def test_teacher_service_is_a_scenario_extension_not_a_common_package():
     assert (extension / "srv/GetTeacherChunk.srv").is_file()
     assert "srv/GetTeacherChunk.srv" in (extension / "CMakeLists.txt").read_text()
     capability = (extension / "msg/TeacherCapability.msg").read_text()
-    assert "marvin_stack_api_msgs.teacher_chunk.v1" in capability
+    assert "marvin_stack_api_msgs.teacher_chunk" in capability

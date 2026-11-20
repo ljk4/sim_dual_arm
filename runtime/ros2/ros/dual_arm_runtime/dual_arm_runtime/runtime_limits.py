@@ -1,18 +1,19 @@
-"""Runtime configuration checks for control limits and task monitoring."""
+"""Runtime control limits and common stream configuration bounds."""
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from robot_contracts.models import ContractError
 
-from dual_arm_runtime.runtime_config import RuntimeConfiguration
+if TYPE_CHECKING:
+    from dual_arm_runtime.runtime_config import RuntimeConfiguration
 
-
-def task_enabled(configuration: RuntimeConfiguration) -> bool:
-    recipe = configuration.recipe
-    stream = recipe.policy if recipe.action_source == "policy" else recipe.teacher
-    return recipe.action_source == "teacher" or (
-        stream is not None and stream.termination_mode == "task"
-    )
+INT64_MAX = 2**63 - 1
+MAX_CHUNKS = 2048
+MAX_TASK_BUDGET_NS = 300_000_000_000
+STREAM_CHUNK_SIZE = 60
+STREAM_PERIOD_NS = 50_000_000
 
 
 def control_limits(configuration: RuntimeConfiguration) -> tuple[float, ...]:
@@ -41,4 +42,4 @@ def control_limits(configuration: RuntimeConfiguration) -> tuple[float, ...]:
     return tuple(result)
 
 
-__all__ = ["control_limits", "task_enabled"]
+__all__ = ["control_limits"]

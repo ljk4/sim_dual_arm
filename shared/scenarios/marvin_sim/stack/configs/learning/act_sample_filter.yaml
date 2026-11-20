@@ -1,5 +1,4 @@
 # In-memory static sample filter applied during full ACT training.
-schema_version: 1
 fps: 20
 chunk_size: 60
 arms:

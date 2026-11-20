@@ -17,9 +17,9 @@ from scenario_fixtures import MARVIN_SHARED_PROFILES
 ROOT = Path(__file__).resolve().parents[2]
 PROFILES = ROOT / "shared/scenarios/marvin_sim/stack/profiles"
 SCHEMAS = ROOT / "shared/common/interfaces/schemas"
-STACK_PROFILE = PROFILES / "robots/marvin_stack_v1/profile.json"
-STACK_OBSERVATION = MARVIN_SHARED_PROFILES / "observations/marvin_rgb_joint_v1.json"
-STACK_ACTION = MARVIN_SHARED_PROFILES / "actions/marvin_joint_position_v1.json"
+STACK_PROFILE = PROFILES / "robots/marvin_stack/profile.json"
+STACK_OBSERVATION = MARVIN_SHARED_PROFILES / "observations/marvin_rgb_joint.json"
+STACK_ACTION = MARVIN_SHARED_PROFILES / "actions/marvin_joint_position.json"
 
 
 def _stack_document():
@@ -32,19 +32,17 @@ def _write(tmp_path, document, name="profile.json"):
     return path
 
 
-def test_v2_profile_supports_one_camera_and_preserves_the_source_hash(tmp_path):
+def test_profile_supports_one_camera_and_preserves_the_source_hash(tmp_path):
     document = _stack_document()
     document["cameras"] = document["cameras"][:1]
     path = _write(tmp_path, document)
     profile = load_profile(path, SCHEMAS)
 
-    assert profile.schema_version == 2
     assert profile.digest == semantic_hash(document)
     assert profile.camera_names == ("global",)
-    assert load_profile(path, SCHEMAS / "v1") == profile
 
 
-def test_v2_profile_is_an_immutable_multi_camera_view():
+def test_profile_is_an_immutable_multi_camera_view():
     raw = _stack_document()
     profile = load_profile(STACK_PROFILE, SCHEMAS)
     cameras = normalize_cameras(raw)
@@ -92,18 +90,6 @@ def test_stack_bindings_have_si_units_and_exact_orders():
         (320, 240),
         (320, 240),
     ]
-
-
-@pytest.mark.parametrize("version", [True, False, "2", 0, 1, 2.0, 3, None])
-def test_non_v2_profile_version_is_rejected(tmp_path, version):
-    document = _stack_document()
-    document["schema_version"] = version
-    path = _write(tmp_path, document)
-
-    with pytest.raises(ContractError, match="schema_version") as caught:
-        load_profile(path, SCHEMAS)
-    assert caught.value.reason == "SCHEMA_MISMATCH"
-    assert str(path) in str(caught.value)
 
 
 @pytest.mark.parametrize("change", ["name", "frame_id"])
@@ -255,14 +241,6 @@ def test_legacy_camera_object_is_rejected_by_file_and_model_loaders(tmp_path):
         normalize_cameras(document)
 
 
-@pytest.mark.parametrize("version", [1, True, 2.0])
-def test_direct_profile_model_rejects_non_v2_versions(version):
-    document = _stack_document()
-    document["schema_version"] = version
-    with pytest.raises(ContractError, match="schema_version"):
-        RobotProfile.validate_dict(document)
-
-
 @pytest.mark.parametrize("digest", [None, "", "0" * 63])
 def test_direct_camera_model_requires_a_calibration_digest(digest):
     document = _stack_document()["cameras"][0]
@@ -272,11 +250,3 @@ def test_direct_camera_model_requires_a_calibration_digest(digest):
         document["calibration_digest"] = digest
     with pytest.raises(ContractError, match="calibration_digest"):
         CameraSpec.validate_dict(document)
-
-
-def test_profile_model_defaults_to_v2_but_files_require_an_explicit_version(tmp_path):
-    document = _stack_document()
-    del document["schema_version"]
-    assert RobotProfile.validate_dict(document).schema_version == 2
-    with pytest.raises(ContractError, match="schema_version"):
-        load_profile(_write(tmp_path, document), SCHEMAS)

@@ -1,6 +1,6 @@
 {
-  "schema_version": 1,
-  "schema_id": "marvin_rgb_joint_v1",
+  "schema_id": "marvin_joint_position",
+  "command_space": "joint_position",
   "joint_names": [
     "left_joint1",
     "left_joint2",
@@ -18,12 +18,5 @@
     "right_joint6",
     "right_joint7",
     "right_gripper_width"
-  ],
-  "camera_names": [
-    "global",
-    "left_wrist",
-    "right_wrist"
-  ],
-  "max_skew_ns": 100000000,
-  "max_age_ns": 500000000
+  ]
 }

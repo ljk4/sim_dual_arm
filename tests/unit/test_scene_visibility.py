@@ -61,12 +61,8 @@ def set_value(*path, value):
 def test_default_check_config_is_typed_frozen_and_cross_checked():
     config = marvin_visibility.load_check_config(CHECK_CONFIG, scene_config())
 
-    assert config.schema_version == 1
-    assert config.seeds == (11, 23, 37)
     assert config.camera_names == ("global", "left_wrist", "right_wrist")
     assert config.object_names == ("source", "target")
-    assert config.boundary_layout_count == 64
-    assert config.layout_count == 67
     assert config.threshold("global", "source") == 32
     assert config.threshold("left_wrist", "target") == 16
     assert config.threshold("right_wrist", "source") == 32
@@ -77,55 +73,12 @@ def test_default_check_config_is_typed_frozen_and_cross_checked():
     with pytest.raises(TypeError):
         config.min_visible_pixels["global"]["source"] = 1  # type: ignore[index]
     with pytest.raises(ValidationError):
-        config.seeds = (1,)  # type: ignore[misc]
-
-
-def test_boundary_layouts_cover_both_objects_jointly_and_within_domains():
-    scene = scene_config()
-    config = marvin_visibility.load_check_config(CHECK_CONFIG, scene)
-    layouts = marvin_visibility.build_layouts(config, scene)
-
-    assert len(layouts) == 67
-    seeds = [layout for layout in layouts if layout.kind == "seed"]
-    boundaries = [layout for layout in layouts if layout.kind == "boundary"]
-    assert [layout.layout_id for layout in seeds] == ["seed-11", "seed-23", "seed-37"]
-    assert len(boundaries) == 64
-    assert [layout.layout_id for layout in boundaries[:2]] == ["boundary-000", "boundary-001"]
-
-    by_name = {obj.name: obj for obj in scene.objects}
-    combinations: dict[str, set[tuple[float, float, float]]] = {name: set() for name in by_name}
-    for layout in boundaries:
-        assert tuple(placement.name for placement in layout.placements) == ("source", "target")
-        for placement in layout.placements:
-            obj = by_name[placement.name]
-            assert abs(placement.x - obj.nominal_xy[0]) == pytest.approx(obj.randomization.xy_m)
-            assert abs(placement.y - obj.nominal_xy[1]) == pytest.approx(obj.randomization.xy_m)
-            assert abs(placement.yaw_deg) == pytest.approx(obj.randomization.yaw_deg)
-            combinations[placement.name].add(
-                (
-                    round(placement.x - obj.nominal_xy[0], 9),
-                    round(placement.y - obj.nominal_xy[1], 9),
-                    placement.yaw_deg,
-                )
-            )
-    for obj in scene.objects:
-        assert len(combinations[obj.name]) == 8
-
-    # Independence: with source fixed, target still visits all eight corners.
-    source_fixed = [
-        layout for layout in boundaries if layout.placements[0] == boundaries[0].placements[0]
-    ]
-    assert len(source_fixed) == 8
-    assert len({layout.placements[1] for layout in source_fixed}) == 8
+        config.throughput = None  # type: ignore[misc,assignment]
 
 
 @pytest.mark.parametrize(
     ("mutate", "field"),
     [
-        (set_value("schema_version", value=2), "schema_version"),
-        (set_value("seeds", value=[]), "seeds"),
-        (set_value("seeds", value=[1, 1, 2]), "seeds"),
-        (set_value("seeds", value=[True, 1, 2]), "seeds"),
         (set_value("throughput", "measure_groups", value=0), "throughput.measure_groups"),
         (set_value("throughput", "warmup_groups", value=True), "throughput.warmup_groups"),
         (set_value("throughput", "max_elapsed_s", value=0.0), "throughput.max_elapsed_s"),
@@ -182,7 +135,7 @@ def test_unknown_and_duplicate_yaml_keys_are_rejected(tmp_path):
 
     duplicate = tmp_path / "duplicate.yaml"
     duplicate.write_text(
-        CHECK_CONFIG.read_text(encoding="utf-8") + "\nseeds: [1, 2, 3]\n", encoding="utf-8"
+        CHECK_CONFIG.read_text(encoding="utf-8") + "\nthroughput: {}\n", encoding="utf-8"
     )
     with pytest.raises(marvin_visibility.SceneCheckConfigError, match="duplicate key"):
         marvin_visibility.load_check_config(duplicate, scene_config())
@@ -221,39 +174,23 @@ def test_zero_pixels_fails_a_camera_and_layout():
     assert all(camera.passed is False for camera in result.cameras)
 
 
-def test_contact_sheet_uses_first_and_worst_layouts(tmp_path):
+def test_contact_sheet_contains_one_row_of_nominal_camera_views(tmp_path):
     from PIL import Image
 
     config = marvin_visibility.load_check_config(CHECK_CONFIG, scene_config())
     run_dir = tmp_path / "run"
-    results = []
-    for index, (layout_id, total) in enumerate((("seed-11", 300), ("boundary-007", 40))):
-        rgb = {}
-        for camera in config.camera_names:
-            path = run_dir / "artifacts/layouts" / layout_id / f"{camera}.png"
-            path.parent.mkdir(parents=True, exist_ok=True)
-            Image.new("RGB", (8, 6), (index * 40, 20, 30)).save(path)
-            rgb[camera] = path.relative_to(run_dir).as_posix()
-        results.append(
-            {
-                "layout_id": layout_id,
-                "kind": "seed" if index == 0 else "boundary",
-                "total_pixels": total,
-                "minimum_margin": total - 100,
-                "passed": True,
-                "rgb": rgb,
-            }
-        )
-    selected = check_scene._select_contact_layouts(results)
-    assert [item["layout_id"] for item in selected] == ["seed-11", "boundary-007"]
+    rgb = {}
+    for camera in config.camera_names:
+        path = run_dir / "artifacts/layouts/nominal" / f"{camera}.png"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (8, 6), (20, 20, 30)).save(path)
+        rgb[camera] = path.relative_to(run_dir).as_posix()
+    layout = {"layout_id": "nominal", "total_pixels": 300, "passed": True, "rgb": rgb}
 
-    relative = check_scene._write_contact_sheet(run_dir, results, config)
+    relative = check_scene._write_contact_sheet(run_dir, layout, config)
     assert relative == "artifacts/contact_sheet.png"
-    sheet = run_dir / relative
-    assert sheet.is_file()
-    with Image.open(sheet) as image:
-        assert image.width > 8 * 3
-        assert image.height > 6 * 2
+    with Image.open(run_dir / relative) as image:
+        assert image.size == (52, 52)
 
 
 class _TestRGB:
@@ -281,7 +218,7 @@ def test_save_rgb_images_writes_three_real_pngs_and_protects_layout_directory(tm
     from PIL import Image
 
     run_dir = tmp_path / "run"
-    layout = marvin_visibility.LayoutSpec(layout_id="seed-11", kind="seed", seed=11, placements=())
+    layout = marvin_visibility.NOMINAL_LAYOUT
     rgb = {
         camera: _TestRGB(40 + index, 30, (10 + index, 20, 30))
         for index, camera in enumerate(("global", "left_wrist", "right_wrist"))
@@ -308,7 +245,7 @@ def test_save_rgb_images_write_error_is_artifact_write_failed(tmp_path, monkeypa
     from PIL import Image
 
     run_dir = tmp_path / "run"
-    layout = marvin_visibility.LayoutSpec(layout_id="seed-11", kind="seed", seed=11, placements=())
+    layout = marvin_visibility.NOMINAL_LAYOUT
     rgb = {camera: _TestRGB(8, 6, (1, 2, 3)) for camera in ("global", "left_wrist")}
 
     def fail_save(*_args, **_kwargs):
@@ -326,29 +263,25 @@ def test_contact_sheet_write_error_has_clear_reason(tmp_path, monkeypatch):
 
     config = marvin_visibility.load_check_config(CHECK_CONFIG, scene_config())
     run_dir = tmp_path / "run"
-    layout = marvin_visibility.LayoutSpec(layout_id="seed-11", kind="seed", seed=11, placements=())
+    layout = marvin_visibility.NOMINAL_LAYOUT
     paths = check_scene._save_rgb_images(
         run_dir,
         layout,
         {camera: _TestRGB(8, 6, (9, 8, 7)) for camera in config.camera_names},
     )
-    results = [
-        {
-            "layout_id": "seed-11",
-            "kind": "seed",
-            "total_pixels": 300,
-            "minimum_margin": 100,
-            "passed": True,
-            "rgb": paths,
-        }
-    ]
+    layout_report = {
+        "layout_id": layout.layout_id,
+        "total_pixels": 300,
+        "passed": True,
+        "rgb": paths,
+    }
 
     def fail_save(*_args, **_kwargs):
         raise OSError("sheet disk full")
 
     monkeypatch.setattr(Image.Image, "save", fail_save)
     with pytest.raises(check_scene.SceneCheckFailure) as caught:
-        check_scene._write_contact_sheet(run_dir, results, config)
+        check_scene._write_contact_sheet(run_dir, layout_report, config)
     assert caught.value.reason == "contact_sheet_write_failed"
     assert "sheet disk full" in caught.value.message
 
@@ -418,9 +351,9 @@ class FakeScene:
         self.data = SimpleNamespace(qpos=[0.0] * 32)
         self.reset(11)
 
-    def reset(self, seed: int) -> None:
+    def reset(self, _seed: int) -> None:
         qpos = [0.0] * 32
-        qpos[18:25] = [0.55 + seed / 1000, -0.08, 0.80, 1.0, 0.0, 0.0, 0.0]
+        qpos[18:25] = [0.55, -0.08, 0.80, 1.0, 0.0, 0.0, 0.0]
         qpos[25:32] = [0.55, -0.30, 0.81, 1.0, 0.0, 0.0, 0.0]
         self.data.qpos = qpos
 
@@ -437,9 +370,6 @@ class FakeRenderer:
         self.closed = False
 
     def capture(self, _data):
-        return object()
-
-    def derive_snapshot(self, _base, _updates):
         return object()
 
     def render_rgb(self, _snapshot):
@@ -535,14 +465,12 @@ def test_run_success_publishes_report_after_logger_close(tmp_path, monkeypatch):
     assert report["logs_closed"] is True
     assert report["artifact"] == "artifacts/contact_sheet.png"
     assert report["layout_summary"] == {
-        "count": 67,
-        "passed": 67,
+        "count": 1,
+        "passed": 1,
         "failed": 0,
-        "boundary_count": 64,
-        "seed_count": 3,
     }
     assert report["throughput"]["measured_groups"] == 20
-    assert len(report["layouts"]) == 67
+    assert [layout["layout_id"] for layout in report["layouts"]] == ["nominal"]
     assert renderer.closed is True
     assert logger.events[-1] == "checks_finished"
     assert not any("complete" in event or "success" in event for event in logger.events)

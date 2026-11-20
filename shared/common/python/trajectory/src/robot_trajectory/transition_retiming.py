@@ -1,6 +1,6 @@
 """Explicit per-axis execution-target shaping onto the reachable envelope.
 
-The follower plans one bounded Ruckig curve from the inherited reference state to
+The follower plans a bounded curve from the inherited reference state to
 the last selected target.  A predicted absolute target that is far ahead of the
 physically reachable envelope at an early point cannot be followed even by a
 maximal-velocity reference, so the unmodified request is rejected.  For a
@@ -15,7 +15,7 @@ The original model targets stay with the caller as evidence.  The deviation from
 those original targets and the deviation from the adapted execution targets are
 distinct quantities; satisfying the follower budget for the adapted path says
 nothing about the original one.  A point inside the envelope is only a necessary
-condition for a feasible curve, so callers keep the real Ruckig plan,
+condition for a feasible curve, so callers keep the generated plan,
 continuous limit, braking and follower-deviation checks and propagate every
 failure.  No speed, acceleration, braking or deviation budget is changed here.
 """

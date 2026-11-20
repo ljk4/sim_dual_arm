@@ -2,7 +2,7 @@
 # total gripper openings.  These bound the difference between the bounded
 # reference and the requested piecewise-linear targets.  Joint hard limits,
 # velocity/acceleration bounds and braking feasibility are enforced separately.
-# Teacher collection uses marvin_follower_v1.yaml.
+# Teacher collection uses marvin_follower.yaml.
 joint_names:
   - left_joint1
   - left_joint2

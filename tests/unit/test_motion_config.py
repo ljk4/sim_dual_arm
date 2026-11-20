@@ -23,7 +23,7 @@ from robot_backend_sim.common.config.motion_config import (  # noqa: E402
 from robot_contracts.models import ContractError  # noqa: E402
 from scenario_fixtures import MARVIN_SHARED_PROFILES  # noqa: E402
 
-CONFIG_PATH = MARVIN_SHARED_PROFILES / "control/marvin_control_v1.yaml"
+CONFIG_PATH = MARVIN_SHARED_PROFILES / "control/marvin_control.yaml"
 DEFAULT_DOCUMENT = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
 
 

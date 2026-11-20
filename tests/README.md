@@ -3,7 +3,7 @@
 本目录包含全仓单元测试、集成测试、测试替身（Fakes）与配置夹具（Fixtures）：
 
 - **[`unit/`](unit/README.md)**：纯 Python 单元测试与合成数据夹具，覆盖契约模型、轨迹数学、状态机、配置校验与学习流水线。
-- **[`integration/`](integration/README.md)**：涉及 ROS 2 通信、MuJoCo 物理执行、Ruckig 跟随与 LeRobot CPU 生命周期的集成测试。
+- **[`integration/`](integration/README.md)**：涉及 ROS 2 通信、提交轨迹的物理执行与 LeRobot CPU 生命周期的集成测试。
 - **[`fakes/`](fakes/README.md)**：仅供测试使用的确定性 Fake Policy Provider（`fakes/policy/`），标记 `test_only=true`，严禁混入正式评估。
 - **[`fixtures/`](fixtures/simulation/README.md)**：用于仿真、控制和策略协议回归的配置夹具。
 

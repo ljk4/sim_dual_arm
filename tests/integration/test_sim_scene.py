@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 import sys
 from pathlib import Path
 
@@ -15,6 +14,10 @@ if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
 from robot_backend_sim.marvin_sim.assembly import gripper_opening  # noqa: E402
+from robot_backend_sim.marvin_sim.scene_base import (  # noqa: E402
+    base_world_point,
+    combined_yaw_quaternion,
+)
 from robot_backend_sim.marvin_sim.stack.kinematics_config import (  # noqa: E402
     MARVIN_ARM_JOINT_RANGES,
 )
@@ -153,31 +156,22 @@ def test_same_seed_reset_restores_complete_state(scene):
         np.testing.assert_array_equal(scene.data.body(name).xpos, expected)
 
 
-def test_different_seeds_vary_objects_within_configured_domain(scene):
-    samples = []
-    for seed in (1, 2, 3, 4, 5):
-        scene.reset(seed)
-        seed_sample = []
-        for obj in scene.config.objects:
-            qpos = object_qpos(scene, obj.name)
-            x, y, z = qpos[:3]
-            quaternion = qpos[3:7]
-            yaw = 2.0 * math.atan2(quaternion[3], quaternion[0])
-            assert abs(x - obj.nominal_xy[0]) <= obj.randomization.xy_m + 1e-9
-            assert abs(y - obj.nominal_xy[1]) <= obj.randomization.xy_m + 1e-9
-            assert abs(yaw) <= math.radians(obj.randomization.yaw_deg) + 1e-9
-            expected_z = (
-                scene.config.robot.base_position[2]
-                + scene.config.table.top_z
-                + obj.half_extents[2]
-            )
-            assert z == pytest.approx(expected_z)
-            assert math.sqrt(float(np.dot(quaternion, quaternion))) == pytest.approx(1.0)
-            seed_sample.append((x, y, yaw))
-        samples.append(seed_sample)
+def test_seed_does_not_change_nominal_object_poses(scene):
+    robot = scene.config.robot
+    expected = {}
+    for obj in scene.config.objects:
+        center = base_world_point(
+            (*obj.nominal_xy, scene.config.table.top_z + obj.half_extents[2]),
+            robot.base_position,
+            robot.base_yaw_deg,
+        )
+        orientation = combined_yaw_quaternion(robot.base_yaw_deg, obj.nominal_yaw_deg)
+        expected[obj.name] = (*center, *orientation)
 
-    assert not np.allclose(samples[0], samples[1])
-    assert not np.allclose(samples[0], samples[2])
+    for seed in (0, 11, 1000, 11):
+        scene.reset(seed)
+        for name, pose in expected.items():
+            np.testing.assert_allclose(object_qpos(scene, name), pose, rtol=0.0, atol=1e-12)
 
 
 def test_default_objects_rest_on_table_for_short_run(scene):

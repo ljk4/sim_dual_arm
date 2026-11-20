@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import OrderedDict
 from typing import Any
 
 from robot_contracts.models import ContractError, RobotProfile, RunContext
 from robot_contracts.task_state import TaskState
 
 from robot_backend_sim.common.tasks.base import (
+    CAPTURE_HISTORY_LIMIT,
     TaskChunk,
     TaskChunkView,
     TaskPlan,
@@ -41,7 +43,7 @@ from robot_backend_sim.marvin_sim.stack.teacher import (
 
 __all__ = ["StackTaskPlugin", "TEACHER_CAPABILITY"]
 
-TEACHER_CAPABILITY = "marvin_stack_api_msgs.teacher_chunk.v1"
+TEACHER_CAPABILITY = "marvin_stack_api_msgs.teacher_chunk"
 _COMMAND_HISTORY = 64
 
 
@@ -66,8 +68,9 @@ class StackTaskPlugin:
         self._scene_config: Any = None
         self._binding: TaskBinding | None = None
         self._runtime: StackTaskRuntime | None = None
-        self._teacher_feedback: dict[int, TeacherFeedback] = {}
-        self._capture_gates: dict[int, StackGateFact] = {}
+        self._teacher_feedback: OrderedDict[int, tuple[TeacherFeedback, StackGateFact]] = (
+            OrderedDict()
+        )
         self._step_motion_start: dict[int, int] = {}
         self._prepared_command_id = ""
         self._chunk_cache: dict[str, tuple[str, TaskChunk]] = {}
@@ -282,7 +285,6 @@ class StackTaskPlugin:
                     "STALE_TASK_PREPARE", "scene objects moved between snapshot and commit"
                 )
         self._teacher_feedback.clear()
-        self._capture_gates.clear()
         self._step_motion_start.clear()
         self.clear_chunk_cache()
         stack_plan = plan.plan if isinstance(plan.plan, StackPlan) else None
@@ -368,7 +370,6 @@ class StackTaskPlugin:
     def reset(self, reason: str) -> TaskState:
         runtime = self._require_runtime()
         self._teacher_feedback.clear()
-        self._capture_gates.clear()
         self._step_motion_start.clear()
         self.clear_chunk_cache()
         return runtime.reset(reason)
@@ -393,11 +394,9 @@ class StackTaskPlugin:
             source_center=observation.source.center,  # type: ignore[attr-defined]
             right_tcp_distance_m=observation.right_tcp_to_source_m,  # type: ignore[attr-defined]
         )
-        if len(self._teacher_feedback) >= 2048:
-            self._teacher_feedback.clear()
-            self._capture_gates.clear()
-        self._teacher_feedback[feedback.capture_seq] = feedback
-        self._capture_gates[feedback.capture_seq] = gate
+        self._teacher_feedback[feedback.capture_seq] = (feedback, gate)
+        if len(self._teacher_feedback) > CAPTURE_HISTORY_LIMIT:
+            self._teacher_feedback.popitem(last=False)
 
     def chunk_view(
         self,
@@ -443,13 +442,13 @@ class StackTaskPlugin:
         plan = runtime.plan
         if plan is None or not isinstance(plan, StackPlan):
             raise _error("TASK_NOT_PREPARED", "task has no immutable stack plan")
-        feedback = self._teacher_feedback.get(capture_seq)
-        if feedback is None:
+        retained_feedback = self._teacher_feedback.get(capture_seq)
+        if retained_feedback is None:
             raise _error(
                 "CAPTURE_FEEDBACK_MISSING",
                 "no immutable teacher feedback exists for this capture",
             )
-        gate = self._capture_gates.get(capture_seq, runtime.gate_fact())
+        feedback, gate = retained_feedback
         return TaskChunkView(
             plan=plan,
             task_epoch=state.task_epoch,

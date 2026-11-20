@@ -76,11 +76,11 @@ _CAPABILITIES = (
     "command_query",
     "control_events",
     "follower_reference",
-    "execution_feedback.gripper_set.v1",
+    "execution_feedback.gripper_set",
     "contact_snapshot",
 )
 _TASK_CAPABILITIES = ("task_plugin", "task_state")
-_FOLLOWER_CAPABILITY = "bounded_target_follower_v1"
+_FOLLOWER_CAPABILITY = "bounded_target_follower"
 _EXIT_OK = 0
 _EXIT_FAILURE = 1
 
@@ -291,7 +291,6 @@ class BackendNode(Node):
         context = self._run_context()
         self._info_pub.publish(
             BackendInfo(
-                protocol_major=1,
                 context=context_message(context),
                 backend_kind="mujoco",
                 ready=fault is None and not self._stop_requested,
@@ -306,7 +305,7 @@ class BackendNode(Node):
     def _capabilities(self) -> tuple[str, ...]:
         capabilities = list(_CAPABILITIES)
         if self.config.reliable_sensors:
-            capabilities.append("reliable_sensor_streams_v1")
+            capabilities.append("reliable_sensor_streams")
         if self._worker.follower_config is None:
             capabilities.remove("follower_reference")
         else:

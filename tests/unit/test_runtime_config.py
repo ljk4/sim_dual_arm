@@ -6,11 +6,6 @@ from dual_arm_runtime.runtime_config import (
     MAX_LEASE_DURATION_NS,
     load_runtime_configuration,
 )
-from robot_contracts.episodes import (
-    DIAGNOSTIC_EPISODE_SCHEMA_VERSION,
-    POLICY_EPISODE_SCHEMA_VERSION,
-    manifest_schema_path,
-)
 from robot_contracts.models import ContractError
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -91,19 +86,6 @@ def test_missing_referenced_file_fails_with_source(tmp_path):
         load_runtime_configuration(write(tmp_path, value, absolute=False), ROOT)
 
 
-def test_manifest_schema_is_a_single_v1():
-    assert DIAGNOSTIC_EPISODE_SCHEMA_VERSION == 1
-    assert POLICY_EPISODE_SCHEMA_VERSION == 1
-    assert (
-        manifest_schema_path(ROOT / "shared/common/interfaces/schemas", 1)
-        .as_posix()
-        .endswith("v1/episode_manifest.schema.json")
-    )
-    with pytest.raises(ContractError) as caught:
-        manifest_schema_path(ROOT / "shared/common/interfaces/schemas", 2)
-    assert caught.value.reason == "UNSUPPORTED_SCHEMA_VERSION"
-
-
 def test_policy_max_chunks_can_cover_a_120_chunk_task(tmp_path):
     policy_config = CONFIG
     value = yaml.safe_load(policy_config.read_text(encoding="utf-8"))
@@ -146,7 +128,7 @@ def test_teacher_task_budget_is_bounded_and_covered_by_chunks(tmp_path):
     value["follower_config"] = str(fixture_follower)
     value.pop("policy")
     value["action_source"] = "teacher"
-    value["teacher_api"] = "marvin_stack_api_msgs.teacher_chunk.v1"
+    value["teacher_api"] = "marvin_stack_api_msgs.teacher_chunk"
     value["teacher"] = {
         "chunk_size": 60,
         "action_period_ns": 50_000_000,
@@ -167,7 +149,7 @@ def test_teacher_task_budget_is_bounded_and_covered_by_chunks(tmp_path):
     configuration = load_runtime_configuration(path, ROOT)
     assert configuration.recipe.teacher.task_sim_budget_ns == 180_000_000_000
     assert configuration.recipe.teacher.max_chunks == 400
-    assert "marvin_stack_api_msgs.teacher_chunk.v1" in (configuration.required_capabilities)
+    assert "marvin_stack_api_msgs.teacher_chunk" in (configuration.required_capabilities)
 
     # 180 s at a ten-point, 50 ms window needs 360 chunks.
     value["teacher"]["max_chunks"] = 359

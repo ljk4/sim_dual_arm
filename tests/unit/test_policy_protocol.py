@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_source_proto_has_fixed_observation_time_and_policy_metadata():
-    text = (ROOT / "shared/common/interfaces/policy/v1/policy.proto").read_text()
+    text = (ROOT / "shared/common/interfaces/policy/policy.proto").read_text()
     assert "time_from_observation_ns = 1;" in text
     assert "time_from_start_ns" not in text
     assert "uint32 chunk_size = 14;" in text
@@ -38,13 +38,14 @@ def test_source_proto_has_fixed_observation_time_and_policy_metadata():
         assert f"`{name}`" in scenario
 
 
-def test_generated_sdk_matches_the_new_contract_when_available():
-    pb2 = pytest.importorskip("dual_arm_policy.v1.policy_pb2")
-    assert pb2.DESCRIPTOR.package == "bimanual.policy.v1"
+def test_generated_sdk_matches_the_contract_when_available():
+    pb2 = pytest.importorskip("dual_arm_policy.policy_pb2")
+    assert pb2.DESCRIPTOR.package == "bimanual.policy"
     target = pb2.JointTarget.DESCRIPTOR.fields_by_name
     assert target["time_from_observation_ns"].number == 1
     assert "time_from_start_ns" not in target
     info = pb2.PolicyInfo.DESCRIPTOR.fields_by_name
+    assert len(info) == 14
     assert info["chunk_size"].number == 14
     assert info["test_only"].number == 15
     assert info["action_period_ns"].number == 10

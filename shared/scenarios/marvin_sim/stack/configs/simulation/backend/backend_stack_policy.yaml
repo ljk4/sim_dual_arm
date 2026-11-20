@@ -1,12 +1,12 @@
 # Marvin stack Policy inference simulation backend.
 robot:
   namespace: /robot
-  profile: ../../../profiles/robots/marvin_stack_v1/profile.json
+  profile: ../../../profiles/robots/marvin_stack/profile.json
   schemas: ../../../../../../common/interfaces/schemas
   scene: ../scene/marvin_stack.yaml
-  control: ../../../../handover/profiles/control/marvin_control_v1.yaml
-  stream: ../../../profiles/control/marvin_stream_v1.yaml
-  follower: ../../../../handover/profiles/control/marvin_follower_inference_v1.yaml
+  control: ../../../../handover/profiles/control/marvin_control.yaml
+  stream: ../../../profiles/control/marvin_stream.yaml
+  follower: ../../../../handover/profiles/control/marvin_follower_inference.yaml
   task: ../scene/marvin_stack_task.yaml
   task_type: stack
   task_mode: inference

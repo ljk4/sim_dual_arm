@@ -151,7 +151,6 @@ def test_successful_core_build_writes_marker_and_verify_accepts_it(tmp_path):
     marker = project / "output/contracts.json"
     assert marker.is_file()
     assert json.loads(marker.read_text()) == document
-    assert document["schema_version"] == 2
     assert list(document["packages"]) == ["robot_api_msgs"]
     assert verify(project, shared, project / "output") == document
 
@@ -313,14 +312,14 @@ def test_scenario_selection_uses_binding_packages_and_teacher_capability(tmp_pat
     )
     (extension / "msg").mkdir(exist_ok=True)
     (extension / "msg/TeacherCapability.msg").write_text(
-        "string ID=demo_api_msgs.teacher_chunk.v1\n"
+        "string ID=demo_api_msgs.teacher_chunk\n"
     )
     from scenario_fixtures import build_scenario
 
     tree = build_scenario(scenario)
     tree.document["interfaces"]["common_ros"] = ["robot_api_msgs", "sim_api_msgs"]
     tree.document["interfaces"]["extension_ros"] = ["extensions/ros/demo_api_msgs"]
-    tree.document["interfaces"]["teacher_api"] = "demo_api_msgs.teacher_chunk.v1"
+    tree.document["interfaces"]["teacher_api"] = "demo_api_msgs.teacher_chunk"
     tree.write()
 
     selection = dev_workspace.resolve_selection(
@@ -332,7 +331,7 @@ def test_scenario_selection_uses_binding_packages_and_teacher_capability(tmp_pat
     assert selection.kind == "binding"
     assert selection.scenario_id == "synthetic_sim/stack"
 
-    tree.document["interfaces"]["teacher_api"] = "demo_api_msgs.teacher_chunk.v2"
+    tree.document["interfaces"]["teacher_api"] = "other_api_msgs.teacher_chunk"
     tree.write()
     with pytest.raises(dev_workspace.DevWorkspaceError) as caught:
         dev_workspace.resolve_selection(project, shared_root=shared, scenario="demo/sim")
@@ -468,18 +467,6 @@ def test_run_colcon_uses_temporary_intermediates_and_cleans_them(tmp_path, monke
     assert command[base_index + 1] == str(
         (shared / "common/interfaces/ros/robot_api_msgs").resolve()
     )
-
-
-def test_old_marker_schema_is_rejected(tmp_path):
-    project, shared = project_tree(tmp_path)
-    build_root = project / "output"
-    build(project, shared, build_root)
-    document = json.loads((build_root / "contracts.json").read_text())
-    document["schema_version"] = 1
-    (build_root / "contracts.json").write_text(json.dumps(document))
-    with pytest.raises(dev_workspace.ContractCheckError) as caught:
-        verify(project, shared, build_root)
-    assert "schema is not 2" in str(caught.value)
 
 
 def test_generic_check_verifies_the_recorded_set_without_downgrading_it(tmp_path):

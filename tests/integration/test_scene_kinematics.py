@@ -243,26 +243,7 @@ def test_plane_with_zero_rbound_is_not_culled_and_reports_penetration():
     assert point.distance_m < 0.002
 
 
-def test_one_layout_end_to_end_with_real_logger_scene_renderer_and_png(
-    tmp_path, scene_config, kinematics_config, monkeypatch
-):
-    check_config = check_kinematics.visibility.load_check_config(CHECK_PATH, scene_config)
-    all_layouts = check_kinematics.visibility.build_layouts(check_config, scene_config)
-    assert check_config.max_layouts == 67
-    assert len(all_layouts) == 67
-    monkeypatch.setattr(
-        check_kinematics.visibility,
-        "build_layouts",
-        lambda _check, _scene: all_layouts[:1],
-    )
-
-    def load_one_layout(arguments):
-        scene = load_marvin_stack_scene_config(arguments.scene_config)
-        layout_config = check_kinematics.visibility.load_check_config(arguments.check_config, scene)
-        kin = load_kinematics_config(arguments.kinematics_config, scene)
-        return scene, layout_config, kin
-
-    monkeypatch.setattr(check_kinematics, "_load_configs", load_one_layout)
+def test_nominal_layout_end_to_end_with_real_logger_scene_renderer_and_png(tmp_path, scene_config):
     arguments = check_kinematics.KinematicsCheckArguments(
         scene_config=CONFIG_PATH,
         check_config=CHECK_PATH,
@@ -294,7 +275,7 @@ def test_one_layout_end_to_end_with_real_logger_scene_renderer_and_png(
     ):
         for camera in scene_config.cameras:
             assert (
-                run_dir / "artifacts" / "layouts" / "seed-11" / phase / f"{camera.name}.png"
+                run_dir / "artifacts" / "layouts" / "nominal" / phase / f"{camera.name}.png"
             ).is_file()
 
 
@@ -348,7 +329,7 @@ def test_real_segmentation_fails_an_impossible_visibility_threshold(
     }
     rgb_paths = {camera: f"artifacts/{camera}.png" for camera in segmentation}
     document = check_kinematics._vision_document(
-        "seed-11",
+        "nominal",
         result.phase,
         segmentation,
         geom_ids,

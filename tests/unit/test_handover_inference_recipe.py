@@ -33,7 +33,9 @@ def test_teacher_plan_budget_only_applies_when_teacher_is_enabled(tmp_path):
 
     # Verify the budget check follows teacher.enabled rather than literal duration.
     document = yaml.safe_load(INFERENCE_TASK.read_text(encoding="utf-8"))
-    document["planning_config"] = str((INFERENCE_TASK.parent / document["planning_config"]).resolve())
+    document["planning_config"] = str(
+        (INFERENCE_TASK.parent / document["planning_config"]).resolve()
+    )
     document["teacher"]["max_plan_duration_s"] = 200.0
     disabled_path = tmp_path / "inference_disabled.yaml"
     disabled_path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
@@ -97,11 +99,11 @@ def test_runtime_and_task_evaluation_budgets_agree(tmp_path):
 def test_inference_following_budget_covers_measured_model_output_only():
     inference = yaml.safe_load(
         (
-            SCENARIO / "profiles/control/marvin_follower_inference_v1.yaml"
+            SCENARIO / "profiles/control/marvin_follower_inference.yaml"
         ).read_text(encoding="utf-8")
     )
     teacher = yaml.safe_load(
-        (SCENARIO / "profiles/control/marvin_follower_v1.yaml").read_text(encoding="utf-8")
+        (SCENARIO / "profiles/control/marvin_follower.yaml").read_text(encoding="utf-8")
     )
     measured = [
         0.2675, 1.1691, 0.4657, 0.8825, 0.4904, 0.3937, 1.3685, 0.0030,
@@ -131,14 +133,9 @@ def test_marvin_binding_declares_learning_and_policy_recipes():
     dataset = yaml.safe_load(
         (SCENARIO / recipes["dataset"]).read_text(encoding="utf-8")
     )
-    assert dataset["diagnostic"] is False
-    assert dataset["expected"] == {
-        "formal_episodes": 50,
-        "training_episodes": 45,
-        "validation_episodes": 5,
-        "validation_positions": [9, 19, 29, 39, 49],
-    }
-    assert document["interfaces"]["policy_api"] == "bimanual.policy.v1"
+    assert dataset["validation_percent"] == 10
+    assert dataset["expected"] == {"formal_episodes": 50}
+    assert document["interfaces"]["policy_api"] == "bimanual.policy"
     policy_service = yaml.safe_load(
         (SCENARIO / recipes["policy_service"]).read_text(encoding="utf-8")
     )

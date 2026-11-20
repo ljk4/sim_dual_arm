@@ -62,7 +62,6 @@ from robot_backend_sim.tools.check_kinematics_report import (
 
 COMPONENT = "kinematics_check"
 KIND = "kinematics"
-REPORT_SCHEMA_VERSION = 1
 _SHARED_ROOT = Path(os.environ.get("SHARED_ROOT", "/shared"))
 _SHARED_RECIPES = (
     _SHARED_ROOT / "scenarios/marvin_sim/stack/configs/simulation"
@@ -150,24 +149,12 @@ def _load_configs(
         kinematics_config = load_kinematics_config(arguments.kinematics_config, scene_config)
     except KinematicsConfigError as error:
         raise KinematicsCheckFailure("kinematics_config_invalid", str(error)) from error
-    layouts = visibility.build_layouts(check_config, scene_config)
-    if len(layouts) > kinematics_config.budgets.max_layouts:
-        raise KinematicsCheckFailure(
-            "layout_budget_exceeded",
-            f"{len(layouts)} layouts exceed max_layouts={kinematics_config.budgets.max_layouts}",
-        )
-    if len(layouts) != check_config.layout_count:
-        raise KinematicsCheckFailure(
-            "layout_count_mismatch",
-            f"built {len(layouts)} layouts but check config declares {check_config.layout_count}",
-        )
     return scene_config, check_config, kinematics_config
 
 
 def _kinematics_config_document(config: KinematicsCheckConfig) -> dict[str, object]:
     return {
         "source": config.source,
-        "schema_version": config.schema_version,
         "ik": {
             "dt_s": config.ik.dt_s,
             "max_iterations": config.ik.max_iterations,
@@ -209,7 +196,6 @@ def _kinematics_config_document(config: KinematicsCheckConfig) -> dict[str, obje
             ]
         },
         "budgets": {
-            "max_layouts": config.budgets.max_layouts,
             "max_png_bytes": config.budgets.max_png_total_bytes,
             "max_report_bytes": config.budgets.max_report_bytes,
         },
@@ -319,20 +305,18 @@ def _load_check_configs(arguments, report: dict):
             "resolved": _kinematics_config_document(kinematics_config),
         },
     }
-    return scene_config, check_config, kinematics_config
+    return scene_config, kinematics_config
 
 
 def _execute_checks(arguments, run_dir: Path, report: dict, logger):
     _emit(logger, "kinematics_check_start", "kinematics key-pose check started")
-    scene_config, check_config, kinematics_config = _load_check_configs(arguments, report)
+    scene_config, kinematics_config = _load_check_configs(arguments, report)
     _emit(
         logger,
         "configs_loaded",
         "scene, layout and kinematics configurations validated before GL",
         {
-            "seeds": len(check_config.seeds),
-            "boundary_layouts": check_config.boundary_layout_count,
-            "layouts": check_config.layout_count,
+            "layout": visibility.NOMINAL_LAYOUT.layout_id,
             "max_iterations": kinematics_config.ik.max_iterations,
         },
     )
@@ -358,7 +342,6 @@ def _execute_checks(arguments, run_dir: Path, report: dict, logger):
         run_dir,
         scene,
         scene_config,
-        check_config,
         kinematics_config,
         renderer,
         logger,
@@ -371,7 +354,7 @@ def _execute_checks(arguments, run_dir: Path, report: dict, logger):
         for result in results
         for failure_document in result["failures"]  # type: ignore[index]
     ]
-    report["summary"] = _summarize_results(results, check_config)
+    report["summary"] = _summarize_results(results)
     overview = _write_overview(run_dir, results, kinematics_config, budget)
     report["artifact"] = overview
     report["artifacts"] = {
@@ -447,14 +430,9 @@ def visibility_document(config: SceneCheckConfig) -> dict[str, object]:
     """Serialize the accepted layout check config without importing its private code."""
     return {
         "source": config.source,
-        "schema_version": config.schema_version,
-        "seeds": list(config.seeds),
-        "boundary_xy_corners": [list(corner) for corner in config.boundary_xy_corners],
-        "boundary_yaw_signs": list(config.boundary_yaw_signs),
         "min_visible_pixels": {
             camera: dict(objects) for camera, objects in config.min_visible_pixels.items()
         },
-        "max_layouts": config.max_layouts,
         "throughput": {
             "warmup_groups": config.throughput.warmup_groups,
             "measure_groups": config.throughput.measure_groups,
@@ -464,8 +442,6 @@ def visibility_document(config: SceneCheckConfig) -> dict[str, object]:
         "camera_resolutions": {
             camera: list(resolution) for camera, resolution in config.camera_resolutions.items()
         },
-        "layout_count": config.layout_count,
-        "boundary_layout_count": config.boundary_layout_count,
     }
 
 

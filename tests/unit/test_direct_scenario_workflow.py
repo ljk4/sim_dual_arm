@@ -37,7 +37,7 @@ def _shared(tmp_path: Path):
     return repo, shared, scenario
 
 
-def _touch(path: Path, text: str = "schema_version: 1\n") -> Path:
+def _touch(path: Path, text: str = "{}\n") -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
     return path
@@ -105,7 +105,7 @@ def _teacher_task(scenario, *, duration_s: float = 30.0) -> None:
     backend.write_text(yaml.safe_dump(document, sort_keys=False))
 
 
-def test_simulation_scenario_expands_paths_seed_and_overrides(tmp_path):
+def test_simulation_scenario_expands_paths_seed_and_realtime_speed(tmp_path):
     repo, shared, scenario = _shared(tmp_path)
     recipe = _simulation_recipe(scenario, shared)
     resolved = resolve_scenario_backend(
@@ -113,7 +113,7 @@ def test_simulation_scenario_expands_paths_seed_and_overrides(tmp_path):
         role="teacher",
         shared_root=shared,
         seed=7,
-        overrides=["run.realtime_speed=0.4"],
+        realtime_speed=0.4,
     )
     assert resolved.selection["robot"] == "synthetic_sim"
     assert resolved.selection["task"] == "stack"
@@ -146,28 +146,28 @@ def test_runtime_teacher_scenario_injects_api_and_checks_budget(tmp_path):
     repo, shared, scenario = _shared(tmp_path)
     _simulation_recipe(scenario, shared)
     _teacher_task(scenario)
-    _runtime_recipe(scenario, "teacher")
+    recipe = _runtime_recipe(scenario, "teacher")
+    document = yaml.safe_load(recipe.read_text())
+    document["observation"]["max_age_ns"] = 250_000_000
+    recipe.write_text(yaml.safe_dump(document))
     resolved = resolve_scenario_runtime(
         robot="synthetic_sim", task="stack",
         role="teacher",
         shared_root=shared,
         project_root=repo,
         seed=5,
-        overrides=["observation.max_age_ns=250000000"],
     )
-    assert resolved.document["teacher_api"] == "marvin_stack_api_msgs.teacher_chunk.v1"
+    assert resolved.document["teacher_api"] == "marvin_stack_api_msgs.teacher_chunk"
     configuration = load_runtime_configuration_document(
         resolved.document,
         source=resolved.source,
         base_dir=resolved.base_dir,
         project_root=repo,
-        overrides=resolved.overrides,
         selection=resolved.selection,
     )
     assert configuration.recipe.reset.seed == 5
     assert configuration.recipe.observation.max_age_ns == 250_000_000
     assert configuration.selection["role"] == "teacher"
-    assert configuration.snapshot["overrides"] == ["observation.max_age_ns=250000000"]
 
 
 def test_runtime_teacher_scenario_rejects_budget_mismatch(tmp_path):
@@ -202,13 +202,15 @@ def test_runtime_policy_scenario_needs_no_bundle_or_model_identity(tmp_path):
         source=resolved.source,
         base_dir=resolved.base_dir,
         project_root=repo,
+        policy_endpoint="policy.example:50051",
         selection=resolved.selection,
     )
     assert configuration.recipe.action_source == "policy"
+    assert configuration.recipe.policy.endpoint == "policy.example:50051"
     assert not hasattr(configuration.recipe.policy, "model_bundle_digest")
 
 
-def test_runtime_scenario_rejects_unknown_override_path(tmp_path):
+def test_runtime_scenario_rejects_policy_endpoint_for_a_teacher_recipe(tmp_path):
     repo, shared, scenario = _shared(tmp_path)
     _simulation_recipe(scenario, shared)
     _teacher_task(scenario)
@@ -218,14 +220,44 @@ def test_runtime_scenario_rejects_unknown_override_path(tmp_path):
         role="teacher",
         shared_root=shared,
         project_root=repo,
-        overrides=["observation.not_a_field=1"],
     )
-    with pytest.raises(Exception, match="does not exist"):
+    with pytest.raises(Exception, match="--policy-endpoint requires a Policy recipe"):
         load_runtime_configuration_document(
             resolved.document,
             source=resolved.source,
             base_dir=resolved.base_dir,
             project_root=repo,
-            overrides=resolved.overrides,
+            policy_endpoint="policy.example:50051",
             selection=resolved.selection,
         )
+
+
+def test_hardware_binding_rejects_managed_task_and_accepts_basic_policy(tmp_path):
+    repo, shared, scenario = _shared(tmp_path)
+    scenario.document["backend"] = {"kind": "hardware", "implementation": "robot_api"}
+    for name in ("simulation_teacher", "simulation_policy", "runtime_teacher"):
+        scenario.document["recipes"].pop(name)
+    for name in ("extension_ros", "teacher_api"):
+        scenario.document["interfaces"].pop(name)
+    scenario.write()
+    recipe = _runtime_recipe(scenario, "policy")
+    document = yaml.safe_load(recipe.read_text())
+    document.pop("reset")
+    recipe.write_text(yaml.safe_dump(document))
+    selection = {
+        "robot": "synthetic_sim", "task": "stack", "project_root": repo, "shared_root": shared,
+    }
+    with pytest.raises(ScenarioRuntimeError, match="require a simulation binding"):
+        resolve_scenario_runtime(**selection)
+    document["policy"]["termination_mode"] = "finite_chunks"
+    recipe.write_text(yaml.safe_dump(document))
+
+    resolved = resolve_scenario_runtime(**selection)
+    configuration = load_runtime_configuration_document(
+        resolved.document,
+        source=resolved.source,
+        base_dir=resolved.base_dir,
+        project_root=repo,
+        selection=resolved.selection,
+    )
+    assert not configuration.recipe.simulation_capabilities

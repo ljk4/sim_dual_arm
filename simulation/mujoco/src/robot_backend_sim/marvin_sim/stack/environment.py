@@ -1,4 +1,4 @@
-"""Stack task environment: fixed table, two randomized cubes, camera mount and lights."""
+"""Stack task environment: table, cubes, camera mount and lights."""
 
 from __future__ import annotations
 

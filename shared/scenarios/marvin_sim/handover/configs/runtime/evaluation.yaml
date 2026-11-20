@@ -4,7 +4,6 @@
 # is present-and-false in task_result.json metrics.conditions.  The first
 # unreached stage names the failure stage.  Exactly one stage carries
 # `succeeded: true` (the terminal marker, not condition-based).
-schema_version: 1
 stages:
   - name: grasp
     label: 抓取/交接

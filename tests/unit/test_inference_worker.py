@@ -115,7 +115,7 @@ def test_prepare_workers_uses_recipe_speed_when_unspecified(tmp_path):
     (project / "var").mkdir(parents=True)
     runtime = _write(
         project / "runtime.yaml",
-        {"schema_version": 1, "action_source": "policy", "robot_namespace": "/robot"},
+        {"action_source": "policy", "robot_namespace": "/robot"},
     )
     backend = _write(
         project / "backend.yaml",
@@ -137,7 +137,6 @@ def test_prepare_workers_isolates_namespaces_and_domains(tmp_path):
     runtime = _write(
         project / "runtime.yaml",
         {
-            "schema_version": 1,
             "action_source": "policy",
             "robot_namespace": "/robot",
         },

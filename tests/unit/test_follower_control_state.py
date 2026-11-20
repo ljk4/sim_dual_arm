@@ -20,24 +20,20 @@ for source in (ROOT / "simulation/mujoco/src", ROOT / "shared/common/python/cont
         sys.path.insert(0, str(source))
 
 import robot_backend_sim.common.control.control_state as control_state_module  # noqa: E402
+from follower_fixtures import generate_prepared_follower  # noqa: E402
 from robot_backend_sim.common.config.follower_config import load_follower_config  # noqa: E402
 from robot_backend_sim.common.config.motion_config import load_control_config  # noqa: E402
 from robot_backend_sim.common.control.control_state import PreparedControlCommand  # noqa: E402
-from robot_backend_sim.common.follower.follower_plan import (  # noqa: E402
-    RUCKIG_ALGORITHM_VERSION,
-    prepare_follower_plan,
-)
 from robot_contracts.profiles import load_profile  # noqa: E402
+from robot_trajectory.follower import RUNTIME_FOLLOWER_ALGORITHM  # noqa: E402
 from scenario_fixtures import MARVIN_SHARED_PROFILES  # noqa: E402
 
-ruckig = pytest.importorskip("ruckig")
-
 PROFILE = load_profile(
-    PROFILES / "robots/marvin_stack_v1/profile.json",
-    ROOT / "shared/common/interfaces/schemas/v1",
+    PROFILES / "robots/marvin_stack/profile.json",
+    ROOT / "shared/common/interfaces/schemas",
 )
-CONTROL = load_control_config(MARVIN_SHARED_PROFILES / "control/marvin_control_v1.yaml")
-FOLLOWER = load_follower_config(MARVIN_SHARED_PROFILES / "control/marvin_follower_v1.yaml")
+CONTROL = load_control_config(MARVIN_SHARED_PROFILES / "control/marvin_control.yaml")
+FOLLOWER = load_follower_config(MARVIN_SHARED_PROFILES / "control/marvin_follower.yaml")
 BASE = PROFILE.initial_positions
 JOINT_COUNT = len(BASE)
 GRID_NS = 2_000_000
@@ -123,7 +119,7 @@ def follower_plan(
     action_window = window(
         source, handoff_ns=handoff_ns, observation_id=observation_id
     )
-    return prepare_follower_plan(
+    return generate_prepared_follower(
         anchor(action_window, positions=positions),
         action_window,
         PROFILE,
@@ -185,12 +181,12 @@ def test_follower_fingerprint_covers_coefficients_anchor_and_extension() -> None
     assert final.prepared.duration_grid_ns == GRID_NS
 
 
-def test_follower_fingerprint_covers_algorithm_version() -> None:
+def test_follower_fingerprint_covers_algorithm() -> None:
     prepared = follower_plan()
     original = packet(prepared).fingerprint
-    changed = replace(prepared, algorithm_version="other-producer/v1")
+    changed = replace(prepared, algorithm="other-producer")
     assert packet(changed).fingerprint != original
-    assert prepared.algorithm_version == RUCKIG_ALGORITHM_VERSION
+    assert prepared.algorithm == RUNTIME_FOLLOWER_ALGORITHM
 
 
 def test_follower_fingerprint_payload_keeps_all_terminal_and_deviation_evidence() -> None:
@@ -211,7 +207,7 @@ def test_follower_fingerprint_payload_keeps_all_terminal_and_deviation_evidence(
     prepared = follower_plan(source=tuple(closing), handoff_ns=0, positions=tuple(start))
     payload = control_state_module._fingerprint_payload(prepared)
     assert payload["kind"] == "FOLLOWER"
-    assert payload["algorithm_version"] == RUCKIG_ALGORITHM_VERSION
+    assert payload["algorithm"] == RUNTIME_FOLLOWER_ALGORITHM
     assert payload["raw_terminal_velocities"] == list(prepared.raw_terminal_velocities)
     assert payload["restricted_terminal_velocities"] == list(
         prepared.restricted_terminal_velocities
@@ -235,7 +231,7 @@ def test_follower_grid_is_strictly_validated() -> None:
     action_window = window(linear_source(), handoff_ns=251_000_000)
     for bad in (True, 0, -1, 1.5, "2000000"):
         with pytest.raises(ContractError) as caught:
-            prepare_follower_plan(
+            generate_prepared_follower(
                 anchor(action_window),
                 action_window,
                 PROFILE,
@@ -244,9 +240,9 @@ def test_follower_grid_is_strictly_validated() -> None:
                 is_final=False,
                 duration_grid_ns=bad,
             )
-        assert caught.value.reason == "INVALID_FOLLOWER_REQUEST"
+        assert caught.value.reason == "INVALID_FOLLOWER_REFERENCE"
     with pytest.raises(ContractError) as caught:
-        prepare_follower_plan(
+        generate_prepared_follower(
             anchor(action_window),
             action_window,
             PROFILE,
@@ -255,7 +251,7 @@ def test_follower_grid_is_strictly_validated() -> None:
             is_final=False,
             duration_grid_ns=GRID_NS,
         )
-    assert caught.value.reason == "INVALID_FOLLOWER_REQUEST"
+    assert caught.value.reason == "FOLLOWER_GRID_MISMATCH"
 
 
 def test_boundary_normalization_covers_confirmed_roundoff_values() -> None:

@@ -51,13 +51,13 @@ def test_selection_returns_binding_recipes_profiles_and_capabilities(tmp_path):
     assert selection["capabilities"] == {
         "backend": "simulation/mujoco",
         "runtime": "ros2",
-        "teacher": "marvin_stack_api_msgs.teacher_chunk.v1",
+        "teacher": "marvin_stack_api_msgs.teacher_chunk",
         "teacher_package": "marvin_stack_api_msgs",
         "teacher_package_path": str(
             (tree.scenario.root / "extensions/ros/marvin_stack_api_msgs").resolve()
         ),
     }
-    assert selection["interfaces"]["teacher_api"] == ("marvin_stack_api_msgs.teacher_chunk.v1")
+    assert selection["interfaces"]["teacher_api"] == ("marvin_stack_api_msgs.teacher_chunk")
 
 
 @pytest.mark.parametrize(
@@ -120,7 +120,7 @@ def test_missing_teacher_service_definition_is_rejected(tmp_path):
 
 def test_teacher_capability_must_match_the_selected_extension(tmp_path):
     tree = build_collection_tree(tmp_path)
-    tree.scenario.document["interfaces"]["teacher_api"] = "marvin_stack_api_msgs.teacher_chunk.v2"
+    tree.scenario.document["interfaces"]["teacher_api"] = "other_api_msgs.teacher_chunk"
     tree.scenario.write()
     with pytest.raises(CampaignError, match="no selected extension declares"):
         _select(tree)
@@ -128,7 +128,7 @@ def test_teacher_capability_must_match_the_selected_extension(tmp_path):
     tree = build_collection_tree(tmp_path / "second")
     _rewrite(
         tree.runtime_recipe,
-        lambda document: document.update(teacher_api="marvin_stack_api_msgs.teacher_chunk.v2"),
+        lambda document: document.update(teacher_api="other_api_msgs.teacher_chunk"),
     )
     with pytest.raises(CampaignError, match="teacher_api .* differs from binding"):
         _select(tree)
@@ -170,12 +170,15 @@ def _preflight_args(tree, *extra):
 
 def test_preflight_plan_is_read_only(tmp_path):
     tree = build_collection_tree(tmp_path)
+    tree.campaign["launch"]["stop_grace_s"] = 45.0
+    tree.campaign_recipe.write_text(yaml.safe_dump(tree.campaign))
     plan = record_preflight.build_plan(_preflight_args(tree))
     assert plan["selection"]["binding"]["sha256"] == sha(tree.scenario.binding_path)
     assert plan["campaign_config"] == str(tree.campaign_recipe.resolve())
     assert plan["runtime_config"] == str(tree.runtime_recipe.resolve())
     assert plan["simulation_template"] == str(tree.backend_recipe.resolve())
     assert plan["campaign_status"]["formal_target_qualified"] == 50
+    assert plan["stop_grace_s"] == 45.0
     assert not (tree.repo / "var/synthetic_sim/stack").exists()
     assert not (tree.repo / "var/synthetic_sim/stack/logs/collection/record-pools").exists()
 

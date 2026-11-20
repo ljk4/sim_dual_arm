@@ -3,15 +3,9 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "schema_version": {
-      "const": 1
-    },
     "schema_id": {
       "type": "string",
       "minLength": 1
-    },
-    "command_space": {
-      "const": "joint_position"
     },
     "joint_names": {
       "type": "array",
@@ -21,12 +15,30 @@
         "type": "string",
         "minLength": 1
       }
+    },
+    "camera_names": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "max_skew_ns": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "max_age_ns": {
+      "type": "integer",
+      "minimum": 1
     }
   },
   "required": [
-    "schema_version",
     "schema_id",
-    "command_space",
-    "joint_names"
+    "joint_names",
+    "camera_names",
+    "max_skew_ns",
+    "max_age_ns"
   ]
 }

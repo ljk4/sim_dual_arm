@@ -11,6 +11,7 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from robot_contracts.models import ContractError, RobotProfile, RunContext
 from robot_contracts.trajectory.follower_reference import FollowerValidationLimits
@@ -23,13 +24,16 @@ from dual_arm_runtime.chunk_stream import (
 )
 from dual_arm_runtime.observation import ExactObservation
 from dual_arm_runtime.run_logging import EventSink
-from dual_arm_runtime.runtime_config import RuntimeConfiguration, TeacherConfig
+from dual_arm_runtime.runtime_config import RuntimeConfiguration
+from dual_arm_runtime.simulation.options import TeacherConfig
 from dual_arm_runtime.target_source import (
     Prediction,
     TaskTerminal,
     task_terminal_fact,
 )
-from dual_arm_runtime.teacher_client import TeacherTaskClient
+
+if TYPE_CHECKING:
+    from dual_arm_runtime.simulation.teacher_client import TeacherTaskClient
 
 __all__ = ["TeacherStreamRunner", "TeacherTargetSource"]
 

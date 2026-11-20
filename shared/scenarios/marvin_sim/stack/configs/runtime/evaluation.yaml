@@ -1,5 +1,4 @@
 # Offline batch-evaluation failure stage classification for Marvin stack.
-schema_version: 1
 stages:
   - name: grasp
     label: 抓取/抬起

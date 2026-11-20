@@ -26,7 +26,7 @@ def pool(recording, monkeypatch):  # noqa: F811 - imported pytest fixture
                         "runtime_config": str(directory / "runtime.yaml"),
                         "backend_log": str(directory / "log")})
     manifest = root / "workers.json"
-    manifest.write_text(json.dumps({"schema_version": 1, "workers": workers}))
+    manifest.write_text(json.dumps({"workers": workers}))
     monkeypatch.setattr(record_pool, "check_ros_sdk", lambda *args, **kwargs: 0)
     script = root / "parallel_fake.py"
     script.write_text('''import json
@@ -49,7 +49,13 @@ export.mkdir()
 (raw / "manifest.json").write_text(json.dumps({
     "recording": {"complete": True}, "runtime": {"outcome": "stopped", "reason": "TEST"}}))
 (raw / "task_result.json").write_text(json.dumps({"result": {"outcome": "succeeded"}}))
-(export / "quality.json").write_text(json.dumps({"qualified": state == "qualified"}))
+(export / "quality.json").write_text(json.dumps({
+    "qualified": state == "qualified",
+    "failure_reasons": ["camera blackout"] if state == "failed" else [],
+}))
+(export / "labels.json").write_text(json.dumps({
+    "summary": {"rejected": {"brake_replaced": 3}},
+}))
 metadata["end"] = time.time()
 (directory / "worker.json").write_text(json.dumps(metadata))
 raise SystemExit(130 if state == "interrupted" else 0)
@@ -86,7 +92,9 @@ def _summary(root):
 
 
 def test_workers_overlap_and_share_sequential_seeds_without_overshooting(pool):
-    root, _, _, run = pool
+    root, config, _, run = pool
+    config["budget"]["formal_target_qualified"] = 2
+    (root / "campaign.yaml").write_text(yaml.safe_dump(config))
     assert run([["qualified", 0.3]] * 3, "--count", "2") == 0
     records = _records(root)
     reserved = [item for item in records if item["event"] == "RESERVED"]
@@ -98,6 +106,9 @@ def test_workers_overlap_and_share_sequential_seeds_without_overshooting(pool):
     assert len({item["runtime_config"] for item in facts}) == 2
     assert all(item["display"] is None for item in facts)
     assert _summary(root)["qualified"] == _summary(root)["attempted"] == 2
+    document = json.loads(Path(_summary(root)["formal_select"]).read_text())
+    assert document["status"] == "SELECTED"
+    assert [item["seed"] for item in document["selected"]] == [10000, 10001]
 
 
 def test_freed_worker_is_reused_until_target(pool):
@@ -125,6 +136,10 @@ def test_failure_threshold_cancels_running_attempt_and_preserves_reservation(poo
     records = _records(root)
     assert len([item for item in records if item["event"] == "RESERVED"]) == 2
     assert len([item for item in records if item["event"] == "INTERRUPTED"]) == 1
+    failed = next(item for item in records if item["event"] == "FINISHED")
+    assert failed["diagnostics"]["quality_failure_reasons"] == ["camera blackout"]
+    assert failed["diagnostics"]["label_rejections"] == {"brake_replaced": 3}
+    assert not Path(failed["attempt_dir"]).exists()
     for path in (root / "out").glob("*/worker.json"):
         with pytest.raises(ProcessLookupError):
             os.kill(json.loads(path.read_text())["pid"], 0)

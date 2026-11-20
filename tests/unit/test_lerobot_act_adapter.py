@@ -13,7 +13,7 @@ import yaml
 
 pytest.importorskip("torch")
 pytest.importorskip("lerobot")
-pb2 = pytest.importorskip("dual_arm_policy.v1.policy_pb2")
+pb2 = pytest.importorskip("dual_arm_policy.policy_pb2")
 grpc = pytest.importorskip("grpc")
 
 from act_fixtures import ACTION, OBSERVATION, PROFILE, make_act_model  # noqa: E402

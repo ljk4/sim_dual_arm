@@ -1,6 +1,6 @@
 # MuJoCo 物理仿真后端
 
-实现 Marvin 双臂（`marvin_sim/stack` 与 `marvin_sim/handover`）的物理仿真、EGL 离屏相机渲染、Ruckig 轨迹跟随、状态发布与程序示教（Teacher），通过 ROS 2 Robot API 与运行端通信。
+实现 Marvin 双臂（`marvin_sim/stack` 与 `marvin_sim/handover`）的物理仿真、EGL 离屏相机渲染、轨迹校验与跟随、状态发布和程序示教（Teacher）。运行端通过 ROS 2 Robot API 提交分段轨迹；仿真端校验后执行，并发布实际生效参考和反馈。
 
 ## 目录结构
 

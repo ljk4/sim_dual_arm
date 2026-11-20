@@ -60,17 +60,24 @@ def _manifest_splits(
     validation = splits.get("validation")
     if not isinstance(training, dict) or not isinstance(validation, dict):
         raise TrainingError("manifest.splits must contain training and validation")
-    expected_meta = manifest.get("expected")
-    if manifest.get("diagnostic") is True and isinstance(expected_meta, dict):
-        expected_formal = int(expected_meta.get("formal_episodes", 0))
-        expected_training = int(expected_meta.get("training_episodes", 0))
-        expected_validation = int(expected_meta.get("validation_episodes", 0))
-        val_positions = tuple(int(pos) for pos in expected_meta.get("validation_positions", []))
-    else:
-        expected_formal = config.dataset.expected_formal_episodes
-        val_positions = config.dataset.validation_positions
-        expected_training = config.dataset.expected_training_episodes
-        expected_validation = config.dataset.expected_validation_episodes
+    expected = manifest.get("expected")
+    if not isinstance(expected, dict):
+        raise TrainingError("manifest.expected must be an object")
+    recorded_counts = tuple(
+        expected.get(key)
+        for key in ("formal_episodes", "training_episodes", "validation_episodes")
+    )
+    configured_counts = (
+        config.dataset.expected_formal_episodes,
+        config.dataset.expected_training_episodes,
+        config.dataset.expected_validation_episodes,
+    )
+    if (
+        any(type(count) is not int for count in recorded_counts)
+        or recorded_counts != configured_counts
+    ):
+        raise TrainingError("manifest.expected episode counts do not match the dataset recipe")
+    expected_formal, expected_training, expected_validation = configured_counts
     if training.get("episode_count") != expected_training:
         raise TrainingError(
             f"training split does not contain exactly {expected_training} episodes"
@@ -81,16 +88,26 @@ def _manifest_splits(
         )
     train_indices = _episode_indices(training)
     validation_indices = _episode_indices(validation)
-    if set(train_indices) & set(validation_indices):
-        raise TrainingError("training and validation splits overlap")
-    if set(validation_indices) != set(val_positions):
-        raise TrainingError("validation split is not at the configured success positions")
-    if set(train_indices) | set(validation_indices) != set(range(expected_formal)):
-        raise TrainingError("splits do not partition the configured success range")
     if len(train_indices) != expected_training or len(validation_indices) != expected_validation:
         raise TrainingError(
             f"split cardinality is not {expected_training}/{expected_validation}"
         )
+    train_index_set = set(train_indices)
+    validation_index_set = set(validation_indices)
+    if train_index_set & validation_index_set:
+        raise TrainingError("training and validation splits overlap")
+    positions = expected.get("validation_positions")
+    if (
+        not isinstance(positions, list)
+        or len(positions) != expected_validation
+        or any(type(position) is not int for position in positions)
+        or validation_index_set != set(positions)
+    ):
+        raise TrainingError(
+            "validation split disagrees with manifest.expected.validation_positions"
+        )
+    if train_index_set | validation_index_set != set(range(expected_formal)):
+        raise TrainingError("splits do not partition the manifest success range")
     return training, validation, train_indices, validation_indices
 
 
@@ -269,7 +286,7 @@ def verify_dataset_manifest(
     allow_synthetic: bool = False,
     require_full: bool | None = None,
 ) -> DatasetAudit:
-    """Check configured split disjointness, validation slots and every declared hash."""
+    """Verify the recorded dataset split and every declared hash."""
     manifest_path, manifest, synthetic = _load_manifest(config, allow_synthetic, require_full)
     training, validation, train_indices, validation_indices = _manifest_splits(config, manifest)
     _verify_profile(config, manifest)

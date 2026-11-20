@@ -1,7 +1,7 @@
 """Generic simulation-side registration of a scenario Teacher extension.
 
 The wire type is selected by the explicit capability identifier, never by a
-scenario or robot name: ``<package>.teacher_chunk.v<N>`` resolves to that ROS
+scenario or robot name: ``<package>.teacher_chunk`` resolves to that ROS
 package's generated ``TeacherCapability``/``GetTeacherChunk`` types.  The
 generated modules are imported only when teacher mode is enabled.  Tasks and
 the common contracts never import a concrete extension package.
@@ -17,7 +17,7 @@ from robot_contracts.models import ContractError
 
 __all__ = ["teacher_extension_modules", "register_teacher_service"]
 
-_CAPABILITY = re.compile(r"^([a-z][a-z0-9_]*)\.teacher_chunk\.v[1-9][0-9]*$")
+_CAPABILITY = re.compile(r"^([a-z][a-z0-9_]*)\.teacher_chunk$")
 
 
 def teacher_extension_modules(capability: str) -> tuple[Any, Any]:
@@ -26,7 +26,7 @@ def teacher_extension_modules(capability: str) -> tuple[Any, Any]:
     if match is None:
         raise ContractError(
             "UNSUPPORTED_TEACHER_CAPABILITY",
-            f"{capability!r} is not a <package>.teacher_chunk.v<N> capability",
+            f"expected <package>.teacher_chunk, got {capability!r}",
         )
     package = match.group(1)
     try:

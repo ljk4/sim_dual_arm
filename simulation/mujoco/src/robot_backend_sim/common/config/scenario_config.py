@@ -2,16 +2,13 @@
 
 The selection is the same strict :mod:`robot_contracts.binding` load used by the
 other ends.  Paths are expanded against the selected recipe directory, the
-recipe's robot profile must match the binding profile, and the caller applies
-the seed and ``--set`` overrides before strict :class:`BackendConfig`
-validation.  The simulation backend never loads model weights, so no bundle is
-required.  No prepared directory and no manifest file are produced here.
+recipe's robot profile must match the binding profile. The caller can supply the
+run seed and realtime speed before strict :class:`BackendConfig` validation.
 """
 
 from __future__ import annotations
 
 import os
-from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -23,7 +20,6 @@ from robot_contracts.binding import (
     resolve_binding_path,
 )
 from robot_contracts.models import ContractError
-from robot_contracts.overrides import apply_overrides
 from robot_contracts.validation import UniqueKeyError, read_unique_yaml
 
 ROLE_RECIPES = {
@@ -120,7 +116,7 @@ def resolve_scenario_backend(
     role: str = "teacher",
     shared_root: Path | None = None,
     seed: int | None = None,
-    overrides: Sequence[str] = (),
+    realtime_speed: float | None = None,
     scenario: str | None = None,
 ) -> ScenarioBackend:
     """Load a robot/task recipe and return the effective backend document.
@@ -164,10 +160,8 @@ def resolve_scenario_backend(
         document["run"] = run
     if seed is not None:
         run["seed"] = seed
-    try:
-        document = apply_overrides(document, list(overrides))
-    except ValueError as error:
-        raise ScenarioError(str(error)) from error
+    if realtime_speed is not None:
+        run["realtime_speed"] = realtime_speed
     return ScenarioBackend(document=document, base_dir=base_dir, selection=selection)
 
 

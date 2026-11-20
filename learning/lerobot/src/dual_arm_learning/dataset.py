@@ -1,10 +1,9 @@
 """ROS-free conversion from accepted episode exports to two LeRobot datasets.
 
-The 034 export is the source of truth: JSON, PNG and the original teacher raw
-chunks.  This module never opens MCAP and never imports ``rclpy``.  It verifies
-capture/label clocks, PNG payloads, raw chunks and episode boundaries before a
-single future action is written.  The two splits are materialised as separate
-``LeRobotDataset`` roots; the validation split never contributes statistics.
+The accepted export provides the JSON, PNG and original Teacher chunks.
+Conversion verifies capture and label clocks, PNG payloads, raw chunks and
+episode boundaries. It partitions the ordered selection by the dataset recipe
+and writes separate ``LeRobotDataset`` roots with statistics from training only.
 
 Export validation lives in :mod:`dataset_export`, split writing and manifest
 assembly in :mod:`dataset_manifest`, and shared primitives in
@@ -15,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import shutil
 import time
 import uuid
@@ -49,40 +49,24 @@ def _resolve_episodes(
     config: DatasetConfig,
     profile_hash: str,
     progress: ConsoleProgress | None = None,
-) -> list[SourceEpisode]:
-    training_entries, validation_entries = _select_entries(select, config)
-    validation_slots = set(config.validation_positions)
-    training_slots = [
-        index for index in range(config.expected_formal_episodes) if index not in validation_slots
-    ]
-    if len(training_slots) != len(training_entries):
-        raise ExportError(
-            "select: training cardinality does not fit the fixed validation positions"
-        )
-    selected = [
-        dict(entry, global_index=slot, split="training")
-        for entry, slot in zip(training_entries, training_slots, strict=True)
-    ] + [
-        dict(entry, global_index=slot, split="validation")
-        for entry, slot in zip(validation_entries, config.validation_positions, strict=True)
-    ]
+) -> tuple[list[SourceEpisode], list[SourceEpisode]]:
+    entries = _select_entries(select, config)
+    validation_slots = set(
+        random.Random(0).sample(range(len(entries)), config.expected_validation_episodes)
+    )
+    train_eps: list[SourceEpisode] = []
+    validation_eps: list[SourceEpisode] = []
     if progress is not None:
-        progress.phase("校验源数据", len(selected), unit="条")
-    parsed = []
-    for entry in selected:
-        parsed.append(_predict_episode(entry, config, profile_hash))
+        progress.phase("校验源数据", len(entries), unit="条")
+    for entry in entries:
+        episode = _predict_episode(entry, config, profile_hash)
+        if episode.global_index in validation_slots:
+            validation_eps.append(episode)
+        else:
+            train_eps.append(episode)
         if progress is not None:
             progress.advance()
-    if len(parsed) != config.expected_formal_episodes:
-        raise ExportError(
-            "select: did not resolve exactly "
-            f"{config.expected_formal_episodes} accepted exports"
-        )
-    if len({episode.attempt_id for episode in parsed}) != len(parsed):
-        raise ExportError("select: duplicate attempt IDs after resolution")
-    if len({episode.seed for episode in parsed}) != len(parsed):
-        raise ExportError("select: duplicate seeds after resolution")
-    return parsed
+    return train_eps, validation_eps
 
 
 def _validate_output_target(config: DatasetConfig, replace: bool, synthetic: bool) -> Path:
@@ -120,20 +104,13 @@ def _write_datasets(
     *,
     temp: Path,
     output_name: str,
-    parsed: list[SourceEpisode],
-    validation_slots: set[int],
+    train_eps: list[SourceEpisode],
+    validation_eps: list[SourceEpisode],
     config: DatasetConfig,
     joint_names: tuple[str, ...],
     profile_id: str,
     progress: ConsoleProgress | None = None,
-) -> tuple[list[SourceEpisode], list[SourceEpisode]]:
-    train_eps = [item for item in parsed if item.global_index not in validation_slots]
-    validation_eps = [item for item in parsed if item.global_index in validation_slots]
-    if (
-        len(train_eps) != config.expected_training_episodes
-        or len(validation_eps) != config.expected_validation_episodes
-    ):
-        raise ExportError("select: split cardinality is inconsistent")
+) -> None:
     # One continuous phase covers both splits so the bar never restarts at zero.
     if progress is not None:
         progress.phase(
@@ -161,7 +138,6 @@ def _write_datasets(
         progress=progress,
         progress_label="验证集 ",
     )
-    return train_eps, validation_eps
 
 
 def _write_failure_marker(temp: Path, synthetic: bool) -> None:
@@ -206,7 +182,7 @@ def convert(
     profile_id = profile_doc.get("profile_id")
     if not isinstance(profile_id, str) or not profile_id:
         raise ExportError(f"{config.profile_path}: profile has no profile_id")
-    parsed = _resolve_episodes(select, config, profile_hash, progress)
+    train_eps, validation_eps = _resolve_episodes(select, config, profile_hash, progress)
     output = _prepare_output(config, replace, synthetic)
     configure_local_caches(config.cache_root, data_root=config.output_root)
     free = shutil.disk_usage(output.parent).free
@@ -216,12 +192,11 @@ def convert(
     temp.mkdir(parents=True, exist_ok=False)
     started = time.time_ns()
     try:
-        validation_slots = set(config.validation_positions)
-        train_eps, validation_eps = _write_datasets(
+        _write_datasets(
             temp=temp,
             output_name=output.name,
-            parsed=parsed,
-            validation_slots=validation_slots,
+            train_eps=train_eps,
+            validation_eps=validation_eps,
             config=config,
             joint_names=joint_names,
             profile_id=profile_id,
@@ -236,12 +211,10 @@ def convert(
             progress.phase("核对哈希并生成清单")
         manifest = build_manifest(
             temp=temp,
-            output_name=output.name,
             config=config,
             select_path=select_path,
             select=select,
             config_path=config_path,
-            parsed=parsed,
             train_eps=train_eps,
             validation_eps=validation_eps,
             joint_names=joint_names,

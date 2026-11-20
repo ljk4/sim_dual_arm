@@ -1,10 +1,9 @@
 # Marvin stack ACT policy inference service configuration.
-schema_version: 1
 
 model:
-  robot_profile_path: ../../profiles/robots/marvin_stack_v1/profile.json
-  observation_schema_path: ../../../handover/profiles/observations/marvin_rgb_joint_v1.json
-  action_schema_path: ../../../handover/profiles/actions/marvin_joint_position_v1.json
+  robot_profile_path: ../../profiles/robots/marvin_stack/profile.json
+  observation_schema_path: ../../../handover/profiles/observations/marvin_rgb_joint.json
+  action_schema_path: ../../../handover/profiles/actions/marvin_joint_position.json
   device: cuda
   require_formal: true
   max_prediction_corrections:
@@ -24,7 +23,6 @@ service:
   open_deadline_s: 5.0
   close_deadline_s: 5.0
   test_only: false
-  protocol_major: 1
   stateful: true
   task_id: marvin-stack
   task_text: >-

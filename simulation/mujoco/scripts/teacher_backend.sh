@@ -23,7 +23,7 @@ options:
   --run-id <id>         backend run id prefix (default: teacher-backend_<YYYYMMDD_HHMMSS>)
   --shared-root <path>  override shared scenarios root
   --run-root <path>     override backend run root
-  --set PATH=VALUE      override one existing configuration path (repeatable)
+  --realtime-speed <n>  simulation seconds per wall-clock second
   -h, --help            show this help message
 EOF
 }
@@ -34,7 +34,7 @@ seed="0"
 run_id=""
 shared_root=""
 run_root=""
-overrides=()
+realtime_speed=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -86,12 +86,12 @@ while [[ $# -gt 0 ]]; do
       run_root="${1#*=}"
       shift
       ;;
-    --set)
-      overrides+=("${2:?missing value for --set}")
+    --realtime-speed)
+      realtime_speed="${2:?missing value for --realtime-speed}"
       shift 2
       ;;
-    --set=*)
-      overrides+=("${1#*=}")
+    --realtime-speed=*)
+      realtime_speed="${1#*=}"
       shift
       ;;
     -h|--help|help)
@@ -134,20 +134,20 @@ python3 "${SHARED_ROOT:-/shared}/common/tools/scripts/dev_workspace.py" check \
   --project-root / \
   --build-root "$ROS_SDK" 1>&2
 
-python3 - "$robot" "$task" "$seed" "$run_id" "$run_root" "$shared_root" "${overrides[@]}" <<'PY'
+python3 - "$robot" "$task" "$seed" "$run_id" "$run_root" "$shared_root" "$realtime_speed" <<'PY'
 import sys
 from pathlib import Path
 import yaml
 from robot_backend_sim.common.config.scenario_config import resolve_scenario_backend
 
-robot, task, seed_str, run_id, run_root, shared_root, *overrides = sys.argv[1:]
+robot, task, seed_str, run_id, run_root, shared_root, speed = sys.argv[1:]
 resolved = resolve_scenario_backend(
     robot=robot,
     task=task,
     role="teacher",
     shared_root=Path(shared_root) if shared_root else None,
     seed=int(seed_str),
-    overrides=overrides,
+    realtime_speed=float(speed) if speed else None,
 )
 run_dir = Path(run_root) / run_id
 Path(run_root).mkdir(parents=True, exist_ok=True)
@@ -176,8 +176,8 @@ cmd=(
 if [[ -n "$shared_root" ]]; then
   cmd+=(--shared-root "$shared_root")
 fi
-for item in "${overrides[@]}"; do
-  cmd+=(--set "$item")
-done
+if [[ -n "$realtime_speed" ]]; then
+  cmd+=(--realtime-speed "$realtime_speed")
+fi
 
 exec "${cmd[@]}"

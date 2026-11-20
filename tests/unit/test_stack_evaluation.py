@@ -17,7 +17,6 @@ def _write(path: Path, value: object) -> None:
 def campaign_config(tmp_path: Path) -> tuple[Path, Path]:
     root = tmp_path / "project"
     config = {
-        "schema_version": 1,
         "budget": {
             "pilot_seed_first": 1000,
             "pilot_seed_last": 1009,
@@ -29,7 +28,6 @@ def campaign_config(tmp_path: Path) -> tuple[Path, Path]:
             "formal_seed_last": 10099,
             "formal_max_attempts": 100,
             "formal_target_qualified": 50,
-            "formal_validation_qualified_indices": [9, 19, 29, 39, 49],
             "test_seed_first": 20000,
             "test_seed_last": 20019,
             "test_max_attempts": 20,
@@ -118,7 +116,6 @@ def make_attempt(root: Path) -> Path:
     _write(
         attempt / "raw" / "task_result.json",
         {
-            "schema_version": 1,
             "evaluated": True,
             "test_only": False,
             "action_source": "policy",
@@ -518,7 +515,6 @@ def test_backend_rejection_detail_is_machine_readable_and_preferred(tmp_path):
     _write_backend_events(
         attempt,
         {
-            "schema_version": 1,
             "component": "backend",
             "instance_id": "backend-1",
             "event_seq": 10,
@@ -529,7 +525,6 @@ def test_backend_rejection_detail_is_machine_readable_and_preferred(tmp_path):
             "fields": {"mode": "FOLLOWER", "has_reference": False},
         },
         {
-            "schema_version": 1,
             "component": "backend",
             "instance_id": "backend-1",
             "event_seq": 11,

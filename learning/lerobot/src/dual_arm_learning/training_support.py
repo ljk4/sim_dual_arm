@@ -194,35 +194,6 @@ def process_batch(pre: Any, batch: dict[str, Any], keys: tuple[str, ...]) -> dic
     return processed
 
 
-def augment_image_shift(processed: dict[str, Any], max_shift_px: int) -> dict[str, Any]:
-    """Apply independent per-sample, per-camera integer pixel shifts with replicate padding."""
-    if max_shift_px <= 0:
-        return processed
-    import torch
-    import torch.nn.functional as F
-
-    augmented = dict(processed)
-    pad = int(max_shift_px)
-    span = 2 * pad + 1
-    for key, value in processed.items():
-        if not key.startswith("observation.images."):
-            continue
-        if not isinstance(value, torch.Tensor) or value.ndim != 4:
-            continue
-        batch, _channels, height, width = value.shape
-        padded = F.pad(value, (pad, pad, pad, pad), mode="replicate")
-        dy = torch.randint(0, span, (batch,)).tolist()
-        dx = torch.randint(0, span, (batch,)).tolist()
-        augmented[key] = torch.stack(
-            [
-                padded[row, :, top : top + height, left : left + width]
-                for row, (top, left) in enumerate(zip(dy, dx, strict=True))
-            ],
-            dim=0,
-        )
-    return augmented
-
-
 def loader(
     dataset: Any,
     config: TrainingConfig,
@@ -412,11 +383,9 @@ def build_report(
     overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     report = {
-        "format": "dual-arm-act-training-report-v2",
         "model_name": model_name,
         "model_dir": str(model_dir),
         "mode": config.mode,
-        "diagnostic": bool(config.dataset.diagnostic),
         "reason": reason,
         "steps": step,
         "planned_steps": steps_total,
@@ -444,7 +413,6 @@ def build_report(
         "limits": [
             "model selection uses validation masked L1 only",
             "physical task success is measured by the supervised campaign, not this loss",
-            "synthetic fixtures never count as the 50 formal episodes",
         ],
     }
     if selection is not None:
@@ -460,7 +428,6 @@ __all__ = [
     "MetricsWriter",
     "TrainingError",
     "TrainingInterrupted",
-    "augment_image_shift",
     "build_act_config",
     "build_optimizer_param_groups",
     "build_policy",

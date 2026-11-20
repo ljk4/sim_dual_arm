@@ -19,7 +19,7 @@ physics:
   object_friction: [1.0, 0.02, 0.0001]
 
 robot:
-  # The simulation resolves the fixed-version model from its own assets/ root.
+  # The simulation resolves the model from its assets directory.
   assembly: marvin
   base_position: [0.0, 0.0, 0.0]
   base_yaw_deg: 0.0

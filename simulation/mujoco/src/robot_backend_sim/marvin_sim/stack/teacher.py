@@ -202,7 +202,6 @@ def _plan_digest(
     target_center: tuple[float, float, float],
 ) -> str:
     payload = {
-        "version": 1,
         "task_config_digest": config.config_digest,
         "context": {
             "robot_id": snapshot.context.robot_id,

@@ -5,16 +5,14 @@ import math
 import random
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from robot_contracts.action_chunks import ActionWindow, ChunkAnchor
-from robot_contracts.models import ContractError, Target
+from robot_contracts.models import Target
 from robot_contracts.profiles import load_profile
 from robot_contracts.trajectory.constants import POSITION_ATOL, RELATIVE_TOLERANCE, VELOCITY_ATOL
 from robot_contracts.trajectory.spline import ReferenceSample
 from robot_trajectory.follower import PreparedFollowerPlan
-from robot_trajectory.sampling import sample_reference_interval
 from robot_trajectory.spline_math import check_continuous_limits, compute_reference_extremes
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -23,121 +21,25 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
+from follower_fixtures import generate_prepared_follower  # noqa: E402
 from robot_backend_sim.common.config.follower_config import load_follower_config  # noqa: E402
 from robot_backend_sim.common.config.motion_config import load_control_config  # noqa: E402
-from robot_backend_sim.common.follower.follower_plan import prepare_follower_plan  # noqa: E402
-from robot_backend_sim.common.motion.ruckig_export import export_ruckig_reference  # noqa: E402
 from scenario_fixtures import MARVIN_SHARED_PROFILES  # noqa: E402
 
-ruckig = pytest.importorskip("ruckig")
-
 PROFILE = load_profile(
-    PROFILES / "robots/marvin_stack_v1/profile.json",
-    ROOT / "shared/common/interfaces/schemas/v1",
+    PROFILES / "robots/marvin_stack/profile.json",
+    ROOT / "shared/common/interfaces/schemas",
 )
-CONTROL = load_control_config(MARVIN_SHARED_PROFILES / "control/marvin_control_v1.yaml")
+CONTROL = load_control_config(MARVIN_SHARED_PROFILES / "control/marvin_control.yaml")
 # These trajectory fixtures use ten-point windows independently of scenario cadence.
-FOLLOWER_PATH = MARVIN_SHARED_PROFILES / "control/marvin_follower_v1.yaml"
+FOLLOWER_PATH = MARVIN_SHARED_PROFILES / "control/marvin_follower.yaml"
 FOLLOWER = load_follower_config(FOLLOWER_PATH).model_copy(update={"target_count": 10})
 BASE = PROFILE.initial_positions
 JOINT_COUNT = len(BASE)
 
-_TINY_BRAKE_START_P = 0.010250677416454232
-_TINY_BRAKE_START_V = 0.04000000000000001
-_TINY_BRAKE_DURATION = 2.2013877787807815e-14
-_TINY_BRAKE_ACCEL = -0.5
-_TINY_BRAKE_TARGET = 0.01665229386424162
-_TINY_BRAKE_MAIN_P = 0.010250677416455113
-_TINY_BRAKE_MAIN_V = 0.039999999999989
-
-
 def smoothstep(fraction: float) -> float:
     value = min(max(fraction, 0.0), 1.0)
     return 3.0 * value * value - 2.0 * value * value * value
-
-
-def smoothstep_derivative(fraction: float, duration_s: float, total: float) -> float:
-    value = min(max(fraction, 0.0), 1.0)
-    return (6.0 * value - 6.0 * value * value) * total / duration_s
-
-
-def calculate_trajectory(
-    current_positions,
-    current_velocities,
-    target_positions,
-    target_velocities,
-    *,
-    max_velocities=None,
-    max_accelerations=None,
-    minimum_duration_s=0.25,
-):
-    count = len(current_positions)
-    max_velocities = max_velocities or [joint.max_velocity for joint in PROFILE.joints]
-    max_accelerations = max_accelerations or list(CONTROL.max_accelerations)
-    inp = ruckig.InputParameter(count)
-    inp.current_position = list(current_positions)
-    inp.current_velocity = list(current_velocities)
-    inp.current_acceleration = [0.0] * count
-    inp.target_position = list(target_positions)
-    inp.target_velocity = list(target_velocities)
-    inp.target_acceleration = [0.0] * count
-    inp.max_velocity = list(max_velocities)
-    inp.max_acceleration = list(max_accelerations)
-    inp.max_jerk = [math.inf] * count
-    inp.minimum_duration = minimum_duration_s
-    trajectory = ruckig.Trajectory(count)
-    result = ruckig.Ruckig(count).calculate(inp, trajectory)
-    assert int(result) >= 0
-    return trajectory
-
-
-def calculate_tiny_brake_trajectory(target_position):
-    inp = ruckig.InputParameter(1)
-    inp.current_position = [_TINY_BRAKE_START_P]
-    inp.current_velocity = [_TINY_BRAKE_START_V]
-    inp.current_acceleration = [0.0]
-    inp.target_position = [target_position]
-    inp.target_velocity = [0.0]
-    inp.target_acceleration = [0.0]
-    inp.max_velocity = [0.04]
-    inp.max_acceleration = [0.5]
-    inp.max_jerk = [math.inf]
-    inp.minimum_duration = 0.5
-    trajectory = ruckig.Trajectory(1)
-    result = ruckig.Ruckig(1).calculate(inp, trajectory)
-    assert int(result) >= 0
-    return trajectory
-
-
-def make_tiny_brake_profile(
-    *,
-    duration=_TINY_BRAKE_DURATION,
-    times=(_TINY_BRAKE_DURATION, 0.0),
-    brake_p=(_TINY_BRAKE_START_P, 0.0),
-    brake_v=(_TINY_BRAKE_START_V, 0.0),
-    brake_a=(_TINY_BRAKE_ACCEL, 0.0),
-    brake_j=(0.0, 0.0),
-    main_p=_TINY_BRAKE_MAIN_P,
-    main_v=_TINY_BRAKE_MAIN_V,
-):
-    "A typed public-profile fixture for invalid brake-prefix cases."
-    brake = SimpleNamespace(
-        duration=duration,
-        t=list(times),
-        p=list(brake_p),
-        v=list(brake_v),
-        a=list(brake_a),
-        j=list(brake_j),
-    )
-    main = SimpleNamespace(
-        t=[0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        p=[main_p] * 8,
-        v=[main_v] * 8,
-        a=[0.0] * 8,
-        j=[0.0] * 7,
-        brake=brake,
-    )
-    return SimpleNamespace(duration=0.5, profiles=((main,),))
 
 
 def make_source_targets(
@@ -220,358 +122,6 @@ def assert_plan_c1_and_limits(prepared: PreparedFollowerPlan) -> None:
     assert len(extremes.joints) == prepared.joint_count
 
 
-def assert_export_matches_ruckig(trajectory, exported, duration_ns):
-    boundaries = set()
-    elapsed = 0
-    for segment in exported.plan.segments[:-1]:
-        elapsed += segment.duration_ns
-        boundaries.add(elapsed)
-    max_position_error = 0.0
-    max_velocity_error = 0.0
-    max_acceleration_error = 0.0
-    step = max(1, duration_ns // 500)
-    for elapsed_ns in range(0, duration_ns + 1, step):
-        if elapsed_ns in boundaries or elapsed_ns == duration_ns:
-            continue
-        sample = sample_reference_interval(exported.plan, elapsed_ns)
-        position, velocity, acceleration = trajectory.at_time(elapsed_ns / 1_000_000_000)
-        for axis in range(exported.plan.joint_count):
-            max_position_error = max(
-                max_position_error, abs(sample.positions[axis] - position[axis])
-            )
-            max_velocity_error = max(
-                max_velocity_error, abs(sample.velocities[axis] - velocity[axis])
-            )
-            max_acceleration_error = max(
-                max_acceleration_error, abs(sample.accelerations[axis] - acceleration[axis])
-            )
-    for boundary in sorted(boundaries):
-        for offset in (-1, 1):
-            elapsed_ns = boundary + offset
-            if elapsed_ns < 0 or elapsed_ns > duration_ns:
-                continue
-            sample = sample_reference_interval(exported.plan, elapsed_ns)
-            position, velocity, acceleration = trajectory.at_time(elapsed_ns / 1_000_000_000)
-            for axis in range(exported.plan.joint_count):
-                max_position_error = max(
-                    max_position_error, abs(sample.positions[axis] - position[axis])
-                )
-                max_velocity_error = max(
-                    max_velocity_error, abs(sample.velocities[axis] - velocity[axis])
-                )
-                max_acceleration_error = max(
-                    max_acceleration_error,
-                    abs(sample.accelerations[axis] - acceleration[axis]),
-                )
-    # Nanosecond boundary rounding and the exact C1 seam are the only sources
-    # of error; acceleration may step at a seam and is checked one-sided above.
-    assert max_position_error < 5e-9
-    assert max_velocity_error < 5e-9
-    assert max_acceleration_error < 5e-9
-    return max_position_error, max_velocity_error, max_acceleration_error
-
-
-def assert_export_pv_matches_ruckig(trajectory, exported, duration_ns):
-    boundaries = set()
-    elapsed = 0
-    for segment in exported.plan.segments:
-        elapsed += segment.duration_ns
-        boundaries.add(elapsed)
-    sample_times = {0, duration_ns}
-    sample_times.update(boundaries)
-    sample_times.update(range(0, duration_ns + 1, 2_000_000))
-    max_position_error = 0.0
-    max_velocity_error = 0.0
-    for elapsed_ns in sorted(sample_times):
-        sample = sample_reference_interval(exported.plan, elapsed_ns)
-        position, velocity, _ = trajectory.at_time(elapsed_ns / 1_000_000_000)
-        max_position_error = max(max_position_error, abs(sample.positions[0] - position[0]))
-        max_velocity_error = max(max_velocity_error, abs(sample.velocities[0] - velocity[0]))
-    assert max_position_error < 5e-9
-    assert max_velocity_error < 5e-9
-    return max_position_error, max_velocity_error
-
-
-@pytest.mark.parametrize(
-    (
-        "name",
-        "current_positions",
-        "current_velocities",
-        "target_positions",
-        "target_velocities",
-        "minimum_s",
-    ),
-    (
-        (
-            "static",
-            BASE,
-            (0.0,) * JOINT_COUNT,
-            BASE,
-            (0.0,) * JOINT_COUNT,
-            0.25,
-        ),
-        (
-            "single-axis",
-            BASE,
-            (0.0,) * JOINT_COUNT,
-            (BASE[0] + 0.1,) + BASE[1:],
-            (0.0,) * JOINT_COUNT,
-            0.25,
-        ),
-        (
-            "sixteen-axis",
-            BASE,
-            (0.0,) * JOINT_COUNT,
-            tuple(
-                min(
-                    max(value + (0.01 if index % 7 else -0.008), joint.minimum + 1e-3),
-                    joint.maximum - 1e-3,
-                )
-                for index, (value, joint) in enumerate(zip(BASE, PROFILE.joints, strict=True))
-            ),
-            (0.0,) * JOINT_COUNT,
-            0.5,
-        ),
-        (
-            "reverse",
-            (BASE[0],) + BASE[1:],
-            (0.2,) + (0.0,) * (JOINT_COUNT - 1),
-            (BASE[0] - 0.05,) + BASE[1:],
-            (0.0,) * JOINT_COUNT,
-            0.25,
-        ),
-        (
-            "tiny",
-            BASE,
-            (0.0,) * JOINT_COUNT,
-            (BASE[0] + 1e-6,) + BASE[1:],
-            (0.0,) * JOINT_COUNT,
-            0.0001,
-        ),
-        (
-            "gripper-boundary",
-            BASE,
-            (0.0,) * JOINT_COUNT,
-            BASE[:7] + (BASE[7] - 0.02,) + BASE[8:],
-            (0.0,) * JOINT_COUNT,
-            0.25,
-        ),
-        (
-            "zero-duration-middle-phase",
-            BASE,
-            (0.0,) * JOINT_COUNT,
-            (BASE[0] + 0.1,) + BASE[1:],
-            (0.2,) + (0.0,) * (JOINT_COUNT - 1),
-            1.0,
-        ),
-    ),
-)
-def test_export_matches_public_ruckig_curve_and_boundaries(
-    name,
-    current_positions,
-    current_velocities,
-    target_positions,
-    target_velocities,
-    minimum_s,
-):
-    trajectory = calculate_trajectory(
-        current_positions,
-        current_velocities,
-        target_positions,
-        target_velocities,
-        minimum_duration_s=minimum_s,
-    )
-    duration_ns = round(trajectory.duration * 1_000_000_000)
-    exported = export_ruckig_reference(
-        trajectory,
-        PROFILE.joint_names,
-        truncate_ns=duration_ns,
-    )
-    assert exported.plan.duration_ns == duration_ns
-    assert exported.profile_duration_ns == duration_ns
-    errors = assert_export_matches_ruckig(trajectory, exported, duration_ns)
-    assert errors[0] < 5e-9
-    if name == "static":
-        assert exported.plan.duration_ns == duration_ns
-
-
-def test_export_rejects_unsupported_public_structures():
-    phase = SimpleNamespace(
-        t=[0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        p=[0.0, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1],
-        v=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        a=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        j=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-    )
-    one_section = SimpleNamespace(duration=0.1, profiles=((phase,),))
-    exported = export_ruckig_reference(one_section, ("j0",), truncate_ns=100_000_000)
-    assert exported.plan.duration_ns == 100_000_000
-
-    two_sections = SimpleNamespace(duration=0.1, profiles=((phase,), (phase,)))
-    with pytest.raises(ContractError) as caught:
-        export_ruckig_reference(two_sections, ("j0",))
-    assert caught.value.reason == "INVALID_RUCKIG_EXPORT"
-
-    bad_lengths = SimpleNamespace(
-        duration=0.1,
-        profiles=(
-            (
-                SimpleNamespace(
-                    t=[0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                    p=[0.0],
-                    v=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                    a=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                    j=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                ),
-            ),
-        ),
-    )
-    with pytest.raises(ContractError):
-        export_ruckig_reference(bad_lengths, ("j0",))
-
-    with pytest.raises(ContractError):
-        export_ruckig_reference(one_section, ("j0",), truncate_ns=100_000_001)
-
-    braking_phase = SimpleNamespace(
-        t=phase.t,
-        p=phase.p,
-        v=phase.v,
-        a=phase.a,
-        j=phase.j,
-        brake=SimpleNamespace(
-            duration=0.01,
-            t=[0.01, 0.0],
-            p=[0.0, 0.0],
-            v=[0.0, 0.0],
-            a=[0.0, 0.0],
-            j=[0.0, 0.0],
-        ),
-    )
-    braking_section = SimpleNamespace(duration=0.1, profiles=((braking_phase,),))
-    with pytest.raises(ContractError):
-        export_ruckig_reference(braking_section, ("j0",))
-
-
-@pytest.mark.parametrize("target_position", (_TINY_BRAKE_TARGET, 0.03))
-def test_export_folds_real_subnanosecond_brake_prefix(target_position):
-    trajectory = calculate_tiny_brake_trajectory(target_position)
-    brake = trajectory.profiles[0][0].brake
-    assert 0.0 < brake.duration < 0.5e-9
-    assert list(brake.t)[1] == 0.0
-    assert list(brake.j)[0] == 0.0
-    full_ns = round(trajectory.duration * 1_000_000_000)
-
-    for truncate_ns in (full_ns, 250_000_000):
-        exported = export_ruckig_reference(
-            trajectory,
-            ("j0",),
-            truncate_ns=truncate_ns,
-        )
-        assert exported.profile_duration_ns == full_ns
-        assert exported.plan.duration_ns == truncate_ns
-        sample = sample_reference_interval(exported.plan, 0)
-        assert sample.positions[0] == brake.p[0]
-        assert sample.velocities[0] == brake.v[0]
-        max_position_error, max_velocity_error = assert_export_pv_matches_ruckig(
-            trajectory,
-            exported,
-            truncate_ns,
-        )
-        assert max_position_error < 5e-9
-        assert max_velocity_error < 5e-9
-
-
-def test_export_tiny_brake_fixture_ignores_uninitialized_padding():
-    profile = make_tiny_brake_profile(
-        brake_p=(_TINY_BRAKE_START_P, math.nan),
-        brake_v=(_TINY_BRAKE_START_V, math.nan),
-        brake_a=(_TINY_BRAKE_ACCEL, math.nan),
-        brake_j=(0.0, math.nan),
-    )
-    exported = export_ruckig_reference(profile, ("j0",), truncate_ns=500_000_000)
-    sample = sample_reference_interval(exported.plan, 0)
-    assert sample.positions[0] == _TINY_BRAKE_START_P
-    assert sample.velocities[0] == _TINY_BRAKE_START_V
-
-
-def test_export_zero_brake_prefix_does_not_read_padding():
-    profile = make_tiny_brake_profile(
-        duration=0.0,
-        times=(0.0, 0.0),
-        brake_p=(math.nan, math.nan),
-        brake_v=(math.nan, math.nan),
-        brake_a=(math.nan, math.nan),
-        brake_j=(math.nan, math.nan),
-    )
-    exported = export_ruckig_reference(profile, ("j0",), truncate_ns=500_000_000)
-    sample = sample_reference_interval(exported.plan, 0)
-    assert sample.positions[0] == _TINY_BRAKE_MAIN_P
-    assert sample.velocities[0] == _TINY_BRAKE_MAIN_V
-
-
-@pytest.mark.parametrize(
-    ("position", "velocity", "target"),
-    (
-        (0.052899139689393235, -0.04000000035111656, 0.03),
-        (0.05455805988956496, 0.04000000043258554, 0.07),
-        (0.04, 0.05, 0.07),
-    ),
-)
-def test_export_preserves_representable_brake_prefix(position, velocity, target):
-    # The first two anchors are from the two failed 2026-11-11 recordings.
-    trajectory = calculate_trajectory(
-        [position],
-        [velocity],
-        [target],
-        [0.0],
-        max_velocities=[0.04],
-        max_accelerations=[0.5],
-        minimum_duration_s=0.5,
-    )
-    assert trajectory.profiles[0][0].brake.duration >= 0.5e-9
-    full_ns = round(trajectory.duration * 1_000_000_000)
-    for truncate_ns in (full_ns, 250_000_000):
-        exported = export_ruckig_reference(trajectory, ("gripper",), truncate_ns=truncate_ns)
-        start = sample_reference_interval(exported.plan, 0)
-        assert start.positions == (position,)
-        assert start.velocities == (velocity,)
-        max_p, max_v = assert_export_pv_matches_ruckig(trajectory, exported, truncate_ns)
-        assert max_p < 5e-9
-        assert max_v < 5e-9
-
-
-@pytest.mark.parametrize(
-    "overrides",
-    (
-        {"duration": 0.01, "times": (0.01, 0.0)},
-        {
-            "duration": -_TINY_BRAKE_DURATION,
-            "times": (-_TINY_BRAKE_DURATION, 0.0),
-        },
-        {"duration": math.nan},
-        {"times": (_TINY_BRAKE_DURATION, math.nan)},
-        {"brake_j": (1.0, 0.0)},
-        {"brake_p": (_TINY_BRAKE_START_P,)},
-        {"times": (_TINY_BRAKE_DURATION,)},
-        {"brake_v": (1e6, 0.0)},
-        {"brake_p": (1.0, 0.0)},
-        {
-            "duration": _TINY_BRAKE_DURATION + 1e-15,
-            "times": (_TINY_BRAKE_DURATION, 1e-15),
-        },
-        {"times": (_TINY_BRAKE_DURATION + 1e-15, 0.0)},
-    ),
-)
-def test_export_rejects_invalid_brake_prefixes(overrides):
-    with pytest.raises(ContractError) as caught:
-        export_ruckig_reference(
-            make_tiny_brake_profile(**overrides),
-            ("j0",),
-            truncate_ns=500_000_000,
-        )
-    assert caught.value.reason == "INVALID_RUCKIG_EXPORT"
-
-
 def counterexample_window(lead_ms: int = 250) -> ActionWindow:
     targets = make_source_targets(BASE, (BASE[0] + 0.04,) + BASE[1:], 3.0)
     return make_window(targets, handoff_ns=lead_ms * 1_000_000)
@@ -581,7 +131,7 @@ def test_first_window_counterexample_and_bounded_follower():
     window = counterexample_window(250)
     anchor = make_anchor(window, BASE, (0.0,) * JOINT_COUNT)
 
-    prepared = prepare_follower_plan(
+    prepared = generate_prepared_follower(
         anchor,
         window,
         PROFILE,
@@ -591,12 +141,11 @@ def test_first_window_counterexample_and_bounded_follower():
     )
     assert prepared.duration_ns == window.end_time_ns
     assert prepared.plan.duration_ns == prepared.requested_window_ns
-    assert prepared.window is window
+    assert prepared.window == window
     assert prepared.window.source_targets == window.source_targets
     assert prepared.window.targets == window.targets
     assert max(prepared.max_target_deviations) <= max(prepared.max_target_deviation_limits)
     assert_plan_c1_and_limits(prepared)
-    assert prepared.flags.acceleration_limited[0] is True
     assert (
         prepared.raw_terminal_velocities[0]
         != pytest.approx(prepared.restricted_terminal_velocities[0])
@@ -617,7 +166,7 @@ def test_two_radian_ten_second_fragment_with_three_leads(lead_ms):
     anchor = make_anchor(window, BASE, (0.0,) * JOINT_COUNT)
 
     for is_final in (False, True):
-        prepared = prepare_follower_plan(
+        prepared = generate_prepared_follower(
             anchor,
             window,
             PROFILE,
@@ -676,7 +225,7 @@ def test_deterministic_random_100_sixteen_axis_cases():
             anchor_velocities,
             stream_id=f"random-{case}",
         )
-        prepared = prepare_follower_plan(
+        prepared = generate_prepared_follower(
             anchor,
             window,
             PROFILE,
@@ -710,7 +259,7 @@ def test_nonfinal_actual_endpoint_is_inherited_by_the_successor():
     source_targets = make_source_targets(BASE, (BASE[0] + 1.0,) + BASE[1:], 3.0)
     first_window = make_window(source_targets, handoff_ns=250_000_000)
     first_anchor = make_anchor(first_window, BASE, (0.0,) * JOINT_COUNT)
-    first = prepare_follower_plan(
+    first = generate_prepared_follower(
         first_anchor,
         first_window,
         PROFILE,
@@ -734,7 +283,7 @@ def test_nonfinal_actual_endpoint_is_inherited_by_the_successor():
         ),
         PROFILE.digest,
     )
-    second = prepare_follower_plan(
+    second = generate_prepared_follower(
         successor_anchor,
         successor_window,
         PROFILE,
@@ -766,7 +315,7 @@ def test_terminal_speed_is_capped_while_raw_targets_are_preserved():
     )
     window = make_window(source_targets)
     anchor = make_anchor(window, BASE, (0.0,) * JOINT_COUNT)
-    prepared = prepare_follower_plan(
+    prepared = generate_prepared_follower(
         anchor,
         window,
         PROFILE,
@@ -806,7 +355,7 @@ def test_gripper_joint_hard_boundary_caps_terminal_speed(boundary):
     anchor_positions = list(BASE)
     anchor_positions[7] = start
     anchor = make_anchor(window, anchor_positions, (0.0,) * JOINT_COUNT)
-    prepared = prepare_follower_plan(
+    prepared = generate_prepared_follower(
         anchor,
         window,
         PROFILE,
@@ -860,7 +409,7 @@ def test_successive_windows_approach_each_joint_boundary_with_inherited_state():
                 ),
                 PROFILE.digest,
             )
-            prepared = prepare_follower_plan(
+            prepared = generate_prepared_follower(
                 anchor,
                 window,
                 PROFILE,

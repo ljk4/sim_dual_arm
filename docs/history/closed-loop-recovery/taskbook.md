@@ -13,7 +13,7 @@
 ### 1.1 成功率回退三大直接根因
 
 1. **`panda_sim/stack` Teacher 采集窗口配置耦合与阶段相位时钟未对齐 `handoff_time_ns`**：
-   - `panda_sim/stack` 的 Teacher 采集与策略推理共用了同一个 `shared/scenarios/panda_sim/stack/profiles/control/panda_follower_v1.yaml`（`target_count: 20`，即 1.0 s 执行窗口），而 `marvin_sim/handover` 已将采集（`target_count: 10`）与推理（`target_count: 20`）拆分为两份独立配置。
+   - `panda_sim/stack` 的 Teacher 采集与策略推理共用了同一个 `shared/scenarios/panda_sim/stack/profiles/control/panda_follower.yaml`（`target_count: 20`，即 1.0 s 执行窗口），而 `marvin_sim/handover` 已将采集（`target_count: 10`）与推理（`target_count: 20`）拆分为两份独立配置。
    - `simulation/mujoco/src/robot_backend_sim/panda_sim/stack/__init__.py`、`teacher.py` 与 `gate.py` 未像 `marvin_sim/handover` 那样将阶段运动起点绑定到块交接时间 `handoff_time_ns`，而是从早 1.0 s 的观测门控通过时刻 `actual_start_ns` 开始采样 smoothstep 轨迹。
    - 结果：每阶段前 20 步（1.0 s 平滑加速段）在 `handoff_time_ns` 之前被 `ActionWindow` 丢弃，窗口首点发生大跨度阶跃；阶段末产生 34～39 帧（1.7～1.95 s）的 `WAITING_FOR_FEEDBACK` 死等平台；全部 50 条正式数据均在旧 30 s 预算下于第 580 帧（29.0 s）被截断。
 2. **阶段末静止帧过滤未压缩目标动作序列且保护过宽**：
@@ -38,7 +38,7 @@
 
 - **P01 — 更新 `AGENTS.md`**：补充 `### 2.4 改动/新增代码归属判断与破例确认准则`，明确“端无关 (`shared/`) vs 四端内”与“端内 `common/` vs `<robot-id>/` vs `<robot-id>/<task-id>/`”的两级判断流程，以及破坏性改动/偏离规范需提前请示用户许可的原则。
 - **P02 — 多轴协同过渡重定时**：在 `RobotProfile` 派生 `coordinated_axis_groups`，在 `transition_retiming.py` 实现同臂多轴按最受限轴等比例协同缩放并彻底清除场景硬编码启发式，在 `PolicyStreamRunner._retime` 接入并在 `tests/unit/test_transition_retiming.py` 补充单元测试。
-- **P03 — 修复 Panda Teacher 时钟对齐、配置拆分与静止帧过滤**：对齐 `panda_sim/stack` 阶段运动起点与 `handoff_time_ns`；拆分 `panda_follower_v1.yaml`（采集 `target_count: 10`）与 `panda_follower_inference_v1.yaml`（推理 `target_count: 20`）；修正 `sample_filter.py` 的 `_protections()` 与两端 `act_sample_filter.yaml` 阈值。
+- **P03 — 修复 Panda Teacher 时钟对齐、配置拆分与静止帧过滤**：对齐 `panda_sim/stack` 阶段运动起点与 `handoff_time_ns`；拆分 `panda_follower.yaml`（采集 `target_count: 10`）与 `panda_follower_inference.yaml`（推理 `target_count: 20`）；修正 `sample_filter.py` 的 `_protections()` 与两端 `act_sample_filter.yaml` 阈值。
 - **P04 — 启动预热增强与异步预取推理**：服务端 `OpenSession` 调用 `pipeline.warm_up()`；扩展 `startup_settle_sim_ns` 上限并设为 3.0 s，开启 `warmup_on_settle` 在 `StartTask` 前执行真实观测预热 `Predict`；在 `ContinuousStreamRunner` 实现 `async_inference` 后台异步推理与 `prefetch_lead_ns` 准时预取；补充单元测试。
 - **P05 — 空中交接移交边界细化与视觉骨干分组学习率**：细化 `marvin_sim/handover/evaluator.py` 的 `_holder_required` 移交过渡守卫与左爪释放后的右爪稳定性参考刷新；为 `learning/lerobot` 增加 `training.lr_backbone` 支持并在两方案 `act_training.yaml` 配置。
 - **P06 — 归属清理、全量单测回归与文档同步**：修正 `hardware/README.md` 单层方案路径，清理残留孤立 `.pyc`，同步更新 `README.md` §5 与 `docs/experiments/closed-loop-triage.md`，通过容器运行相关单元测试并汇总结果。

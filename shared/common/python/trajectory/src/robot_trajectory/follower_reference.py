@@ -83,7 +83,7 @@ def follower_reference_from_prepared(
         requested_window_ns=prepared.requested_window_ns,
         curve_duration_ns=prepared.curve_duration_ns,
         duration_grid_ns=prepared.duration_grid_ns,
-        algorithm_version=prepared.algorithm_version,
+        algorithm=prepared.algorithm,
         velocity_limited=prepared.flags.velocity_limited,
         acceleration_limited=prepared.flags.acceleration_limited,
         boundary_preserved=prepared.flags.boundary_preserved,
@@ -156,7 +156,7 @@ def validate(record: FollowerReference, profile: RobotProfile,
         requested_window_ns=record.requested_window_ns,
         curve_duration_ns=record.curve_duration_ns,
         duration_grid_ns=record.duration_grid_ns,
-        algorithm_version=record.algorithm_version,
+        algorithm=record.algorithm,
     )
     if rebuilt.plan != record.plan:
         raise _invalid("plan", "reconstructed plan differs")

@@ -1,4 +1,4 @@
-"""Pure completed-policy audit invariants shared by the MCAP v4 audit."""
+"""Completed-policy checks for the recording audit."""
 
 from __future__ import annotations
 
@@ -14,9 +14,8 @@ def require_completed_chunks(
 ) -> None:
     """A completed finite diagnostic must contain exactly the configured chunks.
 
-    Task-terminated streams stop on the physical judge, so their executed chunk
-    count is not the configured capacity bound; the old v4 diagnostic path keeps
-    ``strict=True`` unchanged.
+    Finite diagnostics use the configured chunk count as a completion condition.
+    Task-terminated streams use the task result and treat that count as capacity.
     """
     if not completed or not strict:
         return

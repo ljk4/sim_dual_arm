@@ -1,8 +1,7 @@
 {
-  "schema_version": 2,
   "test_only": false,
   "robot_id": "marvin_handover",
-  "profile_id": "marvin_handover_v1",
+  "profile_id": "marvin_handover",
   "joints": [
     {
       "name": "left_joint1",

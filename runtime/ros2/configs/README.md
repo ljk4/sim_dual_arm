@@ -11,7 +11,7 @@
 
 1. **控制配置单一数据源**：运行配方通过相对路径引用方案目录 `configs/simulation/scene/` 下的场景文件、`profiles/control/` 下的共享控制/跟随参数以及 `profiles/` 下的机器人语义档案。`target_count` 唯一定义在对应方案的 follower 档案中。
 2. **Policy 身份来自 Policy Service**：运行端不读取模型 Bundle、不要求 `--bundle`。推理启动时通过 `GetPolicyInfo` 握手从 Policy Service 获取并校验模型/处理器摘要、Profile 语义哈希、观测/动作顺序与 chunk 大小；运行配方只声明 RPC 端点与预算。
-3. **方案选择**：所有运行入口用 `--robot <robot> --task <task>` 从 binding 选择配方；直接配置模式使用 `--config <recipe>`，二者互斥。重复 `--set dot.path=value` 可覆盖配方中已存在的键。
+3. **方案选择**。使用 `--robot <robot> --task <task>` 从 Binding 选择配方，或使用命令帮助列出的直接配置参数。在配方中修改业务参数，临时连接另一个策略服务可用 `--policy-endpoint HOST:PORT`。
 
 ```bash
 # 直接以方案执行一局策略

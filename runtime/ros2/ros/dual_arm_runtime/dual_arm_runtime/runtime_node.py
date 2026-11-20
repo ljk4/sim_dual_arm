@@ -53,10 +53,10 @@ from dual_arm_runtime.observation import ExactCaptureBuffer, ExactObservation
 from dual_arm_runtime.robot_control_client import RobotControlClient
 from dual_arm_runtime.run_logging import EventSink
 from dual_arm_runtime.runtime_callbacks import RuntimeCallbacks
-from dual_arm_runtime.runtime_config import MAX_CHUNKS, RuntimeConfiguration
+from dual_arm_runtime.runtime_config import RuntimeConfiguration
 from dual_arm_runtime.runtime_identity import execution_identity
-from dual_arm_runtime.runtime_limits import control_limits, task_enabled
-from dual_arm_runtime.task_client import TaskClient, task_state_message_type
+from dual_arm_runtime.runtime_limits import MAX_CHUNKS, control_limits
+from dual_arm_runtime.simulation.options import task_enabled
 
 _TERMINAL = frozenset({"COMPLETED", "CANCELED", "FAILED"})
 _MAX_EXPECTED_COMMANDS = 64
@@ -159,39 +159,12 @@ class RuntimeNode(Node):
             episode_output=episode_output,
         )
         self._control = self._episode.control
-        self._task_client = (
-            TaskClient(
-                self,
-                self._root,
-                call_timeout_s=self._recipe.call_timeout_s,
-                prepare_timeout_s=self._recipe.teacher.prepare_timeout_s
-                if self._recipe.teacher is not None
-                else self._recipe.call_timeout_s,
-                start_timeout_s=self._recipe.teacher.start_timeout_s
-                if self._recipe.teacher is not None
-                else self._recipe.call_timeout_s,
-                poll_interval_s=self._recipe.teacher.poll_interval_s
-                if self._recipe.teacher is not None
-                else 0.02,
-                log=log,
-                stop_requested=self._control.stop_requested,
-            )
-            if task_enabled(configuration)
-            else None
-        )
-        if self._recipe.action_source == "teacher" and self._task_client is not None:
-            from dual_arm_runtime.teacher_client import TeacherTaskClient
+        self._task_client = None
+        if task_enabled(self._recipe):
+            from dual_arm_runtime.simulation.task_client import create_task_client
 
-            self._task_client = TeacherTaskClient(
-                self._task_client,
-                self,
-                self._root,
-                capability=self._recipe.teacher_api,
-                chunk_timeout_s=self._recipe.teacher.chunk_deadline_s,
-                call_timeout_s=self._recipe.call_timeout_s,
-                poll_interval_s=self._recipe.teacher.poll_interval_s,
-                log=log,
-                stop_requested=self._control.stop_requested,
+            self._task_client = create_task_client(
+                self, self._root, self._recipe, self._control.stop_requested, log,
             )
         self._cameras = {camera.name: camera for camera in configuration.profile.cameras}
 
@@ -215,6 +188,8 @@ class RuntimeNode(Node):
                 sensor_qos,
             )
         if self._task_client is not None:
+            from dual_arm_runtime.simulation.task_client import task_state_message_type
+
             self.create_subscription(
                 task_state_message_type(),
                 f"{self._root}/task_state",
@@ -311,10 +286,6 @@ class RuntimeNode(Node):
                     raise ContractError("EPISODE_STOPPED", "backend wait stopped")
                 self._condition.wait(timeout=0.1)
             info = self._info
-        if info.backend_kind != "mujoco":
-            raise ContractError("UNSUPPORTED_CAPABILITY", "backend kind")
-        if bool(info.test_only) != self._recipe.test_only:
-            raise ContractError("UNSUPPORTED_CAPABILITY", "backend test_only differs")
         if info.context.robot_profile_hash != self.config.profile.digest:
             raise ContractError("SCHEMA_MISMATCH", "backend profile")
         if tuple(info.joint_names) != self.config.profile.joint_names:
@@ -353,7 +324,6 @@ class RuntimeNode(Node):
         if info is None:
             return
         message = BackendInfo(
-            protocol_major=info.protocol_major,
             context=context_message(context),
             backend_kind=info.backend_kind,
             ready=info.ready,
@@ -378,7 +348,7 @@ class RuntimeNode(Node):
                     raise ContractError("EPISODE_STOPPED", "observation wait stopped")
                 try:
                     candidate = self._buffer.assemble(
-                        self._simulation_now_ns(), time.monotonic_ns()
+                        self._backend_now_ns(), time.monotonic_ns()
                     )
                 except ContractError as error:
                     if error.reason == "STALE_OBSERVATION":
@@ -418,6 +388,8 @@ class RuntimeNode(Node):
         self._commands.publish(message)
 
     def record_task_state(self, fact: object) -> None:
+        from dual_arm_runtime.simulation.task_client import task_state_message_type
+
         if not isinstance(fact, task_state_message_type()):
             raise ContractError("TASK_STATE_MISMATCH", "task fact is not a ROS state message")
         sample_ns = time_ns(fact.sample_time)
@@ -543,8 +515,8 @@ class RuntimeNode(Node):
         return True
 
     def robot_time_ns(self) -> int:
-        """Current robot simulation time, not the ROS wall clock."""
-        return self._simulation_now_ns()
+        """Current backend clock time used by the recorded observations."""
+        return self._backend_now_ns()
 
     def publish_status(
         self, phase: str, episode_id: str, reason: str, record_directory: str
@@ -567,7 +539,9 @@ class RuntimeNode(Node):
         if self._follower_limits is not None:
             topics[f"{self._root}/follower_references"] = "robot_api_msgs/msg/FollowerReference"
         if self._task_client is not None:
-            topics[f"{self._root}/task_state"] = "sim_api_msgs/msg/TaskState"
+            from dual_arm_runtime.simulation.task_client import TASK_STATE_MESSAGE_TYPE
+
+            topics[f"{self._root}/task_state"] = TASK_STATE_MESSAGE_TYPE
         for topic in self._camera_topics.values():
             topics[topic] = "robot_api_msgs/msg/CameraFrame"
         return topics
@@ -600,7 +574,7 @@ class RuntimeNode(Node):
     def _on_task_state(self, message: object) -> None:
         self._callbacks.on_task_state(message)
 
-    def _simulation_now_ns(self) -> int:
+    def _backend_now_ns(self) -> int:
         stamp_value = self._buffer.latest_state_stamp()
         return 0 if stamp_value is None else stamp_value
 
@@ -611,7 +585,7 @@ class RuntimeNode(Node):
         if context is None:
             return
         try:
-            observation = self._buffer.assemble(self._simulation_now_ns(), time.monotonic_ns())
+            observation = self._buffer.assemble(self._backend_now_ns(), time.monotonic_ns())
         except ContractError as error:
             if error.reason == "STALE_OBSERVATION":
                 self._episode.report_control_fault("STALE_OBSERVATION")

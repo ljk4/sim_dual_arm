@@ -58,14 +58,6 @@ def _add_selection_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--shared-root", type=Path, default=None, help="shared tree containing scenarios/"
     )
-    parser.add_argument(
-        "--set",
-        dest="overrides",
-        action="append",
-        default=[],
-        metavar="PATH=VALUE",
-        help="override one existing recipe path (repeatable)",
-    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -125,38 +117,21 @@ def _target(args: argparse.Namespace) -> tuple[str, str] | None:
     return args.robot, args.task
 
 
-def _set_paths(args: argparse.Namespace) -> set[str]:
-    return {
-        item.split("=", 1)[0]
-        for item in getattr(args, "overrides", ())
-        if "=" in item
-    }
-
-
 def _training_config(
     args: argparse.Namespace, config_path: Path, selection: object | None = None
 ) -> object:
-    config = load_training_config(config_path, args.project_root, overrides=args.overrides)
+    config = load_training_config(config_path, args.project_root)
     updates: dict[str, object] = {}
     if getattr(args, "mode", None):
         updates["mode"] = args.mode
     if getattr(args, "data_root", None):
         updates["data_root"] = project_path(args.data_root, args.project_root)
     elif selection is not None:
-        set_paths = _set_paths(args)
         paths = artifact_paths(selection.robot, selection.task, args.project_root)
-        if "data.root" not in set_paths:
-            updates["data_root"] = paths["dataset"]
-        if "cache_root" not in set_paths:
-            updates["cache_root"] = paths["cache"]
-        if "checkpoint.root" not in set_paths:
-            updates["checkpoint"] = config.checkpoint.model_copy(
-                update={"root": paths["models"]}
-            )
-        if "logging.root" not in set_paths:
-            updates["logging"] = config.logging.model_copy(
-                update={"root": paths["training_logs"]}
-            )
+        updates["data_root"] = paths["dataset"]
+        updates["cache_root"] = paths["cache"]
+        updates["checkpoint"] = config.checkpoint.model_copy(update={"root": paths["models"]})
+        updates["logging"] = config.logging.model_copy(update={"root": paths["training_logs"]})
     return config.model_copy(update=updates)
 
 
@@ -217,8 +192,6 @@ def _training_overrides(args: argparse.Namespace, root: Path) -> dict[str, objec
         }
     if getattr(args, "allow_synthetic", False):
         overrides["allow_synthetic"] = {"value": True, "source": "argument"}
-    if getattr(args, "overrides", None):
-        overrides["set"] = {"value": list(args.overrides), "source": "argument"}
     return overrides
 
 
@@ -254,19 +227,15 @@ def _logs_root(args: argparse.Namespace, root: Path) -> Path:
 
 def _command_convert(args: argparse.Namespace, root: Path) -> int:
     config_path, selection = _learning_selection(args, root, recipe_field="dataset")
-    config = load_dataset_config(config_path, root, overrides=args.overrides)
+    config = load_dataset_config(config_path, root)
     _check_selection(selection, profile_path=config.profile_path)
     changes: dict[str, object] = {}
     overrides: dict[str, object] = {}
     if selection is not None:
-        set_paths = _set_paths(args)
         paths = artifact_paths(selection.robot, selection.task, root)
-        if "select" not in set_paths:
-            changes["select_path"] = paths["select"]
-        if "output_root" not in set_paths:
-            changes["output_root"] = paths["dataset"]
-        if "cache_root" not in set_paths:
-            changes["cache_root"] = paths["cache"]
+        changes.update(
+            select_path=paths["select"], output_root=paths["dataset"], cache_root=paths["cache"]
+        )
     if args.select is not None:
         changes["select_path"] = _resolve(args.select, root)
         overrides["select"] = {"value": str(changes["select_path"]), "source": "argument"}
@@ -277,15 +246,13 @@ def _command_convert(args: argparse.Namespace, root: Path) -> int:
         overrides["replace"] = {"value": True, "source": "argument"}
     if args.synthetic:
         overrides["synthetic"] = {"value": True, "source": "argument"}
-    if args.overrides:
-        overrides["set"] = {"value": list(args.overrides), "source": "argument"}
     if changes:
         config = config.model_copy(update=changes)
     settings = [
         f"清单：{config.select_path}",
         f"输出：{config.output_root}",
-        f"划分：{config.expected_training_episodes} 条训练 / "
-        f"{config.expected_validation_episodes} 条验证；{config.fps} Hz；"
+        f"验证比例 {config.validation_percent}%（{config.expected_training_episodes} 条训练 / "
+        f"{config.expected_validation_episodes} 条验证）；{config.fps} Hz；"
         f"{len(config.camera_names)} 路 {config.camera_width}×{config.camera_height} RGB",
     ]
     if args.progress:

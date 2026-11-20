@@ -51,12 +51,7 @@ def parser() -> argparse.ArgumentParser:
         "--backend-template", default=None, help="direct simulation policy recipe"
     )
     result.add_argument(
-        "--set",
-        dest="overrides",
-        action="append",
-        default=[],
-        metavar="PATH=VALUE",
-        help="override one existing runtime recipe path (repeatable)",
+        "--policy-endpoint", metavar="HOST:PORT", help="Policy Service gRPC address"
     )
     result.add_argument(
         "--realtime-speed", type=float, default=None,
@@ -159,8 +154,6 @@ class DockerWorkers:
                     *(["--realtime-speed", str(self.args.realtime_speed)]
                       if self.args.realtime_speed is not None else []),
                     *self._selection_arguments(),
-                    *[item for override in self.args.overrides
-                      for item in ("--set", override)],
                 ]
             ),
             check=False, capture_output=True, text=True, timeout=60,
@@ -215,6 +208,8 @@ class DockerWorkers:
                 "--batch-id", self.batch_id,
                 "--count", str(self.args.count),
                 "--seed-start", str(self.args.seed_start),
+                *(["--policy-endpoint", self.args.policy_endpoint]
+                  if self.args.policy_endpoint is not None else []),
                 *(["--max-consecutive-failures",
                    str(self.args.max_consecutive_failures)]
                   if self.args.max_consecutive_failures is not None else []),
@@ -277,6 +272,8 @@ def _print_startup_info(args: argparse.Namespace, plan: dict, directory: Path) -
         flush=True,
     )
     print(f"批次目录: {directory}", flush=True)
+    if args.policy_endpoint is not None:
+        print(f"策略服务: {args.policy_endpoint}", flush=True)
 
 
 def main(argv: list[str] | None = None) -> int:

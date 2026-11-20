@@ -1,5 +1,5 @@
 # 中文参数说明（维护时优先阅读本段）
-# joint_names：16 个控制轴顺序，与 marvin_handover_v1 档案一致。
+# joint_names：16 个控制轴顺序，与 marvin_handover 档案一致。
 # max_accelerations：各轴最大加速度；臂 rad/s^2，夹爪总开度 m/s^2。
 # position_tolerances：参考与实测位置容差；臂 rad，夹爪 m。
 # velocity_tolerances：参考与实测速度容差；臂 rad/s，夹爪 m/s。
@@ -9,7 +9,7 @@
 # contact_force_min_n / finger_velocity_max_m_s：接触完成判据。
 
 # Marvin no-ROS motion parameters.  SI units only.  Joint position/velocity
-# hard limits come from marvin_handover_v1; the tolerances below were measured
+# hard limits come from marvin_handover; the tolerances below were measured
 # on the real compiled scene and streaming control, independent of any other
 # scenario recipe or the P01A offline 5e-4 m model-consistency tolerance.
 joint_names:

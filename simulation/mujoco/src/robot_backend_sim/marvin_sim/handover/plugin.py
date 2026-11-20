@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import OrderedDict
 from typing import Any
 
 from robot_contracts.models import ContractError, RobotProfile, RunContext
 from robot_contracts.task_state import TaskState
 
 from robot_backend_sim.common.tasks.base import (
+    CAPTURE_HISTORY_LIMIT,
     TaskChunk,
     TaskChunkView,
     TaskPlan,
@@ -37,7 +39,7 @@ from robot_backend_sim.marvin_sim.handover.teacher import (
 
 __all__ = ["HandoverTaskPlugin"]
 
-TEACHER_CAPABILITY = "marvin_handover_api_msgs.teacher_chunk.v1"
+TEACHER_CAPABILITY = "marvin_handover_api_msgs.teacher_chunk"
 _COMMAND_HISTORY = 64
 
 
@@ -67,7 +69,7 @@ class HandoverTaskPlugin:
         self._object_addresses: dict[str, int] = {}
         self._support_body_names: tuple[str, ...] = ()
         self._scene_config: Any = None
-        self._teacher_feedback: dict[int, HandoverFeedback] = {}
+        self._teacher_feedback: OrderedDict[int, HandoverFeedback] = OrderedDict()
         self._step_motion_start: dict[int, int] = {}
         self._prepared_command_id = ""
         self._chunk_cache: dict[str, tuple[str, TaskChunk]] = {}
@@ -419,9 +421,9 @@ class HandoverTaskPlugin:
             sim_time_ns=int(capture.sim_time_ns),  # type: ignore[attr-defined]
             gate=self._runtime.gate_fact(),
         )
-        if len(self._teacher_feedback) >= 2048:
-            self._teacher_feedback.clear()
         self._teacher_feedback[feedback.capture_seq] = feedback
+        if len(self._teacher_feedback) > CAPTURE_HISTORY_LIMIT:
+            self._teacher_feedback.popitem(last=False)
 
     def chunk_view(
         self,

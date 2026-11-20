@@ -16,11 +16,10 @@ ROOT = Path(__file__).resolve().parents[4]
 GENERATED_NAMES = {"dual_arm_policy", "source.sha256"}
 REQUIRED_FILES = (
     "dual_arm_policy/__init__.py",
-    "dual_arm_policy/v1/__init__.py",
-    "dual_arm_policy/v1/policy_pb2.py",
-    "dual_arm_policy/v1/policy_pb2_grpc.py",
+    "dual_arm_policy/policy_pb2.py",
+    "dual_arm_policy/policy_pb2_grpc.py",
 )
-MODULES = ("dual_arm_policy.v1.policy_pb2", "dual_arm_policy.v1.policy_pb2_grpc")
+MODULES = ("dual_arm_policy.policy_pb2", "dual_arm_policy.policy_pb2_grpc")
 
 
 class SDKError(RuntimeError):
@@ -28,12 +27,12 @@ class SDKError(RuntimeError):
 
 
 def proto_path(project_root: Path) -> Path:
-    candidate = project_root / "shared/common/interfaces/policy/v1/policy.proto"
+    candidate = project_root / "shared/common/interfaces/policy/policy.proto"
     if candidate.is_file():
         return candidate
     shared_root = os.environ.get("SHARED_ROOT")
     if shared_root:
-        shared_candidate = Path(shared_root) / "common/interfaces/policy/v1/policy.proto"
+        shared_candidate = Path(shared_root) / "common/interfaces/policy/policy.proto"
         if shared_candidate.is_file():
             return shared_candidate
     return candidate

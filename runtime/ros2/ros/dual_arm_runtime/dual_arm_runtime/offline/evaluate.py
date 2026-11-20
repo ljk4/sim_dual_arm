@@ -216,7 +216,6 @@ def build_report(
         _generate_media(metrics, output)
     summary = _summary(metrics, duplicates, seed_first, seed_last)
     document = {
-        "schema_version": 1,
         "ledger": str(project_path(paths["ledger"], project_root)),
         "purposes": list(purposes),
         "summary": summary,

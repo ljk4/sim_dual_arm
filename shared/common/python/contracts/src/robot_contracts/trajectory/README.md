@@ -1,6 +1,6 @@
 # 轨迹契约数据
 
-- `constants.py`：版本、维数、时间边界与共同数值容差。
+- `constants.py`：维数、时间边界与共同数值容差。
 - `spline.py`：`CubicSegment`、`ReferenceSample`、`ReferencePlan`、`JointExtremes`、`ReferenceExtremes`。
 - `follower.py`：`FollowerLimitFlags`、`NormalizedFollowerPositions`。
 - `follower_reference.py`：`FollowerReference`、`FollowerAppliedSample`、`FollowerValidationLimits`、身份/摘要校验。

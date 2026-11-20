@@ -248,7 +248,6 @@ class _PreparedEvent:
             }
         episode_id, request_id, command_id, clock_epoch, sim_time_ns = self.context
         return {
-            "schema_version": 1,
             "run_id": self.run_id,
             "component": self.component,
             "instance_id": self.instance_id,

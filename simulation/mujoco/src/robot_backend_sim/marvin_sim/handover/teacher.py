@@ -181,7 +181,6 @@ def _plan_digest(
     layout: HandoverLayout,
 ) -> str:
     payload = {
-        "version": 1,
         "task_config_digest": config.config_digest,
         "context": {
             "robot_id": snapshot.context.robot_id,

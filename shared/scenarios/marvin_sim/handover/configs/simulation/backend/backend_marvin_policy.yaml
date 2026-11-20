@@ -2,12 +2,12 @@
 # task_mode: inference 使用同一任务评价器，不提供 Teacher 目标。
 robot:
   namespace: /robot
-  profile: ../../../profiles/robots/marvin_handover_v1/profile.json
+  profile: ../../../profiles/robots/marvin_handover/profile.json
   schemas: ../../../../../../common/interfaces/schemas
   scene: ../scene/marvin_handover.yaml
-  control: ../../../profiles/control/marvin_control_v1.yaml
-  stream: ../../../profiles/control/marvin_stream_v1.yaml
-  follower: ../../../profiles/control/marvin_follower_inference_v1.yaml
+  control: ../../../profiles/control/marvin_control.yaml
+  stream: ../../../profiles/control/marvin_stream.yaml
+  follower: ../../../profiles/control/marvin_follower_inference.yaml
   task: ../scene/marvin_handover_task_inference.yaml
   task_type: handover
   task_mode: inference

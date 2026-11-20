@@ -29,7 +29,6 @@ def test_requirements_lock_is_the_only_pinned_simulation_source():
     assert len(pins) == sum(bool(line.strip()) and not line.startswith(("#", "--"))
                             for line in lock.splitlines())
     locked = {name: version for name, version, _digest in pins}
-    hashes = {name: digest for name, _version, digest in pins}
     assert {
         "mujoco",
         "mink",
@@ -39,13 +38,9 @@ def test_requirements_lock_is_the_only_pinned_simulation_source():
         "qpsolvers",
         "daqp",
         "PyOpenGL",
-        "ruckig",
     } <= set(locked)
-    assert locked["ruckig"] == "0.15.3"
-    assert hashes["ruckig"] == (
-        "c55f1b036c6a8f8545d9af104e86b88c2f2e338c4a888a441ecb6260679c4fbb"
-    )
-    assert "--find-links=/opt/dependencies" in lock
+    assert "ruckig" not in locked
+    assert "ruckig" not in probe._PACKAGE_DISTRIBUTIONS
     assert not (docker / "sim-requirements.lock").exists()
     assert not (docker / "sim-packages.json").exists()
     assert not (docker / "sim-tools-requirements.txt").exists()

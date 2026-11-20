@@ -1,11 +1,10 @@
 # Marvin 交接 Policy 执行与录制；模型身份由 Policy Service 握手提供。
 # inference 评价预算：180 s 仿真任务、1 s 停止余量、420 s 墙钟。
-schema_version: 1
-robot_profile: ../../profiles/robots/marvin_handover_v1/profile.json
-observation_schema: ../../profiles/observations/marvin_rgb_joint_v1.json
-action_schema: ../../profiles/actions/marvin_joint_position_v1.json
-control_constraints: ../../profiles/control/marvin_control_v1.yaml
-follower_config: ../../profiles/control/marvin_follower_inference_v1.yaml
+robot_profile: ../../profiles/robots/marvin_handover/profile.json
+observation_schema: ../../profiles/observations/marvin_rgb_joint.json
+action_schema: ../../profiles/actions/marvin_joint_position.json
+control_constraints: ../../profiles/control/marvin_control.yaml
+follower_config: ../../profiles/control/marvin_follower_inference.yaml
 robot_namespace: /robot
 
 action_source: policy

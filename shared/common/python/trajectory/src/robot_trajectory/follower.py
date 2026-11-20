@@ -6,8 +6,10 @@ from typing import Annotated, Self
 
 from pydantic import BeforeValidator, Field, model_validator
 from robot_contracts.action_chunks import ActionWindow, ChunkAnchor
-from robot_contracts.models import ContractError, FloatVector, JointSpec
+from robot_contracts.models import ContractError, FloatVector, JointSpec, RobotProfile
+from robot_contracts.stream_request import REQUEST_STREAM_FIRST, REQUEST_STREAM_NEXT, StreamRequest
 from robot_contracts.trajectory.follower import FollowerLimitFlags, NormalizedFollowerPositions
+from robot_contracts.trajectory.follower_reference import FollowerValidationLimits
 from robot_contracts.trajectory.spline import ReferencePlan, ReferenceSample
 from robot_contracts.validation import NonEmptyStr, StrictContractModel, as_tuple, contract_error
 
@@ -34,6 +36,8 @@ from .spline_math import (
     validate_reference_inputs,
     validate_velocity_boundaries,
 )
+
+RUNTIME_FOLLOWER_ALGORITHM = "bounded-target-follower/runtime"
 
 
 def _invalid(location: str, message: str) -> ContractError:
@@ -101,7 +105,7 @@ class PreparedFollowerPlan(StrictContractModel):
     is_final: bool
     requested_window_ns: Annotated[int, Field(strict=True, ge=1, le=MAX_HORIZON_NS)]
     curve_duration_ns: Annotated[int, Field(strict=True, ge=1, le=MAX_HORIZON_NS)]
-    algorithm_version: NonEmptyStr
+    algorithm: NonEmptyStr
     duration_grid_ns: Annotated[int, Field(strict=True, ge=1, le=MAX_HORIZON_NS)] | None = None
     actual_terminal_positions: tuple[float, ...] = Field(default=(), exclude=True)
     actual_terminal_velocities: tuple[float, ...] = Field(default=(), exclude=True)
@@ -379,3 +383,53 @@ class PreparedFollowerPlan(StrictContractModel):
                 "all_boundaries_preserved": self.flags.all_boundaries_preserved},
             "extremes": [item.model_dump(mode="json") for item in self.extremes.joints]})
         return document
+
+
+def prepare_submitted_follower(
+    request: StreamRequest,
+    plan: ReferencePlan,
+    profile: RobotProfile,
+    limits: FollowerValidationLimits,
+) -> PreparedFollowerPlan:
+    """Validate the supplied coefficients and derive the execution evidence."""
+    anchor, window = request.anchor, request.window
+    if request.kind not in (REQUEST_STREAM_FIRST, REQUEST_STREAM_NEXT):
+        raise ContractError("INVALID_FOLLOWER_REQUEST", "expected a first or successor chunk")
+    if anchor is None or window is None:
+        raise ContractError("INVALID_FOLLOWER_REQUEST", "request needs an anchor and a window")
+    if (
+        request.trajectory.context.robot_profile_hash != profile.digest
+        or anchor.robot_profile_hash != profile.digest
+        or request.trajectory.joint_names != profile.joint_names
+        or limits.joint_names != profile.joint_names
+    ):
+        raise ContractError("PROFILE_MISMATCH", "request or limits differ from the backend profile")
+    if window.target_count != limits.target_count:
+        raise ContractError("FOLLOWER_LIMIT_MISMATCH", "request differs from the configured window")
+    if max(window.end_time_ns, plan.duration_ns) > limits.max_terminal_tail_duration_ns:
+        raise ContractError("FOLLOWER_HORIZON_EXCEEDED", "trajectory exceeds the configured tail")
+    raw_velocities = estimate_raw_terminal_velocities(window.targets)
+    restricted_velocities = restrict_terminal_velocities(
+        raw_velocities,
+        anchor.reference.positions,
+        anchor.reference.velocities,
+        window.targets[-1].positions,
+        profile.joints,
+        limits.max_accelerations,
+        is_final=request.settle_at_end,
+    )
+    return PreparedFollowerPlan(
+        anchor=anchor,
+        window=window,
+        plan=plan,
+        joints=profile.joints,
+        max_accelerations=limits.max_accelerations,
+        max_target_deviation_limits=limits.max_target_deviations,
+        raw_terminal_velocities=raw_velocities,
+        restricted_terminal_velocities=restricted_velocities,
+        is_final=request.settle_at_end,
+        requested_window_ns=window.end_time_ns,
+        curve_duration_ns=plan.duration_ns,
+        algorithm=RUNTIME_FOLLOWER_ALGORITHM,
+        duration_grid_ns=limits.duration_grid_ns,
+    )

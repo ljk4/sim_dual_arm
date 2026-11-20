@@ -18,7 +18,6 @@ from typing import Any
 
 import numpy as np
 
-MODEL_FORMAT = "dual-arm-act-model-v2"
 MODEL_FILENAME = "model.safetensors"
 TRAINING_ARGS_FILENAME = "training_args.yaml"
 PREPROCESSOR_FILE = "policy_preprocessor_step_3_normalizer_processor.safetensors"
@@ -97,8 +96,8 @@ def read_model_metadata(path: str | Path) -> tuple[Path, dict[str, Any]]:
             metadata = handle.metadata() or {}
     except Exception as error:  # noqa: BLE001 - surface one model error type
         raise ModelError(f"{model_file}: cannot read model metadata: {error}") from error
-    if metadata.get("format") != MODEL_FORMAT:
-        raise ModelError(f"{model_file}: unsupported model format {metadata.get('format')!r}")
+    if metadata.get("policy") != "act":
+        raise ModelError(f"{model_file}: model metadata must declare policy 'act'")
     return model_file, {str(key): str(value) for key, value in metadata.items()}
 
 
@@ -405,7 +404,6 @@ def save_model_package(
             raise ModelError(f"trained tensor {name} contains non-finite values")
     tensors = {**policy_tensors, **processor_tensors}
     metadata = {
-        "format": MODEL_FORMAT,
         "policy": "act",
         "step": str(step),
         "act_config_json": json.dumps(_act_config_document(act_config), sort_keys=True),
@@ -452,7 +450,7 @@ def _write_training_args(path: Path, document: dict[str, Any]) -> None:
 def deployment_summary(config: Any) -> dict[str, Any]:
     """Return JSON-safe deployment provenance from one loaded policy config."""
     summary: dict[str, Any] = {
-        "format": MODEL_FORMAT,
+        "policy": "act",
         "chunk_size": config.chunk_size,
         "state_dim": len(config.joint_names),
         "action_period_ns": config.action_period_ns,
@@ -477,7 +475,6 @@ def deployment_summary(config: Any) -> dict[str, Any]:
 
 __all__ = [
     "MODEL_FILENAME",
-    "MODEL_FORMAT",
     "ModelError",
     "ModelHandle",
     "TRAINING_ARGS_FILENAME",

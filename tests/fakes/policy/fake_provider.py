@@ -140,7 +140,6 @@ class FakeProvider:
     def info(self) -> ProviderInfo:
         config = self.config
         return ProviderInfo(
-            protocol_major=config.protocol_major,
             model_bundle_digest=config.model_bundle_digest,
             processor_digest=config.processor_digest,
             observation_schema_hash=config.observation_schema_hash,

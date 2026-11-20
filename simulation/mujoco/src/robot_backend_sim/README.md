@@ -5,9 +5,9 @@ MuJoCo 双臂后端按职责拆分，同时服务 Marvin 堆叠（`marvin_sim/st
 - **[`common/`](common/)**：机器人/任务无关的通用机制。
   - `config/`：声明式配置及校验。
   - `control/`：控制会话、历史、制动和反馈邮箱。
-  - `follower/`：受限跟随规划及协议。
+  - `follower/`：受限跟随准入及参考反馈。
   - `kinematics/`：通用位姿/路径采样与间隙检查。
-  - `motion/`：运动执行、状态转换、Ruckig 导出和流式接续。
+  - `motion/`：运动执行、状态转换、流式接续与任务规划线程。
   - `physics/`：场景容器、资产、接触与通用机器人 I/O。
   - `render/`：相机渲染、通用可见性计数与 viewer。
   - `ros/`：ROS 节点、服务适配与 CLI。

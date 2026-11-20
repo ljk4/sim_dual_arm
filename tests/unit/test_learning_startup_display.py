@@ -72,7 +72,6 @@ def test_training_data_root_override_uses_data_mount(monkeypatch):
     )
     args = argparse.Namespace(
         project_root=root,
-        overrides=[],
         mode=None,
         data_root=Path("var/marvin_sim/stack/datasets/override"),
     )

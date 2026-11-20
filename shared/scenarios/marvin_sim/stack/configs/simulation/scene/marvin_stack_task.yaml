@@ -1,5 +1,4 @@
 # Marvin stack task evaluation, gate thresholds and Teacher configuration.
-schema_version: 1
 planning_config: ../checks/kinematics_check.yaml
 
 objects:

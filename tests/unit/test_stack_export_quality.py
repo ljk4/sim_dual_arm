@@ -1,4 +1,5 @@
-
+import json
+from argparse import Namespace
 
 from dual_arm_runtime.offline import export_episode
 
@@ -86,6 +87,34 @@ def test_missing_required_samples_or_phase_cannot_be_qualified():
     assert no_phase["qualified"] is False
     assert any("no phase boundary" in reason for reason in no_phase["failure_reasons"])
     assert no_phase["rules"][0]["phase"] == "global"
+
+
+def test_export_quality_uses_only_the_recorded_episode_and_epoch(tmp_path):
+    time_ns = 1_000_000_000
+    log = tmp_path / "events.000001.jsonl"
+    args = Namespace(backend_log=[log])
+    context = {"episode_id": "recorded", "clock_epoch": 1}
+    foreign_events = [
+        {**_event(time_ns, 80), "episode_id": "different", "clock_epoch": 1},
+        {**_event(time_ns, 80), "episode_id": "recorded", "clock_epoch": 2},
+    ]
+
+    def quality(events):
+        log.write_text("\n".join(json.dumps(event) for event in events), encoding="utf-8")
+        return export_episode._quality(
+            args,
+            tmp_path,
+            context,
+            {"phase_observations": {"pregrasp": 1}},
+            {1: time_ns},
+            {"action_source": "teacher"},
+            {"quality": _rules()},
+        )
+
+    assert quality(foreign_events)["qualified"] is False
+    result = quality([*foreign_events, {**_event(time_ns, 80), **context}])
+    assert result["qualified"] is True
+    assert result["samples"]["right_wrist.source"] == 1
 
 
 def test_missing_required_phase_fails_even_when_rules_pass():

@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 def generate(root: Path, output: Path) -> None:
-    source = root / "shared/common/interfaces/policy/v1/policy.proto"
+    source = root / "shared/common/interfaces/policy/policy.proto"
     output.mkdir(parents=True, exist_ok=True)
     # A previous SDK must never be mistaken for this source revision.
     stale = output / "dual_arm_policy"
@@ -18,8 +18,8 @@ def generate(root: Path, output: Path) -> None:
         shutil.rmtree(stale)
     # Compile from a scratch directory so no proto copy remains in the SDK.
     with tempfile.TemporaryDirectory(prefix="policy-sdk-proto-") as scratch:
-        staging = Path(scratch) / "dual_arm_policy/v1"
-        staging.mkdir(parents=True)
+        staging = Path(scratch) / "dual_arm_policy"
+        staging.mkdir()
         shutil.copyfile(source, staging / "policy.proto")
         subprocess.run(
             [
@@ -33,8 +33,7 @@ def generate(root: Path, output: Path) -> None:
             ],
             check=True,
         )
-    for package in (output / "dual_arm_policy", output / "dual_arm_policy/v1"):
-        (package / "__init__.py").write_text('"""Generated Policy API SDK."""\n')
+    (output / "dual_arm_policy/__init__.py").write_text('"""Generated Policy API SDK."""\n')
     (output / "source.sha256").write_text(hashlib.sha256(source.read_bytes()).hexdigest() + "\n")
     print(f"Generated Policy API SDK: {output}")
 

@@ -12,7 +12,6 @@ from typing import Annotated, Any, ClassVar
 from pydantic import BeforeValidator, Field, field_validator, model_validator
 from robot_contracts import validation as rv
 from robot_contracts.models import ContractError, RobotProfile
-from robot_contracts.overrides import apply_overrides
 from robot_run_logging import LogSettings
 
 from .config_yaml import load_yaml
@@ -40,7 +39,6 @@ Vector16 = Annotated[
 class PolicyServiceConfig(rv.StrictMappingModel):
     _config_error: ClassVar[type[ValueError]] = PolicyConfigError
 
-    schema_version: Annotated[int, Field(strict=True, ge=1, le=1)] = 1
     bind_address: rv.NonEmptyStr
     port: Annotated[int, Field(strict=True, ge=0, le=65535)]
     max_workers: Annotated[rv.PositiveInt, Field(le=256)]
@@ -52,7 +50,6 @@ class PolicyServiceConfig(rv.StrictMappingModel):
     open_deadline_s: rv.PositiveFloat
     close_deadline_s: rv.PositiveFloat
     test_only: bool
-    protocol_major: Annotated[int, Field(strict=True, ge=1, le=1)]
     stateful: bool
     model_bundle_digest: OptionalSha = ""
     processor_digest: OptionalSha = ""
@@ -95,13 +92,13 @@ class PolicyServiceConfig(rv.StrictMappingModel):
     @model_validator(mode="after")
     def _service_contract(self) -> PolicyServiceConfig:
         if self.chunk_size != CHUNK_SIZE:
-            raise rv.contract_error("chunk_size", "v1 requires exactly 60 targets")
+            raise rv.contract_error("chunk_size", "must contain exactly 60 targets")
         if self.action_period_ns != PERIOD_NS:
-            raise rv.contract_error("action_period_ns", "v1 requires a uniform 50 ms period")
+            raise rv.contract_error("action_period_ns", "must use a uniform 50 ms period")
         if self.action_joint_names != self.joint_names:
-            raise rv.contract_error("action_joint_names", "v1 requires the complete 16-joint order")
+            raise rv.contract_error("action_joint_names", "must match the complete 16-joint order")
         if self.command_space != "joint_position":
-            raise rv.contract_error("command_space", "v1 accepts only joint_position")
+            raise rv.contract_error("command_space", "must be joint_position")
         unknown = set(self.max_prediction_corrections) - set(self.joint_names)
         if unknown:
             raise rv.contract_error(
@@ -127,12 +124,8 @@ def parse_policy_config(document: object) -> PolicyServiceConfig:
     return rv.validate_config_model(PolicyServiceConfig, document, "<config>", PolicyConfigError)
 
 
-def load_policy_config(
-    path: str | Path, *, set_overrides: tuple[str, ...] | list[str] = (), **overrides: object
-) -> PolicyServiceConfig:
+def load_policy_config(path: str | Path, **overrides: object) -> PolicyServiceConfig:
     document = load_yaml(path)
-    if set_overrides:
-        document = apply_overrides(document, list(set_overrides))
     if not isinstance(document, dict):
         raise PolicyConfigError(str(path), "<root>", "must be a mapping")
     service, model = document.get("service"), document.get("model", {})
@@ -186,9 +179,7 @@ def resolve_policy_contract(values: dict[str, Any]) -> dict[str, Any]:
 
     profile_document = _read_json(Path(values["robot_profile_path"]))
     semantic = _canonical(profile_document)
-    _check(profile_document.get("schema_version") == 2
-           and profile_document.get("test_only") is False,
-           "profile must be a formal schema-2 RobotProfile")
+    _check(profile_document.get("test_only") is False, "profile must be a formal RobotProfile")
     try:
         profile = RobotProfile.validate_dict(profile_document)
     except ContractError as error:

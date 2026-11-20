@@ -23,16 +23,25 @@ def test_public_act_training_writes_a_self_contained_model(tmp_path):
     from dual_arm_learning.bundle import load_model, verify_model_dir
     from dual_arm_learning.config import load_dataset_config
     from dual_arm_learning.dataset import convert
+    from model_helpers import replace
     from torchvision.models import resnet18
 
-    dataset_config = load_dataset_config(SCENARIO / "configs/learning/act_dataset.yaml", ROOT)
-    from model_helpers import replace
-
-    dataset_config = replace(dataset_config, output_root=tmp_path / "data")
+    dataset_document = yaml.safe_load(
+        (SCENARIO / "configs/learning/act_dataset.yaml").read_text()
+    )
+    dataset_document["expected"] = {"formal_episodes": 2}
+    dataset_document["validation_percent"] = 50
+    dataset_path = tmp_path / "dataset.yaml"
+    dataset_path.write_text(yaml.safe_dump(dataset_document))
+    dataset_config = load_dataset_config(dataset_path, ROOT)
+    dataset_config = replace(
+        dataset_config, output_root=tmp_path / "data", cache_root=tmp_path / "cache"
+    )
     select = make_select(tmp_path / "sources", dataset_config)
     convert(select_path=select, config=dataset_config, synthetic=True)
     document = yaml.safe_load((SCENARIO / "configs/learning/act_training.yaml").read_text())
     document["device"] = "cpu"
+    document["data"]["config"] = str(dataset_path)
     document["data"]["root"] = str(tmp_path / "data")
     document["cache_root"] = str(tmp_path / "cache")
     document["model"].update(
@@ -92,4 +101,6 @@ def test_public_act_training_writes_a_self_contained_model(tmp_path):
     metrics = [json.loads(line) for line in (log_root / "metrics.jsonl").read_text().splitlines()]
     assert all(row["kl_loss"] > 0 for row in metrics if row["phase"] == "train")
     assert all(row["grad_norm"] > 0 for row in metrics if row["phase"] == "train")
-    assert (log_root / "training_report.json").is_file()
+    report = json.loads((log_root / "training_report.json").read_text())
+    assert report["dataset"]["training_global_indices"] == [0]
+    assert report["dataset"]["validation_global_indices"] == [1]

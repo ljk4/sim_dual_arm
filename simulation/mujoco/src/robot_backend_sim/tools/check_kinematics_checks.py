@@ -15,10 +15,6 @@ from robot_backend_sim.common.kinematics import common
 from robot_backend_sim.common.kinematics import kinematics_clearance as kinematics
 from robot_backend_sim.common.kinematics.common import extract_object_pose
 from robot_backend_sim.common.render import visibility
-from robot_backend_sim.marvin_sim.scene_base import (
-    base_world_point,
-    combined_yaw_quaternion,
-)
 from robot_backend_sim.marvin_sim.stack import visibility as stack_visibility
 from robot_backend_sim.marvin_sim.stack.kinematics_config import (
     KinematicsCheckConfig,
@@ -35,7 +31,7 @@ from robot_backend_sim.marvin_sim.stack.plan import (
     stack_pair_set,
 )
 from robot_backend_sim.marvin_sim.stack.scene_config import MarvinStackSceneConfig
-from robot_backend_sim.marvin_sim.stack.visibility import LayoutSpec, SceneCheckConfig
+from robot_backend_sim.marvin_sim.stack.visibility import LayoutSpec
 from robot_backend_sim.tools.check_kinematics_common import (
     ArtifactBudget,
     KinematicsCheckFailure,
@@ -47,36 +43,6 @@ if TYPE_CHECKING:
     from robot_backend_sim.marvin_sim.stack.plan import KeyPoseTarget
     from robot_backend_sim.marvin_sim.stack.scene import MarvinStackScene
 
-
-def _apply_updates(qpos: object, updates: dict[int, tuple[float, ...]]) -> object:
-    import numpy as np
-
-    result = np.array(qpos, dtype=np.float64, copy=True)
-    for address, values in updates.items():
-        result[address : address + len(values)] = values
-    return result
-
-def _boundary_updates(
-    layout: LayoutSpec, scene: object, scene_config: MarvinStackSceneConfig
-) -> dict[int, tuple[float, ...]]:
-    by_name = {placement.name: placement for placement in layout.placements}
-    updates: dict[int, tuple[float, ...]] = {}
-    base = scene_config.robot
-    for obj in scene_config.objects:
-        placement = by_name[obj.name]
-        address = scene.indices.environment.object_free_joint_qpos[obj.name]
-        world = base_world_point(
-            (placement.x, placement.y, scene_config.table.top_z + obj.half_extents[2]),
-            base.base_position,
-            base.base_yaw_deg,
-        )
-        updates[address] = (
-            world[0],
-            world[1],
-            world[2],
-            *combined_yaw_quaternion(base.base_yaw_deg, placement.yaw_deg),
-        )
-    return updates
 
 def _point_document(point: kinematics.ClearancePoint) -> dict[str, object]:
     return {
@@ -317,17 +283,12 @@ def _prepare_layout(
     scene_config: MarvinStackSceneConfig,
     layout: LayoutSpec,
     *,
-    base_seed: int,
     target_config: TargetConfig,
 ) -> PreparedLayout:
     """Build the initial diagnostic snapshot; live objects are never moved."""
-    scene.reset(layout.seed if layout.kind == "seed" else base_seed)
+    scene.reset(layout.seed)
     snapshot = renderer.capture(scene.data)
     qpos = scene.data.qpos.copy()
-    if layout.kind == "boundary":
-        updates = _boundary_updates(layout, scene, scene_config)
-        snapshot = renderer.derive_snapshot(snapshot, updates)
-        qpos = _apply_updates(qpos, updates)
     poses = {
         obj.name: extract_object_pose(
             qpos, scene.indices.environment.object_free_joint_qpos[obj.name], obj.name
@@ -476,7 +437,6 @@ def _check_one_layout(
     scene_config: MarvinStackSceneConfig,
     layout: LayoutSpec,
     *,
-    base_seed: int,
     config: KinematicsCheckConfig,
     renderer: SceneRenderer,
     pairs: kinematics.CollisionPairSet,
@@ -498,7 +458,7 @@ def _check_one_layout(
     }
     try:
         prepared = _prepare_layout(
-            scene, renderer, scene_config, layout, base_seed=base_seed, target_config=config.targets
+            scene, renderer, scene_config, layout, target_config=config.targets
         )
         result["objects"] = list(prepared.objects)
         motion = _check_motion(scene, prepared, pairs, config, remaining_samples=remaining_samples)
@@ -540,7 +500,6 @@ def _run_layouts(
     run_dir: Path,
     scene: MarvinStackScene,
     scene_config: MarvinStackSceneConfig,
-    check_config: SceneCheckConfig,
     kinematics_config: KinematicsCheckConfig,
     renderer: SceneRenderer,
     logger: object,
@@ -565,42 +524,37 @@ def _run_layouts(
         {"pairs": len(pairs.pairs), **pairs.categories},
     )
     geom_ids = {**report["scene"]["object_geom_ids"], "table": report["scene"]["table_geom_id"]}
-    results = []
-    report["layouts"] = results  # Preserve completed layouts if a later resource fails.
+    layout = stack_visibility.NOMINAL_LAYOUT
+    result = _check_one_layout(
+        run_dir,
+        scene,
+        scene_config,
+        layout,
+        config=kinematics_config,
+        renderer=renderer,
+        pairs=pairs,
+        geom_ids=geom_ids,
+        budget=budget,
+        remaining_samples=kinematics_config.budgets.max_total_samples,
+    )
+    results = [result]
+    report["layouts"] = results
     first_failure = None
-    remaining = kinematics_config.budgets.max_total_samples
-    for layout in stack_visibility.build_layouts(check_config, scene_config):
-        result = _check_one_layout(
-            run_dir,
-            scene,
-            scene_config,
-            layout,
-            base_seed=check_config.seeds[0],
-            config=kinematics_config,
-            renderer=renderer,
-            pairs=pairs,
-            geom_ids=geom_ids,
-            budget=budget,
-            remaining_samples=remaining,
-        )
-        results.append(result)
-        remaining -= sum(path["sample_count"] for path in result["paths"])
-        if first_failure is None and result["failures"]:
-            failure = result["failures"][0]
-            first_failure = KinematicsCheckFailure(failure["reason"], failure["message"])
-        _emit(
-            logger,
-            "layout_passed" if result["passed"] else "layout_failed",
-            "kinematics layout diagnostic finished",
-            {
-                "layout": layout.layout_id,
-                "kind": layout.kind,
-                "passed": result["passed"],
-                "ik_targets": len(result["ik"]),
-                "paths": len(result["paths"]),
-                "phases": len(result["vision"]),
-                "elapsed_s": result["elapsed_s"],
-            },
-        )
+    if result["failures"]:
+        failure = result["failures"][0]
+        first_failure = KinematicsCheckFailure(failure["reason"], failure["message"])
+    _emit(
+        logger,
+        "layout_passed" if result["passed"] else "layout_failed",
+        "kinematics layout diagnostic finished",
+        {
+            "layout": layout.layout_id,
+            "passed": result["passed"],
+            "ik_targets": len(result["ik"]),
+            "paths": len(result["paths"]),
+            "phases": len(result["vision"]),
+            "elapsed_s": result["elapsed_s"],
+        },
+    )
     return results, first_failure
 

@@ -21,7 +21,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Annotated, Any, Literal
 
-from pydantic import BeforeValidator, Field, model_validator
+from pydantic import BeforeValidator, Field
 
 from .models import ContractError
 from .profiles import (
@@ -34,7 +34,6 @@ from .validation import (
     NonEmptyStr,
     StrictContractModel,
     as_tuple,
-    contract_error,
 )
 
 __all__ = [
@@ -50,7 +49,6 @@ __all__ = [
 ]
 
 PathList = Annotated[tuple[NonEmptyStr, ...], BeforeValidator(as_tuple)]
-SchemaVersion = Annotated[int, Field(strict=True, ge=1, le=1)]
 # The template directory is a documentation scenario, so its id may start
 # with an underscore.  Paths are never derived from this value.
 ScenarioId = Annotated[
@@ -155,7 +153,7 @@ class ModelsSpec(StrictContractModel):
 
 
 class ScenarioBinding(StrictContractModel):
-    """The strict v1 binding document.  Unknown fields are rejected.
+    """A strictly validated scenario binding.
 
     A scenario is the ``(robot_id, task_id)`` pair that owns
     ``<shared>/scenarios/<robot_id>/<task_id>/binding.yaml``.  ``scenario_id``
@@ -163,7 +161,6 @@ class ScenarioBinding(StrictContractModel):
     summaries and logs keep a single canonical name.
     """
 
-    schema_version: SchemaVersion
     robot_id: ScenarioId
     task_id: ScenarioId
     description: NonEmptyStr | None = None
@@ -181,18 +178,6 @@ class ScenarioBinding(StrictContractModel):
     @property
     def scenario_id(self) -> str:
         return f"{self.robot_id}/{self.task_id}"
-
-    @model_validator(mode="before")
-    @classmethod
-    def _check_schema_version(cls, data: Any) -> Any:
-        if isinstance(data, dict) and "schema_version" in data:
-            version = data["schema_version"]
-            if type(version) is not int or version != 1:
-                raise contract_error(
-                    "schema_version",
-                    f"unsupported binding schema_version {version!r}; expected 1",
-                )
-        return data
 
 
 @dataclass(frozen=True)
@@ -312,7 +297,6 @@ class ResolvedBinding:
             "binding": {
                 "path": str(self.path),
                 "sha256": self.sha256,
-                "schema_version": self.binding.schema_version,
                 "scenario_id": self.binding.scenario_id,
                 "description": self.binding.description,
             },

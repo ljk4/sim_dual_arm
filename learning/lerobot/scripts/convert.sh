@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Convert accepted exports into a 45/5 LeRobot dataset inside the learning container.
+# Convert accepted exports into LeRobot training and validation datasets.
 set -euo pipefail
 
 APP_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

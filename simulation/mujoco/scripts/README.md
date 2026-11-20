@@ -12,19 +12,18 @@
 
 `backend.sh` / `viewer.sh` 必须且只能指定 `--robot <id> --task <id>` 或 `--config <recipe>` 之一：
 
-- `--robot/--task` 模式额外接受 `--role teacher|policy`、`--shared-root` 与 `--seed`；
-- 后端在内存中解析并展开配方，把本次实际生效的快照写到 `<run-root>/<run-id>/backend.yaml`，日志写到同目录 `log/`；
-- 所有入口支持重复 `--set dot.path=value`，只覆盖配方中已存在的键；
-- 不生成 `/data/prepared/` 等中间目录。
+- `--robot/--task` 模式接受 `--role teacher|policy` 与 `--shared-root`。
+- 后端在内存中解析并展开配方，把本次实际生效的快照写到 `<run-root>/<run-id>/backend.yaml`，日志写到同目录 `log/`。
+- 后端支持 `--seed` 和 `--realtime-speed`。其他参数在对应的后端配方中修改。
 
 ```bash
 # 按机器人/任务启动示教后端
 scripts/backend.sh --robot marvin_sim --task stack --role teacher \
-  --seed 0 --run-id teacher-backend
+  --seed 0 --run-id teacher-backend --realtime-speed 0.4
 
 # 按机器人/任务启动推理后端
 scripts/backend.sh --robot marvin_sim --task stack --role policy \
-  --seed 20000 --run-id policy-backend --set run.realtime_speed=0.4
+  --seed 20000 --run-id policy-backend --realtime-speed 0.4
 
 # 直接配置模式
 scripts/backend.sh \

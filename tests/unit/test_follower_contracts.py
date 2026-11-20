@@ -28,8 +28,8 @@ from robot_backend_sim.common.config.follower_config import (  # noqa: E402
 )
 from scenario_fixtures import MARVIN_SHARED_PROFILES  # noqa: E402
 
-CONFIG_PATH = MARVIN_SHARED_PROFILES / "control/marvin_follower_v1.yaml"
-PRODUCER = "fixture-producer/v1"
+CONFIG_PATH = MARVIN_SHARED_PROFILES / "control/marvin_follower.yaml"
+PRODUCER = "fixture-producer"
 
 
 def joint(name: str, *, minimum: float = -10.0, maximum: float = 10.0, velocity: float = 1.0):
@@ -86,7 +86,7 @@ def make_non_final() -> tuple[PreparedFollowerPlan, tuple[JointSpec, ...]]:
         is_final=False,
         requested_window_ns=window.end_time_ns,
         curve_duration_ns=window.end_time_ns,
-        algorithm_version=PRODUCER,
+        algorithm=PRODUCER,
     )
     return plan, joints
 
@@ -149,7 +149,7 @@ def test_final_plan_extended_tail_reaches_target_at_zero_velocity():
         is_final=True,
         requested_window_ns=window.end_time_ns,
         curve_duration_ns=plan.duration_ns,
-        algorithm_version=PRODUCER,
+        algorithm=PRODUCER,
     )
     assert prepared.duration_ns == 200_000_000
     assert prepared.extension_ns == 50_000_000
@@ -210,7 +210,7 @@ def test_invalid_or_inconsistent_plan_is_rejected(change):
         "is_final": False,
         "requested_window_ns": window.end_time_ns,
         "curve_duration_ns": window.end_time_ns,
-        "algorithm_version": PRODUCER,
+        "algorithm": PRODUCER,
     }
     fields.update(change)
     with pytest.raises(ContractError):
@@ -239,7 +239,7 @@ def test_discontinuous_plan_and_exceeded_deviation_are_rejected():
             is_final=False,
             requested_window_ns=window.end_time_ns,
             curve_duration_ns=window.end_time_ns,
-            algorithm_version=PRODUCER,
+            algorithm=PRODUCER,
         )
     with pytest.raises(ContractError) as caught:
         PreparedFollowerPlan(
@@ -254,7 +254,7 @@ def test_discontinuous_plan_and_exceeded_deviation_are_rejected():
             is_final=False,
             requested_window_ns=window.end_time_ns,
             curve_duration_ns=window.end_time_ns,
-            algorithm_version=PRODUCER,
+            algorithm=PRODUCER,
         )
     assert caught.value.reason == "FOLLOWER_DEVIATION_EXCEEDED"
 
@@ -445,6 +445,6 @@ def test_dto_rejects_endpoint_that_cannot_brake_inside_joint_boundary():
             is_final=False,
             requested_window_ns=window.end_time_ns,
             curve_duration_ns=window.end_time_ns,
-            algorithm_version=PRODUCER,
+            algorithm=PRODUCER,
         )
     assert caught.value.reason == "FOLLOWER_BRAKING_INFEASIBLE"

@@ -53,9 +53,6 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--role", choices=("teacher", "policy"), default="teacher")
     parser.add_argument("--shared-root", type=Path)
     parser.add_argument(
-        "--set", dest="overrides", action="append", default=[], metavar="PATH=VALUE"
-    )
-    parser.add_argument(
         "--state-topic",
         default="",
         help="defaults to <robot namespace>/visualization/mujoco_state",
@@ -87,7 +84,6 @@ def _load_backend(args: argparse.Namespace):
         task=args.task,
         role=args.role,
         shared_root=args.shared_root,
-        overrides=args.overrides,
     )
     return load_backend_document(resolved.document, resolved.source)
 

@@ -72,22 +72,22 @@ class LaunchInterrupted(KeyboardInterrupt):
 
 
 def classify(directory: Path, quality_sidecar: str) -> dict[str, Any]:
+    """Classify the attempt and collect failure details before its files are removed."""
     manifest = episode_manifest(directory)
     task = episode_task_result(directory)
-    quality = read_json(directory / quality_sidecar)
-    recording_complete = bool(
-        manifest
-        and isinstance(manifest.get("recording"), dict)
-        and manifest["recording"].get("complete")
-    )
+    quality_path = directory / quality_sidecar
+    quality = read_json(quality_path)
+    recording = (manifest or {}).get("recording")
+    recording_complete = isinstance(recording, dict) and bool(recording.get("complete"))
     runtime = manifest.get("runtime") if isinstance(manifest, dict) else None
     runtime_outcome = str(runtime.get("outcome")) if isinstance(runtime, dict) else ""
     runtime_reason = str(runtime.get("reason")) if isinstance(runtime, dict) else ""
-    task_outcome = str(task.get("result", {}).get("outcome")) if isinstance(task, dict) else ""
+    task_result = (task or {}).get("result", {})
+    task_outcome = str(task_result.get("outcome")) if task else ""
     quality_ok = bool(quality and quality.get("qualified") is True)
     succeeded = task_outcome == "succeeded" and runtime_outcome in {"stopped", "completed"}
     qualified = bool(recording_complete and succeeded and quality_ok)
-    return {
+    classification = {
         "recording_complete": recording_complete,
         "runtime_outcome": runtime_outcome,
         "runtime_reason": runtime_reason,
@@ -95,6 +95,20 @@ def classify(directory: Path, quality_sidecar: str) -> dict[str, Any]:
         "quality_qualified": quality_ok,
         "qualified": qualified,
     }
+    if not qualified:
+        labels = read_json(quality_path.with_name("labels.json"))
+        quality = quality or {}
+        classification["diagnostics"] = {
+            "recording_failure_reason": (
+                recording.get("failure_reason", "") if isinstance(recording, dict) else ""
+            ),
+            "task_reason": task_result.get("reason", ""),
+            "visibility_qualified": quality.get("visibility_qualified"),
+            "trajectory_qualified": quality.get("trajectory_qualified"),
+            "quality_failure_reasons": quality.get("failure_reasons", []),
+            "label_rejections": (labels or {}).get("summary", {}).get("rejected", {}),
+        }
+    return classification
 
 
 def _environment(attempt: Attempt) -> dict[str, str]:
@@ -113,6 +127,29 @@ def _environment(attempt: Attempt) -> dict[str, str]:
         }
     )
     return environment
+
+
+def stop_process(process: subprocess.Popen, stop_grace_s: float) -> None:
+    """Allow the whole launch group to close its outputs before forcing a stop."""
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        process.wait()
+        return
+    deadline = time.monotonic() + stop_grace_s
+    while time.monotonic() < deadline:
+        process.poll()
+        try:
+            os.killpg(process.pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.05)
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    process.wait(timeout=5)
 
 
 def run_command(
@@ -141,47 +178,22 @@ def run_command(
     except OSError as error:
         return 127, time.monotonic() - started, f"launch failed: {error}"
 
-    def stop_group(reason: str) -> tuple[int, float, str]:
-        deadline = started + stop_grace_s
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        try:
-            process.wait(timeout=max(0.0, deadline - time.monotonic()))
-        except subprocess.TimeoutExpired:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            process.wait()
-        # The direct child can exit before a descendant that received the same
-        # SIGTERM has finished its bounded recording/log shutdown.  Wait for
-        # the whole group so the terminal summary reads final artefacts.
-        while time.monotonic() < deadline:
-            try:
-                os.killpg(process.pid, 0)
-            except ProcessLookupError:
-                break
-            time.sleep(0.05)
-        return (
-            130 if reason == "interrupted" else (124 if reason == "timeout" else 125),
-            time.monotonic() - started,
-            reason,
-        )
+    def stop_group(code: int, reason: str) -> tuple[int, float, str]:
+        stop_process(process, stop_grace_s)
+        return code, time.monotonic() - started, reason
 
     failure = ""
     try:
         while process.poll() is None:
             now = time.monotonic()
             if now >= deadline:
-                return stop_group(f"launch timeout after {timeout_s}s")
+                return stop_group(124, f"launch timeout after {timeout_s}s")
             free = shutil_disk_free(disk_root)
             if free < min_free_bytes:
-                return stop_group(f"disk free {free} below {min_free_bytes}; launch stopped")
+                return stop_group(125, f"disk free {free} below {min_free_bytes}; launch stopped")
             time.sleep(1.0)
     except KeyboardInterrupt:
-        raise LaunchInterrupted(*stop_group("interrupted")) from None
+        raise LaunchInterrupted(*stop_group(130, "interrupted")) from None
     code = int(process.returncode)
     if code != 0:
         failure = f"launch exit {code}"
@@ -260,4 +272,5 @@ __all__ = [
     "read_json",
     "reject_docker_command",
     "run_command",
+    "stop_process",
 ]

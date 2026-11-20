@@ -23,7 +23,7 @@ from robot_contracts.profiles import load_profile, semantic_hash  # noqa: E402
 
 CONFIG_PATH = ROOT / "shared/scenarios/marvin_sim/stack/configs/simulation/scene/marvin_stack.yaml"
 PROFILE_PATH = (
-    ROOT / "shared/scenarios/marvin_sim/stack/profiles/robots/marvin_stack_v1/profile.json"
+    ROOT / "shared/scenarios/marvin_sim/stack/profiles/robots/marvin_stack/profile.json"
 )
 SCHEMAS = ROOT / "shared/common/interfaces/schemas"
 DEFAULT_DOCUMENT = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
@@ -291,9 +291,9 @@ def test_wrong_object_name_is_rejected(tmp_path):
     assert "target" in str(caught.value)
 
 
-def test_randomized_object_may_not_cross_table_edge(tmp_path):
+def test_nominal_object_may_not_cross_table_edge(tmp_path):
     def mutate(document):
-        document["task"]["source"]["nominal_xy"] = [0.97, 0.0]
+        document["task"]["source"]["nominal_xy"] = [0.99, 0.0]
 
     path = config_with(tmp_path, mutate)
     with pytest.raises(StackSceneConfigError) as caught:
@@ -302,7 +302,7 @@ def test_randomized_object_may_not_cross_table_edge(tmp_path):
     assert "table edge" in str(caught.value)
 
 
-def test_randomized_objects_may_not_overlap(tmp_path):
+def test_nominal_objects_may_not_overlap(tmp_path):
     def mutate(document):
         document["task"]["target"]["nominal_xy"] = [0.55, -0.10]
 
@@ -313,14 +313,16 @@ def test_randomized_objects_may_not_overlap(tmp_path):
     assert "overlap" in str(caught.value)
 
 
-def test_object_count_and_randomization_limits_are_enforced(tmp_path):
+def test_scene_rejects_randomization_and_requires_both_objects(tmp_path):
     path = config_with(
         tmp_path,
-        lambda document: document["task"]["source"]["randomization"].__setitem__("xy_m", 0.26),
+        lambda document: document["task"]["source"].__setitem__(
+            "randomization", {"xy_m": 0.03, "yaw_deg": 10.0}
+        ),
     )
     with pytest.raises(StackSceneConfigError) as caught:
         load_marvin_stack_scene_config(path)
-    assert caught.value.field == "task.source.randomization.xy_m"
+    assert caught.value.field == "task.source.randomization"
 
     def remove_object(document):
         del document["task"]["target"]
@@ -366,21 +368,18 @@ def test_huge_integer_is_rejected_without_leaking_overflow(tmp_path):
     assert caught.value.field == "physics.timestep"
 
 
-def test_diagonal_jitter_worst_case_overlap_is_rejected(tmp_path):
+def test_clear_nominal_diagonal_layout_is_accepted(tmp_path):
     def mutate(document):
         document["task"]["source"]["nominal_xy"] = [0.50, -0.05]
         document["task"]["target"]["nominal_xy"] = [0.58, -0.13]
 
     path = config_with(tmp_path, mutate)
-    with pytest.raises(StackSceneConfigError) as caught:
-        load_marvin_stack_scene_config(path)
-    assert caught.value.field == "task.source.nominal_xy"
-    assert "overlap" in str(caught.value)
+    load_marvin_stack_scene_config(path)
 
 
-def test_overlap_boundary_uses_worst_case_axis_separation(tmp_path):
+def test_overlap_boundary_uses_nominal_separation(tmp_path):
     min_required = math.hypot(0.02, 0.02) + math.hypot(0.03, 0.03) + 0.005
-    boundary_y = -(0.03 + 0.03 + min_required)
+    boundary_y = -min_required
 
     def mutate(target_y):
         def apply(document):

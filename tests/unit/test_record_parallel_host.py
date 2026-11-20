@@ -29,6 +29,7 @@ def test_auto_workers_respects_cpu_memory_and_gpu_headroom(
     ["--workers", "2", "--count", "2", "--domain-base", "232"],
     ["--realtime-speed", "nan"], ["--max-consecutive-failures", "0"],
     ["--target-total", "0"], ["--count", "1", "--target-total", "50"],
+    ["--robot", "test_sim", "--task", "stack", "--set", "reset.enabled=false"],
 ])
 def test_invalid_options_fail_before_starting_containers(monkeypatch, arguments):
     prepare = Mock()
@@ -54,6 +55,32 @@ def test_cleanup_stops_own_container_even_if_log_capture_fails(tmp_path, monkeyp
     with pytest.raises(OSError, match="disk unavailable"):
         docker.cleanup()
     assert ["docker", "stop", "--timeout", "20", "this-batch-worker"] in calls
+
+
+@pytest.mark.parametrize("plan,wait_seconds", [(None, 35.0), ({"stop_grace_s": 45.0}, 55.0)])
+def test_cleanup_honors_controller_stop_grace_before_stopping_backend(
+    tmp_path, monkeypatch, plan, wait_seconds
+):
+    docker = record_parallel.DockerWorkers(SimpleNamespace(), tmp_path)
+    docker.runtime = "runtime-id"
+    docker.created = ["this-batch-worker"]
+    docker.plan = plan
+    docker.controller_pid.write_text("123")
+    docker.controller = Mock()
+    docker.controller.poll.return_value = None
+    events = []
+    docker.controller.wait.side_effect = lambda **kwargs: events.append("controller exited")
+
+    def run(command, **kwargs):
+        events.append(command[1])
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(record_parallel.subprocess, "run", run)
+    docker.cleanup()
+
+    docker.controller.wait.assert_called_once_with(timeout=wait_seconds)
+    assert events == ["exec", "controller exited", "logs", "stop"]
+    docker.controller.terminate.assert_not_called()
 
 
 @pytest.mark.parametrize("current,remaining", [(0, 50), (17, 33), (50, 0)])
@@ -240,7 +267,6 @@ def test_worker_preparation_receives_binding_identity(tmp_path, monkeypatch):
         workers=2,
         domain_base=170,
         realtime_speed=1.0,
-        overrides=[],
     )
     docker = record_parallel.DockerWorkers(args, directory)
     docker.runtime = "runtime-id"
@@ -281,7 +307,6 @@ def test_preflight_command_converts_host_paths(tmp_path):
         backend_template="shared/scenarios/x/backend.yaml",
         purpose="formal",
         target_total=None,
-        overrides=[],
     )
     command = record_parallel.DockerWorkers(args, tmp_path / "pool").preflight_command()
     assert "/shared/scenarios/x/campaign.yaml" in command
@@ -309,7 +334,7 @@ def test_pool_and_inference_progress_include_eta_and_timestamp(tmp_path, capsys)
     )
     pool = record_pool.RecordingPool(
         args,
-        {"paths": {"attempts_root": "var/x/y/datasets/raw"}},
+        {"paths": {"attempts_root": "var/x/y/datasets/raw"}, "launch": {}},
         None,  # type: ignore[arg-type]
         [{"id": "worker-01"}],
     )

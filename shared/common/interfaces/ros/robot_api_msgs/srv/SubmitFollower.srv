@@ -1,7 +1,7 @@
-# Follower entry.  The raw StreamCommand kind must be STREAM_FIRST or
-# STREAM_NEXT; settle_at_end is the explicit final-block flag.  The service
-# entry, not a hidden request field, selects bounded-follower planning.
+# Submit an already generated trajectory for validation and execution.
+# The accompanying raw command retains the source window and hand-off anchor.
 robot_api_msgs/StreamCommand request
+robot_api_msgs/ReferenceSegment[<=128] segments
 ---
 bool accepted
 string reason

@@ -88,7 +88,7 @@ def _context_from_message(message: object) -> RunContext:
 
 
 def _context_message(context: RunContext) -> object:
-    from dual_arm_policy.v1 import policy_pb2
+    from dual_arm_policy import policy_pb2
 
     return policy_pb2.RunContext(
         robot_id=context.robot_id,
@@ -215,7 +215,7 @@ class PolicyClient:
     def connect(self) -> None:
         try:
             import grpc
-            from dual_arm_policy.v1 import policy_pb2_grpc
+            from dual_arm_policy import policy_pb2_grpc
         except ImportError as error:  # pragma: no cover - deployment dependency
             raise ContractError("POLICY_SDK_MISSING", str(error)) from error
         self._grpc = grpc
@@ -262,7 +262,7 @@ class PolicyClient:
         )
 
     def _info_request(self) -> object:
-        from dual_arm_policy.v1 import policy_pb2
+        from dual_arm_policy import policy_pb2
 
         return policy_pb2.GetPolicyInfoRequest()
 
@@ -304,8 +304,6 @@ class PolicyClient:
                 "TEST_POLICY_REJECTED",
                 "runtime config does not allow a test-only policy",
             )
-        if int(info.protocol_major) != 1:
-            raise ContractError("POLICY_INFO_MISMATCH", "unsupported protocol major")
 
     def _rpc(self, name: str, request: object, timeout_s: float) -> object:
         if self._stub is None:
@@ -364,7 +362,7 @@ class PolicyClient:
 
     # -------------------------------------------------------------- session
     def open(self, context: RunContext, open_request_id: str) -> str:
-        from dual_arm_policy.v1 import policy_pb2
+        from dual_arm_policy import policy_pb2
 
         request = policy_pb2.OpenSessionRequest(
             context=_context_message(context),
@@ -392,7 +390,7 @@ class PolicyClient:
         return session_id
 
     def reset(self, context: RunContext, reset_id: str) -> RunContext:
-        from dual_arm_policy.v1 import policy_pb2
+        from dual_arm_policy import policy_pb2
 
         if not self.session_id:
             raise ContractError("POLICY_SESSION_ERROR", "no session is open")
@@ -420,7 +418,7 @@ class PolicyClient:
         *,
         deadline_s: float | None = None,
     ) -> PolicyPrediction:
-        from dual_arm_policy.v1 import policy_pb2
+        from dual_arm_policy import policy_pb2
 
         message = policy_pb2.Observation(
             observation_id=observation.observation_id,
@@ -552,7 +550,7 @@ class PolicyClient:
         )
 
     def close(self) -> None:
-        from dual_arm_policy.v1 import policy_pb2
+        from dual_arm_policy import policy_pb2
 
         if not self.session_id or self._stub is None:
             return

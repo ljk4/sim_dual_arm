@@ -3,9 +3,6 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "schema_version": {
-      "const": 1
-    },
     "episode_id": {
       "type": "string",
       "minLength": 1
@@ -203,7 +200,6 @@
     }
   },
   "required": [
-    "schema_version",
     "episode_id",
     "run_id",
     "source",

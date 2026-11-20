@@ -1,4 +1,4 @@
-"""Immutable episode result values and explicit manifest version selection."""
+"""Immutable episode results and the canonical manifest schema path."""
 
 from __future__ import annotations
 
@@ -7,14 +7,7 @@ from pathlib import Path
 
 from pydantic import model_validator
 
-from .models import ContractError
 from .validation import StrictContractModel, contract_error
-
-EPISODE_SCHEMA_VERSION = 1
-DIAGNOSTIC_EPISODE_SCHEMA_VERSION = 1
-POLICY_EPISODE_SCHEMA_VERSION = 1
-SUPPORTED_EPISODE_SCHEMA_VERSIONS = (1,)
-_VERSION_DIRECTORIES = {1: "v1"}
 
 
 class RuntimeOutcome(StrEnum):
@@ -77,14 +70,6 @@ class TaskResult(StrictContractModel):
     reason: str = ""
 
 
-def manifest_schema_path(schema_root: Path, version: int) -> Path:
-    """Select the episode manifest schema by explicit version mapping."""
-    if isinstance(version, bool) or version not in _VERSION_DIRECTORIES:
-        raise ContractError("UNSUPPORTED_SCHEMA_VERSION", f"unsupported version {version!r}")
-    directory = _VERSION_DIRECTORIES[version]
-    if schema_root.name in _VERSION_DIRECTORIES.values() and schema_root.name != directory:
-        raise ContractError("UNSUPPORTED_SCHEMA_VERSION",
-                            f"schema dir {schema_root.name} != version {version}")
-    if schema_root.name in _VERSION_DIRECTORIES.values():
-        return schema_root / "episode_manifest.schema.json"
-    return schema_root / directory / "episode_manifest.schema.json"
+def manifest_schema_path(schema_root: Path) -> Path:
+    """Return the episode manifest schema in the shared schema directory."""
+    return schema_root / "episode_manifest.schema.json"

@@ -30,7 +30,7 @@ from robot_contracts.profiles import (  # noqa: E402
 
 SCENARIO = ROOT / "shared/scenarios/marvin_sim/handover"
 CONFIG_PATH = SCENARIO / "configs/simulation/scene/marvin_handover.yaml"
-PROFILE_PATH = SCENARIO / "profiles/robots/marvin_handover_v1/profile.json"
+PROFILE_PATH = SCENARIO / "profiles/robots/marvin_handover/profile.json"
 SCHEMAS = ROOT / "shared/common/interfaces/schemas"
 
 
@@ -57,8 +57,8 @@ def test_robot_and_task_are_selected_independently(config):
 
 def test_profile_order_cameras_and_calibrations_match_the_scene(config):
     profile = load_profile(PROFILE_PATH, SCHEMAS)
-    observations = load_document(SCENARIO / "profiles/observations/marvin_rgb_joint_v1.json")
-    actions = load_document(SCENARIO / "profiles/actions/marvin_joint_position_v1.json")
+    observations = load_document(SCENARIO / "profiles/observations/marvin_rgb_joint.json")
+    actions = load_document(SCENARIO / "profiles/actions/marvin_joint_position.json")
     validate_bindings(profile, observations, actions, SCHEMAS)
     for camera, profile_camera in zip(config.cameras, profile.cameras, strict=True):
         declaration = camera_declared_description(camera)
@@ -192,9 +192,9 @@ def test_profile_and_scene_reject_mismatched_selection(config):
     with pytest.raises(ContractError, match="Joint ordering"):
         profile = load_profile(PROFILE_PATH, SCHEMAS)
         observations = load_document(
-            SCENARIO / "profiles/observations/marvin_rgb_joint_v1.json"
+            SCENARIO / "profiles/observations/marvin_rgb_joint.json"
         )
         observations["joint_names"] = list(reversed(observations["joint_names"]))
         validate_bindings(profile, observations, load_document(
-            SCENARIO / "profiles/actions/marvin_joint_position_v1.json"
+            SCENARIO / "profiles/actions/marvin_joint_position.json"
         ), SCHEMAS)

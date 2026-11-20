@@ -12,7 +12,10 @@ from robot_contracts.trajectory.follower_reference import (
     FollowerReference as FollowerReferenceRecord,
 )
 from robot_ros_support.conversions import context_from_message, context_message, stamp, time_ns
-from robot_ros_support.follower_conversions import follower_reference_message
+from robot_ros_support.follower_conversions import (
+    follower_reference_message,
+    reference_segments_from_messages,
+)
 from robot_ros_support.stream_conversions import (
     anchor_message,
     execution_feedback_message,
@@ -188,7 +191,12 @@ class ServiceAdapter:
                     "INVALID_FOLLOWER_REQUEST",
                     "SubmitFollower accepts only STREAM_FIRST or STREAM_NEXT",
                 )
-            outcome = await self._node._await(self._worker.submit_follower(record), submit=True)
+            plan = reference_segments_from_messages(
+                request.segments, record.trajectory.joint_names  # type: ignore[attr-defined]
+            )
+            outcome = await self._node._await(
+                self._worker.submit_follower(record, plan), submit=True
+            )
         except TimeoutError as error:
             return self._reject_follower(response, str(error))
         except BaseException as error:  # noqa: BLE001 - SubmitFollower has no success field

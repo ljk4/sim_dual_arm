@@ -1,11 +1,10 @@
-# Scenario binding v1 for the fixed-base Marvin handover task.
+# Scenario binding for the fixed-base Marvin handover task.
 #
 # This file records selection only.  Numeric recipes stay in the referenced
 # files; profiles are the public robot/observation/action contracts.  Models
 # are deliberately not pinned here: inference validation never requires a
 # bundle; a real verified bundle is supplied explicitly at runtime.
 # Paths resolve against this file's directory, never the caller's cwd.
-schema_version: 1
 robot_id: marvin_sim
 task_id: handover
 description: >-
@@ -25,9 +24,9 @@ learning:
   adapter: act
 
 profiles:
-  robot: profiles/robots/marvin_handover_v1/profile.json
-  observation: profiles/observations/marvin_rgb_joint_v1.json
-  action: profiles/actions/marvin_joint_position_v1.json
+  robot: profiles/robots/marvin_handover/profile.json
+  observation: profiles/observations/marvin_rgb_joint.json
+  action: profiles/actions/marvin_joint_position.json
 
 recipes:
   simulation_teacher: configs/simulation/backend/backend_marvin_teacher.yaml
@@ -51,8 +50,8 @@ interfaces:
   # Explicit Teacher wire capability.  The extension package advertises the
   # same identifier; a backend advertising a different task's Teacher is
   # rejected by the episode capability check.
-  teacher_api: marvin_handover_api_msgs.teacher_chunk.v1
-  policy_api: bimanual.policy.v1
+  teacher_api: marvin_handover_api_msgs.teacher_chunk
+  policy_api: bimanual.policy
 
 # No model bundle is declared; a verified bundle is supplied at runtime.
 source_roots:

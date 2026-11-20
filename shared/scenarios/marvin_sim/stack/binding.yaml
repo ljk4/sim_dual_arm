@@ -1,5 +1,4 @@
-# Scenario binding v1 for the fixed-base Marvin stack task.
-schema_version: 1
+# Scenario binding for the fixed-base Marvin stack task.
 robot_id: marvin_sim
 task_id: stack
 description: >-
@@ -19,9 +18,9 @@ learning:
   adapter: act
 
 profiles:
-  robot: profiles/robots/marvin_stack_v1/profile.json
-  observation: ../handover/profiles/observations/marvin_rgb_joint_v1.json
-  action: ../handover/profiles/actions/marvin_joint_position_v1.json
+  robot: profiles/robots/marvin_stack/profile.json
+  observation: ../handover/profiles/observations/marvin_rgb_joint.json
+  action: ../handover/profiles/actions/marvin_joint_position.json
 
 recipes:
   simulation_teacher: configs/simulation/backend/backend_stack_teacher.yaml
@@ -40,8 +39,8 @@ interfaces:
     - sim_api_msgs
   extension_ros:
     - extensions/ros/marvin_stack_api_msgs
-  teacher_api: marvin_stack_api_msgs.teacher_chunk.v1
-  policy_api: bimanual.policy.v1
+  teacher_api: marvin_stack_api_msgs.teacher_chunk
+  policy_api: bimanual.policy
 
 source_roots:
   - ../../..

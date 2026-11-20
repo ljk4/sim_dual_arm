@@ -85,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as error:  # noqa: BLE001 - preflight reports one bounded reason
         print(json.dumps({"error": str(error)}), flush=True)
         return 2
-    print(json.dumps({"selection": selection, "schema_version": 1}), flush=True)
+    print(json.dumps({"selection": selection}), flush=True)
     return 0
 
 

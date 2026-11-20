@@ -1454,7 +1454,6 @@ def plan_document(
 ) -> dict[str, object]:
     """Serialize the plan and its measured checks for the diagnostics run."""
     return {
-        "schema_version": 1,
         "status": "planned" if plan.passed else "failed",
         "source": config.source,
         "passed": plan.passed,

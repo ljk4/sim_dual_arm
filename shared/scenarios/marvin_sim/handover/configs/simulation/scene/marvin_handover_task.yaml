@@ -3,7 +3,6 @@
 # 目标位姿、抓持点和候选路径仍由 planning_config 指向的 P02B 配方提供；
 # 本文件只补充任务阶段门禁、终态评价、执行预算和 Teacher 时钟。
 # 接触力、持物稳定与相对位姿容差复用 P02B 实测的 diagnostics 数值。
-schema_version: 1
 planning_config: ../planning/handover_paths.yaml
 
 success:
@@ -53,14 +52,14 @@ teacher:
   # 闭合命令；小于物块 60 mm 宽度时两指受压夹持。
   left_close_opening_m: 0.05
   right_close_opening_m: 0.05
-  chunk_cache_entries: 256
+  chunk_cache_entries: &max_teacher_requests 512
 
 capacity:
-  # 1 s 执行窗口；一次完整示教按 60 s 仿真跨度预算。
+  # 512 个 0.5 s 执行窗口覆盖 180 s 任务时限。
   expected_chunks: 512
   expected_references: 512
   expected_events: 2048
   max_episode_chunks: 512
-  max_teacher_requests: 512
+  max_teacher_requests: *max_teacher_requests
   rpc_cache_entries: 512
   backend_chunk_history: 512

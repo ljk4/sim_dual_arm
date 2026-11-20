@@ -14,7 +14,8 @@ def test_real_learning_configs_load():
     training = load_training_config(SCENARIO / "configs/learning/act_training.yaml", ROOT)
     assert dataset.camera_names == ("global", "left_wrist", "right_wrist")
     assert dataset.chunk_size == 60
-    assert dataset.validation_positions == (9, 19, 29, 39, 49)
+    assert dataset.validation_percent == 10
+    assert (dataset.expected_training_episodes, dataset.expected_validation_episodes) == (45, 5)
     assert training.mode == "smoke"
     assert training.modes["smoke"].steps == 128
     assert training.modes["overfit"].steps == 500
@@ -75,7 +76,7 @@ def test_unknown_field_and_invalid_mode_are_rejected(tmp_path):
         load_training_config(bad, ROOT)
 
 
-def test_encoder_and_split_contract_are_strict(tmp_path):
+def test_encoder_contract_is_strict(tmp_path):
     document = yaml.safe_load((SCENARIO / "configs/learning/act_dataset.yaml").read_text())
     document["lerobot"]["rgb_encoder"]["crf"] = 20
     bad = tmp_path / "bad-dataset.yaml"
@@ -83,83 +84,86 @@ def test_encoder_and_split_contract_are_strict(tmp_path):
     with pytest.raises(ConfigError, match="crf"):
         load_dataset_config(bad, ROOT)
 
+
+@pytest.mark.parametrize("key", ["video_files_size_mb", "data_files_size_mb"])
+def test_shard_sizes_are_not_recipe_parameters(tmp_path, key):
     document = yaml.safe_load((SCENARIO / "configs/learning/act_dataset.yaml").read_text())
-    document["expected"]["validation_positions"] = [9, 19, 29, 39, 48]
+    document["lerobot"][key] = 256
+    path = tmp_path / "dataset.yaml"
+    path.write_text(yaml.safe_dump(document))
+    with pytest.raises(ConfigError, match=rf"lerobot\.{key}"):
+        load_dataset_config(path, ROOT)
+
+
+@pytest.mark.parametrize(
+    "split_key", ["training_episodes", "validation_episodes", "validation_positions"]
+)
+def test_split_rejects_counts_and_positions_in_recipe(tmp_path, split_key):
+    document = yaml.safe_load((SCENARIO / "configs/learning/act_dataset.yaml").read_text())
+    document["expected"][split_key] = 1
+    bad = tmp_path / "bad-dataset.yaml"
     bad.write_text(yaml.safe_dump(document))
-    with pytest.raises(ConfigError, match="validation_positions"):
+    with pytest.raises(ConfigError, match=rf"expected\.{split_key}"):
         load_dataset_config(bad, ROOT)
 
+
+@pytest.mark.parametrize("percent", [0, 100, -1, 100.1, "10", True, float("nan")])
+def test_validation_percent_requires_number_between_zero_and_hundred(tmp_path, percent):
     document = yaml.safe_load((SCENARIO / "configs/learning/act_dataset.yaml").read_text())
-    document["expected"] = {
-        "formal_episodes": 2,
-        "training_episodes": 1,
-        "validation_episodes": 1,
-        "validation_positions": [1],
-    }
-    bad.write_text(yaml.safe_dump(document))
-    with pytest.raises(ConfigError, match="exactly 50/45/5"):
-        load_dataset_config(bad, ROOT)
+    document["validation_percent"] = percent
+    path = tmp_path / "dataset.yaml"
+    path.write_text(yaml.safe_dump(document))
+    with pytest.raises(ConfigError, match="validation_percent"):
+        load_dataset_config(path, ROOT)
 
 
-def test_diagnostic_dataset_config_is_explicit_and_consistent(tmp_path):
+@pytest.mark.parametrize(
+    ("count", "percent", "expected_validation"),
+    [
+        (50, 13.0, 7),
+        (50, 12.75, 6),
+        (50, 0.1, 1),
+        (50, 99.9, 49),
+        (2, 10, 1),
+        (4, 62.5, 3),
+    ],
+)
+def test_split_rounds_half_up_and_keeps_both_groups_non_empty(
+    tmp_path, count, percent, expected_validation
+):
     document = yaml.safe_load((SCENARIO / "configs/learning/act_dataset.yaml").read_text())
-    document["diagnostic"] = True
-    document["expected"] = {
-        "formal_episodes": 2,
-        "training_episodes": 1,
-        "validation_episodes": 1,
-        "validation_positions": [1],
-    }
-    path = tmp_path / "diagnostic.yaml"
+    document["expected"]["formal_episodes"] = count
+    document["validation_percent"] = percent
+    path = tmp_path / "dataset.yaml"
     path.write_text(yaml.safe_dump(document))
     config = load_dataset_config(path, ROOT)
-    assert config.diagnostic is True
-    assert config.expected_formal_episodes == 2
-    assert config.validation_positions == (1,)
+    assert config.validation_percent == percent
+    assert config.expected_validation_episodes == expected_validation
+    assert config.expected_training_episodes == count - expected_validation
 
-    document["expected"]["validation_episodes"] = 2
+
+def test_split_requires_at_least_two_episodes(tmp_path):
+    document = yaml.safe_load((SCENARIO / "configs/learning/act_dataset.yaml").read_text())
+    document["expected"]["formal_episodes"] = 1
+    path = tmp_path / "dataset.yaml"
     path.write_text(yaml.safe_dump(document))
     with pytest.raises(ConfigError, match="formal_episodes"):
         load_dataset_config(path, ROOT)
 
-    document["expected"]["validation_episodes"] = 1
-    document["expected"]["validation_positions"] = [2]
+
+def test_dataset_recipe_rejects_diagnostic_field(tmp_path):
+    document = yaml.safe_load((SCENARIO / "configs/learning/act_dataset.yaml").read_text())
+    document["diagnostic"] = True
+    path = tmp_path / "dataset.yaml"
     path.write_text(yaml.safe_dump(document))
-    with pytest.raises(ConfigError, match="episode range"):
+    with pytest.raises(ConfigError, match="diagnostic"):
         load_dataset_config(path, ROOT)
 
 
-def test_image_shift_px_config_and_augmentation(tmp_path):
-    torch = pytest.importorskip("torch")
-    from dual_arm_learning.training_support import augment_image_shift
-
-    stack_cfg = load_training_config(SCENARIO / "configs/learning/act_training.yaml", ROOT)
-    assert stack_cfg.image_shift_px == 0
-    marvin_cfg = load_training_config(
-        ROOT / "shared/scenarios/marvin_sim/handover/configs/learning/act_training.yaml", ROOT
-    )
-    assert marvin_cfg.image_shift_px == 4
-
+def test_training_recipe_rejects_removed_image_shift_field(tmp_path):
     document = yaml.safe_load((SCENARIO / "configs/learning/act_training.yaml").read_text())
-    document["training"]["image_shift_px"] = 64
+    document["training"]["image_shift_px"] = 4
     bad = tmp_path / "bad-shift.yaml"
     bad.write_text(yaml.safe_dump(document))
-    with pytest.raises(ConfigError, match="image_shift_px"):
+    with pytest.raises(ConfigError, match=r"training\.image_shift_px: unknown key"):
         load_training_config(bad, ROOT)
-
-    img = torch.arange(2 * 3 * 12 * 16, dtype=torch.float32).reshape(2, 3, 12, 16)
-    state = torch.ones((2, 16), dtype=torch.float32)
-    batch = {"observation.images.global": img, "observation.state": state}
-    assert augment_image_shift(batch, 0) is batch
-
-    torch.manual_seed(123)
-    out1 = augment_image_shift(batch, 4)
-    torch.manual_seed(123)
-    out2 = augment_image_shift(batch, 4)
-    assert torch.equal(out1["observation.images.global"], out2["observation.images.global"])
-    assert out1["observation.images.global"].shape == img.shape
-    assert out1["observation.images.global"].dtype == img.dtype
-    assert not torch.equal(out1["observation.images.global"], img)
-    assert torch.equal(out1["observation.state"], state)
-    assert float(out1["observation.images.global"].min()) >= float(img.min())
-    assert float(out1["observation.images.global"].max()) <= float(img.max())

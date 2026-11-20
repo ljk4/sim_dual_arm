@@ -36,7 +36,7 @@ from robot_backend_sim.common.physics.robot_io import gripper_indices
 from robot_backend_sim.common.physics.scene_container import CompiledScene
 from robot_backend_sim.common.render.render_worker import Capture, RenderedCapture, RendererThread
 from robot_backend_sim.common.render.rendering import capture_snapshot
-from robot_backend_sim.common.tasks import SimTaskPlugin
+from robot_backend_sim.common.tasks.base import CAPTURE_HISTORY_LIMIT, SimTaskPlugin
 
 __all__ = ["BackendClosed", "SubmitOutcome", "WorkerFault", "WorkerSummary"]
 
@@ -137,7 +137,7 @@ class _Owner:
         )
         self._dropped_captures = self._stale_outputs = 0
         self._capture_seq = self._capture_count = 0
-        self._capture_times: deque[tuple[int, int]] = deque(maxlen=2048)
+        self._capture_times: deque[tuple[int, int]] = deque(maxlen=CAPTURE_HISTORY_LIMIT)
         self._next_capture_sim_ns = self._accepted_commands = self._events_emitted = 0
         self._feedback_key: tuple[str, str] | None = None
         self._thread = threading.Thread(target=self._run, name="backend-physics", daemon=True)

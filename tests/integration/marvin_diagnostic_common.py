@@ -43,13 +43,17 @@ try:
         context_message,
         duration,
     )
-    from robot_ros_support.follower_conversions import follower_reference_from_message
+    from robot_ros_support.follower_conversions import (
+        follower_reference_from_message,
+        reference_segment_messages,
+    )
     from robot_ros_support.qos import SENSOR_QOS
     from robot_ros_support.stream_conversions import (
         anchor_from_message,
         execution_feedback_from_message,
         stream_command_message,
     )
+    from robot_trajectory.trajectory_generation import generate_follower_plan
     from sim_api_msgs.srv import GetContactSnapshot, ResetSimulation
     ROS_IMPORT_ERROR: BaseException | None = None
 except ImportError as error:  # pragma: no cover - host without ROS
@@ -60,8 +64,12 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
+from robot_backend_sim.common.config.backend_config import load_backend_config  # noqa: E402
 from robot_backend_sim.common.config.follower_config import load_follower_config  # noqa: E402
+from robot_backend_sim.common.config.motion_config import load_control_config  # noqa: E402
 from robot_backend_sim.common.config.scenario_config import ROBOT_REFERENCE_FIELDS  # noqa: E402
+from robot_backend_sim.common.config.scene_loader import load_scene_config_for  # noqa: E402
+from robot_backend_sim.common.follower.follower_protocol import validation_limits  # noqa: E402
 from robot_backend_sim.marvin_sim.handover.config import load_handover_plan_config  # noqa: E402
 from robot_backend_sim.marvin_sim.handover.plan import plan_handover  # noqa: E402
 from robot_backend_sim.marvin_sim.handover.scene import build_marvin_scene  # noqa: E402
@@ -77,11 +85,17 @@ RECIPE = Path(
 EVIDENCE_DIR = Path(os.environ.get("P02B_EVIDENCE_DIR", "/data/marvin_sim/handover/debug/p02b"))
 SCENE_PATH = SCENARIO / "configs/simulation/scene/marvin_handover.yaml"
 PLANNING_PATH = SCENARIO / "configs/simulation/planning/handover_paths.yaml"
-PROFILE_PATH = SCENARIO / "profiles/robots/marvin_handover_v1/profile.json"
+PROFILE_PATH = SCENARIO / "profiles/robots/marvin_handover/profile.json"
 SCHEMAS = ROOT / "shared/common/interfaces/schemas"
 PROFILE = load_profile(PROFILE_PATH, SCHEMAS)
 _PLANNING = load_handover_plan_config(PLANNING_PATH)
-_FOLLOWER = load_follower_config(SCENARIO / "profiles/control/marvin_follower_v1.yaml")
+_BACKEND = load_backend_config(RECIPE)
+assert _BACKEND.follower_path is not None
+_FOLLOWER = load_follower_config(_BACKEND.follower_path)
+_GRID_NS = round(load_scene_config_for(_BACKEND.scene_path).physics.timestep * 1e9)
+_LIMITS = validation_limits(
+    load_control_config(_BACKEND.control_path), _FOLLOWER, duration_grid_ns=_GRID_NS
+)
 
 
 def _direct_document(path: Path) -> dict:
@@ -402,6 +416,17 @@ class Driver:
         )
         return request, hold
 
+    def send(self, request: StreamRequest):
+        plan = generate_follower_plan(request, PROFILE, _LIMITS)
+        return self.stack.call(
+            "submit_follower",
+            SubmitFollower.Request(
+                request=stream_command_message(request),
+                segments=reference_segment_messages(plan),
+            ),
+            timeout=30.0,
+        )
+
     def submit(
         self, target: tuple[float, ...], label: str, duration_s: float
     ) -> dict[str, object]:
@@ -446,11 +471,7 @@ class Driver:
         command_id = f"{label}-{uuid.uuid4().hex[:8]}"
         request, hold = self.request(target, command_id, duration_s)
         states_before = len(self.stack.states)
-        response = self.stack.call(
-            "submit_follower",
-            SubmitFollower.Request(request=stream_command_message(request)),
-            timeout=30.0,
-        )
+        response = self.send(request)
         record: dict[str, object] = {
             "label": label,
             "command_id": command_id,

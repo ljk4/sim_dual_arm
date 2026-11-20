@@ -181,7 +181,7 @@ class PolicyServer:
         prediction_directory: Path | None = None,
         prediction_max_bytes: int = 268435456,
     ) -> None:
-        from dual_arm_policy.v1 import policy_pb2_grpc
+        from dual_arm_policy import policy_pb2_grpc
 
         self.config = config
         self.service = PolicyService(

@@ -2,7 +2,7 @@
 
 The curve representation, sampling and hard-boundary normalization are shared
 conventions; a record is accepted from any producer that supplies a valid
-:class:`ReferencePlan`.  ``algorithm_version`` keeps the producer's real
+:class:`ReferencePlan`.  ``algorithm`` keeps the producer's real
 identity for readers and logs, but is not compared with any shared constant.
 """
 
@@ -33,9 +33,6 @@ from ..validation import (
     contract_error,
 )
 
-FOLLOWER_SAMPLER_VERSION = "follower-sampler-v1"
-FOLLOWER_NORMALIZATION_VERSION = "hard-boundary-normalization-v1"
-FOLLOWER_REFERENCE_DIGEST_VERSION = "follower-reference-v2"
 FOLLOWER_REFERENCE_KINDS = (REQUEST_STREAM_FIRST, REQUEST_STREAM_NEXT)
 DIGEST_HEX_LENGTH = 64
 _UINT64_MAX = 2**64 - 1
@@ -51,7 +48,7 @@ def follower_reference_digest_payload(record: FollowerReference) -> dict[str, ob
     """Return the complete canonical document covered by the record digest."""
     document = record.model_dump(mode="json", exclude={"reference_digest"})
     document["window"]["selected_indices"] = list(record.window.selected_indices)
-    return {"digest_version": FOLLOWER_REFERENCE_DIGEST_VERSION, **document}
+    return document
 
 
 def _digest_of(payload: dict[str, object]) -> str:
@@ -115,9 +112,7 @@ class FollowerReference(StrictContractModel):
                                     Field(min_length=1, max_length=MAX_JOINTS)]
     boundary_preserved: Annotated[tuple[bool, ...], BeforeValidator(as_tuple),
                                   Field(min_length=1, max_length=MAX_JOINTS)]
-    algorithm_version: NonEmptyStr
-    sampler_version: str = FOLLOWER_SAMPLER_VERSION
-    normalization_version: str = FOLLOWER_NORMALIZATION_VERSION
+    algorithm: NonEmptyStr
     reference_digest: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{64})?$")] | None = None
 
     @model_validator(mode="after")
@@ -127,12 +122,6 @@ class FollowerReference(StrictContractModel):
             raise contract_error("request.kind", "requires STREAM_FIRST or STREAM_NEXT")
         if request.anchor is None or request.window is None:
             raise contract_error("request", "requires an anchor and window")
-        for name, expected in (
-            ("sampler_version", FOLLOWER_SAMPLER_VERSION),
-            ("normalization_version", FOLLOWER_NORMALIZATION_VERSION),
-        ):
-            if getattr(self, name) != expected:
-                raise contract_error(name, f"unsupported version {getattr(self, name)!r}")
         joint_count = len(self.joint_names)
         if self.plan.joint_names != self.joint_names:
             raise contract_error("joint_names", "must match the explicit plan")
