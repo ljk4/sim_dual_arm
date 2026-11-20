@@ -130,7 +130,7 @@ def test_probe_log_directory_uses_its_actual_instance_identity(tmp_path, monkeyp
     report = json.loads((tmp_path / "identity/report.json").read_text())
     assert "image_versions" not in report
     assert report["source"] == {
-        "model_directory": str(probe.assets.robot_model_path("panda").parent)
+        "model_directory": str(probe.assets.robot_model_path("marvin").parent)
     }
     assert Path(report["log_directory"]).name == report["instance_id"]
     events = list((tmp_path / "identity" / report["log_directory"]).glob("events*.jsonl"))

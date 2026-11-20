@@ -2,7 +2,7 @@
 
 面向双臂机器人的仿真数据采集、ACT 策略训练与流式控制闭环系统。当前提供两个可直接运行的方案：
 
-- [`panda_sim/stack`](shared/scenarios/panda_sim/stack/README.md)：MuJoCo 双 Panda 堆叠；
+- [`marvin_sim/stack`](shared/scenarios/marvin_sim/stack/README.md)：Marvin 固定基座双臂单臂堆叠；
 - [`marvin_sim/handover`](shared/scenarios/marvin_sim/handover/README.md)：Marvin 抓取—空中交接—入箱。
 
 两个方案共用同一套通用实现：仿真端负责物理步进、三路相机渲染与程序示教（Teacher），运行端负责观测同步、流式动作块调度与 MCAP 录制，学习端负责数据集转换、ACT 训练与 gRPC Policy 服务。
@@ -16,7 +16,7 @@
 - **`learning/lerobot/`**：ROS-free 学习与策略服务端，负责数据集转换、ACT 混合精度训练、模型（`model.safetensors` + `training_args.yaml`）写出与 gRPC Policy 推理服务。
 - **`hardware/`**：真机 Robot API 边界说明；当前没有可验证的真实驱动。
 - **`shared/common/`**：公共层，只放跨端接口约束（Policy Protobuf、ROS 2 IDL、JSON Schema）、共享 Python 包与通用工具，不选择具体任务、机器人或算法。
-- **`shared/scenarios/<robot-id>/<task-id>/`**：两级方案绑定层，用 `binding.yaml` 选择档案、配方与方案专用接口（如 `shared/scenarios/panda_sim/stack/`、`shared/scenarios/marvin_sim/handover/`）；[`_template`](shared/scenarios/_template/README.md) 说明新增方案的方法。
+- **`shared/scenarios/<robot-id>/<task-id>/`**：两级方案绑定层，用 `binding.yaml` 选择档案、配方与方案专用接口（如 `shared/scenarios/marvin_sim/stack/`、`shared/scenarios/marvin_sim/handover/`）；[`_template`](shared/scenarios/_template/README.md) 说明新增方案的方法。
 
 **三端统一的一步式工作流**：任何端启动时只传 `--robot <robot-id> --task <task-id>`，由该方案 `binding.yaml` 在内存中选择并展开配方；不再生成 `/data/prepared/` 中间目录，也不再需要在三端分别执行 `prepare`。所有入口支持重复 `--set dot.path=value` 覆盖配方中已存在的键，用于临时调参。直接配置模式仍可用：把 `--robot ... --task ...` 换成对应端的 `--config <recipe>`（学习端策略服务也接受 `--config`）。
 
@@ -57,10 +57,10 @@ mkdir -p build var
 
 三端容器统一将各自的实现目录只读挂载为 `/app`（`working_dir: /app`），公共目录 `shared/` 只读挂载为 `/shared`，运行输出 `var/` 挂载为 `/data`；runtime/learning 额外将 `build/` 挂载为 `/build`，simulation 仅只读挂载所需的 `build/ros-dev` 至 `/opt/ros-dev`。更新挂载配置后，重新执行 `./env.sh up <env>` 使配置生效。
 
-所有运行期产物按机器人/任务对归入 `var/<robot-id>/<task-id>/`（容器 `/data/<robot-id>/<task-id>/`，如 `var/panda_sim/stack/`、`var/marvin_sim/handover/`），任务目录内严格分为四个平级目录：
+所有运行期产物按机器人/任务对归入 `var/<robot-id>/<task-id>/`（容器 `/data/<robot-id>/<task-id>/`，如 `var/marvin_sim/stack/`、`var/marvin_sim/handover/`），任务目录内严格分为四个平级目录：
 
 ```text
-var/panda_sim/stack/
+var/marvin_sim/stack/
 ├── datasets/
 │   ├── raw/          # 合格原始录制（raw/ MCAP、manifest、task_result、export/）与 formal-select.json
 │   └── lerobot/      # 转换后的 LeRobot 训练/验证数据集
@@ -109,15 +109,15 @@ scripts/build_sdk.sh
 在 `simulation` 容器内直接以方案启动示教后端（显式指定机器人/任务；默认 `--seed 0 --run-id teacher-backend`，启动时会打印所用配置文件路径与完整生效参数）：
 
 ```bash
-scripts/teacher_backend.sh --robot panda_sim --task stack
+scripts/teacher_backend.sh --robot marvin_sim --task stack
 ```
 
-`teacher_backend.sh` 会在内存中读取 `binding.yaml`、展开配方路径、打印配置路径与详细参数，并写入本次实际生效的快照 `/data/panda_sim/stack/logs/backend/teacher-backend/backend.yaml`；运行日志位于 `/data/panda_sim/stack/logs/backend/teacher-backend/log`。`--run-id teacher-backend` 同时是 runtime 端 `record.sh` 的默认后端日志位置，单路试采无需再指定 `--backend-log`。
+`teacher_backend.sh` 会在内存中读取 `binding.yaml`、展开配方路径、打印配置路径与详细参数，并写入本次实际生效的快照 `/data/marvin_sim/stack/logs/backend/teacher-backend/backend.yaml`；运行日志位于 `/data/marvin_sim/stack/logs/backend/teacher-backend/log`。`--run-id teacher-backend` 同时是 runtime 端 `record.sh` 的默认后端日志位置，单路试采无需再指定 `--backend-log`。
 
 需要切换方案或临时调参时可追加参数，例如降低仿真速度：
 
 ```bash
-scripts/teacher_backend.sh --robot panda_sim --task stack --seed 0 --run-id teacher-backend --set run.realtime_speed=0.4
+scripts/teacher_backend.sh --robot marvin_sim --task stack --seed 0 --run-id teacher-backend --set run.realtime_speed=0.4
 ```
 
 ### 2.3 试采时开启实时 MuJoCo 可视化（可选）
@@ -126,7 +126,7 @@ scripts/teacher_backend.sh --robot panda_sim --task stack --seed 0 --run-id teac
 
 ```bash
 # 显式选择机器人和任务；policy 角色使用 --role policy
-./env.sh viewer --robot panda_sim --task stack --role teacher
+./env.sh viewer --robot marvin_sim --task stack --role teacher
 ```
 
 ### 2.4 单路试采一次，确认完整链路
@@ -136,7 +136,7 @@ scripts/teacher_backend.sh --robot panda_sim --task stack --seed 0 --run-id teac
 ```bash
 # 只试一次：合格即结束，失败也立即结束
 scripts/record.sh \
-  --robot panda_sim --task stack --purpose pilot --count 1 --max-consecutive-failures 1
+  --robot marvin_sim --task stack --purpose pilot --count 1 --max-consecutive-failures 1
 ```
 
 确认试采命令退出码为 0，末尾 `recording.finished` 的 `reason` 为 `target_reached`、`qualified` 为 1；本局应同时满足任务成功、录制完整、导出质量合格。若失败，先检查日志并修复，再重新执行本节的试采命令。
@@ -153,7 +153,7 @@ scripts/record.sh \
 
 ```bash
 ./record_parallel.sh \
-  --robot panda_sim --task stack --purpose formal --target-total 50 \
+  --robot marvin_sim --task stack --purpose formal --target-total 50 \
   --workers auto --max-consecutive-failures 3
 ```
 
@@ -161,14 +161,14 @@ scripts/record.sh \
 
 入口自动创建独立的 MuJoCo backend，复用 runtime 容器并行录制与导出。每路使用独立的 ROS domain、命名空间和日志目录，共用原 campaign 的种子和预算。自动档按 CPU、可用内存和显存选择至多 4 路；如需固定并发，将 `--workers auto` 改为 `--workers 4`。
 
-并行 worker 禁用 viewer 状态发布、预览 PNG 和 GIF，保留训练 RGB、标签及质量门禁。连续失败按各 worker 进程独立计数，合格一次清零，终端只显示当前最大连败数；任一 worker 连续 3 次不合格会取消在途任务并提前退出，取消项仍占预算。预算/种子不足也会停止。按 `Ctrl-C` 可中断本批次；命令结束时自动清理本批次后台实例。配置、backend 日志和性能汇总保存到 `var/panda_sim/stack/logs/collection/record-pools/pool-*/`。
+并行 worker 禁用 viewer 状态发布、预览 PNG 和 GIF，保留训练 RGB、标签及质量门禁。连续失败按各 worker 进程独立计数，合格一次清零，终端只显示当前最大连败数；任一 worker 连续 3 次不合格会取消在途任务并提前退出，取消项仍占预算。预算/种子不足也会停止。按 `Ctrl-C` 可中断本批次；命令结束时自动清理本批次后台实例。配置、backend 日志和性能汇总保存到 `var/marvin_sim/stack/logs/collection/record-pools/pool-*/`。
 
 ### 2.7 查看数据集与训练/验证清单状态
 
-正式台账累计达标并正常结束时（`reason=target_reached`），采集入口会自动原子写出 `var/panda_sim/stack/datasets/raw/formal-select.json`，无需手动重定向。回到 **runtime 容器终端**即可查看当前数据集、磁盘占用与训练/验证清单划分状态（显式指定机器人/任务）：
+正式台账累计达标并正常结束时（`reason=target_reached`），采集入口会自动原子写出 `var/marvin_sim/stack/datasets/raw/formal-select.json`，无需手动重定向。回到 **runtime 容器终端**即可查看当前数据集、磁盘占用与训练/验证清单划分状态（显式指定机器人/任务）：
 
 ```bash
-scripts/record.sh status --robot panda_sim --task stack
+scripts/record.sh status --robot marvin_sim --task stack
 ```
 
 确认清单状态显示为 `SELECTED`（训练 45 条 / 验证 5 条，自动排除 `pilot` 试采）后，即可进入第 3 节的转换与训练。
@@ -187,44 +187,44 @@ scripts/record.sh status --robot panda_sim --task stack
 
 ### 3.2 转换数据集与训练 ACT 模型
 
-在 `learning` 容器内将正式清单中的 50 条合格 episode 转换为 LeRobot 数据集（45 条训练 / 5 条验证，输出至 `/data/panda_sim/stack/datasets/lerobot`）。转换配方直接读取 `/data/panda_sim/stack/datasets/raw/formal-select.json`，无需移动原始数据：
+在 `learning` 容器内将正式清单中的 50 条合格 episode 转换为 LeRobot 数据集（45 条训练 / 5 条验证，输出至 `/data/marvin_sim/stack/datasets/lerobot`）。转换配方直接读取 `/data/marvin_sim/stack/datasets/raw/formal-select.json`，无需移动原始数据：
 
 ```bash
-scripts/convert.sh --robot panda_sim --task stack
+scripts/convert.sh --robot marvin_sim --task stack
 ```
 
-转换时终端只显示配置、日志路径和一条持续前进的进度条（训练集与验证集共用同一总进度，不再归零重启）；视频编码使用多线程（`lerobot.encoder_threads` / `lerobot.image_writer_threads`，默认 4/4），详细输出写入日志。转换是 CPU 视频编码，不占用显存；GPU 仅用于训练与策略推理。训练使用同样的显示方式，额外显示 step、loss 和验证状态。重定向输出时仅保留阶段摘要，避免生成大量进度行。可用 `--log-file /data/panda_sim/stack/logs/convert/<文件名>.log` 指定详细日志；需要原始输出和 JSON 结果时添加 `--no-progress`。
+转换时终端只显示配置、日志路径和一条持续前进的进度条（训练集与验证集共用同一总进度，不再归零重启）；视频编码使用多线程（`lerobot.encoder_threads` / `lerobot.image_writer_threads`，默认 4/4），详细输出写入日志。转换是 CPU 视频编码，不占用显存；GPU 仅用于训练与策略推理。训练使用同样的显示方式，额外显示 step、loss 和验证状态。重定向输出时仅保留阶段摘要，避免生成大量进度行。可用 `--log-file /data/marvin_sim/stack/logs/convert/<文件名>.log` 指定详细日志；需要原始输出和 JSON 结果时添加 `--no-progress`。
 
 训练使用共享官方 ResNet18 权重文件 `third_party/weights/resnet18-f37072fd.pth`（两方案共用，长期保留，不属于 `build/` 生成产物）；也可在 learning 容器内用 `RESNET18_WEIGHTS` 指定现有权重文件。训练按离线方式运行，缺少权重时会报错，不会自动下载。
 
 启动完整模式训练（默认 5000 步，启用 PyAV 视频解码、张量批处理、多进程预取与 CUDA bfloat16 混合精度）：
 
 ```bash
-scripts/train.sh --robot panda_sim --task stack --mode full
+scripts/train.sh --robot marvin_sim --task stack --mode full
 ```
 
 训练直接写出可部署模型目录，无需额外导出或打包步骤：
 
 ```text
-var/panda_sim/stack/models/act_<YYYYMMDD_HHMMSS>/
+var/marvin_sim/stack/models/act_<YYYYMMDD_HHMMSS>/
 ├── model.safetensors     # 网络权重与归一化统计量，推理直接加载
 └── training_args.yaml    # 训练参数备忘，仅记录不消费
 ```
 
-训练事件、指标和训练终态摘要保存在 `var/panda_sim/stack/logs/training/act_<YYYYMMDD_HHMMSS>/`。
+训练事件、指标和训练终态摘要保存在 `var/marvin_sim/stack/logs/training/act_<YYYYMMDD_HHMMSS>/`。
 
 ### 3.3 直接启动 Policy 推理服务
 
-在 `learning` 容器内启动 gRPC Policy 服务；`--robot/--task` 读取方案绑定的 `policy_service` 配方、机器人档案与模型。省略 `--model` 时自动选择 `/data/panda_sim/stack/models/` 下最新的 `act_*` 模型目录；也可显式指定模型目录或 `model.safetensors`：
+在 `learning` 容器内启动 gRPC Policy 服务；`--robot/--task` 读取方案绑定的 `policy_service` 配方、机器人档案与模型。省略 `--model` 时自动选择 `/data/marvin_sim/stack/models/` 下最新的 `act_*` 模型目录；也可显式指定模型目录或 `model.safetensors`：
 
 ```bash
-scripts/server_policy.sh --robot panda_sim --task stack
+scripts/server_policy.sh --robot marvin_sim --task stack
 # 或显式指定模型
-scripts/server_policy.sh --robot panda_sim --task stack \
-  --model /data/panda_sim/stack/models/act_<YYYYMMDD_HHMMSS>
+scripts/server_policy.sh --robot marvin_sim --task stack \
+  --model /data/marvin_sim/stack/models/act_<YYYYMMDD_HHMMSS>
 ```
 
-服务默认监听 `50051`，日志目录为 `/data/panda_sim/stack/logs/policy-service`（可用 `--log-directory` 或环境变量 `ACT_LOG_DIRECTORY` 修改）。保持该终端运行。若本机尚未生成 Policy SDK，先在 runtime 容器执行 `scripts/build_sdk.sh`。
+服务默认监听 `50051`，日志目录为 `/data/marvin_sim/stack/logs/policy-service`（可用 `--log-directory` 或环境变量 `ACT_LOG_DIRECTORY` 修改）。保持该终端运行。若本机尚未生成 Policy SDK，先在 runtime 容器执行 `scripts/build_sdk.sh`。
 
 ### 3.4 直接启动推理仿真后端
 
@@ -232,11 +232,11 @@ scripts/server_policy.sh --robot panda_sim --task stack \
 
 ```bash
 scripts/inference_backend.sh \
-  --robot panda_sim --task stack \
+  --robot marvin_sim --task stack \
   --seed 20000 --run-id policy-backend
 ```
 
-运行快照与日志分别位于 `/data/panda_sim/stack/logs/backend/policy-backend/backend.yaml` 与 `/data/panda_sim/stack/logs/backend/policy-backend/log`。后端与第 3.3 节的 Policy 服务、第 3.5 节的 runtime 需同时在线。
+运行快照与日志分别位于 `/data/marvin_sim/stack/logs/backend/policy-backend/backend.yaml` 与 `/data/marvin_sim/stack/logs/backend/policy-backend/log`。后端与第 3.3 节的 Policy 服务、第 3.5 节的 runtime 需同时在线。
 
 ### 3.5 直接运行推理或交互闭环
 
@@ -244,15 +244,15 @@ scripts/inference_backend.sh \
 
 ```bash
 scripts/client_interactive.sh \
-  --robot panda_sim --task stack \
+  --robot marvin_sim --task stack \
   --seed 20000 --run-id policy-interactive
 ```
 
-非交互式单局执行使用 `scripts/client_policy.sh`，录制默认落到 `/data/panda_sim/stack/logs/recordings/<run-id>`；需要另选位置时再显式传 `--output`：
+非交互式单局执行使用 `scripts/client_policy.sh`，录制默认落到 `/data/marvin_sim/stack/logs/recordings/<run-id>`；需要另选位置时再显式传 `--output`：
 
 ```bash
 scripts/client_policy.sh \
-  --robot panda_sim --task stack \
+  --robot marvin_sim --task stack \
   --reset-seed 20000 --run-id policy-run
 ```
 
@@ -260,7 +260,7 @@ scripts/client_policy.sh \
 
 ```bash
 scripts/client_interactive.sh \
-  --robot panda_sim --task stack \
+  --robot marvin_sim --task stack \
   --seed 20001 --run-id policy-interactive-2
 ```
 
@@ -268,11 +268,11 @@ scripts/client_interactive.sh \
 
 ```bash
 ./inference_parallel.sh \
-  --robot panda_sim --task stack \
+  --robot marvin_sim --task stack \
   --count 10 --seed-start 20000 --workers auto
 ```
 
-`--workers auto` 按 CPU、内存与显存选择至多 4 路；也可固定并发（`--workers 4`）。每路使用独立 ROS domain、命名空间与日志目录。入口启动时打印方案与关键参数，结束输出：总成功/总尝试与成功率、抓取/交接、搬运/放置、释放/撤离、稳定确认各阶段达成次数/总次数，以及按失败阶段聚合的失败原因与种子。逐局明细、控制台日志保存在 `var/panda_sim/stack/logs/batch-policy/<batch-id>/`，评估报告写到 `var/panda_sim/stack/debug/batch-policy/<batch-id>/report.json`。`--max-consecutive-failures` 可选；任一 worker 连续失败达到上限即停止并清理在途任务。验收要求每个方案至少一次真实任务成功。
+`--workers auto` 按 CPU、内存与显存选择至多 4 路；也可固定并发（`--workers 4`）。每路使用独立 ROS domain、命名空间与日志目录。入口启动时打印方案与关键参数，结束输出：总成功/总尝试与成功率、抓取/交接、搬运/放置、释放/撤离、稳定确认各阶段达成次数/总次数，以及按失败阶段聚合的失败原因与种子。逐局明细、控制台日志保存在 `var/marvin_sim/stack/logs/batch-policy/<batch-id>/`，评估报告写到 `var/marvin_sim/stack/debug/batch-policy/<batch-id>/report.json`。`--max-consecutive-failures` 可选；任一 worker 连续失败达到上限即停止并清理在途任务。验收要求每个方案至少一次真实任务成功。
 
 ### 3.6 用 `--set` 调参与采集产物
 
@@ -280,27 +280,27 @@ scripts/client_interactive.sh \
 
 ```bash
 # simulation：降低仿真速度
-scripts/teacher_backend.sh --robot panda_sim --task stack --run-id teacher-slow --set run.realtime_speed=0.4
+scripts/teacher_backend.sh --robot marvin_sim --task stack --run-id teacher-slow --set run.realtime_speed=0.4
 
 # runtime：放宽观测最大年龄（该键由观测档案派生，也可覆盖）
-scripts/client_interactive.sh --robot panda_sim --task stack \
+scripts/client_interactive.sh --robot marvin_sim --task stack \
   --run-id policy-fast --set observation.max_age_ns=200000000
 
 # learning：只运行 smoke 预算并指定轮次数
-scripts/train.sh --robot panda_sim --task stack \
+scripts/train.sh --robot marvin_sim --task stack \
   --mode smoke --set modes.smoke.steps=64
 
 # 采集：为每次尝试追加运行时覆盖
-scripts/record.sh --robot panda_sim --task stack --purpose pilot --count 1 \
+scripts/record.sh --robot marvin_sim --task stack --purpose pilot --count 1 \
   --set observation.max_age_ns=250000000
 ```
 
 直接配置模式同样支持 `--set`：把 `--robot ... --task ...` 换成 `--config <recipe>` 即可，二者互斥。
 
-采集与训练产物统一落在 `var/panda_sim/stack/{datasets,models,logs,debug}` 四个分区：
+采集与训练产物统一落在 `var/marvin_sim/stack/{datasets,models,logs,debug}` 四个分区：
 
 ```text
-var/panda_sim/stack/
+var/marvin_sim/stack/
 ├── datasets/
 │   ├── raw/
 │   │   ├── formal-select.json         # 达标时自动原子写出，供 convert 消费
@@ -333,7 +333,7 @@ var/panda_sim/stack/
 
 ## 4. 使用 marvin_sim/handover
 
-`marvin_sim/handover` 与 `panda_sim/stack` 使用完全相同的入口，训练默认同样为 50 条正式数据（45 训练 / 5 验证）与 full 5000 步，共享同一份 ResNet18 权重；只需替换 `--robot/--task`：
+`marvin_sim/handover` 与 `marvin_sim/stack` 使用完全相同的入口，训练默认同样为 50 条正式数据（45 训练 / 5 验证）与 full 5000 步，共享同一份 ResNet18 权重；只需替换 `--robot/--task`：
 
 ```bash
 # simulation：示教后端（--run-id 为前缀，自动追加 _YYYYMMDD_HHMMSS 时间戳）

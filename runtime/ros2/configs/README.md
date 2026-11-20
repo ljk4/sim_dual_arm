@@ -3,7 +3,7 @@
 本目录只保留运行端私有环境；方案运行配方位于方案目录。
 
 - **`container.env`**：声明容器内项目根路径（`PROJECT_ROOT=/app`）、ROS 2 域 ID（`ROS_DOMAIN_ID=42`）、Fast DDS 配置路径与 Python 源码路径，由 Compose `env_file` 自动加载。
-- **[`shared/scenarios/panda_sim/stack/configs/runtime/`](../../../shared/scenarios/panda_sim/stack/configs/runtime/)**：Panda 堆叠的 Teacher 采集、Policy 推理与 campaign 配方。
+- **[`shared/scenarios/marvin_sim/stack/configs/runtime/`](../../../shared/scenarios/marvin_sim/stack/configs/runtime/)**：Marvin 堆叠的 Teacher 采集、Policy 推理与 campaign 配方。
 - **[`shared/scenarios/marvin_sim/handover/configs/runtime/`](../../../shared/scenarios/marvin_sim/handover/configs/runtime/)**：Marvin 交接的 Teacher 采集、Policy 评估与 campaign 配方。
 - **`binding.yaml`**：各方案目录（`<robot>/<task>/binding.yaml`）下的方案选择；`recipes.runtime_teacher` / `recipes.runtime_policy` / `recipes.campaign` 指向上述配方。
 
@@ -15,11 +15,11 @@
 
 ```bash
 # 直接以方案执行一局策略
-scripts/server_policy.sh --robot panda_sim --task stack \
+scripts/client_policy.sh --robot marvin_sim --task stack \
   --reset-seed 20000 --run-id policy-run
 
 # 交互式执行
-scripts/client_interactive.sh --robot panda_sim --task stack \
+scripts/client_interactive.sh --robot marvin_sim --task stack \
   --seed 20000 --run-id policy-interactive
 ```
 

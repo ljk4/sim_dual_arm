@@ -7,7 +7,7 @@
 - [`srv/`](srv/README.md)：`ResetSimulation`、`PrepareTask`、`StartTask`、`GetTaskState`；P02B 增加 `GetContactSnapshot`，只用于仿真端诊断，不承载 Teacher 动作块。
 
 只由 simulation 后端实现。runtime 在复位或任务路径延迟加载这些类型。固定
-60×16 堆叠 Teacher 已迁至方案专用 `panda_stack_api_msgs`，本包不再包含
-`GetTeacherChunk`。
+60×16 堆叠与交接 Teacher 已迁至方案专用扩展包（`marvin_stack_api_msgs`、
+`marvin_handover_api_msgs`），本包不再包含 `GetTeacherChunk`。
 
 目录导航：[上级目录](../README.md)

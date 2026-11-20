@@ -11,24 +11,31 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from robot_backend_sim.panda_sim.kinematics_config import KinematicsCheckConfig, TargetConfig
-from robot_backend_sim.panda_sim.stack.scene_config import SceneConfig
 from robot_backend_sim.common.kinematics import common
-from robot_backend_sim.panda_sim import kinematics
 from robot_backend_sim.common.kinematics.common import extract_object_pose
-from robot_backend_sim.panda_sim.kinematics import (
+from robot_backend_sim.common.kinematics import kinematics_clearance as kinematics
+from robot_backend_sim.common.render import visibility
+from robot_backend_sim.marvin_sim.scene_base import (
+    base_world_point,
+    combined_yaw_quaternion,
+)
+from robot_backend_sim.marvin_sim.stack import visibility as stack_visibility
+from robot_backend_sim.marvin_sim.stack.kinematics_config import (
+    KinematicsCheckConfig,
+    TargetConfig,
+)
+from robot_backend_sim.marvin_sim.stack.plan import (
     IKResult,
     KinematicsError,
     PathResult,
-    build_collision_pairs,
     build_targets,
     check_initial_pose,
     check_path,
     solve_key_poses,
+    stack_pair_set,
 )
-from robot_backend_sim.common.render import visibility
-from robot_backend_sim.panda_sim.stack import visibility as panda_visibility
-from robot_backend_sim.panda_sim.stack.visibility import LayoutSpec, SceneCheckConfig
+from robot_backend_sim.marvin_sim.stack.scene_config import MarvinStackSceneConfig
+from robot_backend_sim.marvin_sim.stack.visibility import LayoutSpec, SceneCheckConfig
 from robot_backend_sim.tools.check_kinematics_common import (
     ArtifactBudget,
     KinematicsCheckFailure,
@@ -36,7 +43,7 @@ from robot_backend_sim.tools.check_kinematics_common import (
 )
 
 if TYPE_CHECKING:
-    from robot_backend_sim.panda_sim.stack.scene import Scene
+    from robot_backend_sim.marvin_sim.stack.scene import MarvinStackScene
     from robot_backend_sim.common.render.rendering import SceneRenderer, Snapshot
 
 
@@ -49,19 +56,24 @@ def _apply_updates(qpos: object, updates: dict[int, tuple[float, ...]]) -> objec
     return result
 
 def _boundary_updates(
-    layout: LayoutSpec, scene: object, scene_config: SceneConfig
+    layout: LayoutSpec, scene: object, scene_config: MarvinStackSceneConfig
 ) -> dict[int, tuple[float, ...]]:
     by_name = {placement.name: placement for placement in layout.placements}
     updates: dict[int, tuple[float, ...]] = {}
+    base = scene_config.robot
     for obj in scene_config.objects:
         placement = by_name[obj.name]
         address = scene.indices.environment.object_free_joint_qpos[obj.name]
-        z = scene_config.table.top_z + obj.half_extents[2]
+        world = base_world_point(
+            (placement.x, placement.y, scene_config.table.top_z + obj.half_extents[2]),
+            base.base_position,
+            base.base_yaw_deg,
+        )
         updates[address] = (
-            placement.x,
-            placement.y,
-            z,
-            *visibility.yaw_quaternion(placement.yaw_deg),
+            world[0],
+            world[1],
+            world[2],
+            *combined_yaw_quaternion(base.base_yaw_deg, placement.yaw_deg),
         )
     return updates
 
@@ -283,7 +295,7 @@ class PreparedLayout:
     snapshot: Snapshot
     qpos: np.ndarray
     objects: tuple[dict[str, object], ...]
-    targets: tuple[kinematics.KeyPoseTarget, ...]
+    targets: tuple[KeyPoseTarget, ...]
 
 @dataclass(frozen=True)
 class MotionChecks:
@@ -299,9 +311,9 @@ class MotionChecks:
         )
 
 def _prepare_layout(
-    scene: Scene,
+    scene: MarvinStackScene,
     renderer: SceneRenderer,
-    scene_config: SceneConfig,
+    scene_config: MarvinStackSceneConfig,
     layout: LayoutSpec,
     *,
     base_seed: int,
@@ -325,7 +337,7 @@ def _prepare_layout(
     targets = build_targets(
         poses["source"],
         poses["target"],
-        table_top_z=scene_config.table.top_z,
+        table_top_z=scene_config.robot.base_position[2] + scene_config.task.table.top_z,
         source_half_z=half_z["source"],
         target_half_z=half_z["target"],
         config=target_config,
@@ -338,7 +350,7 @@ def _prepare_layout(
     return PreparedLayout(snapshot, qpos, objects, targets)
 
 def _check_motion(
-    scene: Scene,
+    scene: MarvinStackScene,
     prepared: PreparedLayout,
     pairs: kinematics.CollisionPairSet,
     config: KinematicsCheckConfig,
@@ -459,8 +471,8 @@ def _motion_failures(
 
 def _check_one_layout(
     run_dir: Path,
-    scene: Scene,
-    scene_config: SceneConfig,
+    scene: MarvinStackScene,
+    scene_config: MarvinStackSceneConfig,
     layout: LayoutSpec,
     *,
     base_seed: int,
@@ -525,8 +537,8 @@ def _check_one_layout(
 
 def _run_layouts(
     run_dir: Path,
-    scene: Scene,
-    scene_config: SceneConfig,
+    scene: MarvinStackScene,
+    scene_config: MarvinStackSceneConfig,
     check_config: SceneCheckConfig,
     kinematics_config: KinematicsCheckConfig,
     renderer: SceneRenderer,
@@ -534,12 +546,7 @@ def _run_layouts(
     report: dict[str, object],
     budget: ArtifactBudget,
 ) -> tuple[list[dict[str, object]], KinematicsCheckFailure | None]:
-    pairs = build_collision_pairs(
-        scene.model,
-        robot_prefixes=("left_", "right_"),
-        robot_sides={"left": ("left_",), "right": ("right_",)},
-        object_names=("source", "target"),
-    )
+    pairs = stack_pair_set(scene.model)
     report["collision_pairs"] = {
         "total_effective_pairs": len(pairs.pairs),
         "categories": pairs.categories,
@@ -560,8 +567,8 @@ def _run_layouts(
     results = []
     report["layouts"] = results  # Preserve completed layouts if a later resource fails.
     first_failure = None
-    remaining = kinematics_config.clearance.max_total_samples
-    for layout in panda_visibility.build_layouts(check_config, scene_config):
+    remaining = kinematics_config.budgets.max_total_samples
+    for layout in stack_visibility.build_layouts(check_config, scene_config):
         result = _check_one_layout(
             run_dir,
             scene,

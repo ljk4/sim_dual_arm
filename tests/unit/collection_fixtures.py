@@ -80,7 +80,7 @@ def _write_runtime_recipe(root: Path) -> Path:
         "follower_config": "follower.yaml",
         "robot_namespace": "/robot",
         "action_source": "teacher",
-        "teacher_api": "panda_stack_api_msgs.teacher_chunk.v1",
+        "teacher_api": "marvin_stack_api_msgs.teacher_chunk.v1",
         "reset": {"enabled": True, "seed": 0},
     }
     path = root / "configs/runtime_teacher.yaml"

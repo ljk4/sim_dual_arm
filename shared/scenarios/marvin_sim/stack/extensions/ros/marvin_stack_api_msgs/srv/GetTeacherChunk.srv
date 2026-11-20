@@ -1,0 +1,41 @@
+# marvin_stack_api_msgs capability: marvin_stack_api_msgs.teacher_chunk.v1.
+# 60x16 raw teacher targets at 50 ms relative to the retained observation.
+# phase_codes use the fixed order: 0 pregrasp, 1 grasp, 2 close, 3 lift,
+# 4 transport, 5 lower, 6 open, 7 retreat, 8 stable.
+robot_api_msgs/RunContext context
+string episode_id
+uint64 task_epoch
+string request_id
+uint64 capture_seq
+builtin_interfaces/Time observation_time
+# Scheduled hand-off for which this chunk is requested.  The teacher starts a
+# newly gated step at this time so its targets continue the reference the
+# follower will inherit, instead of racing ahead of the observation.
+builtin_interfaces/Time handoff_time
+---
+bool success
+string reason
+uint64 task_epoch
+uint64 capture_seq
+string plan_digest
+string chunk_digest
+builtin_interfaces/Time observation_time
+builtin_interfaces/Time source_time
+string robot_profile_hash
+string phase
+uint32 point_count
+uint32 joint_count
+# positions is row-major: positions[point * 16 + axis]. Axis order is the
+# backend profile order: left_joint1..7, left_gripper_width, right_joint1..7,
+# right_gripper_width (SI: rad, m total opening). The response carries the
+# exact robot_profile_hash used for validation.
+float64[960] positions
+int64[60] time_from_observation_ns
+uint8[60] phase_codes
+float64 ik_max_position_error_m
+float64 ik_max_orientation_error_rad
+# Measured gate state for this retained capture, not the nominal plan clock.
+string gate_state
+string gate_failure
+builtin_interfaces/Time phase_start_time
+float64 phase_wait_s

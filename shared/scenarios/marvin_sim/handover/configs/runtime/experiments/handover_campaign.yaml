@@ -1,6 +1,6 @@
 # Marvin 交接正式采集预算、种子与路径。
 #
-# pilot 与 formal 使用本方案独立种子与台账，不复用 Panda 数据根。
+# pilot 与 formal 使用本方案独立种子与台账，严格隔离在 marvin_sim/handover 数据根下。
 schema_version: 1
 
 # Formal training evidence: 50 qualified demonstrations, 45 train / 5 validate.

@@ -10,8 +10,8 @@
 
 # Marvin no-ROS motion parameters.  SI units only.  Joint position/velocity
 # hard limits come from marvin_handover_v1; the tolerances below were measured
-# on the real compiled scene and streaming control, not taken from the Panda
-# recipe or the P01A offline 5e-4 m model-consistency tolerance.
+# on the real compiled scene and streaming control, independent of any other
+# scenario recipe or the P01A offline 5e-4 m model-consistency tolerance.
 joint_names:
   - left_joint1
   - left_joint2

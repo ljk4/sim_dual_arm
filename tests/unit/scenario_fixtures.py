@@ -16,7 +16,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 SHARED = ROOT / "shared"
-PANDA_PROFILES = SHARED / "scenarios/panda_sim/stack/profiles"
+MARVIN_PROFILES = SHARED / "scenarios/marvin_sim/stack/profiles"
 
 
 def sha(path: Path) -> str:
@@ -69,8 +69,8 @@ def base_binding() -> dict[str, Any]:
         "recipes": {name: f"configs/{name}.yaml" for name in RECIPES},
         "interfaces": {
             "common_ros": ["robot_api_msgs"],
-            "extension_ros": ["extensions/ros/panda_stack_api_msgs"],
-            "teacher_api": "panda_stack_api_msgs.teacher_chunk.v1",
+            "extension_ros": ["extensions/ros/marvin_stack_api_msgs"],
+            "teacher_api": "marvin_stack_api_msgs.teacher_chunk.v1",
             "policy_api": "bimanual.policy.v1",
         },
         "source_roots": [],
@@ -83,15 +83,15 @@ def _copy_profile_documents(root: Path) -> None:
     profiles = root / "profiles"
     profiles.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(
-        PANDA_PROFILES / "robots/panda_stack_learning_v1/profile.json",
+        MARVIN_PROFILES / "robots/marvin_stack_v1/profile.json",
         profiles / "robot.json",
     )
     shutil.copyfile(
-        PANDA_PROFILES / "observations/panda_rgb_joint_v1.json",
+        MARVIN_PROFILES / "observations/marvin_rgb_joint_v1.json",
         profiles / "observation.json",
     )
     shutil.copyfile(
-        PANDA_PROFILES / "actions/panda_joint_position_v1.json",
+        MARVIN_PROFILES / "actions/marvin_joint_position_v1.json",
         profiles / "action.json",
     )
 
@@ -103,14 +103,14 @@ def build_scenario(root: Path, document: dict[str, Any] | None = None) -> Scenar
     configs.mkdir(exist_ok=True)
     for name in RECIPES:
         (configs / f"{name}.yaml").write_text("schema_version: 1\n", encoding="utf-8")
-    extension = root / "extensions/ros/panda_stack_api_msgs"
+    extension = root / "extensions/ros/marvin_stack_api_msgs"
     (extension / "msg").mkdir(parents=True, exist_ok=True)
     (extension / "srv").mkdir(parents=True, exist_ok=True)
     (extension / "package.xml").write_text(
-        "<package format='3'><name>panda_stack_api_msgs</name></package>\n", encoding="utf-8"
+        "<package format='3'><name>marvin_stack_api_msgs</name></package>\n", encoding="utf-8"
     )
     (extension / "msg/TeacherCapability.msg").write_text(
-        "string ID=panda_stack_api_msgs.teacher_chunk.v1\n", encoding="utf-8"
+        "string ID=marvin_stack_api_msgs.teacher_chunk.v1\n", encoding="utf-8"
     )
     (extension / "srv/GetTeacherChunk.srv").write_text("---\n", encoding="utf-8")
     tree = ScenarioTree(root, root / "binding.yaml", document or base_binding())

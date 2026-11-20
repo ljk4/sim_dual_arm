@@ -11,7 +11,7 @@
 
 当前包版本 **0.3.0**（[`package.xml`](package.xml)），能力标识 **`execution_feedback.gripper_set.v1`**：
 
-- `ExecutionFeedback.grippers` 为 `GripperFeedback[<=8]`，`GripperFeedback.fingers` 为 `FingerFeedback[<=8]`；夹爪允许 0～8 个，每个夹爪允许 1～8 个手指。Panda 的“恰好左右双指”规则在 `simulation` 实现侧，不在公共消息中。
+- `ExecutionFeedback.grippers` 为 `GripperFeedback[<=8]`，`GripperFeedback.fingers` 为 `FingerFeedback[<=8]`；夹爪允许 0～8 个，每个夹爪允许 1～8 个手指。Marvin 的“恰好左右双指”规则在 `simulation` 实现侧，不在公共消息中。
 - `FollowerReference.curve_duration_ns` 是生产者完整曲线的总时长（`uint64`）。0.3.0 只把该字段从 `ruckig_duration_ns` 改名，CDR 类型、顺序和边界未变；字段关系与校验以 [`robot_contracts`](../../../python/contracts/src/robot_contracts/trajectory/follower_reference.py) 为准。
 - 当前消费者要求所需能力由后端明确声明；接口包版本、生成类型与已记录消息定义须匹配实际使用格式。
 

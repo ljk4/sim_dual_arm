@@ -1,0 +1,50 @@
+# Marvin stack Policy inference simulation backend.
+robot:
+  namespace: /robot
+  profile: ../../../profiles/robots/marvin_stack_v1/profile.json
+  schemas: ../../../../../../common/interfaces/schemas
+  scene: ../scene/marvin_stack.yaml
+  control: ../../../profiles/control/marvin_control_v1.yaml
+  stream: ../../../profiles/control/marvin_stream_v1.yaml
+  follower: ../../../profiles/control/marvin_follower_inference_v1.yaml
+  task: ../scene/marvin_stack_task.yaml
+  task_type: stack
+  task_mode: inference
+  render_quality:
+    enabled: false
+  velocity_feedforward: true
+  reliable_sensors: true
+
+run:
+  seed: 0
+  capture_hz: 20.0
+  realtime_speed: 0.5
+  max_catchup_steps: 8
+
+queues:
+  owner: 64
+  planner: 4
+  render_snapshots: 32
+  render_outputs: 32
+  captures: 32
+  events: 1024
+  feedback: 64
+  accepted_references: 256
+  follower_references: 256
+
+limits:
+  planner_health_s: 30.0
+  renderer_health_s: 5.0
+  request_timeout_s: 10.0
+  shutdown_s: 10.0
+  command_history: 64
+  chunk_history: 256
+
+logging:
+  queue_capacity: 256
+  max_event_bytes: 32768
+  max_file_bytes: 8388608
+  max_total_bytes: 268435456
+  close_timeout_s: 3.0
+  flush_interval_s: 0.2
+  console: false

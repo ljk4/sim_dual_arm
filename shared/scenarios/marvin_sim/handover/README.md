@@ -116,7 +116,7 @@ scripts/bundle.sh --scenario marvin_sim/handover --mode full \
   --output /data/marvin_sim/handover/models/bundles/<new-bundle>
 ```
 
-`act_dataset.yaml` 使用 `diagnostic: false`，按 50 条正式数据做 45/5 划分；骨干权重与 Panda 共用 `third_party/weights/resnet18-f37072fd.pth`。
+`act_dataset.yaml` 使用 `diagnostic: false`，按 50 条正式数据做 45/5 划分；骨干权重与 `marvin_sim/stack` 共用 `third_party/weights/resnet18-f37072fd.pth`。
 
 ### 推理
 

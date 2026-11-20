@@ -12,8 +12,8 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim.panda_sim.stack.config import load_task_config  # noqa: E402
-from robot_backend_sim.panda_sim.stack.evaluator import (  # noqa: E402
+from robot_backend_sim.marvin_sim.stack.config import load_task_config  # noqa: E402
+from robot_backend_sim.marvin_sim.stack.evaluator import (  # noqa: E402
     ObjectState,
     StackTaskRuntime,
     TaskBinding,
@@ -22,8 +22,8 @@ from robot_backend_sim.panda_sim.stack.evaluator import (  # noqa: E402
 )
 from robot_contracts.models import ContractError, RunContext  # noqa: E402
 
-CONFIG_PATH = ROOT / "shared/scenarios/panda_sim/stack/configs/simulation/scene/panda_stack_task.yaml"
-TABLE_TOP = 0.75
+CONFIG_PATH = ROOT / "shared/scenarios/marvin_sim/stack/configs/simulation/scene/marvin_stack_task.yaml"
+TABLE_TOP = 0.78
 TARGET_Z = TABLE_TOP + 0.03
 SOURCE_Z = TARGET_Z + 0.03 + 0.02
 SOURCE_Q = (1.0, 0.0, 0.0, 0.0)
@@ -36,6 +36,8 @@ def binding() -> TaskBinding:
         target_body_id=2,
         table_body_id=1,
         finger_body_ids=(20, 21, 30, 31),
+        right_finger_body_ids=(30, 31),
+        left_finger_body_ids=(20, 21),
         source_qpos_address=20,
         target_qpos_address=13,
         source_dof_address=18,
@@ -49,10 +51,10 @@ def binding() -> TaskBinding:
 
 def observation(**changes) -> TaskObservation:
     source = ObjectState(
-        (0.36, 0.55, SOURCE_Z), SOURCE_Q, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)
+        (0.55, -0.30, SOURCE_Z), SOURCE_Q, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)
     )
     target = ObjectState(
-        (0.36, 0.55, TARGET_Z), TARGET_Q, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)
+        (0.55, -0.30, TARGET_Z), TARGET_Q, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)
     )
     base = dict(
         sim_time_ns=0,
@@ -62,8 +64,8 @@ def observation(**changes) -> TaskObservation:
         target_table_normal_force_n=0.6,
         source_table_normal_force_n=0.0,
         finger_contact_count=0,
-        right_gripper_opening_m=0.08,
-        right_tcp_position=(0.36, 0.55, 1.05),
+        right_gripper_opening_m=0.0814,
+        right_tcp_position=(0.55, -0.30, 1.05),
         right_tcp_to_source_m=0.22,
         table_top_z_m=TABLE_TOP,
     )
@@ -101,9 +103,9 @@ def test_positive_static_stack_passes_every_condition(config):
 @pytest.mark.parametrize(
     ("changes", "failed"),
     [
-        ({"source": replace(observation().source, center=(0.36, 0.55, TARGET_Z + 0.02))},
+        ({"source": replace(observation().source, center=(0.55, -0.30, TARGET_Z + 0.02))},
          "source_on_target_height"),
-        ({"source": replace(observation().source, center=(0.40, 0.55, SOURCE_Z))},
+        ({"source": replace(observation().source, center=(0.59, -0.30, SOURCE_Z))},
          "source_xy_inside_target"),
         ({"source_target_normal_force_n": 0.0}, "source_target_vertical_contact"),
         ({"target_table_normal_force_n": 0.0}, "target_on_table"),
@@ -112,7 +114,7 @@ def test_positive_static_stack_passes_every_condition(config):
         ({"right_gripper_opening_m": 0.04}, "right_gripper_opening"),
         ({"right_tcp_to_source_m": 0.05}, "right_tcp_clearance"),
         ({"source_table_normal_force_n": 0.0, "target": replace(
-            observation().target, center=(0.36, 0.55, TARGET_Z + 0.02)
+            observation().target, center=(0.55, -0.30, TARGET_Z + 0.02)
         )}, "target_on_table"),
     ],
 )

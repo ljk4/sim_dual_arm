@@ -5,7 +5,7 @@
 | 目录/文件 | 用途说明 |
 | --- | --- |
 | `container.env` | `simulation` 容器内运行路径、ROS 2 域 ID 与 NVIDIA EGL 环境变量 |
-| [`shared/scenarios/panda_sim/stack/configs/simulation/`](../../../shared/scenarios/panda_sim/stack/configs/simulation/) | Panda 堆叠的后端启动、物理场景/任务与静态检查配方 |
+| [`shared/scenarios/marvin_sim/stack/configs/simulation/`](../../../shared/scenarios/marvin_sim/stack/configs/simulation/) | Marvin 堆叠的后端启动、物理场景/任务与静态检查配方 |
 | [`shared/scenarios/marvin_sim/handover/configs/simulation/`](../../../shared/scenarios/marvin_sim/handover/configs/simulation/) | Marvin 交接的后端、场景、任务与路径配方 |
 | [`tests/fixtures/simulation/`](../../../tests/fixtures/simulation/README.md) | 历史回归对照专用配置夹具（测试归属，不进入方案） |
 

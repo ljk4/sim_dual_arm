@@ -9,7 +9,7 @@ import sys
 import time
 from pathlib import Path
 
-from robot_backend_sim.panda_sim.stack.visibility import SceneCheckConfig
+from robot_backend_sim.marvin_sim.stack.visibility import SceneCheckConfig
 from robot_backend_sim.common.runtime.diagnostics import utc_now, write_json_atomic
 from robot_backend_sim.tools.check_kinematics_common import (
     ArtifactBudget,

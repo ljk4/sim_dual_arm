@@ -1,9 +1,9 @@
 """Fixed extrinsic RGB camera declarations shared by simulation scenes.
 
 The declaration is the calibration identity: the profile stores the SHA-256 of
-the exact name/parent/pose/lens/resolution fields, and both the Panda and
-Marvin scenes hash the same way.  Scene-specific configuration decides which
-body each camera is attached to.
+the exact name/parent/pose/lens/resolution fields, and every scene hashes the
+same way.  Scene-specific configuration decides which body each camera is
+attached to.
 """
 
 from __future__ import annotations

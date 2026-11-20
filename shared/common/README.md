@@ -1,6 +1,6 @@
 # 公共契约与共享实现（Common）
 
-本目录存放跨端稳定、与具体任务和实现无关的公共内容，不持有仿真、运行或学习业务生命周期，也不选择方案。任务、机器人、后端与学习算法的选择在 [`shared/scenarios/<robot>/<task>/binding.yaml`](../scenarios/panda_sim/stack/README.md)。
+本目录存放跨端稳定、与具体任务和实现无关的公共内容，不持有仿真、运行或学习业务生命周期，也不选择方案。任务、机器人、后端与学习算法的选择在 [`shared/scenarios/<robot>/<task>/binding.yaml`](../scenarios/marvin_sim/stack/README.md)。
 
 ## 目录结构
 

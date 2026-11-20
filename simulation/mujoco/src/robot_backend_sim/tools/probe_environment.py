@@ -1,7 +1,7 @@
 """MuJoCo/mink/EGL environment probe for one report run.
 
 The module is intentionally small: it reports installed dependency versions and
-import sources, loads the local single Panda keyframe,
+import sources, loads the local Marvin scene keyframe,
 runs a few real MuJoCo steps,
 solves one known QP through DAQP, renders one 320x240 RGB preview with EGL and
 publishes a JSON report.  It does not start ROS, a robot service or training.
@@ -213,33 +213,29 @@ def _check_model() -> dict[str, object]:
     import mujoco
     import numpy as np
 
-    from robot_backend_sim.panda_sim.plugin import panda_model_paths
+    from robot_backend_sim.marvin_sim.stack.scene import load_and_build
 
-    scene_path, panda_path = panda_model_paths()
-    for path in (scene_path, panda_path):
+    scene_cfg = Path(os.environ.get("SHARED_ROOT", "/shared")) / (
+        "scenarios/marvin_sim/stack/configs/simulation/scene/marvin_stack.yaml"
+    )
+    urdf_path = assets.robot_model_path("marvin")
+    for path in (scene_cfg, urdf_path):
         if not path.is_file():
             raise ProbeFailure("model_missing", f"model file is missing: {path}")
     try:
-        model = mujoco.MjModel.from_xml_path(str(scene_path))
-        panda_model = mujoco.MjModel.from_xml_path(str(panda_path))
+        scene = load_and_build(str(scene_cfg))
+        model, data = scene.model, scene.data
     except Exception as error:
         raise ProbeFailure(
             "model_load_failed",
             f"{type(error).__name__}: {error}",
         ) from error
     stats = _model_stats(model)
-    if stats["nq"] < 7 or stats["nv"] < 7 or stats["nu"] < 7:
+    if stats["nq"] < 14 or stats["nv"] < 14 or stats["nu"] < 16:
         raise ProbeFailure("model_dimensions_implausible", f"model stats are too small: {stats}")
-    if stats["nq"] > 32 or stats["nv"] > 32 or stats["nu"] > 32:
+    if stats["nq"] > 64 or stats["nv"] > 64 or stats["nu"] > 32:
         raise ProbeFailure("model_dimensions_implausible", f"model stats are too large: {stats}")
-    if stats["nkey"] < 1:
-        raise ProbeFailure("keyframe_missing", "the upstream model has no keyframe")
-    data = mujoco.MjData(model)
-    data.qpos[:] = model.key_qpos[0]
-    data.qvel[:] = 0.0
-    if stats["nu"]:
-        data.ctrl[:] = model.key_ctrl[0]
-    mujoco.mj_forward(model, data)
+    scene.reset(0)
     for _ in range(MODEL_STEPS):
         mujoco.mj_step(model, data)
     finite = {
@@ -250,10 +246,9 @@ def _check_model() -> dict[str, object]:
     if not all(finite.values()):
         raise ProbeFailure("model_state_not_finite", f"non-finite MuJoCo state: {finite}")
     return {
-        "scene_xml": str(scene_path),
-        "panda_xml": str(panda_path),
+        "scene_config": str(scene_cfg),
+        "urdf": str(urdf_path),
         "stats": stats,
-        "panda_stats": _model_stats(panda_model),
         "steps": MODEL_STEPS,
         "finite": finite,
         "qpos": [float(value) for value in data.qpos],
@@ -318,16 +313,14 @@ def _prepare_render():
         raise ProbeFailure("egl_not_selected", "MUJOCO_GL must be 'egl'")
     if os.environ.get("PYOPENGL_PLATFORM") != "egl":
         raise ProbeFailure("egl_not_selected", "PYOPENGL_PLATFORM must be 'egl'")
-    from robot_backend_sim.panda_sim.plugin import panda_model_paths
+    from robot_backend_sim.marvin_sim.stack.scene import load_and_build
 
-    scene_path, _panda_path = panda_model_paths()
-    model = mujoco.MjModel.from_xml_path(str(scene_path))
-    data = mujoco.MjData(model)
-    data.qpos[:] = model.key_qpos[0]
-    data.qvel[:] = 0.0
-    if model.nu:
-        data.ctrl[:] = model.key_ctrl[0]
-    mujoco.mj_forward(model, data)
+    scene_cfg = Path(os.environ.get("SHARED_ROOT", "/shared")) / (
+        "scenarios/marvin_sim/stack/configs/simulation/scene/marvin_stack.yaml"
+    )
+    scene = load_and_build(str(scene_cfg))
+    scene.reset(0)
+    model, data = scene.model, scene.data
     camera = 0 if model.ncam else -1
     info: dict[str, object] = {
         "width": PREVIEW_WIDTH,
@@ -413,7 +406,7 @@ def _save_preview(run_dir: Path, frame, info) -> None:
 
     artifacts = run_dir / "artifacts"
     artifacts.mkdir(exist_ok=False)
-    png_path = artifacts / "panda_preview.png"
+    png_path = artifacts / "marvin_preview.png"
     Image.fromarray(frame, mode="RGB").save(png_path, format="PNG")
     body = png_path.read_bytes()
     info.update(
@@ -524,7 +517,7 @@ def _report_template(arguments: ProbeArguments) -> dict[str, object]:
             "PYOPENGL_PLATFORM": os.environ.get("PYOPENGL_PLATFORM"),
         },
         "assets": None,
-        "source": {"model_directory": str(assets.robot_model_path("panda").parent)},
+        "source": {"model_directory": str(assets.robot_model_path("marvin").parent)},
         "model": None,
         "qp": None,
         "render": None,
@@ -574,12 +567,12 @@ def _run_probe_checks(arguments, run_dir: Path, report: dict, logger) -> None:
     )
     model_info = _check_model()
     report["model"] = model_info
-    report["assets"] = {"model_directory": str(assets.robot_model_path("panda").parent)}
+    report["assets"] = {"model_directory": str(assets.robot_model_path("marvin").parent)}
     stats = model_info["stats"]
     _emit(
         logger,
         "model_checked",
-        "upstream Panda scene loaded from its keyframe and stepped",
+        "Marvin stack scene compiled and stepped",
         {
             "nq": int(stats["nq"]),
             "nv": int(stats["nv"]),

@@ -1,0 +1,26 @@
+# Marvin stack follower parameters for ACT policy inference.
+joint_names:
+  - left_joint1
+  - left_joint2
+  - left_joint3
+  - left_joint4
+  - left_joint5
+  - left_joint6
+  - left_joint7
+  - left_gripper_width
+  - right_joint1
+  - right_joint2
+  - right_joint3
+  - right_joint4
+  - right_joint5
+  - right_joint6
+  - right_joint7
+  - right_gripper_width
+
+target_count: 20
+
+max_target_deviations:
+  [0.50, 1.30, 0.52, 0.98, 0.80, 0.50, 1.51, 0.02,
+   0.50, 1.30, 0.52, 0.98, 0.80, 0.50, 1.51, 0.02]
+
+max_terminal_tail_duration_s: 3.0

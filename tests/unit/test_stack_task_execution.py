@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-SCENARIO = ROOT / "shared/scenarios/panda_sim/stack"
+SCENARIO = ROOT / "shared/scenarios/marvin_sim/stack"
 SIM_SRC = ROOT / "simulation/mujoco/src"
 CONTRACTS = ROOT / "shared/common/python/contracts/src"
 for source in (SIM_SRC, CONTRACTS):
@@ -15,10 +15,10 @@ for source in (SIM_SRC, CONTRACTS):
 
 pytest.importorskip("mujoco")
 import mujoco  # noqa: E402
-from robot_backend_sim.panda_sim.stack.scene_config import load_scene_config  # noqa: E402
-from robot_backend_sim.panda_sim.stack.scene import build_scene  # noqa: E402
-from robot_backend_sim.panda_sim.stack.config import load_task_config  # noqa: E402
-from robot_backend_sim.panda_sim.stack.evaluator import (  # noqa: E402
+from robot_backend_sim.marvin_sim.stack.scene_config import load_marvin_stack_scene_config  # noqa: E402
+from robot_backend_sim.marvin_sim.stack.scene import build_marvin_stack_scene  # noqa: E402
+from robot_backend_sim.marvin_sim.stack.config import load_task_config  # noqa: E402
+from robot_backend_sim.marvin_sim.stack.evaluator import (  # noqa: E402
     StackTaskRuntime,
     capture_task_observation,
     evaluate_task,
@@ -29,14 +29,16 @@ from robot_contracts.models import RunContext  # noqa: E402
 
 @pytest.fixture(scope="module")
 def scene_fixture():
-    scene_config = load_scene_config(SCENARIO / "configs/simulation/scene/panda_stack.yaml")
-    scene = build_scene(
+    scene_config = load_marvin_stack_scene_config(SCENARIO / "configs/simulation/scene/marvin_stack.yaml")
+    scene = build_marvin_stack_scene(
         scene_config,
     )
     scene.reset(0)
-    task_config = load_task_config(SCENARIO / "configs/simulation/scene/panda_stack_task.yaml")
+    task_config = load_task_config(SCENARIO / "configs/simulation/scene/marvin_stack_task.yaml")
     binding = make_task_binding(
-        scene.model, task_config, table_top_z_m=scene.config.table.top_z
+        scene.model,
+        task_config,
+        table_top_z_m=scene.config.robot.base_position[2] + scene.config.table.top_z,
     )
     return scene, task_config, binding
 

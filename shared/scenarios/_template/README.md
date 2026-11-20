@@ -2,7 +2,7 @@
 
 本目录说明如何在现有接口内新增一个方案。它不是可运行方案：目录中没有
 `binding.yaml`，所以 `--robot _template --task _template` 会报没有 binding 文件，
-不会回退到 [`panda_sim/stack`](../panda_sim/stack/README.md)。[`binding.example.yaml`](binding.example.yaml)
+不会回退到 [`marvin_sim/stack`](../marvin_sim/stack/README.md)。[`binding.example.yaml`](binding.example.yaml)
 的全部取值都是明显占位符，未填写时校验直接失败；入口只读取
 `binding.yaml`，不会读取本示例。
 
@@ -44,7 +44,7 @@ shared/scenarios/<robot>/<task>/
 - `source_roots` 必须相对 binding 目录；`profiles.*`、`recipes.*`、
   `interfaces.extension_ros[*]` 必须位于 binding 目录或某个 `source_root` 之内。
   例如复用 shared 树中其他方案的档案：`source_roots: ["../../.."]`（指向 `shared/`），
-  档案写 `../../../panda_sim/stack/profiles/robots/panda_stack_learning_v1/profile.json`。
+  档案写 `../../../marvin_sim/stack/profiles/robots/marvin_stack_v1/profile.json`。
 - `artifact_roots` 可写绝对路径；部署数据根通常是 `/data`。bundle 覆盖路径先在
   调用者 cwd 解析，再检查是否落在 binding 目录、source root 或 artifact root 内。
 - `profiles.*`、`recipes.*` 必须是文件，`interfaces.extension_ros[*]` 必须是目录。
@@ -141,4 +141,4 @@ scripts/train.sh --scenario <robot>/<task> --mode smoke
 方案专用能力只在确实需要时新增 `extensions/`，公共协议按实际消费者演进；模板不预建
 未来算法、机器人、驱动或后端的占位实现。
 
-目录导航：[方案目录](../) · [panda_sim/stack 方案](../panda_sim/stack/README.md) · [文档索引](../../../docs/README.md)
+目录导航：[方案目录](../) · [marvin_sim/stack 方案](../marvin_sim/stack/README.md) · [文档索引](../../../docs/README.md)

@@ -6,15 +6,21 @@ model, how the block is grasped or which arm moves first.
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 
 import mujoco
 
-from robot_backend_sim.marvin_sim.handover.scene_config import TaskConfig
 from robot_backend_sim.common.physics.scene_container import SceneBuildError
+from robot_backend_sim.marvin_sim.handover.scene_config import TaskConfig
+from robot_backend_sim.marvin_sim.scene_base import (
+    add_marvin_camera_mount,
+    add_marvin_lights,
+    add_marvin_table,
+    base_world_point,
+    combined_yaw_quaternion,
+)
 
 __all__ = [
     "BOX_BOTTOM_GEOM",
@@ -46,52 +52,6 @@ class HandoverBinding:
     camera_mount_body_id: int
 
 
-def _yaw_quaternion(yaw_deg: float) -> tuple[float, float, float, float]:
-    half = math.radians(yaw_deg) / 2.0
-    return (math.cos(half), 0.0, 0.0, math.sin(half))
-
-
-def base_world_point(
-    local: tuple[float, float, float],
-    base_position: tuple[float, float, float],
-    base_yaw_deg: float,
-) -> tuple[float, float, float]:
-    """Transform one task-frame point into world using the robot base pose."""
-    angle = math.radians(base_yaw_deg)
-    cosine, sine = math.cos(angle), math.sin(angle)
-    x, y, z = local
-    return (
-        base_position[0] + cosine * x - sine * y,
-        base_position[1] + sine * x + cosine * y,
-        base_position[2] + z,
-    )
-
-
-def combined_yaw_quaternion(
-    base_yaw_deg: float, local_yaw_deg: float
-) -> tuple[float, float, float, float]:
-    return _yaw_quaternion(base_yaw_deg + local_yaw_deg)
-
-
-def _add_lights(spec: mujoco.MjSpec) -> None:
-    spec.worldbody.add_light(
-        name="key_light",
-        pos=[0.55, 0.35, 2.4],
-        dir=[-0.15, -0.25, -1.0],
-        type=mujoco.mjtLightType.mjLIGHT_DIRECTIONAL,
-        diffuse=[0.8, 0.8, 0.8],
-        specular=[0.2, 0.2, 0.2],
-        castshadow=True,
-    )
-    spec.worldbody.add_light(
-        name="fill_light",
-        pos=[-0.20, 0.90, 1.80],
-        dir=[0.30, -0.35, -1.0],
-        type=mujoco.mjtLightType.mjLIGHT_DIRECTIONAL,
-        diffuse=[0.35, 0.35, 0.35],
-    )
-
-
 def add_handover_environment(
     spec: mujoco.MjSpec,
     task: TaskConfig,
@@ -105,27 +65,9 @@ def add_handover_environment(
     by the declared base pose.  The environment does not read robot I/O.
     """
     surface_friction = list(friction)
-    _add_lights(spec)
+    add_marvin_lights(spec)
+    add_marvin_table(spec, task.table, friction, base_position, base_yaw_deg)
     table = task.table
-    table_center = base_world_point(
-        (table.center_xy[0], table.center_xy[1], table.top_z - table.thickness / 2.0),
-        base_position,
-        base_yaw_deg,
-    )
-    table_body = spec.worldbody.add_body(
-        name="table",
-        pos=list(table_center),
-        quat=list(_yaw_quaternion(base_yaw_deg)),
-    )
-    table_body.add_geom(
-        name="table_top",
-        type=mujoco.mjtGeom.mjGEOM_BOX,
-        size=[table.size_xy[0] / 2.0, table.size_xy[1] / 2.0, table.thickness / 2.0],
-        rgba=list(table.rgba),
-        contype=1,
-        conaffinity=1,
-        friction=surface_friction,
-    )
 
     box = task.box
     outer_x, outer_y = box.outer_xy
@@ -223,15 +165,7 @@ def add_handover_environment(
         friction=surface_friction,
     )
 
-    spec.worldbody.add_body(
-        name="camera_mount",
-        pos=list(
-            base_world_point(
-                tuple(task.camera_mount.position), base_position, base_yaw_deg
-            )
-        ),
-        quat=list(_yaw_quaternion(base_yaw_deg)),
-    )
+    add_marvin_camera_mount(spec, task.camera_mount, base_position, base_yaw_deg)
 
 
 def bind_handover_environment(model: mujoco.MjModel, task: TaskConfig) -> HandoverBinding:

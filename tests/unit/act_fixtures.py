@@ -22,13 +22,13 @@ from safetensors.torch import load_file, save_file
 
 ROOT = Path(__file__).resolve().parents[2]
 PROFILE = (
-    ROOT / "shared/scenarios/panda_sim/stack/profiles/robots/panda_stack_learning_v1/profile.json"
+    ROOT / "shared/scenarios/marvin_sim/stack/profiles/robots/marvin_stack_v1/profile.json"
 )
 OBSERVATION = (
-    ROOT / "shared/scenarios/panda_sim/stack/profiles/observations/panda_rgb_joint_v1.json"
+    ROOT / "shared/scenarios/marvin_sim/stack/profiles/observations/marvin_rgb_joint_v1.json"
 )
 ACTION = (
-    ROOT / "shared/scenarios/panda_sim/stack/profiles/actions/panda_joint_position_v1.json"
+    ROOT / "shared/scenarios/marvin_sim/stack/profiles/actions/marvin_joint_position_v1.json"
 )
 CAMERAS = ("global", "left_wrist", "right_wrist")
 

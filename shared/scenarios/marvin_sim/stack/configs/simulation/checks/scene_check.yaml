@@ -1,0 +1,20 @@
+# Static 3-camera visibility check configuration for Marvin stack (3 seeds + 64 corners).
+schema_version: 1
+seeds: [11, 23, 37]
+
+min_visible_pixels:
+  global:
+    source: 32
+    target: 64
+  left_wrist:
+    source: 8
+    target: 16
+  right_wrist:
+    source: 32
+    target: 64
+
+throughput:
+  warmup_groups: 3
+  measure_groups: 20
+  max_elapsed_s: 60.0
+  min_fps: 20.0

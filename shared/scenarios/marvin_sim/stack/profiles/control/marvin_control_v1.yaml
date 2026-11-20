@@ -1,0 +1,38 @@
+# Marvin stack motion parameters (SI units: rad, m, rad/s^2, m/s^2).
+joint_names:
+  - left_joint1
+  - left_joint2
+  - left_joint3
+  - left_joint4
+  - left_joint5
+  - left_joint6
+  - left_joint7
+  - left_gripper_width
+  - right_joint1
+  - right_joint2
+  - right_joint3
+  - right_joint4
+  - right_joint5
+  - right_joint6
+  - right_joint7
+  - right_gripper_width
+
+max_accelerations:
+  [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.5,
+   1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.5]
+
+position_tolerances:
+  [0.010, 0.010, 0.010, 0.010, 0.010, 0.010, 0.010, 0.001,
+   0.010, 0.010, 0.010, 0.010, 0.010, 0.010, 0.010, 0.001]
+
+velocity_tolerances:
+  [0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.005,
+   0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.005]
+
+stable_duration_s: 0.2
+settle_timeout_s: 2.0
+motion_wall_timeout_s: 10.0
+stop_wall_timeout_s: 3.0
+
+contact_force_min_n: 0.5
+finger_velocity_max_m_s: 0.003

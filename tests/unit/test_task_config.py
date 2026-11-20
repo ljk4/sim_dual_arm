@@ -6,22 +6,23 @@ from pathlib import Path
 
 import pytest
 import yaml
-from model_helpers import replace
 
 ROOT = Path(__file__).resolve().parents[2]
-SCENARIO = ROOT / "shared/scenarios/panda_sim/stack"
+SCENARIO = ROOT / "shared/scenarios/marvin_sim/stack"
 SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim.panda_sim.stack.scene_config import load_scene_config  # noqa: E402
-from robot_backend_sim.panda_sim.stack import validate_scene_geometry  # noqa: E402
-from robot_backend_sim.panda_sim.stack.config import (  # noqa: E402
+from robot_backend_sim.marvin_sim.stack.config import (  # noqa: E402
     StackTaskConfigError,
     load_task_config,
+    validate_scene_geometry,
+)
+from robot_backend_sim.marvin_sim.stack.scene_config import (  # noqa: E402
+    load_marvin_stack_scene_config,
 )
 
-CONFIG_PATH = SCENARIO / "configs/simulation/scene/panda_stack_task.yaml"
+CONFIG_PATH = SCENARIO / "configs/simulation/scene/marvin_stack_task.yaml"
 
 
 def document() -> dict:
@@ -34,7 +35,7 @@ def write_config(tmp_path: Path, value: dict) -> Path:
     checks = directory.parent / "checks"
     checks.mkdir()
     (checks / "kinematics_check.yaml").write_text("dummy: true\n", encoding="utf-8")
-    path = directory / "panda_stack_task.yaml"
+    path = directory / "marvin_stack_task.yaml"
     path.write_text(yaml.safe_dump(value), encoding="utf-8")
     return path
 
@@ -61,7 +62,7 @@ def test_repository_task_config_has_all_thresholds_and_capacity():
         ("max_task_sim_duration_s", 301.0, "max_task_sim_duration_s"),
         ("support_xy_margin_m", -0.001, "support_xy_margin_m"),
         ("min_support_normal_force_n", 0.0, "min_support_normal_force_n"),
-        ("min_gripper_opening_m", 0.081, "min_gripper_opening_m"),
+        ("min_gripper_opening_m", 0.082, "min_gripper_opening_m"),
         ("min_vertical_normal_component", 0.0, "min_vertical_normal_component"),
     ],
 )
@@ -111,10 +112,17 @@ def test_wrong_geometry_is_rejected_against_configured_cube(tmp_path):
 
 
 def test_task_geometry_must_match_the_frozen_scene():
-    scene_config = load_scene_config(SCENARIO / "configs/simulation/scene/panda_stack.yaml")
+    scene_config = load_marvin_stack_scene_config(
+        SCENARIO / "configs/simulation/scene/marvin_stack.yaml"
+    )
     config = load_task_config(CONFIG_PATH)
     validate_scene_geometry(config, scene_config)
-    wrong = replace(config, objects=replace(
-        config.objects, source_half_extents_m=(0.021, 0.021, 0.021)))
+    wrong = config.model_copy(
+        update={
+            "objects": config.objects.model_copy(
+                update={"source_half_extents_m": (0.021, 0.021, 0.021)}
+            )
+        }
+    )
     with pytest.raises(StackTaskConfigError, match="half extents"):
         validate_scene_geometry(wrong, scene_config)

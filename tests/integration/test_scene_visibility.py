@@ -14,25 +14,25 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim.panda_sim.stack.scene_config import load_scene_config  # noqa: E402
-from robot_backend_sim.panda_sim.stack.scene import build_scene  # noqa: E402
+from robot_backend_sim.marvin_sim.stack.scene_config import load_marvin_stack_scene_config  # noqa: E402
+from robot_backend_sim.marvin_sim.stack.scene import build_marvin_stack_scene  # noqa: E402
 from robot_backend_sim.common.render import rendering, visibility  # noqa: E402
-from robot_backend_sim.panda_sim.stack import visibility as panda_visibility
+from robot_backend_sim.marvin_sim.stack import visibility as marvin_visibility
 from robot_backend_sim.common.render.rendering import SceneRenderer, SceneRenderError  # noqa: E402
 from robot_backend_sim.tools import check_scene  # noqa: E402
 
-CONFIG_PATH = ROOT / "shared/scenarios/panda_sim/stack/configs/simulation/scene/panda_stack.yaml"
-CHECK_PATH = ROOT / "shared/scenarios/panda_sim/stack/configs/simulation/checks/scene_check.yaml"
+CONFIG_PATH = ROOT / "shared/scenarios/marvin_sim/stack/configs/simulation/scene/marvin_stack.yaml"
+CHECK_PATH = ROOT / "shared/scenarios/marvin_sim/stack/configs/simulation/checks/scene_check.yaml"
 
 
 @pytest.fixture(scope="module")
 def scene_config():
-    return load_scene_config(CONFIG_PATH)
+    return load_marvin_stack_scene_config(CONFIG_PATH)
 
 
 @pytest.fixture(scope="module")
 def scene(scene_config):
-    return build_scene(
+    return build_marvin_stack_scene(
         scene_config,
     )
 
@@ -84,7 +84,7 @@ def test_rgb_and_segmentation_come_from_one_immutable_snapshot(scene, renderer):
     scene.reset(23)
     np.testing.assert_array_equal(snapshot.state, original_state)
 
-    check = panda_visibility.load_check_config(CHECK_PATH, scene.config)
+    check = marvin_visibility.load_check_config(CHECK_PATH, scene.config)
     geom_ids = {obj.name: scene.model.geom(f"{obj.name}_geom").id for obj in scene.config.objects}
     counts = {
         camera: {
@@ -95,7 +95,8 @@ def test_rgb_and_segmentation_come_from_one_immutable_snapshot(scene, renderer):
     }
     assert counts["global"]["source"] > 0
     assert counts["global"]["target"] > 0
-    assert check.threshold("global", "source") == 64
+    assert check.threshold("global", "source") == 32
+    assert check.threshold("global", "target") == 64
 
 
 def test_snapshot_time_matches_reported_state_and_mismatch_is_rejected(scene, renderer):
@@ -120,9 +121,9 @@ def test_snapshot_time_matches_reported_state_and_mismatch_is_rejected(scene, re
 
 
 def test_full_check_entry_with_one_real_layout(tmp_path, monkeypatch):
-    real_build_layouts = panda_visibility.build_layouts
+    real_build_layouts = marvin_visibility.build_layouts
     monkeypatch.setattr(
-        visibility,
+        marvin_visibility,
         "build_layouts",
         lambda config, scene: real_build_layouts(config, scene)[:1],
     )

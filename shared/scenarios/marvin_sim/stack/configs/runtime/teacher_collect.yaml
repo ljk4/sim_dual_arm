@@ -1,0 +1,66 @@
+# Marvin stack Teacher collection configuration.
+schema_version: 1
+robot_profile: ../../profiles/robots/marvin_stack_v1/profile.json
+observation_schema: ../../profiles/observations/marvin_rgb_joint_v1.json
+action_schema: ../../profiles/actions/marvin_joint_position_v1.json
+control_constraints: ../../profiles/control/marvin_control_v1.yaml
+follower_config: ../../profiles/control/marvin_follower_v1.yaml
+robot_namespace: /robot
+
+action_source: teacher
+teacher_api: marvin_stack_api_msgs.teacher_chunk.v1
+
+lease_duration_ns: 2000000000
+renew_interval_ns: 500000000
+command_acceptance_ns: 500000000
+startup_timeout_s: 60.0
+call_timeout_s: 10.0
+command_timeout_s: 10.0
+
+reset:
+  enabled: true
+  seed: 0
+
+observation:
+  reliable: true
+  wall_arrival_timeout_s: 1.5
+  capacity: 32
+
+control:
+  submit_query_retries: 2
+  poll_interval_s: 0.02
+  stop_timeout_s: 8.0
+  terminal_timeout_s: 20.0
+
+teacher:
+  chunk_size: 60
+  action_period_ns: 50000000
+  initial_lead_ns: 250000000
+  max_chunks: 256
+  total_sim_deadline_ns: 90000000000
+  total_wall_deadline_s: 300.0
+  prepare_timeout_s: 30.0
+  start_timeout_s: 5.0
+  chunk_deadline_s: 3.0
+  poll_interval_s: 0.02
+  termination_mode: task
+  task_stop_margin_s: 1.0
+  task_sim_budget_ns: 90000000000
+  task_id: marvin-stack
+
+motions: []
+
+logging:
+  queue_capacity: 256
+  max_event_bytes: 32768
+  max_file_bytes: 8388608
+  max_total_bytes: 268435456
+  close_timeout_s: 3.0
+  flush_interval_s: 0.2
+  console: false
+
+recording:
+  queue_capacity: 1024
+  max_pending_bytes: 67108864
+  startup_timeout_s: 5.0
+  close_timeout_s: 5.0

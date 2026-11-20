@@ -3,11 +3,11 @@
 
 Examples:
   python3 shared/common/tools/scenario.py validate \
-      --robot panda_sim --task stack --stage collection
+      --robot marvin_sim --task stack --stage collection
   python3 shared/common/tools/scenario.py show \
-      --scenario panda_sim/stack
+      --scenario marvin_sim/stack
   python3 shared/common/tools/scenario.py show \
-      --binding shared/scenarios/panda_sim/stack/binding.yaml
+      --binding shared/scenarios/marvin_sim/stack/binding.yaml
 
 The tool never imports ROS, MuJoCo, PyTorch or a scenario implementation, never
 starts a process and never writes campaign ledgers, seeds or other state.
