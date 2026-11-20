@@ -13,7 +13,7 @@ PROFILE_REL = "shared/scenarios/marvin_sim/stack/profiles/profile.json"
 def templates(tmp_path):
     runtime = tmp_path / "runtime.yaml"
     runtime.write_text(yaml.safe_dump({"action_source": "teacher",
-                                      "teacher_api": "marvin_stack_api_msgs.teacher_chunk.v1",
+                                      "teacher_api": "marvin_stack_api_msgs.teacher_chunk",
                                       "robot_namespace": "/robot",
                                       "robot_profile": PROFILE_REL}))
     backend = tmp_path / "backend.yaml"

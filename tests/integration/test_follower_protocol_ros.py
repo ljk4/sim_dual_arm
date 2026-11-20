@@ -31,9 +31,12 @@ try:
     from robot_ros_support.follower_conversions import (
         follower_reference_from_message,
         follower_reference_message,
+        reference_segment_messages,
+        reference_segments_from_messages,
     )
     from robot_ros_support.stream_conversions import anchor_from_message, stream_command_message
     from robot_trajectory.follower_reference import validate
+    from robot_trajectory.trajectory_generation import generate_follower_plan
 except ImportError as error:  # pragma: no cover - host without ROS
     pytest.skip(f"ROS unavailable: {error}", allow_module_level=True)
 
@@ -131,9 +134,16 @@ def _request(
     )
 
 
+def _submission(request: StreamRequest) -> SubmitFollower.Request:
+    limits = validation_limits(CONTROL, FOLLOWER, duration_grid_ns=GRID_NS)
+    plan = generate_follower_plan(request, PROFILE, limits)
+    return SubmitFollower.Request(
+        request=stream_command_message(request), segments=reference_segment_messages(plan)
+    )
+
+
 def _submit(stack: Stack, request: StreamRequest):
-    message = SubmitFollower.Request(request=stream_command_message(request))
-    return stack.call("submit_follower", message, timeout=20.0)
+    return stack.call("submit_follower", _submission(request), timeout=20.0)
 
 
 def _acquire_anchor(stack: Stack, context: RunContext, lease: str) -> ChunkAnchor:
@@ -174,7 +184,13 @@ def test_follower_reference_really_serializes_and_roundtrips():
         final=False,
         observation_ns=700_000_000,
     )
-    packet = prepare_follower_request(raw, PROFILE, CONTROL, FOLLOWER, duration_grid_ns=GRID_NS)
+    submit = _submission(raw)
+    decoded_submit = deserialize_message(serialize_message(submit), SubmitFollower.Request)
+    assert decoded_submit.request.kind == 2
+    plan = reference_segments_from_messages(decoded_submit.segments, PROFILE.joint_names)
+    packet = prepare_follower_request(
+        raw, plan, PROFILE, CONTROL, FOLLOWER, duration_grid_ns=GRID_NS
+    )
     chunk = ChunkStatus(
         context=raw.command.context,
         command_id=raw.command.command_id,
@@ -199,7 +215,7 @@ def test_follower_reference_really_serializes_and_roundtrips():
     assert restored == record
     assert restored.reference_digest == record.reference_digest
     assert restored.window.source_targets == raw.trajectory.targets
-    assert restored.sampler_version == record.sampler_version
+    assert restored.algorithm == record.algorithm
     validate(
         restored,
         PROFILE,
@@ -213,8 +229,6 @@ def test_follower_reference_really_serializes_and_roundtrips():
             serialize_message(tampered), FollowerReferenceMessage
         ))
 
-    submit = SubmitFollower.Request(request=stream_command_message(raw))
-    assert deserialize_message(serialize_message(submit), SubmitFollower.Request).request.kind == 2
     response = SubmitFollower.Response(
         accepted=True,
         reason="ACCEPTED",
@@ -257,7 +271,7 @@ def test_three_follower_blocks_over_real_ros_services(tmp_path):
     stack = FollowerStack(tmp_path)
     try:
         stack.wait_ready()
-        assert "bounded_target_follower_v1" in stack.info.capabilities
+        assert "bounded_target_follower" in stack.info.capabilities
         context = _profile_context(
             PROFILE, stack.info, episode="follower-ros-episode", control_epoch=1
         )
@@ -289,6 +303,12 @@ def test_three_follower_blocks_over_real_ros_services(tmp_path):
         assert retry_record.reference_digest == first_digest
         assert retry_record.accepted_sim_time_ns == first_sim
         assert retry_record.accepted_wall_time_ns == first_wall
+
+        changed_curve = _submission(first_request)
+        changed_curve.segments[0].c0[0] += 0.0001
+        conflict = stack.call("submit_follower", changed_curve)
+        assert not conflict.accepted
+        assert conflict.reason == "COMMAND_ID_CONFLICT"
 
         changed_targets = list(first_request.trajectory.targets)
         changed_targets[-1] = Target(

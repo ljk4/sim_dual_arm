@@ -32,7 +32,6 @@ class ProviderContext:
 
 @dataclass(frozen=True, slots=True)
 class ProviderInfo:
-    protocol_major: int
     model_bundle_digest: str
     processor_digest: str
     observation_schema_hash: str
@@ -52,7 +51,6 @@ class ProviderInfo:
     def from_config(cls, config: object) -> ProviderInfo:
         """Project one PolicyServiceConfig onto the wire identity."""
         return cls(
-            protocol_major=config.protocol_major,  # type: ignore[attr-defined]
             model_bundle_digest=config.model_bundle_digest,  # type: ignore[attr-defined]
             processor_digest=config.processor_digest,  # type: ignore[attr-defined]
             observation_schema_hash=config.observation_schema_hash,  # type: ignore[attr-defined]

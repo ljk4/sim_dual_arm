@@ -1,8 +1,7 @@
 """Heavy synthetic conversion check; run with DSH035_HEAVY=1.
 
-It deliberately creates all 50 accepted exports because the production
-contract is 45/5.  It is skipped by default so the small NumPy-only suite stays
-fast; the candidate report records the actual heavy run.
+It creates the scenario's 50 accepted exports and verifies the materialized
+LeRobot datasets. It is skipped by default to keep the unit suite fast.
 """
 
 import json
@@ -42,6 +41,7 @@ def test_two_independent_datasets_train_only_processors_and_padding(tmp_path):
         env=os.environ | {"LEARNING_CACHE_ROOT": str(config.cache_root)},
     )
     assert result.returncode == 0, result.stdout + "\n" + result.stderr + log.read_text()
+    assert "验证比例 10.0%（45 条训练 / 5 条验证）" in result.stderr
     assert "转换完成：训练 45 条 / 149 帧；验证 5 条 / 10 帧" in result.stdout
     assert "50/50 条 100.0%" in result.stderr
     assert "libx264" not in result.stdout + result.stderr
@@ -51,10 +51,26 @@ def test_two_independent_datasets_train_only_processors_and_padding(tmp_path):
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
     assert manifest["synthetic"] is True
+    assert "diagnostic" not in manifest
+    for split in ("train", "validation"):
+        info_path = config.output_root / split / "meta" / "info.json"
+        info = json.loads(info_path.read_text())
+        assert info["video_files_size_in_mb"] == 256
+        assert info["data_files_size_in_mb"] == 256
     assert manifest["splits"]["training"]["episode_count"] == 45
     assert manifest["splits"]["validation"]["episode_count"] == 5
     assert manifest["splits"]["training"]["frame_count"] == 149
     assert manifest["splits"]["validation"]["frame_count"] == 10
+    assert manifest["expected"] == {
+        "formal_episodes": 50,
+        "training_episodes": 45,
+        "validation_episodes": 5,
+        "validation_percent": 10,
+        "validation_positions": [2, 16, 24, 26, 48],
+    }
+    assert [
+        episode["global_success_index"] for episode in manifest["splits"]["validation"]["episodes"]
+    ] == manifest["expected"]["validation_positions"]
     assert manifest["processors"]["training_stats_only"] is True
     with pytest.raises(ExportError, match="already exists"):
         convert(select_path=select, config=config, synthetic=True)
@@ -99,4 +115,4 @@ def test_two_independent_datasets_train_only_processors_and_padding(tmp_path):
     training = replace(training, data_root=tmp_path / "data", mode="smoke")
     audit = verify_dataset_manifest(training, allow_synthetic=True, require_full=False)
     assert audit.synthetic is True
-    assert audit.validation_global_indices == (9, 19, 29, 39, 49)
+    assert audit.validation_global_indices == tuple(manifest["expected"]["validation_positions"])

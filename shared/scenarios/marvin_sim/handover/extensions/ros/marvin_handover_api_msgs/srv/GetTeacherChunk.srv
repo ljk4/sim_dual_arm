@@ -1,4 +1,4 @@
-# marvin_handover_api_msgs capability: marvin_handover_api_msgs.teacher_chunk.v1.
+# marvin_handover_api_msgs capability: marvin_handover_api_msgs.teacher_chunk.
 # 60x16 raw teacher targets at 50 ms relative to the retained observation.
 # phase_codes use the fixed order: 0 left_approach, 1 left_grasp, 2 left_lift,
 # 3 handover_approach, 4 dual_hold, 5 left_release, 6 left_retreat,

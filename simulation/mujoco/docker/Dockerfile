@@ -19,9 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python3 -m venv --system-site-packages /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
 
-COPY requirements.lock \
-     wheels/ruckig-0.15.3-cp312-cp312-linux_x86_64.whl \
-     /opt/dependencies/
+COPY requirements.lock /opt/dependencies/requirements.lock
 RUN pip install --no-cache-dir --require-hashes -r /opt/dependencies/requirements.lock
 
 # The container stays idle until a user enters it and runs scripts/run.sh.

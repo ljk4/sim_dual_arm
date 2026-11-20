@@ -54,7 +54,6 @@ class FilterError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class FilterRule:
-    schema_version: int
     fps: int
     chunk_size: int
     arm_indices: tuple[int, ...]
@@ -123,7 +122,6 @@ class _StaticRuns(StrictMappingModel):
 
 
 class _FilterDocument(StrictMappingModel):
-    schema_version: Literal[1]
     fps: Literal[20]
     chunk_size: Literal[60]
     arms: _ArmRule
@@ -151,7 +149,6 @@ def load_filter_rule(path: str | Path) -> FilterRule:
     grippers = document.grippers
     runs = document.static_runs
     return FilterRule(
-        schema_version=document.schema_version,
         fps=document.fps,
         chunk_size=document.chunk_size,
         arm_indices=tuple(arms.joint_indices),

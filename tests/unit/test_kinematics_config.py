@@ -16,7 +16,6 @@ if str(SIM_SRC) not in sys.path:
 
 from robot_backend_sim.common.kinematics import common  # noqa: E402
 from robot_backend_sim.marvin_sim.stack import plan  # noqa: E402
-from robot_backend_sim.marvin_sim.stack import visibility as marvin_visibility  # noqa: E402
 from robot_backend_sim.marvin_sim.stack.kinematics_config import (  # noqa: E402
     STACK_KEY_POSES,
     KinematicsConfigError,
@@ -27,7 +26,6 @@ from robot_backend_sim.marvin_sim.stack.scene_config import (  # noqa: E402
 )
 
 SCENE_PATH = SCENARIO / "configs/simulation/scene/marvin_stack.yaml"
-CHECK_PATH = SCENARIO / "configs/simulation/checks/scene_check.yaml"
 KINEMATICS_PATH = SCENARIO / "configs/simulation/checks/kinematics_check.yaml"
 
 
@@ -80,15 +78,6 @@ def test_config_records_all_mandated_initial_values(config):
     assert config.targets.place_yaw_deg == -90.0
 
 
-def test_config_reuses_the_67_layout_boundary_domain(config, scene_config):
-    check = marvin_visibility.load_check_config(CHECK_PATH, scene_config)
-    layouts = marvin_visibility.build_layouts(check, scene_config)
-    assert len(layouts) == 67
-    assert [layout.kind for layout in layouts[:3]] == ["seed", "seed", "seed"]
-    assert all(layout.kind == "boundary" for layout in layouts[3:])
-    assert config.budgets.max_layouts == 100
-
-
 def test_visibility_rules_cover_every_camera_object_phase_once(config):
     seen = set()
     for rule in config.visibility_rules:
@@ -126,7 +115,6 @@ def test_visibility_rules_cover_every_camera_object_phase_once(config):
             lambda d: d["clearance"].__setitem__("max_samples_per_segment", 5001),
             "clearance.max_samples_per_segment",
         ),
-        (lambda d: d["budgets"].__setitem__("max_layouts", 1001), "budgets.max_layouts"),
         (
             lambda d: d["budgets"].__setitem__("max_png_total_bytes", 1_000_000_001),
             "budgets.max_png_total_bytes",
@@ -155,7 +143,7 @@ def test_config_rejects_invalid_values_with_file_and_field(tmp_path, scene_confi
 def test_config_rejects_duplicate_yaml_keys(tmp_path, scene_config):
     path = tmp_path / "duplicate.yaml"
     text = KINEMATICS_PATH.read_text(encoding="utf-8")
-    path.write_text(text + "\nschema_version: 1\n", encoding="utf-8")
+    path.write_text(text + "\nbudgets: {}\n", encoding="utf-8")
     with pytest.raises(KinematicsConfigError, match="duplicate key"):
         load_kinematics_config(path, scene_config)
 

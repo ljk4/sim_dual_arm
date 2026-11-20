@@ -38,7 +38,7 @@ __all__ = ["main", "parse_arguments", "run"]
 _SHARED_ROOT = Path(os.environ.get("SHARED_ROOT", "/shared"))
 _SCENARIO = _SHARED_ROOT / "scenarios/marvin_sim/handover"
 DEFAULT_SCENE_CONFIG = _SCENARIO / "configs/simulation/scene/marvin_handover.yaml"
-DEFAULT_PROFILE = _SCENARIO / "profiles/robots/marvin_handover_v1/profile.json"
+DEFAULT_PROFILE = _SCENARIO / "profiles/robots/marvin_handover/profile.json"
 DEFAULT_SCHEMAS = _SHARED_ROOT / "common/interfaces/schemas"
 PUBLIC_JOINTS = tuple(
     f"{side}_joint{index}" for side in ("left", "right") for index in range(1, 8)
@@ -924,7 +924,6 @@ def run(arguments) -> int:
     run_dir.mkdir(exist_ok=False)
     started = time.monotonic()
     report: dict[str, object] = {
-        "schema_version": 1,
         "kind": "marvin_scene",
         "run_id": arguments.run_id,
         "instance_id": str(uuid.uuid4()),

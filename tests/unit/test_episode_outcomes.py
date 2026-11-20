@@ -17,13 +17,9 @@ from robot_contracts.profiles import validate_document
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_manifest_schema_selection_is_an_explicit_version_mapping(tmp_path):
+def test_manifest_schema_lives_in_the_shared_schema_root(tmp_path):
     base = tmp_path / "schemas"
-    assert manifest_schema_path(base, 1) == base / "v1/episode_manifest.schema.json"
-    assert manifest_schema_path(base / "v1", 1) == base / "v1/episode_manifest.schema.json"
-    for version in (0, 2, 3, 4, True, "1"):
-        with pytest.raises(ContractError, match="UNSUPPORTED_SCHEMA_VERSION"):
-            manifest_schema_path(base, version)
+    assert manifest_schema_path(base) == base / "episode_manifest.schema.json"
 
 
 def test_runtime_result_rejects_ambiguous_completed_and_missing_reason():
@@ -40,10 +36,9 @@ def test_runtime_result_rejects_ambiguous_completed_and_missing_reason():
         RecordingResult(False, "")
 
 
-def test_v1_schema_separates_dimensions_and_rejects_legacy_alias():
-    schema = ROOT / "shared/common/interfaces/schemas/v1/episode_manifest.schema.json"
+def test_manifest_schema_separates_dimensions_and_rejects_unknown_fields():
+    schema = manifest_schema_path(ROOT / "shared/common/interfaces/schemas")
     manifest = {
-        "schema_version": 1,
         "episode_id": "episode-test",
         "run_id": "run-test",
         "source": "mock",

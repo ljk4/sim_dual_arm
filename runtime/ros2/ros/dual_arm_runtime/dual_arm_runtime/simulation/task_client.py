@@ -3,7 +3,7 @@
 Only wire conversion and service deadlines live here.  Physical task evaluation
 and teacher planning stay in the backend; the runtime never imports MuJoCo or
 mink and never reads object truth from a live model.  A scenario Teacher chunk
-client is layered on top by :mod:`dual_arm_runtime.teacher_client`.
+client is layered on top by :mod:`dual_arm_runtime.simulation.teacher_client`.
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ import json
 import threading
 import time
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import rclpy
 from rclpy.callback_groups import ReentrantCallbackGroup
@@ -22,9 +23,46 @@ from robot_ros_support.conversions import context_message, time_ns
 
 from dual_arm_runtime.run_logging import EventSink, emit_best_effort
 
+if TYPE_CHECKING:
+    from dual_arm_runtime.runtime_config import RuntimeRecipe
+    from dual_arm_runtime.simulation.teacher_client import TeacherTaskClient
+
 __all__ = ["PrepareFact", "TaskClient"]
 
 _CANCEL_CHECK_S = 0.05
+TASK_STATE_MESSAGE_TYPE = "sim_api_msgs/msg/TaskState"
+
+
+def create_task_client(
+    node: Node, root: str, recipe: RuntimeRecipe, stop_requested: threading.Event,
+    log: EventSink | None,
+) -> TaskClient | TeacherTaskClient:
+    teacher = recipe.teacher
+    timeout = recipe.call_timeout_s
+    client = TaskClient(
+        node,
+        root,
+        call_timeout_s=timeout,
+        prepare_timeout_s=timeout if teacher is None else teacher.prepare_timeout_s,
+        start_timeout_s=timeout if teacher is None else teacher.start_timeout_s,
+        poll_interval_s=0.02 if teacher is None else teacher.poll_interval_s,
+        log=log,
+        stop_requested=stop_requested,
+    )
+    if teacher is None:
+        return client
+    from dual_arm_runtime.simulation.teacher_client import TeacherTaskClient
+
+    assert recipe.teacher_api is not None
+    return TeacherTaskClient(
+        client, node, root,
+        capability=recipe.teacher_api,
+        chunk_timeout_s=teacher.chunk_deadline_s,
+        call_timeout_s=timeout,
+        poll_interval_s=teacher.poll_interval_s,
+        log=log,
+        stop_requested=stop_requested,
+    )
 
 
 @dataclass(frozen=True, slots=True)

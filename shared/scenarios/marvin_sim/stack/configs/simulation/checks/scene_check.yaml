@@ -1,6 +1,4 @@
-# Static 3-camera visibility check configuration for Marvin stack (3 seeds + 64 corners).
-schema_version: 1
-seeds: [11, 23, 37]
+# Static three-camera visibility check for the nominal Marvin stack layout.
 
 min_visible_pixels:
   global:

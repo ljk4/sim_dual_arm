@@ -7,7 +7,7 @@ git log -- docs/history/
 git show <commit>:docs/history/dsh-048.md
 ```
 
-> **注意**：历史条目中提及的旧模块名（如 `Native*`、`SubmitNative`、`v2`～`v4` Schema）仅反映当时的演进状态。当前使用入口与模块结构请以[根 README](../../README.md)、[公共层说明](../../shared/README.md)和[Agent 指导与规范](../../AGENTS.md)为准。
+当前使用入口与模块结构见[根 README](../../README.md)、[公共层说明](../../shared/README.md)和[Agent 指导与规范](../../AGENTS.md)。
 
 ---
 

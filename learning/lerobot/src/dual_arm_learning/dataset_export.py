@@ -68,9 +68,7 @@ def _profile_document(
     return doc, tuple(joint_names), camera_names
 
 
-def _select_entries(
-    select: dict[str, Any], config: DatasetConfig
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _select_entries(select: dict[str, Any], config: DatasetConfig) -> list[dict[str, Any]]:
     if select.get("status") != "SELECTED":
         raise ExportError(f"select: expected status SELECTED, got {select.get('status')!r}")
     qualified = require_int(select.get("qualified"), "select.qualified")
@@ -78,52 +76,40 @@ def _select_entries(
         raise ExportError(
             f"select.qualified: expected {config.expected_formal_episodes}, got {qualified}"
         )
-    training = select.get("training")
-    validation = select.get("validation")
-    if not isinstance(training, list) or not isinstance(validation, list):
-        raise ExportError("select: training and validation must be arrays")
-    if len(training) != config.expected_training_episodes:
-        raise ExportError(
-            f"select.training: expected {config.expected_training_episodes}, got {len(training)}"
-        )
-    if len(validation) != config.expected_validation_episodes:
-        raise ExportError(
-            "select.validation: expected "
-            f"{config.expected_validation_episodes}, got {len(validation)}"
-        )
+    selected = select.get("selected")
+    if not isinstance(selected, list):
+        raise ExportError("select.selected: expected an array")
+    if len(selected) != qualified:
+        raise ExportError(f"select.selected: expected {qualified} entries, got {len(selected)}")
     all_ids: set[str] = set()
     all_seeds: set[int] = set()
-    result: list[list[dict[str, Any]]] = []
-    for split_name, entries in (("training", training), ("validation", validation)):
-        parsed: list[dict[str, Any]] = []
-        for index, raw in enumerate(entries):
-            if not isinstance(raw, dict):
-                raise ExportError(f"select.{split_name}[{index}]: expected an object")
-            attempt_id = raw.get("attempt_id")
-            attempt_dir = raw.get("attempt_dir")
-            seed = require_int(raw.get("seed"), f"select.{split_name}[{index}].seed")
-            if not isinstance(attempt_id, str) or not attempt_id:
-                raise ExportError(f"select.{split_name}[{index}].attempt_id: expected a string")
-            if not isinstance(attempt_dir, str):
-                raise ExportError(f"select.{split_name}[{index}].attempt_dir: expected a string")
-            if attempt_id in all_ids:
-                raise ExportError(f"select: duplicate attempt_id {attempt_id!r}")
-            if seed in all_seeds:
-                raise ExportError(f"select: duplicate seed {seed}")
-            all_ids.add(attempt_id)
-            all_seeds.add(seed)
-            parsed.append(
-                {
-                    "attempt_id": attempt_id,
-                    "seed": seed,
-                    "attempt_dir": Path(attempt_dir)
-                    if Path(attempt_dir).is_absolute()
-                    else project_path(attempt_dir, config.project_root),
-                    "split": split_name,
-                }
-            )
-        result.append(parsed)
-    return result[0], result[1]
+    parsed = []
+    for index, raw in enumerate(selected):
+        field = f"select.selected[{index}]"
+        if not isinstance(raw, dict):
+            raise ExportError(f"{field}: expected an object")
+        attempt_id = raw.get("attempt_id")
+        attempt_dir = raw.get("attempt_dir")
+        seed = require_int(raw.get("seed"), f"{field}.seed")
+        if not isinstance(attempt_id, str) or not attempt_id:
+            raise ExportError(f"{field}.attempt_id: expected a non-empty string")
+        if not isinstance(attempt_dir, str) or not attempt_dir:
+            raise ExportError(f"{field}.attempt_dir: expected a non-empty string")
+        if attempt_id in all_ids:
+            raise ExportError(f"select: duplicate attempt_id {attempt_id!r}")
+        if seed in all_seeds:
+            raise ExportError(f"select: duplicate seed {seed}")
+        all_ids.add(attempt_id)
+        all_seeds.add(seed)
+        parsed.append(
+            {
+                "attempt_id": attempt_id,
+                "seed": seed,
+                "attempt_dir": project_path(attempt_dir, config.project_root),
+                "global_index": index,
+            }
+        )
+    return parsed
 
 
 def _validate_png(path: Path, expected: dict[str, Any], config: DatasetConfig) -> np.ndarray:
@@ -306,13 +292,10 @@ def _export_documents(export_dir: Path) -> tuple[dict[str, Any], ...]:
 
 def _validate_export_headers(
     labels: dict[str, Any],
-    raw_doc: dict[str, Any],
     quality: dict[str, Any],
     config: DatasetConfig,
     profile_hash: str,
 ) -> None:
-    if labels.get("schema_version") != 1 or raw_doc.get("schema_version") != 1:
-        raise ExportError("export: unsupported schema version")
     if labels.get("robot_profile_hash") != profile_hash:
         raise ExportError("export: robot profile hash does not match the learning profile")
     if quality.get("qualified") is not True:
@@ -412,7 +395,7 @@ def _validate_export(
     dict[str, Any],
 ]:
     labels, raw_doc, quality = _export_documents(export_dir)
-    _validate_export_headers(labels, raw_doc, quality, config, profile_hash)
+    _validate_export_headers(labels, quality, config, profile_hash)
     _source_facts(labels, quality)
     rows_value = labels.get("labels")
     if not isinstance(rows_value, list) or not rows_value:

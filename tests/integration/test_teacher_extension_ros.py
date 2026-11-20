@@ -16,7 +16,7 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from dual_arm_runtime.teacher_client import teacher_service_type  # noqa: E402
+from dual_arm_runtime.simulation.teacher_client import teacher_service_type  # noqa: E402
 from robot_backend_sim.common.ros.teacher_extension import (  # noqa: E402
     register_teacher_service,
     teacher_extension_modules,
@@ -24,8 +24,8 @@ from robot_backend_sim.common.ros.teacher_extension import (  # noqa: E402
 from robot_contracts.models import ContractError  # noqa: E402
 
 CAPABILITIES = (
-    "marvin_stack_api_msgs.teacher_chunk.v1",
-    "marvin_handover_api_msgs.teacher_chunk.v1",
+    "marvin_stack_api_msgs.teacher_chunk",
+    "marvin_handover_api_msgs.teacher_chunk",
 )
 
 
@@ -78,13 +78,13 @@ def test_runtime_and_simulation_resolve_the_same_teacher_type():
         assert node.services == [(services.GetTeacherChunk, "/robot/get_task_chunk")]
 
 
-def test_old_capability_and_unknown_package_are_rejected():
+def test_unqualified_capability_and_unknown_package_are_rejected():
     with pytest.raises(ContractError) as caught:
         teacher_service_type("teacher_chunk")
     assert caught.value.reason == "UNSUPPORTED_TEACHER_CAPABILITY"
 
     with pytest.raises(ContractError) as caught:
-        teacher_service_type("missing_extension_msgs.teacher_chunk.v1")
+        teacher_service_type("missing_extension_msgs.teacher_chunk")
     assert caught.value.reason in {
         "TEACHER_EXTENSION_MISSING",
         "UNSUPPORTED_TEACHER_CAPABILITY",

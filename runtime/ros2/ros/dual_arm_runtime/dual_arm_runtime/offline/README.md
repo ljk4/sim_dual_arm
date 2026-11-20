@@ -2,7 +2,7 @@
 
 所有 Python 业务入口均支持 `python3 -m dual_arm_runtime.offline.<模块名>`。各端独立入口脚本（`record.sh`、`client_policy.sh`、`client_interactive.sh` 及宿主机 `record_parallel.sh`、`inference_parallel.sh`）均直接接受 `--robot <robot> --task <task>` 或显式 `--config`，不经过离线 `prepare`。
 
-- `campaign*`：预算、台账与筛选；达到正式目标时自动原子写出 `formal-select.json`；`collect_*`：单次采集及产物收口。
+- `campaign*` 管理预算和台账，达到正式目标时原子写出有序的合格局清单 `formal-select.json`。`collect_*` 执行单次采集及产物收口。
 - `record*`：串行录制、宿主机 Docker 编排、并行池及 worker 配置。
 - `evaluate`、`evaluation_*`：只读评估。
 - `export_episode`、`export_media`、`export_quality`：MCAP 导出、图像及质量规则。

@@ -10,8 +10,6 @@ from typing import Any
 from .dataset_common import canonical_hash, file_sha256
 from .sample_filter_rules import FilterError
 
-FILTER_FORMAT = "dual-arm-act-sample-filter-v1"
-
 
 @dataclass(frozen=True, slots=True)
 class SampleFilterMask:
@@ -181,8 +179,6 @@ def mask_from_document(
 ) -> SampleFilterMask:
     """Validate one filter document that was either loaded or just computed."""
     label = source if source is not None else Path("<in-memory>")
-    if document.get("format") != FILTER_FORMAT:
-        raise FilterError(f"{label}: unknown sample filter format")
     if document.get("filter_digest") != mask_digest(document):
         raise FilterError(f"{label}: filter digest does not match its contents")
     training = document.get("training")
@@ -215,7 +211,6 @@ def load_filter_mask(path: str | Path, *, verify_source: bool = True) -> SampleF
 
 
 __all__ = [
-    "FILTER_FORMAT",
     "SampleFilterMask",
     "load_filter_mask",
     "mask_digest",

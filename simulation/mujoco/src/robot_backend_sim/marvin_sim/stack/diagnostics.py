@@ -48,10 +48,6 @@ def scene_config_document(scene_config: MarvinStackSceneConfig) -> dict[str, obj
                     "nominal_yaw_deg": obj.nominal_yaw_deg,
                     "mass": obj.mass,
                     "rgba": list(obj.rgba),
-                    "randomization": {
-                        "xy_m": obj.randomization.xy_m,
-                        "yaw_deg": obj.randomization.yaw_deg,
-                    },
                 }
                 for obj in scene_config.objects
             ],

@@ -3,11 +3,10 @@
 The core :class:`TaskClient` owns only the optional ``sim_api_msgs`` task
 lifecycle.  This module adds the scenario-specific Teacher chunk client.  The
 generated extension type is selected by explicit capability identifier
-``<package>.teacher_chunk.v<N>`` and imported only when teacher mode creates
+``<package>.teacher_chunk`` and imported only when teacher mode creates
 this adapter, so ordinary policy/control never loads a scenario extension.
-The identifier is validated against the extension's own generated
-``TeacherCapability.ID``; an old backend advertising a different capability is
-rejected by the episode capability check.
+The episode checks the advertised capability against the extension's generated
+``TeacherCapability.ID``.
 """
 
 from __future__ import annotations
@@ -21,11 +20,11 @@ from robot_contracts.models import ContractError, RunContext
 from robot_ros_support.conversions import context_message, stamp, time_ns
 
 from dual_arm_runtime.run_logging import EventSink
-from dual_arm_runtime.task_client import TaskClient
+from dual_arm_runtime.simulation.task_client import TaskClient
 
 __all__ = ["TeacherChunkFact", "TeacherTaskClient", "teacher_service_type"]
 
-_CAPABILITY = re.compile(r"^([a-z][a-z0-9_]*)\.teacher_chunk\.v[1-9][0-9]*$")
+_CAPABILITY = re.compile(r"^([a-z][a-z0-9_]*)\.teacher_chunk$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,7 +54,7 @@ def teacher_service_type(capability: str):
     if match is None:
         raise ContractError(
             "UNSUPPORTED_TEACHER_CAPABILITY",
-            f"{capability!r} is not a <package>.teacher_chunk.v<N> capability",
+            f"expected <package>.teacher_chunk, got {capability!r}",
         )
     package = match.group(1)
     try:

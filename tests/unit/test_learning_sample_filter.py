@@ -147,7 +147,6 @@ def _write_split(
         _write_json(
             export / "labels.json",
             {
-                "schema_version": 1,
                 "episode_id": attempt_id,
                 "robot_profile_hash": PROFILE,
                 "seed": seed,
@@ -206,7 +205,6 @@ def _make_source(
     train_split, _ = _write_split(root, "train", training, first_global=0)
     validation_split, _ = _write_split(root, "validation", validation, first_global=1000)
     manifest = {
-        "schema_version": 1,
         "status": "complete",
         "synthetic": False,
         "profile": {"semantic_sha256": PROFILE},

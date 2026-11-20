@@ -51,21 +51,15 @@ def semantic_hash(document: dict[str, Any]) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
-def _schema_directory(schema_root: Path) -> Path:
-    if schema_root.name == "v1":
-        return schema_root
-    return schema_root / "v1"
-
-
 def profile_schema_path(schema_root: Path) -> Path:
-    """Return the sole Profile v2 schema in the shared schema collection."""
-    return _schema_directory(schema_root) / "robot_profile.schema.json"
+    """Return the Robot Profile schema in the shared schema directory."""
+    return schema_root / "robot_profile.schema.json"
 
 
 def normalize_cameras(
     document: dict[str, Any], source: Path | str = "<profile>"
 ) -> tuple[CameraSpec, ...]:
-    """Validate the named camera list of a Profile v2 document."""
+    """Validate the named camera list of a Robot Profile."""
     return RobotProfile.validate_dict(document, source=str(source)).cameras
 
 
@@ -94,9 +88,8 @@ def validate_bindings(
     actions: dict[str, Any],
     schema_root: Path,
 ) -> None:
-    schemas = _schema_directory(schema_root)
-    validate_document(observations, schemas / "observation.schema.json")
-    validate_document(actions, schemas / "action.schema.json")
+    validate_document(observations, schema_root / "observation.schema.json")
+    validate_document(actions, schema_root / "action.schema.json")
     for name, document in (("observation", observations), ("action", actions)):
         if tuple(document["joint_names"]) != profile.joint_names:
             raise ContractError("SCHEMA_MISMATCH", f"{name}: Joint ordering differs from profile")

@@ -1,4 +1,4 @@
-"""Small 034-format export fixtures for DSH-035 component tests.
+"""Small synthetic export fixtures for Learning component tests.
 
 The generated files are explicitly synthetic.  They reproduce the accepted
 flat export shape (labels with camera order and source facts, raw chunks and
@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from random import Random
 from typing import Any
 
 import numpy as np
@@ -95,7 +96,6 @@ def make_export(
     write_json(
         export / "labels.json",
         {
-            "schema_version": 1,
             "episode_id": episode_id,
             "robot_profile_hash": profile_hash(config),
             "seed": seed,
@@ -118,7 +118,6 @@ def make_export(
     write_json(
         export / "raw_predictions.json",
         {
-            "schema_version": 1,
             "predictions": [
                 {
                     "chunk_seq": 1,
@@ -134,7 +133,6 @@ def make_export(
     write_json(
         export / "quality.json",
         {
-            "schema_version": 1,
             "qualified": True,
             "visibility_qualified": True,
             "trajectory_qualified": True,
@@ -145,12 +143,16 @@ def make_export(
 
 
 def make_select(root: Path, config: DatasetConfig, *, first_frames: int = 61) -> Path:
-    training: list[dict[str, Any]] = []
-    validation: list[dict[str, Any]] = []
+    validation_positions = set(
+        Random(0).sample(
+            range(config.expected_formal_episodes), config.expected_validation_episodes
+        )
+    )
+    selected: list[dict[str, Any]] = []
     for index in range(config.expected_formal_episodes):
         episode_id = f"synthetic-{index:03d}"
         frames = first_frames if index == 0 else 2
-        value = 0.01 if index not in config.validation_positions else 1.01
+        value = 1.01 if index in validation_positions else 0.01
         entry = make_export(
             attempt_dir=root / "attempts" / episode_id,
             config=config,
@@ -160,16 +162,14 @@ def make_select(root: Path, config: DatasetConfig, *, first_frames: int = 61) ->
             value=value,
             start_ns=1_000_000_000 + index * 10_000_000_000,
         )
-        (validation if index in config.validation_positions else training).append(entry)
+        selected.append(entry)
     select = root / "select.json"
     write_json(
         select,
         {
             "status": "SELECTED",
             "qualified": config.expected_formal_episodes,
-            "training": training,
-            "validation": validation,
-            "rule": "first 50 qualified formal attempts; 10th/20th/30th/40th/50th validate",
+            "selected": selected,
         },
     )
     return select

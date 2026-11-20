@@ -1,12 +1,9 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Run event v1",
+  "title": "Run event",
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "schema_version": {
-      "const": 1
-    },
     "run_id": {
       "type": "string",
       "minLength": 1,
@@ -124,7 +121,6 @@
     }
   },
   "required": [
-    "schema_version",
     "run_id",
     "component",
     "instance_id",

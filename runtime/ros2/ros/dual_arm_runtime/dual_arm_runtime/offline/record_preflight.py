@@ -131,12 +131,12 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         if args.purpose == "formal" and args.target_total > int(status["formal_target_qualified"]):
             raise CampaignError("target total exceeds the campaign formal qualified target")
     plan: dict[str, Any] = {
-        "schema_version": 1,
         "selection": selection,
         "campaign_config": str(campaign_path),
         "runtime_config": str(runtime_path),
         "simulation_template": None if backend_path is None else str(backend_path),
         "campaign_status": status,
+        "stop_grace_s": float(config.get("launch", {}).get("stop_grace_s", 10.0)),
         "sdk": {"checked": not args.skip_sdk_check, "ok": None},
     }
     if not args.skip_sdk_check:

@@ -13,7 +13,6 @@ from pathlib import Path
 import rosbag2_py
 from rclpy.serialization import serialize_message
 from robot_contracts.episodes import (
-    EPISODE_SCHEMA_VERSION,
     RecordingResult,
     RuntimeOutcome,
     RuntimeResult,
@@ -120,7 +119,6 @@ class EpisodeRecorder:
         run_id: str,
         source: str,
         test_only: bool,
-        format_version: int = EPISODE_SCHEMA_VERSION,
         episode_directory: Path | None = None,
     ) -> None:
         if not isinstance(run_id, str) or not run_id:
@@ -129,9 +127,6 @@ class EpisodeRecorder:
             raise ContractError("EPISODE_ERROR", "manifest source must be a non-empty string")
         if not isinstance(test_only, bool):
             raise ContractError("EPISODE_ERROR", "manifest test_only must be a boolean")
-        if isinstance(format_version, bool) or format_version != 1:
-            raise ContractError("EPISODE_ERROR", "manifest format_version must be 1")
-        self._format_version = format_version
         # An explicit episode directory lets a caller record straight into its
         # final location (for example ``<attempt>/raw``) without an extra
         # ``<episode_id>`` nesting level.
@@ -254,7 +249,6 @@ class EpisodeRecorder:
 
     def _manifest_document(self, stats, files, recording_result, runtime_result, task_result):
         return {
-            "schema_version": self._format_version,
             "episode_id": self._episode_id,
             "run_id": self._run_id,
             "source": self._source,
@@ -284,7 +278,7 @@ class EpisodeRecorder:
     def _write_manifest(self, manifest: dict) -> None:
         validate_document(
             manifest,
-            manifest_schema_path(self._schemas, self._format_version),
+            manifest_schema_path(self._schemas),
         )
         temporary = self.directory / "manifest.json.tmp"
         with temporary.open("w") as stream:

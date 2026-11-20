@@ -1,6 +1,6 @@
 # Simulation 容器构建与使用
 
-- **基础镜像**：`ros:jazzy-ros-base-noble` + 锁定版本的 MuJoCo 与 Ruckig（需要 NVIDIA GPU 与 Container Toolkit）。
+- **基础镜像** `ros:jazzy-ros-base-noble`，Python 依赖按 `requirements.lock` 安装。EGL 渲染需要 NVIDIA GPU 与 Container Toolkit。
 - **空闲启动**：容器以 `sleep infinity` 运行，命令均通过容器内 `scripts/*.sh` 执行。
 
 ## 常用操作

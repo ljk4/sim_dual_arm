@@ -26,7 +26,7 @@ from robot_contracts.profiles import load_profile  # noqa: E402
 
 SCENARIO = ROOT / "shared/scenarios/marvin_sim/handover"
 CONFIG_PATH = SCENARIO / "configs/simulation/scene/marvin_handover.yaml"
-PROFILE_PATH = SCENARIO / "profiles/robots/marvin_handover_v1/profile.json"
+PROFILE_PATH = SCENARIO / "profiles/robots/marvin_handover/profile.json"
 SCHEMAS = ROOT / "shared/common/interfaces/schemas"
 
 

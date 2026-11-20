@@ -6,4 +6,4 @@
 - `follower.py`：算法产物 `PreparedFollowerPlan`、归一化及完整规划验证。
 - `follower_reference.py`：`sample_follower_reference`、`applied_follower_sample`、`follower_reference_from_prepared`、独立数值验证 `validate`。
 
-数据记录与版本常量从 `robot_contracts.trajectory` 导入；本包不反向提供契约的兼容别名。
+轨迹数据结构与边界常量从 `robot_contracts.trajectory` 导入。

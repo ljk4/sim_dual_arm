@@ -2,7 +2,6 @@
 
 import hashlib
 import importlib.util
-import json
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -32,7 +31,7 @@ policy_sdk = _load_tool("policy_sdk")
 
 def sdk_fixture(tmp_path):
     project = tmp_path / "project"
-    proto = project / "shared/common/interfaces/policy/v1/policy.proto"
+    proto = project / "shared/common/interfaces/policy/policy.proto"
     proto.parent.mkdir(parents=True)
     proto.write_text('syntax = "proto3";\n')
     sdk = tmp_path / "sdk"
@@ -56,7 +55,7 @@ def test_stale_sdk_rejected_before_import(tmp_path, monkeypatch):
 
 def test_incomplete_sdk_rejected(tmp_path):
     project, sdk = sdk_fixture(tmp_path)
-    (sdk / "dual_arm_policy/v1/policy_pb2.py").unlink()
+    (sdk / "dual_arm_policy/policy_pb2.py").unlink()
     with pytest.raises(policy_sdk.SDKError, match="POLICY_SDK_INCOMPLETE"):
         policy_sdk.verify_sdk(project, sdk)
 
@@ -93,23 +92,6 @@ def test_symlink_output_not_adopted(tmp_path):
     assert target.read_text() == "keep"
 
 
-def test_repository_ruckig_wheel_matches_provenance_and_unique_lock():
-    docker = ROOT / "simulation/mujoco/docker"
-    provenance = json.loads((docker / "wheels/provenance.json").read_text())
-    wheel = docker / "wheels" / provenance["wheel_file"]
-    assert wheel.stat().st_size == provenance["wheel_bytes"]
-    assert hashlib.sha256(wheel.read_bytes()).hexdigest() == provenance["wheel_sha256"]
-    lock = (docker / "requirements.lock").read_text()
-    assert f"{provenance['package']}=={provenance['version']}" in lock
-    assert provenance["wheel_sha256"] in lock
-    assert "--find-links=/opt/dependencies" in lock
-    assert not (docker / "sim-requirements.lock").exists()
-    assert not (docker / "ruckig-requirements.lock").exists()
-    assert not (docker / "sim-tools-requirements.txt").exists()
-    assert not (docker / "ruckig-build-requirements.lock").exists()
-    assert not (docker / "ruckig-source.json").exists()
-
-
 def test_sim_dockerfile_uses_single_hash_lock_without_extra_tool_installations():
     text = (ROOT / "simulation/mujoco/docker/Dockerfile").read_text()
     assert "requirements-dev" not in text
@@ -130,28 +112,19 @@ def test_sim_dockerfile_uses_single_hash_lock_without_extra_tool_installations()
     assert "FASTRTPS_DEFAULT_PROFILES_FILE" not in text
 
 
-def test_sim_dockerfile_copies_fixed_wheel_once_and_installs_with_hashes():
+def test_sim_dockerfile_installs_dependencies_from_one_hash_lock():
     text = (ROOT / "simulation/mujoco/docker/Dockerfile").read_text()
     from_lines = [line for line in text.splitlines() if line.startswith("FROM ")]
     assert len(from_lines) == 1
     copy_lines = [line for line in text.splitlines() if line.startswith("COPY ")]
-    assert len(copy_lines) == 1
+    assert copy_lines == ["COPY requirements.lock /opt/dependencies/requirements.lock"]
     assert " AS " not in text
     assert "COPY --from" not in text
-    assert "ruckig-builder" not in text
     assert "pip wheel" not in text
     assert "build-essential" not in text
     assert "python3-dev" not in text
-    assert "ruckig-build-requirements.lock" not in text
-    assert "ruckig-source.json" not in text
-    assert "/opt/ruckig" not in text
     assert "provenance" not in text
-    assert "ruckig-check" not in text
-    assert "requirements.lock" in text
-    assert "sim-requirements.lock" not in text
-    assert (
-        "wheels/ruckig-0.15.3-cp312-cp312-linux_x86_64.whl" in text
-    )
+    assert "ruckig" not in text
     assert sum(line.startswith("RUN pip install ") for line in text.splitlines()) == 1
     assert (
         "pip install --no-cache-dir --require-hashes "
@@ -182,7 +155,7 @@ def test_dockerfile_rejects_embedded_programs_and_application_copy(instruction):
 
 def test_dockerfile_allows_dependency_files_and_pinned_wheel_artifacts():
     instructions = """COPY requirements.lock \\
-     wheels/ruckig.whl /opt/dependencies/
+     wheels/dependency.whl /opt/dependencies/
 RUN pip install --no-cache-dir --require-hashes -r /opt/dependencies/requirements.lock
 """
     assert check_dockerfiles.check_text(instructions) == []

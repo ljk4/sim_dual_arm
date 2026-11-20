@@ -14,11 +14,11 @@ config=""
 robot=""
 task=""
 role="policy"
+policy_endpoint=""
 shared_root=""
 run_id=""
 seed=""
 output_root=""
-selection_args=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -62,12 +62,12 @@ while [[ $# -gt 0 ]]; do
       shared_root="${1#*=}"
       shift
       ;;
-    --set)
-      selection_args+=(--set "${2:-}")
+    --policy-endpoint)
+      policy_endpoint="${2:?missing value for --policy-endpoint}"
       shift 2
       ;;
-    --set=*)
-      selection_args+=(--set "${1#*=}")
+    --policy-endpoint=*)
+      policy_endpoint="${1#*=}"
       shift
       ;;
     --run-id)
@@ -96,7 +96,8 @@ while [[ $# -gt 0 ]]; do
       ;;
     -h|--help)
       printf '%s\n' \
-        'usage: scripts/client_interactive.sh (--robot <id> --task <id> [--role policy|teacher] [--shared-root <dir>] | --config <runtime.yaml>) [--run-id <id>] [--seed <int>] [--output-root <dir>] [--set path=value ...]'
+        'usage: scripts/client_interactive.sh (--robot <id> --task <id> [--role policy|teacher] [--shared-root <dir>] | --config <runtime.yaml>) [--run-id <id>] [--seed <int>] [--output-root <dir>]' \
+        '  --policy-endpoint HOST:PORT  Policy Service gRPC address.'
       exit 0
       ;;
     *)
@@ -124,14 +125,17 @@ else
 fi
 
 if [[ -n "$config" ]]; then
-  selection_args=(--config "$config" "${selection_args[@]}")
+  selection_args=(--config "$config")
   display="$config"
 else
-  selection_args=(--robot "$robot" --task "$task" --role "$role" "${selection_args[@]}")
+  selection_args=(--robot "$robot" --task "$task" --role "$role")
   if [[ -n "$shared_root" ]]; then
     selection_args+=(--shared-root "$shared_root")
   fi
   display="scenario:$robot/$task/$role"
+fi
+if [[ -n "$policy_endpoint" ]]; then
+  selection_args+=(--policy-endpoint "$policy_endpoint")
 fi
 if [[ -z "$output_root" ]]; then
   output_root="$DATA_ROOT/$segment/logs/recordings"
@@ -159,6 +163,9 @@ if [[ -e "$output_root/$run_id" ]]; then
   exit 2
 fi
 printf '配置: %s\n' "$display"
+if [[ -n "$policy_endpoint" ]]; then
+  printf '策略服务: %s\n' "$policy_endpoint"
+fi
 printf 'run_id: %s\n' "$run_id"
 printf 'seed: %s\n' "${seed:-<runtime reset.seed>}"
 printf '输入 y 复原环境并开始本次任务，其他键取消: '

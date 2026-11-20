@@ -41,7 +41,6 @@ __all__ = [
 ]
 
 HandoverPlanConfigError = StrictMappingError
-SCHEMA_VERSION = 1
 
 Vec3 = Annotated[
     tuple[StrictFloat, StrictFloat, StrictFloat],
@@ -142,7 +141,6 @@ class DiagnosticsSettings(StrictMappingModel):
 
 class HandoverPlanConfig(StrictMappingModel):
     source: str = ""
-    schema_version: Annotated[int, Field(strict=True, ge=SCHEMA_VERSION, le=SCHEMA_VERSION)]
     frame: Literal["robot_base"]
     ik: IKSettings
     clearance: ClearanceSettings

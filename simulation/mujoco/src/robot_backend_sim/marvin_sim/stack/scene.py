@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from types import MappingProxyType
 
 import mujoco
-import numpy as np
 
 from robot_backend_sim.common.physics.scene_container import SceneBuildError
 from robot_backend_sim.marvin_sim.assembly import (
@@ -19,8 +18,6 @@ from robot_backend_sim.marvin_sim.assembly import (
 from robot_backend_sim.marvin_sim.scene_base import (
     MarvinSceneBase,
     add_marvin_cameras,
-    base_world_point,
-    combined_yaw_quaternion,
     compile_marvin_spec,
     create_marvin_spec,
     validate_marvin_cameras,
@@ -47,7 +44,7 @@ class MarvinStackSceneIndices:
 
 
 class MarvinStackScene(MarvinSceneBase):
-    """One compiled Marvin stack scene with deterministic object randomization."""
+    """One compiled Marvin stack scene with fixed initial object poses."""
 
     @property
     def contact_object_names(self) -> tuple[str, ...]:
@@ -66,42 +63,10 @@ class MarvinStackScene(MarvinSceneBase):
             raise TypeError("seed must be an integer")
         if seed < 0:
             raise ValueError("seed must be a non-negative integer")
-        model = self.model
-        data = self.data
+        # The free joints' compiled rest poses are the configured nominal poses.
         self.reset_run_state()
         self._reset_robot_joints()
-
-        rng = np.random.default_rng(seed)
-        base = self.config.robot
-        task = self.config.task
-        for obj in (task.source, task.target):
-            dx = (
-                float(rng.uniform(-obj.randomization.xy_m, obj.randomization.xy_m))
-                if obj.randomization.xy_m > 0.0
-                else 0.0
-            )
-            dy = (
-                float(rng.uniform(-obj.randomization.xy_m, obj.randomization.xy_m))
-                if obj.randomization.xy_m > 0.0
-                else 0.0
-            )
-            dyaw = (
-                float(rng.uniform(-obj.randomization.yaw_deg, obj.randomization.yaw_deg))
-                if obj.randomization.yaw_deg > 0.0
-                else 0.0
-            )
-            local_x = obj.nominal_xy[0] + dx
-            local_y = obj.nominal_xy[1] + dy
-            local_z = task.table.top_z + obj.half_extents[2]
-            world = base_world_point(
-                (local_x, local_y, local_z), base.base_position, base.base_yaw_deg
-            )
-            quaternion = combined_yaw_quaternion(
-                base.base_yaw_deg, obj.nominal_yaw_deg + dyaw
-            )
-            address = self.indices.environment.object_free_joint_qpos[obj.name]
-            data.qpos[address : address + 7] = (*world, *quaternion)
-        mujoco.mj_forward(model, data)
+        mujoco.mj_forward(self.model, self.data)
 
 
 def build_marvin_stack_scene(config: MarvinStackSceneConfig) -> MarvinStackScene:

@@ -65,14 +65,6 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument(
         "--runtime-config", help="direct runtime teacher recipe (conflicts with --robot)"
     )
-    result.add_argument(
-        "--set",
-        dest="overrides",
-        action="append",
-        default=[],
-        metavar="PATH=VALUE",
-        help="override one existing runtime recipe path for each attempt (repeatable)",
-    )
     result.add_argument("--worker-manifest", type=Path, help=argparse.SUPPRESS)
     result.add_argument("--target-total", type=positive_int, help=argparse.SUPPRESS)
     result.add_argument(
@@ -134,10 +126,10 @@ def _collector_command(args: argparse.Namespace) -> list[str]:
         command += ["--robot", args.robot, "--task", args.task]
         if getattr(args, "shared_root", None) is not None:
             command += ["--shared-root", str(args.shared_root)]
+        if getattr(args, "robot_namespace", None) is not None:
+            command += ["--robot-namespace", args.robot_namespace]
     else:
         command += ["--runtime-config", str(args.runtime_config)]
-    for override in getattr(args, "overrides", []):
-        command += ["--set", override]
     return command
 
 
@@ -276,7 +268,7 @@ def record(args: argparse.Namespace, config: dict, ledger: Ledger) -> int:
         flush=True,
     )
     if "formal_select" in summary:
-        print(f"训练/验证清单: {summary['formal_select']}", flush=True)
+        print(f"合格录制清单: {summary['formal_select']}", flush=True)
     print(f"运行摘要: {summary_path}", flush=True)
     return exit_code
 
@@ -303,7 +295,7 @@ def _print_status(args: argparse.Namespace, config: dict, ledger: Ledger) -> Non
     )
     print(
         f"试采验证 (pilot):  合格 {pilot.get('qualified', 0)} 条，"
-        f"总尝试 {pilot.get('reserved_attempts', 0)} 次（不计入正式训练清单）",
+        f"总尝试 {pilot.get('reserved_attempts', 0)} 次（不计入正式采集）",
         flush=True,
     )
     print(f"磁盘占用:          {used_mb:.1f} MB / {limit_mb:.1f} MB", flush=True)
@@ -313,16 +305,14 @@ def _print_status(args: argparse.Namespace, config: dict, ledger: Ledger) -> Non
         if formal_select_path.is_file():
             doc = json.loads(formal_select_path.read_text(encoding="utf-8"))
             status = doc.get("status", "UNKNOWN")
-            train_n = len(doc.get("training", []))
-            val_n = len(doc.get("validation", []))
+            qualified = doc["qualified"]
             print(
-                f"训练/验证清单:     {status}（训练 {train_n} 条 / 验证 {val_n} 条）"
-                f"-> {formal_select_path}",
+                f"合格录制清单:      {status}（{qualified} 条） -> {formal_select_path}",
                 flush=True,
             )
         else:
             print(
-                f"训练/验证清单:     未生成（正式合格达 {target} 条后自动生成于 "
+                f"合格录制清单:      未生成（正式合格达 {target} 条后自动生成于 "
                 f"{formal_select_path}）",
                 flush=True,
             )
@@ -350,7 +340,6 @@ def _print_startup_info(args: argparse.Namespace, config: dict, ledger: Ledger) 
                 "purpose": args.purpose,
                 "count": args.count,
                 "max_consecutive_failures": args.max_consecutive_failures,
-                "overrides": list(args.overrides),
                 "campaign": config,
             },
             sort_keys=False,

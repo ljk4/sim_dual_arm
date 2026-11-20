@@ -12,7 +12,7 @@ import pytest
 pytest.importorskip("rclpy")
 pytest.importorskip("robot_api_msgs.srv")
 
-from dual_arm_runtime.task_client import TaskClient  # noqa: E402
+from dual_arm_runtime.simulation.task_client import TaskClient  # noqa: E402
 from rclpy.serialization import deserialize_message, serialize_message  # noqa: E402
 from sim_api_msgs.srv import PrepareTask
 

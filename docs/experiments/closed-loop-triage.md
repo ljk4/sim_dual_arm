@@ -20,7 +20,7 @@
 [Step 3: 推理执行侧隔离与闭环追踪]
    ├── 逐层比对同一观测时间戳下的动作流：
    │   raw_act → admitted → execution_targets → FollowerReference → ExecutionFeedback
-   └── 定位 ActionWindow 选窗、transition_retiming 整形、Ruckig 规划与 MotionRuntime 跟踪中的拦截点
+   └── 定位 ActionWindow 选窗、transition_retiming 整形、Runtime 轨迹生成与 MotionRuntime 跟踪中的拦截点
          │ (解除执行器误拒、速度过冲与等待死锁后，观察物理终态 ↓)
 [Step 4: 仿真物理环境与评价器边界对齐]
    ├── 检查抓取/搬运/叠放中的接触物理（如自由物体 condim 扭转摩擦、轻物体求解器微颤）
@@ -31,7 +31,7 @@
 
 1. **先定位首发物理事件**：按时间戳查找后端与运行端日志中的首个拒绝或停止原因（例如后端 `TRACKING_TIMEOUT` 停止后，运行端请求下一块常表现为 `STREAM_ANCHOR_UNAVAILABLE`，切勿把后果当根因）。
 2. **区分模型能力与执行截断**：当机械臂看似不动或停在半途时，必须同时对比完整 60 点预测块与实际截取窗口（`ActionWindow`），不能仅凭视频表现断定模型未学会动作。
-3. **用 Oracle Follower 隔离规划器怀疑**：将数据集未来 60 点真值直接送入生产 `prepare_follower_plan`（Ruckig）与 `MotionRuntime`。若 Oracle Follower 100% 成功，即可排除“规划器本身无法执行任务轨迹”的假说。
+3. **用 Oracle Follower 隔离规划器怀疑**：将数据集未来 60 点真值直接送入生产 `generate_follower_plan` 与后端 `MotionRuntime`。若 Oracle Follower 100% 成功，即可排除“规划器本身无法执行任务轨迹”的假说。
 
 ---
 
@@ -42,9 +42,8 @@
 | **策略准入** (`learning`) | Marvin 开局第 3 块报 `POLICY_RPC_DATA_LOSS` / `left_joint7: arm prediction outside hard limits` | 示教 `left_joint7` 紧贴 `-1.5708 rad` 下限（仅差 `4.25e-7 rad`），线性头在未执行尾部（索引 46–50）轻微外推过冲 `0.005–0.008 rad` | 网络传输丢包、模型权重损坏 | 方案配置启用按轴有界输出准入 `max_prediction_corrections`（`left_joint7: 0.01 rad`），整块严格校验 |
 | **时间融合** (`learning`) | 历史合法夹爪开度加权平均后报超出 `0.08 m` 上限；或抓取阶段夹爪关闭明显滞后 | 1. IEEE 754 浮点加权和产生 `0.08000000000000002 m` 尾数溢出；<br>2. 时间融合保留旧的张开预测，延迟了当前帧要求的快速闭合 | 模型预测开度越界、夹爪控制反向 | 1. 融合结果钳制在当次参与样本的凸包（`[min, max]`）内；<br>2. 按绝对目标仿真时间戳对齐，按场景权衡融合系数 |
 | **窗口调度** (`runtime`) | 短窗口（2 点或 5 点）下机械臂原地微动或停在阶段起点直至 `TASK_TIMEOUT` | 1. 极短窗口受零初速加速约束推进不足；<br>2. 数据集含 32%–47% 阶段末门控等待静止帧，单帧模型前 5–10 点预测保持等待、20–40 点才展开动作 | 模型只会输出常数、视觉骨干失效 | 执行窗口扩至 `target_count: 20`（1.0 s）跨过等待区；在整机静止且尾部（`40..59`）有明确动作时推进尾部目标 |
-| **跟随规划** (`runtime` / `simulation`) | 中途报 `FOLLOWER_DEVIATION_EXCEEDED` 或 `FOLLOWER_HORIZON_EXCEEDED`（Ruckig 曲线 `3.186 s > 3.0 s`） | 1. 过渡重定时仅覆盖夹爪而未覆盖臂轴；<br>2. 单轴冲刺包络未计入 Ruckig 匀化曲率；<br>3. `marvin_follower_inference_v1.yaml` 右臂预算误留为首帧静止测得的 `0.05 rad` | 继承 anchor 数值计算错误、Ruckig 库缺陷 | 全 16 轴启用仅限 Policy 的 `retime_action_window`；加入 `line_excess > 0.90 * budget` 触发；对称化 Marvin 左右臂偏差预算 |
-| **动力学衔接** (`runtime` / `simulation`) | Marvin 交接时右臂大幅过冲 `0.26 rad`，触发 `FORBIDDEN_CONTACT: robot-robot contact 10.58 N` | 臂轴末点超出 1.0 s 内可减速到零的范围，Ruckig 规划出 `>1.0 s` 曲线并在 `1.0 s` 截断，留下 `-0.7 rad/s` 初速度传入下一块导致无法刹停 | 模型预测轨迹本身要求撞击对侧手臂 | 在 `transition_retiming.py` 中对超界臂轴末点施加 `_stop_bounds`（确保单窗口末端可平稳减速至零） |
-| **导出与制动** (`simulation`) | 夹持或跨块切换时报 `INVALID_RUCKIG_EXPORT`（含飞秒级或亚纳秒级制动前缀） | C1 连续边界处 `1e-17`～`1e-10 m/s` 的浮点速度超限使 Ruckig 生成极短制动段，被旧导出器一刀切拒绝 | 速度上限配置错误 | 纳秒量化为 `0 ns` 的极小前缀安全折叠；`> 0 ns` 的真实制动段正式导出多项式系数并将主轨迹时间后移 |
+| **跟随规划** (`runtime` / `simulation`) | 中途报 `FOLLOWER_DEVIATION_EXCEEDED` 或 `FOLLOWER_HORIZON_EXCEEDED`（规划时域超出 3 s） | 1. 过渡重定时仅覆盖夹爪而未覆盖臂轴；<br>2. 单轴冲刺包络低估有界曲线偏差；<br>3. `marvin_follower_inference.yaml` 右臂预算误留为首帧静止测得的 `0.05 rad` | 继承 anchor 数值计算错误 | 全 16 轴启用仅限 Policy 的 `retime_action_window`；加入 `line_excess > 0.90 * budget` 触发；对称化 Marvin 左右臂偏差预算 |
+| **动力学衔接** (`runtime` / `simulation`) | Marvin 交接时右臂大幅过冲 `0.26 rad`，触发 `FORBIDDEN_CONTACT: robot-robot contact 10.58 N` | 臂轴末点超出 1.0 s 内可减速到零的范围，Runtime 轨迹生成出 `>1.0 s` 曲线并在 `1.0 s` 截断，留下 `-0.7 rad/s` 初速度传入下一块导致无法刹停 | 模型预测轨迹本身要求撞击对侧手臂 | 在 `transition_retiming.py` 中对超界臂轴末点施加 `_stop_bounds`（确保单窗口末端可平稳减速至零） |
 | **夹爪释放** (`runtime`) | 物块已入箱或叠放到位，但夹爪一直停在闭合态 `0.0497 m` 直至 `TASK_TIMEOUT` | 单帧模型在前 40 点（`0..39`）模拟 Teacher 等待稳定门控，张爪动作在 `40..59` 点，固定截取 `20..39` 永远够不到释放点 | 夹爪执行器卡死、接触摩擦过大 | 检测到 16 轴静止（`all_stationary`）且连续尾部 `tail_last > end + 0.004 m` 时，将释放目标引入当前窗口 |
 | **夹持跟踪** (`simulation`) | 稳定夹持方块期间报 `TRACKING_TIMEOUT` | 1. 闭合参考速度 `+5.3e-14 m/s` 落在零速度容差空隙；<br>2. 持物期间参考开度短暂微增（仍小于实测物块宽度且双指保持法向力），被旧逻辑当成释放过渡取消接触豁免 | 物理上发生滑脱或伺服失效 | 1. 统一零速度容差 `1e-9 m/s`；<br>2. 只要参考小于实测开度且满足双指同物体有效法向力与低指速，即維持有效夹持约束豁免 |
 | **接触物理** (`simulation`) | 搬运中的方块绕夹持轴旋转，或堆叠静止期角速度跳变 | `condim=3` 缺少绕接触法向的扭转摩擦。静止期角速度跳变还可能与接触求解有关 | 结合手腕位姿、方块倾角与接触记录识别翻转来源 | 检查 `object_contact_dim`、求解器参数、方块角速度和连续稳定计时 |

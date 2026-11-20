@@ -6,6 +6,6 @@
 - **[`shared/scenarios/marvin_sim/stack/configs/learning/`](../../../shared/scenarios/marvin_sim/stack/configs/learning/)**：Marvin 堆叠的数据集转换、训练、采样过滤与 Policy 服务配方。
 - **[`shared/scenarios/marvin_sim/handover/configs/learning/`](../../../shared/scenarios/marvin_sim/handover/configs/learning/)**：Marvin 交接的数据集转换、训练、采样过滤与 Policy 服务配方。
 
-方案入口使用 `--robot <robot> --task <task>` 选择配方，直接模式使用 `--config`，两者互斥，没有隐式默认配方。数据与训练配方各维护一份，路径按项目根解析，不另设容器副本；重复 `--set dot.path=value` 可覆盖配方中已存在的键。
+方案入口使用 `--robot <robot> --task <task>` 选择配方。直接模式使用 `--config`。修改转换、训练和服务参数时，编辑选定的配方。方案模式按机器人和任务归档产物，直接模式使用配方中的数据、模型和日志路径。
 
 目录导航：[上级目录](../README.md)

@@ -1,4 +1,4 @@
-"""Versioned trajectory bounds and numeric tolerances shared by all endpoints."""
+"""Trajectory bounds and numeric tolerances shared by all endpoints."""
 MAX_JOINTS = 64
 MAX_SEGMENTS = 128
 MAX_HORIZON_NS = 3_000_000_000

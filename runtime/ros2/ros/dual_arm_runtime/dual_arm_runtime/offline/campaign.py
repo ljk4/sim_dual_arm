@@ -133,7 +133,6 @@ def _reserve(
                 "config": attempt.config,
                 "code": attempt.code,
                 "budget": attempt.budget,
-                "overrides": list(getattr(args, "overrides", [])),
                 "reserved_at_ns": attempt.reserved_at_ns,
             }
         )
@@ -226,8 +225,7 @@ def _finish_attempt(
                 **classification,
             }
         )
-    # The ledger keeps the failure reason and size; the dataset keeps only
-    # qualified episodes.
+    # Persist failure evidence before removing an unqualified attempt.
     discard_unqualified_attempt(attempt.directory, classification)
     return event, classification, raw_bytes
 
@@ -240,7 +238,7 @@ def _measure(directory: Path) -> int:
 
 def command_run(args: argparse.Namespace) -> int:
     project_root = args.project_root.resolve()
-    config = _load(project_path(args.config, project_root), args.overrides)
+    config = _load(project_path(args.config, project_root))
     paths = config["paths"]
     attempts_root = args.attempts_root or str(config["paths"]["attempts_root"])
     output = (project_path(attempts_root, project_root)).resolve()
@@ -296,6 +294,8 @@ def command_run(args: argparse.Namespace) -> int:
             f"{verdict} | 日志 {log_directory / 'console.log'}",
             flush=True,
         )
+        if code in {124, 125, 130}:
+            return code
         return 1 if code else 0
     finally:
         signal.signal(signal.SIGTERM, previous_sigterm)
@@ -307,7 +307,7 @@ def command_run(args: argparse.Namespace) -> int:
 
 def command_status(args: argparse.Namespace) -> int:
     project_root = args.project_root.resolve()
-    config = _load(project_path(args.config, project_root), args.overrides)
+    config = _load(project_path(args.config, project_root))
     paths = config["paths"]
     ledger = Ledger(
         project_path(paths["ledger"], project_root), project_path(paths["lock"], project_root)
@@ -341,45 +341,19 @@ def _formal_selection(
             )
     target = int(config["budget"]["formal_target_qualified"])
     selected = ordered[:target]
-    validation_positions = sorted(
-        {int(value) for value in config["budget"].get("formal_validation_qualified_indices", [])}
-    )
-    rule = str(config.get("formal_split_description") or "").strip() or (
-        f"first {target} qualified formal attempts; "
-        f"zero-based qualified positions {validation_positions} validate"
-    )
-    document: dict[str, Any] = {
-        "schema_version": 1,
+    return {
         "campaign": config_name,
         "diagnostic": bool(config.get("diagnostic", False)),
         "target": target,
-        "validation_positions": validation_positions,
-        "rule": rule,
+        "rule": f"first {target} qualified formal attempts in reservation order",
+        "status": "SELECTED" if len(selected) >= target else "INSUFFICIENT_QUALIFIED",
+        "qualified": len(selected),
+        "selected": selected,
     }
-    if len(selected) < target:
-        document.update(
-            {
-                "status": "INSUFFICIENT_QUALIFIED",
-                "qualified": len(selected),
-                "selected": selected,
-            }
-        )
-        return document
-    training = [item for index, item in enumerate(selected) if index not in validation_positions]
-    validation = [item for index, item in enumerate(selected) if index in validation_positions]
-    document.update(
-        {
-            "status": "SELECTED",
-            "qualified": len(selected),
-            "training": training,
-            "validation": validation,
-        }
-    )
-    return document
 
 
 def formal_selection_path(config: dict[str, Any]) -> Path:
-    """The training selection manifest belongs to the dataset directory."""
+    """Return the configured formal recording selection path."""
     return Path(str(config["paths"]["formal_select"]))
 
 
@@ -411,7 +385,7 @@ def write_formal_selection(
 
 def command_select(args: argparse.Namespace) -> int:
     project_root = args.project_root.resolve()
-    config = _load(project_path(args.config, project_root), args.overrides)
+    config = _load(project_path(args.config, project_root))
     paths = config["paths"]
     ledger = Ledger(
         project_path(paths["ledger"], project_root), project_path(paths["lock"], project_root)
@@ -434,7 +408,7 @@ def command_backfill_terminal(args: argparse.Namespace) -> int:
     only fills facts that are still empty (or a zero wall time).
     """
     project_root = args.project_root.resolve()
-    config = _load(project_path(args.config, project_root), args.overrides)
+    config = _load(project_path(args.config, project_root))
     paths = config["paths"]
     ledger = Ledger(
         project_path(paths["ledger"], project_root), project_path(paths["lock"], project_root)
@@ -518,14 +492,6 @@ def parser() -> argparse.ArgumentParser:
         default=None,
         help="direct campaign recipe (conflicts with --robot/--task)",
     )
-    result.add_argument(
-        "--set",
-        dest="overrides",
-        action="append",
-        default=[],
-        metavar="PATH=VALUE",
-        help="override one existing campaign configuration path (repeatable)",
-    )
     result.add_argument("--attempts-root", default=None)
     sub = result.add_subparsers(dest="action", required=True)
     run = sub.add_parser("run", help="reserve one attempt, run it, and record the result")
@@ -543,7 +509,7 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("launch_command", nargs=argparse.REMAINDER)
     status = sub.add_parser("status", help="show budgets and consumed raw bytes")
     status.set_defaults()
-    select = sub.add_parser("select", help="select the qualified formal split")
+    select = sub.add_parser("select", help="select qualified formal recordings")
     select.add_argument(
         "--output",
         default=None,

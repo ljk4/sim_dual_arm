@@ -9,11 +9,23 @@ import yaml
 from dual_arm_learning import cli, policy_service_cli
 from learning_scenario_fixtures import (
     Audit as _Audit,
+)
+from learning_scenario_fixtures import (
     convert_args as _convert_args,
+)
+from learning_scenario_fixtures import (
     fake_convert as _fake_convert,
+)
+from learning_scenario_fixtures import (
     fake_train as _fake_train,
+)
+from learning_scenario_fixtures import (
     make_tree as _make_tree,
+)
+from learning_scenario_fixtures import (
     run_dispatcher as _run_dispatcher,
+)
+from learning_scenario_fixtures import (
     scenario_args as _scenario_args,
 )
 from learning_scenario_fixtures import (
@@ -409,46 +421,26 @@ def test_policy_service_rejects_direct_profile_inputs(tmp_path):
     assert error.value.code == 2
 
 
-def test_train_applies_set_overrides_and_records_them(tmp_path, monkeypatch):
+def test_train_applies_hyperparameters_from_the_recipe(tmp_path, monkeypatch):
     tree = _make_tree(tmp_path)
+    training = yaml.safe_load(tree.training_recipe.read_text())
+    training["modes"]["smoke"]["steps"] = 64
+    tree.training_recipe.write_text(yaml.safe_dump(training))
     captured: dict = {}
     monkeypatch.setattr(cli, "train", _fake_train(captured))
-    assert (
-        cli.main(
-            _scenario_args(tree, "train", "--mode", "smoke", "--set", "modes.smoke.steps=64")
-        )
-        == 0
-    )
+    assert cli.main(_scenario_args(tree, "train", "--mode", "smoke")) == 0
     assert captured["config"].modes["smoke"].steps == 64
-    assert captured["kwargs"]["overrides"]["set"]["value"] == ["modes.smoke.steps=64"]
 
 
-def test_policy_service_applies_set_overrides(tmp_path, model_fixtures, monkeypatch):
+def test_learning_entries_reject_generic_overrides(tmp_path):
     tree = _make_tree(tmp_path)
-    model = model_fixtures(tmp_path / "model", synthetic=False)
-    monkeypatch.setenv("PROJECT_ROOT", str(tree.repo))
-    captured: dict = {}
-    _serve_patches(monkeypatch, captured)
-    code = policy_service_cli.main(
-        [
-            "--robot",
-            "synthetic_sim",
-            "--task",
-            "stack",
-            "--shared-root",
-            str(tree.shared),
-            "--model",
-            str(model),
-            "--set",
-            "service.task_text=overridden task",
-            "--log-directory",
-            str(tmp_path / "logs"),
-            "--run-id",
-            "scenario-set",
-        ]
-    )
-    assert code == 0
-    assert captured["config"].task_text == "overridden task"
-    assert captured["snapshot"]["overrides"]["set"]["value"] == [
-        "service.task_text=overridden task"
-    ]
+    for command in ("convert", "train", "verify-data"):
+        assert cli.main(_scenario_args(tree, command, "--set", "modes.smoke.steps=64")) == 2
+    with pytest.raises(SystemExit) as error:
+        policy_service_cli.main(
+            [
+                "--robot", "synthetic_sim", "--task", "stack",
+                "--shared-root", str(tree.shared), "--set", "service.task_text=changed",
+            ]
+        )
+    assert error.value.code == 2

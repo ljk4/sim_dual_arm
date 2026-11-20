@@ -1,7 +1,7 @@
-"""Worker orchestration: bounded planner and public worker surface.
+"""Worker orchestration for admission, task planning and public requests.
 
 The single live-physics owner lives in :mod:`robot_backend_sim.common.runtime.worker_owner`; this
-module keeps the one-compile planner thread and the lifecycle/output helpers the
+module keeps the follower admission thread and the lifecycle/output helpers the
 ROS node uses.  Every caller receives an explicit ``Future``.
 """
 
@@ -16,6 +16,7 @@ from robot_contracts.models import ContractError, RunContext
 from robot_contracts.profiles import load_profile
 from robot_contracts.stream_request import StreamRequest
 from robot_contracts.trajectory.follower_reference import FollowerReference
+from robot_contracts.trajectory.spline import ReferencePlan
 
 from robot_backend_sim.common.config.backend_config import BackendConfig
 from robot_backend_sim.common.config.follower_config import load_follower_config
@@ -23,7 +24,12 @@ from robot_backend_sim.common.config.motion_config import load_control_config
 from robot_backend_sim.common.config.scene_loader import load_scene_config_for
 from robot_backend_sim.common.config.stream_config import load_stream_config
 from robot_backend_sim.common.control.control_state import ControlEvent, ControlStatus
-from robot_backend_sim.common.motion.planner import _failed_future, _Planner, _request_digest, _TaskPlanner
+from robot_backend_sim.common.motion.planner import (
+    _failed_future,
+    _Planner,
+    _request_digest,
+    _TaskPlanner,
+)
 from robot_backend_sim.common.render.render_worker import (
     Capture,
     RenderCloseSummary,
@@ -107,7 +113,6 @@ class Worker:
             config,
             profile,
             control_config,
-            log,
             follower_config=follower_config,
             duration_grid_ns=duration_grid_ns,
         )
@@ -275,7 +280,7 @@ class Worker:
             (reason,),
         )
 
-    def submit_follower(self, request: StreamRequest) -> Future:
+    def submit_follower(self, request: StreamRequest, plan: ReferencePlan) -> Future:
         if self.follower_config is None:
             future: Future = Future()
             future.set_exception(
@@ -285,7 +290,7 @@ class Worker:
                 )
             )
             return future
-        return self._submit(request)
+        return self._submit(request, plan)
 
     def prepare_task(
         self,
@@ -411,7 +416,7 @@ class Worker:
         if self._task_planner is not None:
             self._task_planner.clear_cache()
 
-    def _submit(self, request: StreamRequest) -> Future:
+    def _submit(self, request: StreamRequest, plan: ReferencePlan) -> Future:
         if self._closed:
             future: Future = Future()
             future.set_exception(BackendClosed("backend is closing"))
@@ -424,7 +429,7 @@ class Worker:
             return future
         future = Future()
         try:
-            self._planner.submit(request, future)
+            self._planner.submit(request, plan, future)
         except queue.Full:
             pass  # the planner already set BACKEND_BUSY on this future
         return future

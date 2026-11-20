@@ -30,7 +30,7 @@
 2. **持物期“控制参考 vs. 实测开度”的合理差异**：
    - 对照 `lift / transport / lower` 阶段的夹爪动作与实测开度。以 Marvin Stack 为例，Teacher 的闭合目标为 `30 mm`，源方块宽 `40 mm`。持物时，较小的控制参考维持夹持预载，实测开度由方块与双指之间的接触决定。
 3. **三种模式的真实 MuJoCo 物理回放验证**：
-   - 分别使用 `reference`（回放 MCAP 中的三次样条 `FollowerReference`）、`labels`（插值回放 20 Hz 位置标签并使用速度前馈）及 `oracle_follower`（将未来 60 点真值送入生产 Ruckig `prepare_follower_plan` 与 `MotionRuntime`）。对照三种回放的任务结果，定位动作标签、跟随器和物理评价之间的差异。
+   - 分别使用 `reference`（回放 MCAP 中的三次样条 `FollowerReference`）、`labels`（插值回放 20 Hz 位置标签并使用速度前馈）及 `oracle_follower`（将未来 60 点真值送入生产 `generate_follower_plan` 与后端 `MotionRuntime`）。对照三种回放的任务结果，定位动作标签、跟随器和物理评价之间的差异。
 4. **图像编码与几何裕量特征**：
    - 对齐 MP4 解码帧和同一时间戳的原始 PNG，比较图像误差和逐步动作预测差异。
    - 在抓取闭合阶段检查指尖与桌面的最小净空，并与跟随误差一同评估擦碰。

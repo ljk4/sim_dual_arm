@@ -1,9 +1,7 @@
 # Marvin 交接正式采集预算、种子与路径。
 #
 # pilot 与 formal 使用本方案独立种子与台账，严格隔离在 marvin_sim/handover 数据根下。
-schema_version: 1
 
-# Formal training evidence: 50 qualified demonstrations, 45 train / 5 validate.
 diagnostic: false
 
 budget:
@@ -17,12 +15,10 @@ budget:
   pilot_label_replay_max: 0
 
   # Fifty qualified demonstrations, at most one hundred attempts.
-  # Qualified positions 9, 19, 29, 39 and 49 validate; the other 45 train.
   formal_seed_first: 4100
   formal_seed_last: 4199
   formal_max_attempts: 100
   formal_target_qualified: 50
-  formal_validation_qualified_indices: [9, 19, 29, 39, 49]
 
   # Model smoke runs use the shared test budget, never pilot or formal seeds.
   test_seed_first: 5100
@@ -50,11 +46,11 @@ paths:
     - shared/scenarios/marvin_sim/handover/configs/simulation/scene/marvin_handover_task.yaml
     - shared/scenarios/marvin_sim/handover/extensions/ros/marvin_handover_api_msgs/srv/GetTeacherChunk.srv
     - shared/scenarios/marvin_sim/handover/extensions/ros/marvin_handover_api_msgs/msg/TeacherCapability.msg
-    - shared/scenarios/marvin_sim/handover/profiles/robots/marvin_handover_v1/profile.json
-    - shared/scenarios/marvin_sim/handover/profiles/observations/marvin_rgb_joint_v1.json
-    - shared/scenarios/marvin_sim/handover/profiles/actions/marvin_joint_position_v1.json
-    - shared/scenarios/marvin_sim/handover/profiles/control/marvin_control_v1.yaml
-    - shared/scenarios/marvin_sim/handover/profiles/control/marvin_follower_v1.yaml
+    - shared/scenarios/marvin_sim/handover/profiles/robots/marvin_handover/profile.json
+    - shared/scenarios/marvin_sim/handover/profiles/observations/marvin_rgb_joint.json
+    - shared/scenarios/marvin_sim/handover/profiles/actions/marvin_joint_position.json
+    - shared/scenarios/marvin_sim/handover/profiles/control/marvin_control.yaml
+    - shared/scenarios/marvin_sim/handover/profiles/control/marvin_follower.yaml
     - runtime/ros2/docker/docker-compose.yml
   sdk_marker: build/ros-dev/contracts.json
 

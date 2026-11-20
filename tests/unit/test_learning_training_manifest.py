@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from dual_arm_learning.config import load_training_config
+from dual_arm_learning.config import TrainingConfig, load_training_config
 from dual_arm_learning.dataset import canonical_hash
 from dual_arm_learning.training import TrainingError, masked_l1, verify_dataset_manifest
 from model_helpers import replace
@@ -19,7 +19,7 @@ def _write(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
 
 
-def _manifest(config, root: Path) -> dict:
+def _manifest(config: TrainingConfig, root: Path) -> dict:
     profile = json.loads(config.dataset.profile_path.read_text())
     semantic = hashlib.sha256(
         json.dumps(profile, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
@@ -48,12 +48,14 @@ def _manifest(config, root: Path) -> dict:
             "source_facts": facts,
         }
 
+    # Use a valid stored split independent of the converter's random draw.
+    validation_positions = list(range(1, config.dataset.expected_validation_episodes + 1))
     training_episodes = [
         episode(index)
         for index in range(config.dataset.expected_formal_episodes)
-        if index not in config.dataset.validation_positions
+        if index not in validation_positions
     ]
-    validation_episodes = [episode(index) for index in config.dataset.validation_positions]
+    validation_episodes = [episode(index) for index in validation_positions]
     for split, episodes in (("train", training_episodes), ("validation", validation_episodes)):
         split_root = root / split
         _write(
@@ -79,6 +81,13 @@ def _manifest(config, root: Path) -> dict:
         "status": "complete",
         "source_facts_sha256": canonical_hash(fact_records),
         "synthetic": False,
+        "expected": {
+            "formal_episodes": config.dataset.expected_formal_episodes,
+            "training_episodes": len(training_episodes),
+            "validation_episodes": len(validation_episodes),
+            "validation_positions": validation_positions,
+            "validation_percent": config.dataset.validation_percent,
+        },
         "profile": {"semantic_sha256": semantic, "profile_id": profile.get("profile_id")},
         "lerobot": {
             "source_revision": config.dataset.lerobot_source_revision,
@@ -104,17 +113,18 @@ def _manifest(config, root: Path) -> dict:
     }
 
 
-def test_manifest_partitions_45_5_and_rejects_overlap(tmp_path):
+def test_manifest_reads_saved_45_5_split_and_validates_partition(tmp_path):
     config = load_training_config(SCENARIO / "configs/learning/act_training.yaml", ROOT)
     config = replace(config, data_root=tmp_path, verify_hashes=False, mode="full")
     manifest = _manifest(config, tmp_path)
+    manifest["expected"]["validation_positions"].reverse()
     _write(tmp_path / "manifest.json", manifest)
     audit = verify_dataset_manifest(config, allow_synthetic=False, require_full=True)
     assert len(audit.train_episodes) == 45
-    assert audit.validation_global_indices == (9, 19, 29, 39, 49)
+    assert audit.validation_global_indices == (1, 2, 3, 4, 5)
 
     bad = copy.deepcopy(manifest)
-    bad["splits"]["validation"]["episodes"][0]["global_success_index"] = 8
+    bad["expected"]["validation_positions"][0] = 8
     _write(tmp_path / "manifest.json", bad)
     with pytest.raises(TrainingError, match="validation split"):
         verify_dataset_manifest(config, allow_synthetic=False, require_full=True)
@@ -123,6 +133,19 @@ def test_manifest_partitions_45_5_and_rejects_overlap(tmp_path):
     bad["splits"]["validation"]["episodes"][0]["global_success_index"] = 0
     _write(tmp_path / "manifest.json", bad)
     with pytest.raises(TrainingError, match="overlap"):
+        verify_dataset_manifest(config, allow_synthetic=False, require_full=True)
+
+    bad = copy.deepcopy(manifest)
+    bad["splits"]["training"]["episodes"][0]["global_success_index"] = 50
+    _write(tmp_path / "manifest.json", bad)
+    with pytest.raises(TrainingError, match="partition"):
+        verify_dataset_manifest(config, allow_synthetic=False, require_full=True)
+
+    bad = copy.deepcopy(manifest)
+    bad["expected"]["training_episodes"] -= 1
+    bad["expected"]["validation_episodes"] += 1
+    _write(tmp_path / "manifest.json", bad)
+    with pytest.raises(TrainingError, match="episode counts do not match"):
         verify_dataset_manifest(config, allow_synthetic=False, require_full=True)
 
 
@@ -142,18 +165,13 @@ def test_full_refuses_short_episode_and_synthetic_data(tmp_path):
         verify_dataset_manifest(config, allow_synthetic=True, require_full=True)
 
 
-def test_diagnostic_manifest_uses_configured_small_split(tmp_path):
+def test_small_manifest_requires_matching_dataset_recipe(tmp_path):
     dataset_document = yaml.safe_load(
         (SCENARIO / "configs/learning/act_dataset.yaml").read_text()
     )
-    dataset_document["diagnostic"] = True
-    dataset_document["expected"] = {
-        "formal_episodes": 2,
-        "training_episodes": 1,
-        "validation_episodes": 1,
-        "validation_positions": [1],
-    }
-    dataset_path = tmp_path / "diagnostic_dataset.yaml"
+    dataset_document["expected"] = {"formal_episodes": 2}
+    dataset_document["validation_percent"] = 50
+    dataset_path = tmp_path / "small_dataset.yaml"
     dataset_path.write_text(yaml.safe_dump(dataset_document))
 
     training_document = yaml.safe_load(
@@ -161,7 +179,7 @@ def test_diagnostic_manifest_uses_configured_small_split(tmp_path):
     )
     training_document["data"]["config"] = str(dataset_path)
     training_document["mode"] = "smoke"
-    training_path = tmp_path / "diagnostic_training.yaml"
+    training_path = tmp_path / "small_training.yaml"
     training_path.write_text(yaml.safe_dump(training_document))
 
     config = load_training_config(training_path, ROOT)
@@ -172,6 +190,11 @@ def test_diagnostic_manifest_uses_configured_small_split(tmp_path):
     assert audit.validation_global_indices == (1,)
     assert audit.train_frames == 60
     assert audit.validation_frames == 60
+
+    standard = load_training_config(SCENARIO / "configs/learning/act_training.yaml", ROOT)
+    standard = replace(standard, data_root=tmp_path, verify_hashes=False, mode="smoke")
+    with pytest.raises(TrainingError, match="episode counts do not match"):
+        verify_dataset_manifest(standard, allow_synthetic=False, require_full=False)
 
     manifest = _manifest(config, tmp_path)
     manifest["splits"]["validation"]["episodes"] = []

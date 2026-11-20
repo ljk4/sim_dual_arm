@@ -170,7 +170,6 @@ class VisibilitySection(StrictMappingModel):
 
 
 class BudgetConfig(StrictMappingModel):
-    max_layouts: Annotated[StrictInt, Field(ge=67, le=1000)]
     max_total_samples: Annotated[StrictInt, Field(ge=1000, le=5_000_000)]
     max_elapsed_s: Annotated[PositiveFloat, Field(gt=1.0, le=3600.0)]
     max_png_count: Annotated[StrictInt, Field(ge=0, le=10_000)]
@@ -180,7 +179,6 @@ class BudgetConfig(StrictMappingModel):
 
 class KinematicsCheckConfig(StrictMappingModel):
     source: str = ""
-    schema_version: Annotated[int, Field(strict=True, ge=1, le=1)]
     ik: IKConfig
     clearance: ClearanceConfig
     targets: TargetConfig

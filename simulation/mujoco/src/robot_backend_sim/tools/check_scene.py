@@ -1,4 +1,4 @@
-"""MuJoCo three-camera static-layout visibility check for the S2 scene.
+"""MuJoCo three-camera visibility check for the nominal Marvin stack layout.
 
 The module loads the scene and check configurations, builds the scene once,
 takes explicit full-physics snapshots, renders three named RGB/segmentation
@@ -44,21 +44,15 @@ from robot_backend_sim.tools import probe_environment
 from robot_backend_sim.tools.check_scene_common import SceneCheckFailure, SceneCheckUsageError
 from robot_backend_sim.tools.check_scene_views import (
     _actual_object_poses,
-    _boundary_object_poses,
-    _boundary_updates,
     _first_visibility_failure,
     _layout_document,
     _measure_throughput,
     _save_rgb_images,
     _write_contact_sheet,
 )
-from robot_backend_sim.tools.check_scene_views import (
-    _select_contact_layouts as _select_contact_layouts,
-)
 
 COMPONENT = "scene_check"
 KIND = "scene"
-REPORT_SCHEMA_VERSION = 1
 _SHARED_ROOT = Path(os.environ.get("SHARED_ROOT", "/shared"))
 _SHARED_RECIPES = (
     _SHARED_ROOT / "scenarios/marvin_sim/stack/configs/simulation"
@@ -144,14 +138,9 @@ def _emit(
 def _check_config_document(config: SceneCheckConfig) -> dict[str, object]:
     return {
         "source": config.source,
-        "schema_version": config.schema_version,
-        "seeds": list(config.seeds),
-        "boundary_xy_corners": [list(corner) for corner in config.boundary_xy_corners],
-        "boundary_yaw_signs": list(config.boundary_yaw_signs),
         "min_visible_pixels": {
             camera: dict(objects) for camera, objects in config.min_visible_pixels.items()
         },
-        "max_layouts": config.max_layouts,
         "throughput": {
             "warmup_groups": config.throughput.warmup_groups,
             "measure_groups": config.throughput.measure_groups,
@@ -161,8 +150,6 @@ def _check_config_document(config: SceneCheckConfig) -> dict[str, object]:
         "camera_resolutions": {
             camera: list(resolution) for camera, resolution in config.camera_resolutions.items()
         },
-        "layout_count": config.layout_count,
-        "boundary_layout_count": config.boundary_layout_count,
     }
 
 
@@ -278,19 +265,11 @@ def _layout_result(
     renderer: object,
     logger: object,
     object_geom_ids,
-    boundary_base,
 ):
     try:
-        if layout.kind == "boundary":
-            assert boundary_base is not None
-            snapshot = renderer.derive_snapshot(
-                boundary_base, _boundary_updates(layout, scene, scene_config)
-            )
-            poses = _boundary_object_poses(layout, scene_config)
-        else:
-            scene.reset(layout.seed)
-            snapshot = renderer.capture(scene.data)
-            poses = _actual_object_poses(scene, scene_config)
+        scene.reset(layout.seed)
+        snapshot = renderer.capture(scene.data)
+        poses = _actual_object_poses(scene, scene_config)
         rgb = renderer.render_rgb(snapshot)
         rgb_paths = _save_rgb_images(run_dir, layout, rgb)
         segmentation = renderer.render_segmentation(snapshot)
@@ -331,59 +310,36 @@ def _run_layouts(
     logger: object,
     report: dict[str, object],
 ) -> SceneCheckFailure | None:
-    layouts = visibility.build_layouts(check_config, scene_config)
     object_geom_ids = report["scene"]["object_geom_ids"]  # type: ignore[index]
-    boundary_base = None
-    if any(layout.kind == "boundary" for layout in layouts):
-        scene.reset(check_config.seeds[0])
-        boundary_base = renderer.capture(scene.data)
-
-    results: list[dict[str, object]] = []
-    first_failure: SceneCheckFailure | None = None
-    for layout in layouts:
-        result, poses, rgb_paths = _layout_result(
-            run_dir,
-            layout,
-            scene,
-            scene_config,
-            check_config,
-            renderer,
-            logger,
-            object_geom_ids,
-            boundary_base,
-        )
-        document = _layout_document(layout, result, poses, rgb_paths)
-        results.append(document)
-        fields = {
+    layout = visibility.NOMINAL_LAYOUT
+    result, poses, rgb_paths = _layout_result(
+        run_dir, layout, scene, scene_config, check_config, renderer, logger, object_geom_ids
+    )
+    report["layouts"] = [_layout_document(layout, result, poses, rgb_paths)]
+    report["layout_summary"] = {
+        "count": 1,
+        "passed": int(result.passed),
+        "failed": int(not result.passed),
+    }
+    _emit(
+        logger,
+        "layout_checked" if result.passed else "layout_failed",
+        "scene layout visibility counted",
+        {
             "layout": layout.layout_id,
-            "kind": layout.kind,
             "passed": result.passed,
             "total_pixels": result.total_pixels,
             "minimum_margin": result.minimum_margin,
-        }
-        _emit(
-            logger,
-            "layout_checked" if result.passed else "layout_failed",
-            "scene layout visibility counted",
-            fields,
-        )
-        failure = _first_visibility_failure(result)
-        if failure is not None and first_failure is None:
-            layout_id, camera, obj, pixels = failure
-            first_failure = SceneCheckFailure(
-                "visibility_threshold_not_met",
-                f"layout {layout_id!r} camera {camera!r} object {obj!r} "
-                f"has {pixels} visible pixels",
-            )
-    report["layouts"] = results
-    report["layout_summary"] = {
-        "count": len(results),
-        "passed": sum(1 for result in results if bool(result["passed"])),
-        "failed": sum(1 for result in results if not bool(result["passed"])),
-        "boundary_count": check_config.boundary_layout_count,
-        "seed_count": len(check_config.seeds),
-    }
-    return first_failure
+        },
+    )
+    failure = _first_visibility_failure(result)
+    if failure is None:
+        return None
+    layout_id, camera, obj, pixels = failure
+    return SceneCheckFailure(
+        "visibility_threshold_not_met",
+        f"layout {layout_id!r} camera {camera!r} object {obj!r} has {pixels} visible pixels",
+    )
 
 
 
@@ -418,7 +374,6 @@ def _open_logger(run_dir: Path, run_id: str, instance_id: str) -> object:
 
 def _report_template(arguments: SceneCheckArguments, instance_id: str) -> dict[str, object]:
     return {
-        "schema_version": REPORT_SCHEMA_VERSION,
         "kind": KIND,
         "component": COMPONENT,
         "run_id": arguments.run_id,
@@ -480,11 +435,7 @@ def _execute_checks(arguments, run_dir: Path, report: dict, logger: object):
         logger,
         "configs_loaded",
         "scene and check configurations validated and frozen before GL",
-        {
-            "seeds": len(check_config.seeds),
-            "boundary_layouts": check_config.boundary_layout_count,
-            "layouts": check_config.layout_count,
-        },
+        {"layout": visibility.NOMINAL_LAYOUT.layout_id},
     )
     dependencies = probe_environment.check_dependencies()
     probe_environment._verify_mounted_source(dependencies)
@@ -530,7 +481,7 @@ def _execute_checks(arguments, run_dir: Path, report: dict, logger: object):
             "p95_s": float(report["throughput"]["p95_s"]),
         },
     )
-    contact = _write_contact_sheet(run_dir, report["layouts"], check_config)
+    contact = _write_contact_sheet(run_dir, report["layouts"][0], check_config)
     report["artifact"] = contact
     report["artifacts"] = {
         "contact_sheet": contact,

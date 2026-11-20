@@ -30,7 +30,6 @@ if TYPE_CHECKING:
     from robot_backend_sim.marvin_sim.stack.scene import MarvinStackScene
 
 COMPONENT = "sim_probe"
-REPORT_SCHEMA_VERSION = 1
 PREVIEW_WIDTH = 320
 PREVIEW_HEIGHT = 240
 MODEL_STEPS = 20
@@ -46,7 +45,6 @@ _PACKAGE_DISTRIBUTIONS = (
     "qpsolvers",
     "pillow",
     "PyOpenGL",
-    "ruckig",
     "absl-py",
     "daqp",
     "etils",
@@ -492,7 +490,6 @@ def _write_json_atomic(path: Path, document: object) -> None:
 
 def _report_template(arguments: ProbeArguments) -> dict[str, object]:
     return {
-        "schema_version": REPORT_SCHEMA_VERSION,
         "run_id": arguments.run_id,
         "component": COMPONENT,
         "instance_id": None,

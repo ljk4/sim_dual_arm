@@ -26,7 +26,7 @@ simulation 的 `backend` / `viewer` 只按 binding 取配方，不按实现名�
 
 ```text
 shared/scenarios/<robot>/<task>/
-├── binding.yaml            # 必需，唯一选择文件（v1）
+├── binding.yaml            # 方案选择文件
 ├── profiles/               # 本方案拥有的机器人/观测/动作档案
 ├── configs/                # 被选中的数值配方（由所属端维护）
 └── extensions/             # 方案专用接口，例如固定 Teacher 服务
@@ -41,7 +41,7 @@ shared/scenarios/<robot>/<task>/
 - `source_roots` 必须相对 binding 目录；`profiles.*`、`recipes.*`、
   `interfaces.extension_ros[*]` 必须位于 binding 目录或某个 `source_root` 之内。
   例如 Marvin Stack 通过 `source_roots: ["../../.."]` 声明 `shared/`，
-  并用 `../handover/profiles/actions/marvin_joint_position_v1.json` 复用 Marvin 的动作档案。
+  并用 `../handover/profiles/actions/marvin_joint_position.json` 复用 Marvin 的动作档案。
 - `artifact_roots` 可写绝对路径，容器数据根为 `/data`。学习端校验显式模型路径位于
   binding 目录、source root 或 artifact root 内。
 - `profiles.*`、`recipes.*` 必须是文件，`interfaces.extension_ros[*]` 必须是目录。
@@ -82,7 +82,7 @@ python3 /shared/common/tools/scenario.py validate \
 ```
 
 三端入口在内存中展开 binding 选定的配方。`--robot/--task` 与 `--config`
-分别选择方案和直接配方。`--set dot.path=value` 可重复覆盖配方中已存在的键。
+分别选择方案和直接配方。常用运行参数使用各命令帮助中的专用选项，其余参数在相应配方中修改。
 
 ```bash
 # simulation 容器（工作目录 /app）

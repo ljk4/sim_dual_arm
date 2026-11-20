@@ -6,7 +6,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 PROFILES = ROOT / "shared/scenarios/marvin_sim/stack/profiles"
 pytest.importorskip("grpc")
-pb2 = pytest.importorskip("dual_arm_policy.v1.policy_pb2")
+pb2 = pytest.importorskip("dual_arm_policy.policy_pb2")
 from dual_arm_learning.policy_service import PolicyService  # noqa: E402
 from dual_arm_learning.policy_types import PolicyError  # noqa: E402
 from fake_provider import FakeProvider, load_fake_config  # noqa: E402
@@ -17,9 +17,9 @@ CONFIG = ROOT / "tests/fakes/policy/fake_policy.yaml"
 
 def documents():
     return (
-        (PROFILES / "robots/marvin_stack_v1/profile.json").read_bytes(),
-        (MARVIN_SHARED_PROFILES / "observations/marvin_rgb_joint_v1.json").read_bytes(),
-        (MARVIN_SHARED_PROFILES / "actions/marvin_joint_position_v1.json").read_bytes(),
+        (PROFILES / "robots/marvin_stack/profile.json").read_bytes(),
+        (MARVIN_SHARED_PROFILES / "observations/marvin_rgb_joint.json").read_bytes(),
+        (MARVIN_SHARED_PROFILES / "actions/marvin_joint_position.json").read_bytes(),
     )
 
 
@@ -52,7 +52,7 @@ def open_request(config, ctx, open_id="open-1"):
 
 
 def observation(config, reference_ns=1_000_000_000):
-    profile = json.loads((PROFILES / "robots/marvin_stack_v1/profile.json").read_text())
+    profile = json.loads((PROFILES / "robots/marvin_stack/profile.json").read_text())
     message = pb2.Observation(
         observation_id=1,
         reference_robot_time_ns=reference_ns,

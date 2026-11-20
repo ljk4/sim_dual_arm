@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from robot_contracts.overrides import OverrideError, apply_overrides
 from robot_contracts.project_paths import project_path
 
 PURPOSES = {"pilot", "formal", "test", "evaluation"}
@@ -33,18 +32,13 @@ def now_ns() -> int:
     return time.time_ns()
 
 
-def load(path: Path, overrides: tuple[str, ...] | list[str] = ()) -> dict[str, Any]:
+def load(path: Path) -> dict[str, Any]:
     try:
         document = yaml.safe_load(path.read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError) as error:
         raise CampaignError(f"cannot read campaign config {path}: {error}") from error
-    if not isinstance(document, dict) or document.get("schema_version") != 1:
-        raise CampaignError("campaign config must be an object with schema_version 1")
-    if overrides:
-        try:
-            document = apply_overrides(document, list(overrides))
-        except OverrideError as error:
-            raise CampaignError(str(error)) from error
+    if not isinstance(document, dict):
+        raise CampaignError("campaign config must be an object")
     return document
 
 

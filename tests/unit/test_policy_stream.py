@@ -11,8 +11,8 @@ from dual_arm_runtime.chunk_stream import (
 )
 from dual_arm_runtime.policy_client import PolicyPrediction
 from dual_arm_runtime.runtime_config import load_runtime_configuration
+from dual_arm_runtime.simulation.teacher_source import TeacherStreamRunner, TeacherTargetSource
 from dual_arm_runtime.target_source import Prediction
-from dual_arm_runtime.teacher_source import TeacherStreamRunner, TeacherTargetSource
 from robot_contracts.action_chunks import ChunkAnchor
 from robot_contracts.models import ContractError, RunContext, Target
 from robot_contracts.trajectory.spline import ReferenceSample
@@ -938,7 +938,7 @@ def test_wait_advance_preserves_timestamps_and_prefers_newest_active_prediction(
     ):
         value[field] = str((POLICY_CONFIG.parent / value[field]).resolve())
     value["follower_config"] = str(
-        MARVIN_SHARED_PROFILES / "control/marvin_follower_inference_v1.yaml"
+        MARVIN_SHARED_PROFILES / "control/marvin_follower_inference.yaml"
     )
     value["policy"]["startup_settle_sim_ns"] = 0
     value["policy"]["async_inference"] = False

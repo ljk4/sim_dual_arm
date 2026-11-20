@@ -21,6 +21,8 @@ from dual_arm_runtime.offline.audit.audit_common import (
     record_error,
     validate_camera_frame,
 )
+from dual_arm_runtime.simulation.options import require_simulation_backend
+from dual_arm_runtime.simulation.options import required_capabilities as simulation_capabilities
 
 
 class StreamAudit:
@@ -30,16 +32,15 @@ class StreamAudit:
     required_capabilities = frozenset(
         {
             "exact_capture",
-            "simulation_reset",
             "lease",
             "stop",
             "command_query",
             "control_events",
             "follower_reference",
-            "bounded_target_follower_v1",
+            "bounded_target_follower",
             # Recordings made with the fixed two-gripper/two-finger container
             # are not audited as if they used the bounded named set.
-            "execution_feedback.gripper_set.v1",
+            "execution_feedback.gripper_set",
         }
     )
 
@@ -75,6 +76,20 @@ class StreamAudit:
             observation = configuration.get("observation", {})
         if not isinstance(observation, dict):
             raise record_error("recorded observation snapshot is incomplete")
+        action_source = recipe.get("action_source", configuration.get("action_source"))
+        stream = recipe.get(action_source)
+        reset = recipe.get("reset") or {}
+        self.simulation_capabilities = simulation_capabilities(
+            reset_enabled=bool(configuration.get("reset_used", reset.get("enabled"))),
+            task_enabled=action_source == "teacher" or (
+                isinstance(stream, dict) and stream.get("termination_mode") == "task"
+            ),
+            teacher_api=recipe.get("teacher_api") if action_source == "teacher" else None,
+        )
+        self.required_capabilities = self.required_capabilities.union(
+            self.simulation_capabilities,
+            ("reliable_sensor_streams",) if observation.get("reliable") else (),
+        )
         _positive_int(observation.get("max_age_ns"), "max_age_ns")
         _positive_number(observation.get("wall_arrival_timeout_s"), "wall_arrival_timeout_s")
         motions = recipe.get("motions")
@@ -143,8 +158,14 @@ class StreamAudit:
         if not self.context(message):
             return
         self.info_seen += 1
-        if message.backend_kind != "mujoco":
-            raise record_error("recorded backend kind is not mujoco")
+        source = self.configuration.get("source")
+        if source is not None and message.backend_kind != source:
+            raise record_error("recorded backend kind differs from the snapshot")
+        if self.simulation_capabilities:
+            try:
+                require_simulation_backend(message.backend_kind)
+            except ContractError as error:
+                raise record_error(str(error)) from error
         if bool(message.test_only):
             raise record_error("diagnostic recording is marked test_only")
         if message.context.robot_profile_hash != self.configuration["profile_hash"]:

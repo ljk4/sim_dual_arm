@@ -22,7 +22,6 @@ import rclpy
 import yaml
 from rclpy.executors import ExternalShutdownException, SingleThreadedExecutor
 from rclpy.signals import SignalHandlerOptions
-from robot_contracts.overrides import OverrideError, apply_overrides
 from robot_contracts.project_paths import project_path
 from robot_contracts.validation import UniqueKeyError, read_unique_yaml
 from robot_run_logging import EventLogger, LogFailure, LogSettings
@@ -114,12 +113,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--shared-root", type=Path, help="shared tree containing scenarios/")
     parser.add_argument("--seed", type=int, default=None, help="override run.seed")
     parser.add_argument(
-        "--set",
-        dest="overrides",
-        action="append",
-        default=[],
-        metavar="PATH=VALUE",
-        help="override one existing configuration path (repeatable)",
+        "--realtime-speed", type=float, help="simulation seconds per wall-clock second"
     )
     parser.add_argument("--run-root", type=Path, default=None)
     parser.add_argument("--run-id", default=None)
@@ -220,11 +214,15 @@ def _direct_document(parsed: argparse.Namespace) -> dict[str, Any]:
             value = robot.get(field)
             if isinstance(value, str):
                 robot[field] = str((path.parent / value).resolve())
+    run = document.get("run")
     if parsed.seed is not None:
-        run = document.get("run")
         if not isinstance(run, dict) or "seed" not in run:
             raise SystemExit("--seed requires an existing run.seed field")
         run["seed"] = parsed.seed
+    if parsed.realtime_speed is not None:
+        if not isinstance(run, dict) or "realtime_speed" not in run:
+            raise SystemExit("--realtime-speed requires an existing run.realtime_speed field")
+        run["realtime_speed"] = parsed.realtime_speed
     return document
 
 
@@ -252,16 +250,16 @@ def _prepare_run(parsed: argparse.Namespace):
                 role=parsed.role or "teacher",
                 shared_root=parsed.shared_root,
                 seed=parsed.seed,
-                overrides=parsed.overrides,
+                realtime_speed=parsed.realtime_speed,
             )
             document, selection = resolved.document, resolved.selection
         else:
-            document = apply_overrides(_direct_document(parsed), parsed.overrides)
+            document = _direct_document(parsed)
             selection = {"mode": "direct", "robot": None, "task": None, "role": None}
         # Validate before creating the run directory so a bad recipe leaves no
         # orphan directory behind.
         load_backend_document(document, parsed.config or "scenario:selection")
-    except (ScenarioError, OverrideError, BackendConfigError) as error:
+    except (ScenarioError, BackendConfigError) as error:
         raise SystemExit(str(error)) from error
     try:
         run_dir.mkdir(parents=True, exist_ok=False)
@@ -299,7 +297,7 @@ def _robot_metadata(config) -> dict[str, str]:
 
 
 def _write_run_document(
-    run_dir: Path, config, run_id: str, selection: dict[str, Any], overrides: list[str]
+    run_dir: Path, config, run_id: str, selection: dict[str, Any]
 ) -> None:
     _write_json(
         run_dir / "run.json",
@@ -308,7 +306,6 @@ def _write_run_document(
             "created_utc": _now_utc(),
             "config": str(config.source),
             "selection": selection,
-            "overrides": list(overrides),
             **_robot_metadata(config),
             "effective_configuration": config.canonical_dict(),
             "configuration_sources": _configuration_sources(config),
@@ -324,7 +321,7 @@ def _write_run_document(
                 "executable": sys.executable,
                 "packages": {
                     name: _package_version(name)
-                    for name in ("mujoco", "scipy", "numpy", "mink", "ruckig")
+                    for name in ("mujoco", "scipy", "numpy", "mink")
                 },
             },
         },
@@ -461,7 +458,7 @@ def _teardown(executor, node, logger, previous, failure, exit_code) -> tuple[str
 def run(argv: list[str] | None = None) -> int:
     parsed = _parser().parse_args(argv)
     config, run_id, run_dir, logger, selection = _prepare_run(parsed)
-    _write_run_document(run_dir, config, run_id, selection, parsed.overrides)
+    _write_run_document(run_dir, config, run_id, selection)
     signals = _Signals()
     previous = {signum: signal.getsignal(signum) for signum in (signal.SIGINT, signal.SIGTERM)}
     for signum in previous:

@@ -6,11 +6,11 @@ import copy
 import hashlib
 import json
 import re
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import AliasPath, BeforeValidator, Field, model_validator
-from robot_contracts.overrides import apply_overrides
 from robot_contracts.project_paths import project_path
 from robot_contracts.validation import (
     NonEmptyStr,
@@ -19,6 +19,7 @@ from robot_contracts.validation import (
     PositiveFloat,
     PositiveInt,
     SafeIdStr,
+    StrictFloat,
     StrictMappingModel,
     as_tuple,
     contract_error,
@@ -67,11 +68,6 @@ Episodes = Annotated[
 Names3 = Annotated[
     tuple[NonEmptyStr, ...], BeforeValidator(as_tuple), Field(min_length=3, max_length=3)
 ]
-VectorN = Annotated[
-    tuple[NonNegativeInt, ...], BeforeValidator(as_tuple), Field(min_length=1, max_length=50)
-]
-FORMAL_SPLIT = (50, 45, 5)
-FORMAL_VALIDATION_POSITIONS = (9, 19, 29, 39, 49)
 
 
 class RGBEncoderSpec(StrictMappingModel):
@@ -150,7 +146,6 @@ class DatasetConfig(StrictMappingModel):
     """Conversion contract and feature source for one learning data root."""
 
     project_root: Path = Path(".")
-    schema_version: Annotated[int, Field(strict=True, ge=1, le=1)] = 1
     fps: Annotated[int, Field(strict=True, ge=20, le=20)]
     chunk_size: Annotated[int, Field(strict=True, ge=60, le=60)]
     action_lead_ns: Annotated[int, Field(strict=True, ge=50_000_000, le=50_000_000)]
@@ -166,18 +161,9 @@ class DatasetConfig(StrictMappingModel):
     attempt_export_glob: NonEmptyStr
     verify_png_pixels: bool
     require_quality: bool
-    diagnostic: bool = False
-    expected_formal_episodes: Annotated[int, Field(strict=True, ge=1, le=9999)] = Field(
+    validation_percent: Annotated[StrictFloat, Field(gt=0.0, lt=100.0)]
+    expected_formal_episodes: Annotated[int, Field(strict=True, ge=2, le=9999)] = Field(
         validation_alias=AliasPath("expected", "formal_episodes")
-    )
-    expected_training_episodes: Annotated[int, Field(strict=True, ge=1, le=9999)] = Field(
-        validation_alias=AliasPath("expected", "training_episodes")
-    )
-    expected_validation_episodes: Annotated[int, Field(strict=True, ge=1, le=9999)] = Field(
-        validation_alias=AliasPath("expected", "validation_episodes")
-    )
-    validation_positions: VectorN = Field(
-        validation_alias=AliasPath("expected", "validation_positions")
     )
     lerobot_source_revision: NonEmptyStr = Field(
         validation_alias=AliasPath("lerobot", "source_revision")
@@ -187,12 +173,6 @@ class DatasetConfig(StrictMappingModel):
     )
     video_backend: Literal["pyav", "torchcodec"] = Field(
         default="pyav", validation_alias=AliasPath("lerobot", "video_backend")
-    )
-    video_files_size_mb: Annotated[int, Field(strict=True, ge=16, le=16384)] = Field(
-        validation_alias=AliasPath("lerobot", "video_files_size_mb")
-    )
-    data_files_size_mb: Annotated[int, Field(strict=True, ge=16, le=16384)] = Field(
-        validation_alias=AliasPath("lerobot", "data_files_size_mb")
     )
     encoder_threads: Annotated[int, Field(strict=True, ge=0, le=64)] = Field(
         validation_alias=AliasPath("lerobot", "encoder_threads")
@@ -223,6 +203,17 @@ class DatasetConfig(StrictMappingModel):
         dataset_after(self)
         return self
 
+    @property
+    def expected_validation_episodes(self) -> int:
+        count = self.expected_formal_episodes
+        requested = Decimal(str(self.validation_percent)) * count / 100
+        rounded = int(requested.to_integral_value(rounding=ROUND_HALF_UP))
+        return min(count - 1, max(1, rounded))
+
+    @property
+    def expected_training_episodes(self) -> int:
+        return self.expected_formal_episodes - self.expected_validation_episodes
+
     rgb_encoder = property(
         lambda self: RGBEncoderSpec(
             vcodec=self.rgb_vcodec, g=self.rgb_g, crf=self.rgb_crf, preset=self.rgb_preset
@@ -239,7 +230,6 @@ class DatasetConfig(StrictMappingModel):
 class TrainingConfig(StrictMappingModel):
     project_root: Path
     source: Path
-    schema_version: Annotated[int, Field(strict=True, ge=1, le=1)] = 1
     mode: NonEmptyStr
     seed: Annotated[NonNegativeInt, Field(le=2**31 - 1)]
     device: NonEmptyStr
@@ -286,9 +276,6 @@ class TrainingConfig(StrictMappingModel):
     val_batches: Annotated[PositiveInt, Field(le=10000)] = Field(
         validation_alias=AliasPath("training", "val_batches")
     )
-    image_shift_px: Annotated[NonNegativeInt, Field(le=32)] = Field(
-        default=0, validation_alias=AliasPath("training", "image_shift_px")
-    )
     deterministic: bool = Field(validation_alias=AliasPath("training", "deterministic"))
     modes: dict[str, ModeSpec]
     model: ModelSpec
@@ -324,11 +311,7 @@ def dataset_before(data: object) -> object:
     for name in ("profile", "select", "output_root", "cache_root"):
         if name in data and not isinstance(data[name], Path):
             data[name] = project_path(data[name], root)
-    unknown(
-        data.get("expected"),
-        {"formal_episodes", "training_episodes", "validation_episodes", "validation_positions"},
-        "expected",
-    )
+    unknown(data.get("expected"), {"formal_episodes"}, "expected")
     lerobot = data.get("lerobot")
     unknown(
         lerobot,
@@ -337,8 +320,6 @@ def dataset_before(data: object) -> object:
             "source_archive_sha256",
             "rgb_encoder",
             "video_backend",
-            "video_files_size_mb",
-            "data_files_size_mb",
             "encoder_threads",
             "image_writer_threads",
         },
@@ -349,35 +330,9 @@ def dataset_before(data: object) -> object:
     return data
 
 
-def dataset_after(config) -> None:
+def dataset_after(config: DatasetConfig) -> None:
     if config.camera_names != ("global", "left_wrist", "right_wrist"):
         raise contract_error("camera_names", "must be global/left_wrist/right_wrist")
-    if len(set(config.validation_positions)) != len(config.validation_positions):
-        raise contract_error("validation_positions", "must be unique")
-    if config.diagnostic:
-        if config.expected_formal_episodes != (
-            config.expected_training_episodes + config.expected_validation_episodes
-        ):
-            raise contract_error(
-                "expected.formal_episodes", "must equal the training and validation episode counts"
-            )
-        if len(config.validation_positions) != config.expected_validation_episodes:
-            raise contract_error("validation_positions", "must name every validation episode")
-        if any(
-            position >= config.expected_formal_episodes for position in config.validation_positions
-        ):
-            raise contract_error(
-                "validation_positions", "must stay inside the configured episode range"
-            )
-    else:
-        if (
-            config.expected_formal_episodes,
-            config.expected_training_episodes,
-            config.expected_validation_episodes,
-        ) != FORMAL_SPLIT:
-            raise contract_error("expected", "formal data must be exactly 50/45/5")
-        if config.validation_positions != FORMAL_VALIDATION_POSITIONS:
-            raise contract_error("validation_positions", "must be the 10th/20th/30th/40th/50th")
     if config.lerobot_source_revision != PINNED_REVISION:
         raise contract_error("lerobot.source_revision", "must be the pinned revision")
     if config.lerobot_source_archive_sha256:
@@ -436,7 +391,6 @@ def training_before(data: object) -> object:
             "log_every_steps",
             "val_every_steps",
             "val_batches",
-            "image_shift_px",
             "deterministic",
         },
         "training",
@@ -508,13 +462,8 @@ def parse_dataset_config(document: object, project_root: str | Path) -> DatasetC
 def load_dataset_config(
     path: str | Path,
     project_root: str | Path,
-    *,
-    overrides: tuple[str, ...] | list[str] = (),
 ) -> DatasetConfig:
-    document = load_yaml(path)
-    if overrides:
-        document = apply_overrides(document, list(overrides))
-    return parse_dataset_config(document, project_root)
+    return parse_dataset_config(load_yaml(path), project_root)
 
 
 def _dataset_config_path(document: dict) -> object:
@@ -541,10 +490,5 @@ def parse_training_config(
 def load_training_config(
     path: str | Path,
     project_root: str | Path,
-    *,
-    overrides: tuple[str, ...] | list[str] = (),
 ) -> TrainingConfig:
-    document = load_yaml(path)
-    if overrides:
-        document = apply_overrides(document, list(overrides))
-    return parse_training_config(document, project_root=project_root, source=path)
+    return parse_training_config(load_yaml(path), project_root=project_root, source=path)

@@ -32,8 +32,6 @@ if ROS_IMPORT_ERROR is not None:  # pragma: no cover
 
 try:
     import rclpy
-    from robot_api_msgs.srv import SubmitFollower
-    from robot_ros_support.stream_conversions import stream_command_message
 except ImportError as error:  # pragma: no cover
     pytest.skip(f"ROS unavailable: {error}", allow_module_level=True)
 
@@ -106,11 +104,7 @@ def test_stop_under_load(tmp_path):
         )
         command_id = f"stop-hold-{uuid.uuid4().hex[:8]}"
         request, _hold = driver.request(stop_target, command_id, 1.2)
-        response = stack.call(
-            "submit_follower",
-            SubmitFollower.Request(request=stream_command_message(request)),
-            timeout=30.0,
-        )
+        response = driver.send(request)
         assert response.accepted, response.reason
         driver.wait_phase(command_id, {"STARTED"}, 20.0)
         before_stop = _snapshot(stack, driver.context)

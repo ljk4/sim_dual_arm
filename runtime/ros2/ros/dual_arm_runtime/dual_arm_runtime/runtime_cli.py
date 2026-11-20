@@ -83,13 +83,9 @@ def _parse_arguments() -> tuple[argparse.Namespace, list[str]]:
     parser.add_argument("--task", help="task id for --robot")
     parser.add_argument("--role", choices=("policy", "teacher"), default="policy")
     parser.add_argument("--shared-root", type=Path)
+    parser.add_argument("--robot-namespace", help=argparse.SUPPRESS)
     parser.add_argument(
-        "--set",
-        dest="overrides",
-        action="append",
-        default=[],
-        metavar="PATH=VALUE",
-        help="override one existing configuration path (repeatable)",
+        "--policy-endpoint", metavar="HOST:PORT", help="Policy Service gRPC address"
     )
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument(
@@ -120,10 +116,14 @@ def _parse_arguments() -> tuple[argparse.Namespace, list[str]]:
         help="bounded seconds to wait for episode cleanup after a signal",
     )
     args, ros_args = parser.parse_known_args()
+    if ros_args and ros_args[0] != "--ros-args":
+        parser.error(f"unrecognized arguments: {' '.join(ros_args)}")
     if args.robot is not None and args.task is None:
         parser.error("--robot requires --task")
     if args.task is not None and args.robot is None:
         parser.error("--task requires --robot")
+    if args.robot_namespace is not None and args.robot is None:
+        parser.error("--robot-namespace requires --robot/--task")
     if args.hold_after_episode and not args.once:
         parser.error("--hold-after-episode requires --once")
     if args.reset_seed is not None and not 0 <= args.reset_seed <= 2**63 - 1:
@@ -153,14 +153,15 @@ def _load_configuration(args: argparse.Namespace, run_id: str):
                 shared_root=args.shared_root,
                 project_root=args.project_root,
                 seed=args.reset_seed,
-                overrides=args.overrides,
             )
+            if args.robot_namespace is not None:
+                resolved.document["robot_namespace"] = args.robot_namespace
             return load_runtime_configuration_document(
                 resolved.document,
                 source=resolved.source,
                 base_dir=resolved.base_dir,
                 project_root=args.project_root,
-                overrides=resolved.overrides,
+                policy_endpoint=args.policy_endpoint,
                 selection=resolved.selection,
             )
         if args.shared_root is not None:
@@ -169,7 +170,7 @@ def _load_configuration(args: argparse.Namespace, run_id: str):
             args.config,
             args.project_root,
             seed=args.reset_seed,
-            overrides=args.overrides,
+            policy_endpoint=args.policy_endpoint,
         )
     except Exception as error:
         _initialization_error(error)

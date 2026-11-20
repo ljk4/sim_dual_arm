@@ -37,8 +37,12 @@ from robot_contracts.trajectory.follower_reference import (
     FollowerReference,
     FollowerValidationLimits,
 )
+from robot_contracts.trajectory.spline import ReferencePlan
 from robot_ros_support.conversions import context_from_message, context_message, duration
-from robot_ros_support.follower_conversions import follower_reference_from_message
+from robot_ros_support.follower_conversions import (
+    follower_reference_from_message,
+    reference_segment_messages,
+)
 from robot_ros_support.stream_conversions import (
     anchor_from_message,
     execution_feedback_from_message,
@@ -47,6 +51,7 @@ from robot_ros_support.stream_conversions import (
 )
 from robot_run_logging import EventContext, Scalar
 from robot_trajectory.follower_reference import validate as validate_follower_reference
+from robot_trajectory.trajectory_generation import generate_follower_plan
 
 from dual_arm_runtime.follower_submit import (
     rejection_type,
@@ -54,6 +59,7 @@ from dual_arm_runtime.follower_submit import (
 )
 from dual_arm_runtime.run_logging import EventSink, check_health, emit_best_effort, emit_event
 from dual_arm_runtime.runtime_config import RuntimeRecipe
+from dual_arm_runtime.runtime_errors import FirstFollowerRejected
 
 _ServiceResponse = (
     AcquireControl.Response
@@ -376,13 +382,15 @@ class RobotControlClient:
             },
         )
 
-    def _submit_once(self, request: StreamRequest):
+    def _submit_once(
+        self, message: SubmitFollower.Request
+    ) -> tuple[SubmitFollower.Response | None, str]:
         try:
             response = cast(
                 SubmitFollower.Response,
                 self._call(
                     "submit_follower",
-                    SubmitFollower.Request(request=stream_command_message(request)),
+                    message,
                     require_success=False,
                 ),
             )
@@ -402,17 +410,28 @@ class RobotControlClient:
         so the caller never invents a new identity to hide an unknown ACK.
         """
         context, command_id = validate_follower_request(self, request)
+        assert self._follower_limits is not None
+        try:
+            plan = generate_follower_plan(request, self._profile, self._follower_limits)
+        except ContractError as error:
+            if request.kind == REQUEST_STREAM_FIRST:
+                raise FirstFollowerRejected(error.reason, str(error).partition(": ")[2]) from error
+            raise
+        message = SubmitFollower.Request(
+            request=stream_command_message(request),
+            segments=reference_segment_messages(plan),
+        )
         self._emit_follower_submit(request, context, command_id)
         attempts = 1 + self._recipe.control.submit_query_retries
         unknown_reason = ""
         queried = False
         for attempt in range(1, attempts + 1):
-            response, failure = self._submit_once(request)
+            response, failure = self._submit_once(message)
             unknown_reason = failure or unknown_reason
             if response is not None:
                 if response.accepted:
                     return self._follower_accepted(
-                        request, response, queried=queried, attempts=attempt
+                        request, response, plan, queried=queried, attempts=attempt
                     )
                 if not _unknown_reason(response.reason):
                     rejection = rejection_type(response, attempt)
@@ -442,6 +461,7 @@ class RobotControlClient:
         self,
         request: StreamRequest,
         response: SubmitFollower.Response,
+        plan: ReferencePlan,
         *,
         queried: bool,
         attempts: int,
@@ -453,6 +473,8 @@ class RobotControlClient:
                 "INVALID_FOLLOWER_REFERENCE", "accepted follower block has no reference"
             )
         reference = follower_reference_from_message(response.reference)
+        if reference.plan != plan:
+            raise ContractError("REFERENCE_PLAN_MISMATCH", "accepted follower plan differs")
         self._validate_follower_reference(request, reference)
         if not response.has_execution:
             execution = self.query(context, command_id, request=request, ignore_stop=True)
@@ -513,7 +535,7 @@ class RobotControlClient:
     # ---- Reset and cleanup --------------------------------------------------------
 
     def reset(self, context: RunContext, lease_id: str, seed: int) -> RunContext:
-        from dual_arm_runtime.task_client import reset_service_type
+        from dual_arm_runtime.simulation.task_client import reset_service_type
 
         ResetSimulation = reset_service_type()
         if "reset_simulation" not in self._clients:

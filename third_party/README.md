@@ -10,6 +10,5 @@
 ## 其他外部资产位置
 
 - **Marvin 仿真模型**：直接维护于 [`simulation/mujoco/assets/marvin/`](../simulation/mujoco/assets/marvin/README.md)，随仿真目录只读挂载至容器 `/app/assets/`。
-- **固定 Ruckig Wheel 安装包**：维护于 [`simulation/mujoco/docker/wheels/`](../simulation/mujoco/docker/wheels/README.md)，包含二进制 wheel、`provenance.json` 来源摘要与上游 MIT 许可证。
 
 目录导航：[上级目录](../README.md)

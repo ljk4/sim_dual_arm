@@ -2,7 +2,6 @@
 #
 # 目标位姿、抓持点和候选路径仍由 planning_config 指向的 P02B 配方提供。
 # 门禁与终态判据与 P03 完整配方一致，评价预算为完整任务 180 s。
-schema_version: 1
 planning_config: ../planning/handover_paths.yaml
 
 success:

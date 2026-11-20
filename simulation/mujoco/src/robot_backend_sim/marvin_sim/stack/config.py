@@ -181,7 +181,6 @@ class StackTaskConfig(StrictMappingModel):
     source: Path = Path("")
     planning_config: Path = Path("")
     config_digest: Annotated[str, Field(pattern=_SHA256)] = "0" * 64
-    schema_version: Annotated[int, Field(strict=True, ge=1, le=1)]
     objects: ObjectsConfig
     success: SuccessConfig
     gates: GatesConfig

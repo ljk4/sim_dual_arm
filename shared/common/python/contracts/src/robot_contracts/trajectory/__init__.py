@@ -24,10 +24,7 @@ _EXPORTS = {
     "LIMIT_ATOL": ".constants",
     "LIMIT_RTOL": ".constants",
     "DIGEST_HEX_LENGTH": ".follower_reference",
-    "FOLLOWER_NORMALIZATION_VERSION": ".follower_reference",
-    "FOLLOWER_REFERENCE_DIGEST_VERSION": ".follower_reference",
     "FOLLOWER_REFERENCE_KINDS": ".follower_reference",
-    "FOLLOWER_SAMPLER_VERSION": ".follower_reference",
 }
 __all__ = sorted(_EXPORTS)
 def __getattr__(name):

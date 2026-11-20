@@ -89,10 +89,10 @@ BINDING = HandoverBinding(
     block_initial_center=(0.55, 0.12, 0.81),
 )
 PROFILE = load_profile(
-    SCENARIO / "profiles/robots/marvin_handover_v1/profile.json",
+    SCENARIO / "profiles/robots/marvin_handover/profile.json",
     ROOT / "shared/common/interfaces/schemas",
 )
-CONTROL = load_control_config(SCENARIO / "profiles/control/marvin_control_v1.yaml")
+CONTROL = load_control_config(SCENARIO / "profiles/control/marvin_control.yaml")
 TASK = load_handover_task_config(
     SCENARIO / "configs/simulation/scene/marvin_handover_task.yaml"
 )

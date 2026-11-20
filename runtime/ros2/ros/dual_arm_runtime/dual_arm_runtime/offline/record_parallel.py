@@ -134,14 +134,6 @@ def parser() -> argparse.ArgumentParser:
         "--backend-template", default=None,
         help="direct simulation teacher recipe (conflicts with --robot/--task)",
     )
-    result.add_argument(
-        "--set",
-        dest="overrides",
-        action="append",
-        default=[],
-        metavar="PATH=VALUE",
-        help="override one existing runtime recipe path (repeatable)",
-    )
     result.add_argument("--realtime-speed", type=float, default=1.0)
     result.add_argument("--domain-base", type=int)
     return result
@@ -272,20 +264,15 @@ class DockerWorkers:
     def _worker_selection_arguments(self, plan: dict | None) -> list[str]:
         scenario = self._scenario_selection_arguments(plan)
         if scenario is not None:
-            for override in self.args.overrides:
-                scenario += ["--set", override]
             return scenario
         if getattr(self.args, "robot", None) is not None:
             raise RuntimeError("binding preflight did not return a scenario selection")
-        arguments = [
+        return [
             "--runtime-config",
             host_path_to_container(self.args.runtime_config, self.args.project_root),
             "--backend-template",
             host_path_to_container(self.args.backend_template, self.args.project_root),
         ]
-        for override in self.args.overrides:
-            arguments += ["--set", override]
-        return arguments
 
     def prepare(self, plan: dict | None = None) -> list[dict]:
         self.ensure_runtime()
@@ -353,8 +340,6 @@ class DockerWorkers:
                 "--max-consecutive-failures", str(self.args.max_consecutive_failures),
                 "--purpose", self.args.purpose,
                 *selection_arguments,
-                *[item for override in self.args.overrides
-                  for item in ("--set", override)],
                 "--worker-manifest", str(relative / "workers.json"),
                 *(["--target-total", str(self.args.target_total)]
                   if self.args.target_total is not None else []),
@@ -384,7 +369,10 @@ class DockerWorkers:
                     ["docker", "exec", self.runtime, "kill", "-TERM", str(pid)],
                     check=False, timeout=10, capture_output=True,
                 )
-                self.controller.wait(timeout=35)
+                # Give Runtime time to stop the collectors and persist terminal facts
+                # before taking their simulation backends offline.
+                grace = (self.plan or {}).get("stop_grace_s", 0.0)
+                self.controller.wait(timeout=max(35.0, grace + 10.0))
             except (OSError, ValueError, subprocess.TimeoutExpired):
                 self.controller.terminate()
         def stop(name: str) -> None:
@@ -429,8 +417,6 @@ def _print_startup_info(
         f"最大连败: {args.max_consecutive_failures} | 实时倍速: {args.realtime_speed}",
         flush=True,
     )
-    if args.overrides:
-        print(f"参数覆盖: {'; '.join(args.overrides)}", flush=True)
     print(f"批次目录: {directory}", flush=True)
     status = plan.get("campaign_status")
     if isinstance(status, dict):

@@ -20,18 +20,18 @@ Marvin 固定根双臂方案：左手抓取物块、空中交接给右手、再�
 | `configs/simulation/checks/handover_right_grasp_miss_task.yaml` | 右手未接稳负向诊断：右闭爪命令宽于物块，其他参数相同 |
 | `configs/runtime/teacher_collect.yaml` | runtime Teacher 采集配方（180 s 任务预算、能力标识） |
 | `configs/runtime/policy_eval.yaml` | runtime Policy 执行配方（180 s 任务预算、1 s 停止余量、420 s 墙钟） |
-| `configs/learning/act_dataset.yaml` | 正式数据转换：50 条、45/5 划分、validation `[9,19,29,39,49]`、`diagnostic: false` |
+| `configs/learning/act_dataset.yaml` | 正式数据转换，50 条合格局，随机抽取 10% 作为验证集 |
 | `configs/learning/act_training.yaml` | ACT full 5000 步、训练日志与模型路径 |
 | `configs/learning/policy.yaml` | ACT Policy 服务；首轮关闭时间融合，按实测为 `left_joint7` 与两夹爪配置逐轴修正额度 |
 | `configs/runtime/experiments/handover_campaign.yaml` | 正式采集预算（50 条 / 最多 100 次尝试）、种子、台账、阶段质量规则、导出标签上限与独立路径 |
 | `extensions/ros/marvin_handover_api_msgs/` | 60×16 交接 Teacher IDL、能力标识与包构建文件 |
-| `profiles/control/marvin_control_v1.yaml` | 16 维控制轴、实测跟踪容差、停止与接触参数 |
-| `profiles/control/marvin_stream_v1.yaml` | 连续块流的提前量、观测年龄与超时 |
-| `profiles/control/marvin_follower_v1.yaml` | Teacher 有界跟随窗口、参考偏差预算与终端尾长 |
-| `profiles/control/marvin_follower_inference_v1.yaml` | ACT 推理窗口与逐轴参考偏差上限，独立于关节硬限位 |
-| `profiles/robots/marvin_handover_v1/` | Robot Profile v2、三路相机标定文件；Profile 摘要由本方案场景声明计算 |
-| `profiles/observations/marvin_rgb_joint_v1.json` | 三路 RGB + 16 维机器人状态 |
-| `profiles/actions/marvin_joint_position_v1.json` | 16 维关节位置动作 |
+| `profiles/control/marvin_control.yaml` | 16 维控制轴、实测跟踪容差、停止与接触参数 |
+| `profiles/control/marvin_stream.yaml` | 连续块流的提前量、观测年龄与超时 |
+| `profiles/control/marvin_follower.yaml` | Teacher 有界跟随窗口、参考偏差预算与终端尾长 |
+| `profiles/control/marvin_follower_inference.yaml` | ACT 推理窗口与逐轴参考偏差上限，独立于关节硬限位 |
+| `profiles/robots/marvin_handover/` | Robot Profile 和三路相机标定文件。Profile 摘要根据场景声明计算。 |
+| `profiles/observations/marvin_rgb_joint.json` | 三路 RGB + 16 维机器人状态 |
+| `profiles/actions/marvin_joint_position.json` | 16 维关节位置动作 |
 
 Marvin 的原始 URDF/STL 位于仿真端 [`assets/marvin/`](../../../../simulation/mujoco/assets/marvin/README.md)。堆叠方案复用本目录的控制、跟随、观测与动作档案。
 
@@ -72,7 +72,7 @@ scripts/build_sdk.sh
 ```bash
 python3 -m robot_backend_sim.tools.check_marvin_scene \
   --scene-config /shared/scenarios/marvin_sim/handover/configs/simulation/scene/marvin_handover.yaml \
-  --profile /shared/scenarios/marvin_sim/handover/profiles/robots/marvin_handover_v1/profile.json \
+  --profile /shared/scenarios/marvin_sim/handover/profiles/robots/marvin_handover/profile.json \
   --schemas /shared/common/interfaces/schemas \
   --report-root /data/marvin_sim/handover/debug/marvin \
   --run-id marvin-p01a
@@ -82,16 +82,18 @@ python3 -m robot_backend_sim.tools.check_marvin_scene \
 
 ## 操作入口
 
-使用 `--robot marvin_sim --task handover` 从本目录的 binding 选择配方，或用 `--config` 指定配方。重复 `--set dot.path=value` 可覆盖配方中已存在的键。
+使用 `--robot marvin_sim --task handover` 从本目录的 binding 选择配方，或用 `--config` 指定配方。
 
 ### 采集
+
+使用条数、用途和仿真倍速等专用参数。其他采集参数在相应配方中修改。
 
 ```bash
 # simulation 容器：直接启动 Teacher 后端
 scripts/backend.sh --robot marvin_sim --task handover --role teacher \
   --seed 0 --run-id teacher-backend
 
-# runtime 容器：试采与正式采集（默认后端日志为 /data/marvin_sim/handover/logs/backend/teacher-backend/log）
+# runtime 容器：使用已启动的 Teacher 后端试采
 scripts/record.sh --robot marvin_sim --task handover \
   --purpose pilot --count 1 --max-consecutive-failures 1
 
@@ -103,7 +105,7 @@ scripts/record.sh --robot marvin_sim --task handover \
 scripts/record.sh status --robot marvin_sim --task handover
 ```
 
-正式采集达到 campaign 目标时也会自动原子写出 `var/marvin_sim/handover/datasets/raw/formal-select.json`。质量规则按本任务阶段声明：左手抓取看左腕/全局，空中交接看物块与左右腕，运输/放置看右腕/全局与箱口；`left_grasp`、`dual_hold`、`left_release`、`right_release` 为必需阶段，缺失即导出不合格。
+正式采集达到 campaign 目标时，Runtime 将有序合格局写入 `var/marvin_sim/handover/datasets/raw/formal-select.json`。质量规则按本任务阶段声明：左手抓取看左腕/全局，空中交接看物块与左右腕，运输/放置看右腕/全局与箱口；`left_grasp`、`dual_hold`、`left_release`、`right_release` 为必需阶段，缺失即导出不合格。
 
 ### 数据转换与训练
 
@@ -113,7 +115,7 @@ scripts/convert.sh --robot marvin_sim --task handover
 scripts/train.sh --robot marvin_sim --task handover --mode full
 ```
 
-`act_dataset.yaml` 按 50 条正式数据做 45/5 划分。训练将 `model.safetensors` 和 `training_args.yaml` 写入 `/data/marvin_sim/handover/models/act_<时间戳>/`。
+Learning 转换器按 `act_dataset.yaml` 的 `validation_percent` 从 50 条合格局随机抽取 10% 作为验证集。训练将 `model.safetensors` 和 `training_args.yaml` 写入 `/data/marvin_sim/handover/models/act_<时间戳>/`。
 
 ### 推理
 

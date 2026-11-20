@@ -20,9 +20,6 @@ from robot_contracts.models import (
 )
 from robot_contracts.stream_request import REQUEST_STREAM_FIRST, StreamRequest, Trajectory
 from robot_contracts.trajectory.follower_reference import (
-    FOLLOWER_NORMALIZATION_VERSION,
-    FOLLOWER_REFERENCE_DIGEST_VERSION,
-    FOLLOWER_SAMPLER_VERSION,
     FollowerReference,
     FollowerValidationLimits,
     compute_follower_reference_digest,
@@ -51,7 +48,7 @@ CONTEXT = RunContext(
 TARGET_POSITION = 0.03
 PLAN_NS = 150_000_000
 WINDOW_NS = 250_000_000
-PRODUCER = "fixture-producer/v1"
+PRODUCER = "fixture-producer"
 
 # Deliberately smaller than the accepted round-off allowance so the
 # raw endpoint is outside the hard range but the shared normalizer legally clips
@@ -128,7 +125,7 @@ def prepared() -> PreparedFollowerPlan:
         requested_window_ns=WINDOW_NS - 100_000_000,
         curve_duration_ns=PLAN_NS,
         duration_grid_ns=None,
-        algorithm_version=PRODUCER,
+        algorithm=PRODUCER,
     )
 
 
@@ -177,9 +174,7 @@ def constraints() -> FollowerValidationLimits:
 def test_record_is_independent_and_digest_covers_every_field():
     record = reference()
     assert record.reference_digest == compute_follower_reference_digest(record)
-    assert record.algorithm_version == PRODUCER
-    assert record.sampler_version == FOLLOWER_SAMPLER_VERSION
-    assert record.normalization_version == FOLLOWER_NORMALIZATION_VERSION
+    assert record.algorithm == PRODUCER
     assert record.chunk_seq == 1 and record.mode == "STREAM_FIRST"
     assert record.extension_ns == 0
 
@@ -211,8 +206,6 @@ def test_record_is_independent_and_digest_covers_every_field():
         ("velocity_limited", (True, False)),
         ("acceleration_limited", (True, False)),
         ("boundary_preserved", (False, True)),
-        ("sampler_version", "future-sampler"),
-        ("normalization_version", "future-normalization"),
     ),
 )
 def test_any_protected_field_tamper_fails(field, value):
@@ -285,33 +278,25 @@ def test_independent_actual_reference_reconstruction_and_corrections():
     assert raw.positions == sample_reference_interval(record.plan, PLAN_NS // 2).positions
 
 
-def test_shared_conventions_are_rejected_when_unknown():
-    record = reference()
-    for field in ("sampler_version", "normalization_version"):
-        with pytest.raises(ContractError) as caught:
-            replace(record, **{field: "unknown-v999"})
-        assert caught.value.reason == "INVALID_FOLLOWER_REFERENCE"
-
-
 def test_same_curve_accepts_different_producer_identity():
     first = reference()
     second = replace(
-        first, algorithm_version="another-producer/v7", reference_digest=None
+        first, algorithm="another-producer", reference_digest=None
     )
     assert first.plan == second.plan
-    assert second.algorithm_version == "another-producer/v7"
+    assert second.algorithm == "another-producer"
     assert second.reference_digest != first.reference_digest
     rebuilt_first = validate(first, profile(), constraints())
     rebuilt_second = validate(second, profile(), constraints())
     assert rebuilt_first.plan == rebuilt_second.plan
     assert rebuilt_first.actual_terminal_positions == rebuilt_second.actual_terminal_positions
     assert rebuilt_first.flags == rebuilt_second.flags
-    assert rebuilt_second.algorithm_version == second.algorithm_version
+    assert rebuilt_second.algorithm == second.algorithm
 
 
 def test_producer_identity_must_be_a_non_empty_string():
     with pytest.raises(ContractError) as caught:
-        replace(reference(), algorithm_version="")
+        replace(reference(), algorithm="")
     assert caught.value.reason == "INVALID_FOLLOWER_REFERENCE"
 
 

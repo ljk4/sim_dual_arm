@@ -41,13 +41,17 @@ try:
         FollowerReference,
     )
     from robot_ros_support.conversions import context_from_message, context_message, duration
-    from robot_ros_support.follower_conversions import follower_reference_from_message
+    from robot_ros_support.follower_conversions import (
+        follower_reference_from_message,
+        reference_segment_messages,
+    )
     from robot_ros_support.qos import SENSOR_QOS
     from robot_ros_support.stream_conversions import (
         anchor_from_message,
         execution_feedback_from_message,
         stream_command_message,
     )
+    from robot_trajectory.trajectory_generation import generate_follower_plan
 except ImportError as error:  # pragma: no cover - host without ROS
     pytest.skip(f"ROS unavailable: {error}", allow_module_level=True)
 
@@ -56,7 +60,12 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
+from robot_backend_sim.common.config.backend_config import load_backend_config  # noqa: E402
+from robot_backend_sim.common.config.follower_config import load_follower_config  # noqa: E402
+from robot_backend_sim.common.config.motion_config import load_control_config  # noqa: E402
 from robot_backend_sim.common.config.scenario_config import ROBOT_REFERENCE_FIELDS  # noqa: E402
+from robot_backend_sim.common.config.scene_loader import load_scene_config_for  # noqa: E402
+from robot_backend_sim.common.follower.follower_protocol import validation_limits  # noqa: E402
 from robot_contracts.models import Target  # noqa: E402
 from robot_contracts.profiles import load_profile  # noqa: E402
 
@@ -67,10 +76,19 @@ RECIPE = Path(
         str(SCENARIO / "configs/simulation/backend/backend_marvin_control.yaml"),
     )
 )
-EVIDENCE_DIR = Path(os.environ.get("P02A_EVIDENCE_DIR", "/data/marvin_sim/handover/diagnostics/p02a"))
-PROFILE_PATH = SCENARIO / "profiles/robots/marvin_handover_v1/profile.json"
+EVIDENCE_DIR = Path(
+    os.environ.get("P02A_EVIDENCE_DIR", "/data/marvin_sim/handover/diagnostics/p02a")
+)
+PROFILE_PATH = SCENARIO / "profiles/robots/marvin_handover/profile.json"
 SCHEMAS = ROOT / "shared/common/interfaces/schemas"
 PROFILE = load_profile(PROFILE_PATH, SCHEMAS)
+_BACKEND = load_backend_config(RECIPE)
+assert _BACKEND.follower_path is not None
+_FOLLOWER = load_follower_config(_BACKEND.follower_path)
+_GRID_NS = round(load_scene_config_for(_BACKEND.scene_path).physics.timestep * 1e9)
+_LIMITS = validation_limits(
+    load_control_config(_BACKEND.control_path), _FOLLOWER, duration_grid_ns=_GRID_NS
+)
 
 
 def _direct_document(path: Path) -> dict:
@@ -83,8 +101,9 @@ def _direct_document(path: Path) -> dict:
             robot[field] = str((path.parent / value).resolve())
     return document
 
-TARGET_COUNT = 20
-POINT_NS = 50_000_000
+TARGET_COUNT = _FOLLOWER.target_count
+# The single opening/closing windows span about two seconds to fit the gripper speed.
+POINT_NS = max(1, round(2_000_000_000 / (TARGET_COUNT * _GRID_NS))) * _GRID_NS
 LEASE_NS = 8_000_000_000
 LEASE_RENEW_NS = 3_000_000_000
 TERMINAL = frozenset({"COMPLETED", "STOPPED", "FAILED", "CANCELED"})
@@ -271,19 +290,14 @@ def _smoothstep(t: float) -> float:
 def _source_targets(
     hold: tuple[float, ...], target: tuple[float, ...], lead_ns: int
 ) -> tuple[Target, ...]:
-    first = int(lead_ns // POINT_NS)
-    total = first + TARGET_COUNT
-    values = []
-    for index in range(total):
-        progress = (index + 1 - first) / TARGET_COUNT
-        factor = _smoothstep(progress)
-        values.append(
-            Target(
-                (index + 1) * POINT_NS,
-                tuple(h + (v - h) * factor for h, v in zip(hold, target, strict=True)),
-            )
+    return tuple(
+        Target(
+            lead_ns + index * POINT_NS,
+            tuple(h + (v - h) * _smoothstep(index / TARGET_COUNT)
+                  for h, v in zip(hold, target, strict=True)),
         )
-    return tuple(values)
+        for index in range(1, TARGET_COUNT + 1)
+    )
 
 
 class Driver:
@@ -352,7 +366,7 @@ class Driver:
         hold = tuple(float(value) for value in anchor.reference.positions)
         observed = self.stack.latest_sim_ns()
         lead_ns = int(anchor.start_sim_time_ns) - observed
-        assert lead_ns > POINT_NS, (
+        assert lead_ns > 0, (
             f"anchor lead {lead_ns} ns leaves no selectable window after the observation"
         )
         self.command_seq += 1
@@ -376,16 +390,36 @@ class Driver:
         )
         return request, hold
 
-    def submit(self, target: tuple[float, ...], label: str) -> dict[str, object]:
+    def send(self, request: StreamRequest, *, hold_reference: bool = False):
+        planning_request = request
+        if hold_reference:
+            # Preserve the over-limit wire targets while supplying a well-formed curve
+            # for the backend's independent target validation.
+            assert request.anchor is not None
+            hold = request.anchor.reference.positions
+            hold_targets = tuple(
+                Target(point.time_ns, hold) for point in request.trajectory.targets
+            )
+            planning_trajectory = request.trajectory.model_copy(update={"targets": hold_targets})
+            planning_request = request.model_copy(update={"trajectory": planning_trajectory})
+        plan = generate_follower_plan(planning_request, PROFILE, _LIMITS)
+        return self.stack.call(
+            "submit_follower",
+            SubmitFollower.Request(
+                request=stream_command_message(request),
+                segments=reference_segment_messages(plan),
+            ),
+            timeout=20.0,
+        )
+
+    def submit(
+        self, target: tuple[float, ...], label: str, *, hold_reference: bool = False
+    ) -> dict[str, object]:
         self.renew()
         command_id = f"{label}-{uuid.uuid4().hex[:8]}"
         request, hold = self._request(target, command_id)
         states_before = len(self.stack.states)
-        response = self.stack.call(
-            "submit_follower",
-            SubmitFollower.Request(request=stream_command_message(request)),
-            timeout=20.0,
-        )
+        response = self.send(request, hold_reference=hold_reference)
         record: dict[str, object] = {
             "label": label,
             "command_id": command_id,
@@ -592,7 +626,7 @@ def test_marvin_robot_api_execution(tmp_path):
         # Let the preceding valid opening finish its small servo relaxation.
         stack.spin(0.5)
         before_limit = stack.latest_state()
-        limit = driver.submit(target(left_joint1=4.0), "over-limit")
+        limit = driver.submit(target(left_joint1=4.0), "over-limit", hold_reference=True)
         assert not limit["accepted"]
         assert limit["reason"]
         stack.spin(0.2)
@@ -607,11 +641,7 @@ def test_marvin_robot_api_execution(tmp_path):
         })
         command_id = f"stop-{uuid.uuid4().hex[:8]}"
         request, _hold = driver._request(stop_target, command_id)
-        response = stack.call(
-            "submit_follower",
-            SubmitFollower.Request(request=stream_command_message(request)),
-            timeout=20.0,
-        )
+        response = driver.send(request)
         assert response.accepted, response.reason
         driver.wait_phase(command_id, {"STARTED"}, 10.0)
         running = True

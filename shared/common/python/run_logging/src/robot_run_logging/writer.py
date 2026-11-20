@@ -413,7 +413,6 @@ class EventLogger:
         if state == "complete" and failure is not None:
             state = "failed"
         summary = {
-            "schema_version": 1,
             "run_id": self._run_id,
             "component": self._component,
             "instance_id": self._instance_id,

@@ -7,18 +7,20 @@
 
 两个方案共用同一套通用实现：仿真端负责物理步进、三路相机渲染与程序示教（Teacher），运行端负责观测同步、流式动作块调度与 MCAP 录制，学习端负责数据集转换、ACT 训练与 gRPC Policy 服务。
 
+Stack 与 Handover 均按各自配方的固定物块位姿复位。采集和评估的种子用于区分运行。
+
 ## 架构概览
 
 仓库按职能划分为三个容器化运行端、真机边界与公共/方案层：
 
-- **`simulation/mujoco/`**：MuJoCo 物理仿真后端，负责机器人动力学、三路 EGL 相机渲染、Ruckig 有界跟随与接触判定，通过 ROS 2 接口对外提供服务。
-- **`runtime/ros2/`**：ROS 2 运行端，负责多路观测同步、控制租约与流式动作块调度、MCAP 录制、离线审计、导出与采集调度。
+- **`simulation/mujoco/`**：MuJoCo 物理仿真后端，负责机器人动力学、三路 EGL 相机渲染、已提交轨迹的安全校验与执行、接触判定和程序示教。
+- **`runtime/ros2/`**：ROS 2 运行端，负责观测同步、控制租约、Policy 和 Teacher 的轨迹生成与提交、MCAP 录制与离线审计。仿真运行代码负责仿真任务和采集组织。
 - **`learning/lerobot/`**：ROS-free 学习与策略服务端，负责数据集转换、ACT 混合精度训练、模型（`model.safetensors` + `training_args.yaml`）写出与 gRPC Policy 推理服务。
 - **`hardware/`**：真机 Robot API 边界说明；当前没有可验证的真实驱动。
 - **`shared/common/`**：公共层，只放跨端接口约束（Policy Protobuf、ROS 2 IDL、JSON Schema）、共享 Python 包与通用工具，不选择具体任务、机器人或算法。
 - **`shared/scenarios/<robot-id>/<task-id>/`**：两级方案绑定层，用 `binding.yaml` 选择档案、配方与方案专用接口（如 `shared/scenarios/marvin_sim/stack/`、`shared/scenarios/marvin_sim/handover/`）；[`_template`](shared/scenarios/_template/README.md) 说明新增方案的方法。
 
-**三端统一的一步式工作流**：任何端启动时只传 `--robot <robot-id> --task <task-id>`，由该方案 `binding.yaml` 在内存中选择并展开配方；所有入口支持重复 `--set dot.path=value` 覆盖配方中已存在的键，用于临时调参。直接配置模式仍可用：把 `--robot ... --task ...` 换成对应端的 `--config <recipe>`（学习端策略服务也接受 `--config`）。
+使用 `--robot <robot-id> --task <task-id>` 时，该方案的 `binding.yaml` 在内存中选择并展开配方。条数、并发数和仿真倍速等运行参数使用专用选项，其余参数在对应配方中修改。直接配置模式使用各命令帮助列出的配置路径参数。
 
 ```text
 simulation backend ──ROS 2──▶ runtime ──gRPC──▶ learning policy service
@@ -81,7 +83,7 @@ var/marvin_sim/stack/
 
 ## 2. 数据采集流程
 
-按顺序完成：**单路试采一次（pilot，可观察可视化）→ 停止手动后端与 viewer → 宿主机并行补足 50 条合格正式数据 → 自动生成训练/验证清单 → 第 3 节转换与训练**。
+按顺序完成：**单路试采一次（pilot，可观察可视化）→ 停止手动后端与 viewer → 宿主机并行补足 50 条合格正式数据 → 自动生成有序合格清单 → 第 3 节转换与训练**。
 
 ### 2.1 启动 Runtime 容器并构建 SDK
 
@@ -112,10 +114,10 @@ scripts/build_sdk.sh
 scripts/teacher_backend.sh --robot marvin_sim --task stack
 ```
 
-需要切换方案或临时调参时可追加参数，例如降低仿真速度：
+降低仿真速度时使用 `--realtime-speed`。其他仿真参数在方案的 Teacher 后端配方中修改。
 
 ```bash
-scripts/teacher_backend.sh --robot marvin_sim --task stack --seed 0 --run-id teacher-backend --set run.realtime_speed=0.4
+scripts/teacher_backend.sh --robot marvin_sim --task stack --seed 0 --run-id teacher-backend --realtime-speed 0.4
 ```
 
 ### 2.3 试采时开启实时 MuJoCo 可视化（可选）
@@ -139,7 +141,7 @@ scripts/record.sh \
 
 确认试采命令退出码为 0，末尾 `recording.finished` 的 `reason` 为 `target_reached`、`qualified` 为 1；本局应同时满足任务成功、录制完整、导出质量合格。若失败，先检查日志并修复，再重新执行本节的试采命令。
 
-`--count` 统计本次新增合格条数；`--max-consecutive-failures 1` 让试采最多尝试一次。每次试采继续记录在原台账并占用 pilot 预算，种子自动递增；pilot 数据不会进入后面的正式训练/验证清单。
+`--count` 统计本次新增合格条数；`--max-consecutive-failures 1` 让试采最多尝试一次。每次试采继续记录在原台账并占用 pilot 预算，种子自动递增。正式清单只收录合格的 formal 采集局。
 
 ### 2.5 停止试采后端和 viewer
 
@@ -159,15 +161,15 @@ scripts/record.sh \
 
 并行 worker 禁用 viewer 状态发布、预览 PNG 和 GIF，保留训练 RGB、标签及质量门禁。连续失败按各 worker 进程独立计数，合格一次清零，终端只显示当前最大连败数；任一 worker 连续 3 次不合格会取消在途任务并提前退出，取消项仍占预算。预算/种子不足也会停止。按 `Ctrl-C` 可中断本批次；命令结束时自动清理本批次后台实例。配置、backend 日志和性能汇总保存到 `var/marvin_sim/stack/logs/collection/record-pools/pool-*/`。
 
-### 2.7 查看数据集与训练/验证清单状态
+### 2.7 查看采集与正式清单状态
 
-回到 **runtime 容器终端**即可查看当前数据集、磁盘占用与训练/验证清单划分状态（显式指定机器人/任务）：
+在 **runtime 容器终端**查看合格条数、磁盘占用与正式清单状态：
 
 ```bash
 scripts/record.sh status --robot marvin_sim --task stack
 ```
 
-确认清单状态显示为 `SELECTED`后，即可进入第 3 节的转换与训练。
+确认清单状态显示为 `SELECTED` 后，即可进入第 3 节的转换与训练。
 
 ---
 
@@ -183,7 +185,7 @@ scripts/record.sh status --robot marvin_sim --task stack
 
 ### 3.2 转换数据集与训练 ACT 模型
 
-在 `learning` 容器内将正式清单中的 50 条合格 episode 转换为 LeRobot 数据集（45 条训练 / 5 条验证，输出至 `/data/marvin_sim/stack/datasets/lerobot`）。转换配方直接读取 `/data/marvin_sim/stack/datasets/raw/formal-select.json`，无需移动原始数据：
+在 `learning` 容器内读取 `/data/marvin_sim/stack/datasets/raw/formal-select.json`。转换器按 `act_dataset.yaml` 的 `validation_percent` 随机抽取整局作为验证集，其余局进入训练集。正式配方使用 10%，50 条合格局划分为 45 条训练和 5 条验证。划分结果写入 `/data/marvin_sim/stack/datasets/lerobot/manifest.json`。
 
 ```bash
 scripts/convert.sh --robot marvin_sim --task stack
@@ -250,7 +252,7 @@ scripts/client_policy.sh \
   --reset-seed 6000 --run-id policy-run
 ```
 
-后续测试不同随机种子时，直接传入新的种子即可，无需重新生成任何配置：
+再次执行同一固定布局时，可以用新的种子区分运行：
 
 ```bash
 scripts/client_interactive.sh \
@@ -274,7 +276,7 @@ scripts/client_interactive.sh \
 var/marvin_sim/stack/
 ├── datasets/
 │   ├── raw/
-│   │   ├── formal-select.json         # 达标时自动原子写出，供 convert 消费
+│   │   ├── formal-select.json         # 达标时发布的有序合格局清单
 │   │   └── <purpose>-<seed>-<run_id>/ # 每次采集尝试
 │   │       ├── raw/                   # manifest.json、task_result.json、recording/（rosbag2 MCAP）
 │   │       └── export/                # labels.json、raw_predictions.json、quality.json、rgb/<frame>/<camera>.png

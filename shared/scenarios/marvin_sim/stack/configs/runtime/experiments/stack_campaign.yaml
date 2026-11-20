@@ -1,5 +1,4 @@
 # Marvin stack campaign collection budget, seeds and export quality thresholds.
-schema_version: 1
 diagnostic: false
 
 budget:
@@ -14,7 +13,6 @@ budget:
   formal_seed_last: 2099
   formal_max_attempts: 100
   formal_target_qualified: 50
-  formal_validation_qualified_indices: [9, 19, 29, 39, 49]
 
   test_seed_first: 6000
   test_seed_last: 6019
@@ -40,11 +38,11 @@ paths:
     - shared/scenarios/marvin_sim/stack/configs/simulation/checks/kinematics_check.yaml
     - shared/scenarios/marvin_sim/stack/extensions/ros/marvin_stack_api_msgs/srv/GetTeacherChunk.srv
     - shared/scenarios/marvin_sim/stack/extensions/ros/marvin_stack_api_msgs/msg/TeacherCapability.msg
-    - shared/scenarios/marvin_sim/stack/profiles/robots/marvin_stack_v1/profile.json
-    - shared/scenarios/marvin_sim/handover/profiles/observations/marvin_rgb_joint_v1.json
-    - shared/scenarios/marvin_sim/handover/profiles/actions/marvin_joint_position_v1.json
-    - shared/scenarios/marvin_sim/handover/profiles/control/marvin_control_v1.yaml
-    - shared/scenarios/marvin_sim/handover/profiles/control/marvin_follower_v1.yaml
+    - shared/scenarios/marvin_sim/stack/profiles/robots/marvin_stack/profile.json
+    - shared/scenarios/marvin_sim/handover/profiles/observations/marvin_rgb_joint.json
+    - shared/scenarios/marvin_sim/handover/profiles/actions/marvin_joint_position.json
+    - shared/scenarios/marvin_sim/handover/profiles/control/marvin_control.yaml
+    - shared/scenarios/marvin_sim/handover/profiles/control/marvin_follower.yaml
     - runtime/ros2/docker/docker-compose.yml
   sdk_marker: build/ros-dev/contracts.json
 

@@ -8,7 +8,6 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BeforeValidator, Field, model_validator
 from robot_contracts.models import ContractError, RobotProfile
-from robot_contracts.overrides import OverrideError, apply_overrides
 from robot_contracts.profiles import load_profile, semantic_hash, validate_bindings
 from robot_contracts.project_paths import project_path
 from robot_contracts.validation import (
@@ -28,27 +27,29 @@ from robot_contracts.validation import (
 from robot_run_logging import LogSettings
 
 from dual_arm_runtime.recording_queue import RecordingSettings
+from dual_arm_runtime.runtime_limits import (
+    INT64_MAX,
+    MAX_CHUNKS,
+    MAX_TASK_BUDGET_NS,
+    STREAM_CHUNK_SIZE,
+    STREAM_PERIOD_NS,
+)
+from dual_arm_runtime.simulation.options import ResetConfig, TeacherConfig, task_enabled
+from dual_arm_runtime.simulation.options import required_capabilities as simulation_capabilities
 
 MIN_LEASE_DURATION_NS = 100_000_000
 MAX_LEASE_DURATION_NS = 10_000_000_000
-MAX_CHUNKS = 2048
-# A bounded task budget, not a per-task default.  Recipes declare their own
-# value and the coverage check below ties it to chunks, target count and period.
-MAX_TASK_BUDGET_NS = 300_000_000_000
-STREAM_CHUNK_SIZE = 60
-STREAM_PERIOD_NS = 50_000_000
-INT64_MAX = 2**63 - 1
 UINT64_MAX = 2**64 - 1
 REQUIRED_CAPABILITIES = (
     "continuous_chunks",
     "exact_capture",
-    "simulation_reset",
     "lease",
     "stop",
     "command_query",
     "control_events",
     "follower_reference",
-    "execution_feedback.gripper_set.v1",
+    "bounded_target_follower",
+    "execution_feedback.gripper_set",
 )
 _VECTOR = Annotated[
     tuple[StrictFloat, ...], BeforeValidator(as_tuple), Field(min_length=1, max_length=64)
@@ -66,11 +67,6 @@ class MotionSpec(StrictMappingModel):
     name: NonEmptyStr
     duration_ns: Annotated[PositiveInt, Field(le=3_000_000_000)]
     positions: _VECTOR
-
-
-class ResetConfig(StrictMappingModel):
-    enabled: bool
-    seed: Annotated[NonNegativeInt, Field(le=INT64_MAX)]
 
 
 class ObservationConfig(StrictMappingModel):
@@ -163,32 +159,7 @@ class PolicyConfig(StrictMappingModel):
         return self
 
 
-class TeacherConfig(StrictMappingModel):
-    """Program-teacher stream identity, independent of policy RPC settings."""
-
-    chunk_size: Annotated[int, Field(strict=True, ge=STREAM_CHUNK_SIZE, le=STREAM_CHUNK_SIZE)] = (
-        STREAM_CHUNK_SIZE
-    )
-    action_period_ns: Annotated[
-        int, Field(strict=True, ge=STREAM_PERIOD_NS, le=STREAM_PERIOD_NS)
-    ] = STREAM_PERIOD_NS
-    initial_lead_ns: PositiveInt = 250_000_000
-    max_chunks: Annotated[PositiveInt, Field(le=MAX_CHUNKS)] = 128
-    total_sim_deadline_ns: PositiveInt = 30_000_000_000
-    total_wall_deadline_s: PositiveFloat = 60.0
-    prepare_timeout_s: PositiveFloat = 12.0
-    start_timeout_s: PositiveFloat = 5.0
-    chunk_deadline_s: PositiveFloat = 2.0
-    poll_interval_s: PositiveFloat = 0.02
-    termination_mode: Literal["finite_chunks", "task"] = "task"
-    task_stop_margin_s: PositiveFloat = 1.0
-    task_sim_budget_ns: Annotated[PositiveInt, Field(le=MAX_TASK_BUDGET_NS)] = 30_000_000_000
-    # Episode metadata identity selected by the scenario recipe.
-    task_id: NonEmptyStr = "teacher"
-
-
 class RuntimeRecipe(StrictMappingModel):
-    schema_version: Annotated[int, Field(strict=True, ge=1, le=1)]
     robot_profile: NonEmptyStr
     observation_schema: NonEmptyStr
     action_schema: NonEmptyStr
@@ -202,7 +173,7 @@ class RuntimeRecipe(StrictMappingModel):
     startup_timeout_s: PositiveFloat
     call_timeout_s: PositiveFloat
     command_timeout_s: PositiveFloat
-    reset: ResetConfig
+    reset: ResetConfig = ResetConfig()
     observation: ObservationConfig
     control: ControlConfig
     motions: Annotated[tuple[MotionSpec, ...], BeforeValidator(as_tuple), Field(max_length=64)] = ()
@@ -290,6 +261,19 @@ class RuntimeRecipe(StrictMappingModel):
     def test_only(self) -> bool:
         return False
 
+    @property
+    def simulation_capabilities(self) -> tuple[str, ...]:
+        return simulation_capabilities(
+            reset_enabled=self.reset.enabled,
+            task_enabled=task_enabled(self),
+            teacher_api=self.teacher_api,
+        )
+
+    @property
+    def required_capabilities(self) -> tuple[str, ...]:
+        reliable = ("reliable_sensor_streams",) if self.observation.reliable else ()
+        return (*REQUIRED_CAPABILITIES, *reliable, *self.simulation_capabilities)
+
 
 class RuntimeConfiguration(StrictMappingModel):
     recipe: RuntimeRecipe
@@ -298,17 +282,13 @@ class RuntimeConfiguration(StrictMappingModel):
     control_document: dict[str, Any]
     snapshot_json: str = Field(exclude=True, repr=False)
     selection: dict[str, Any] | None = None
-    overrides: tuple[str, ...] = ()
     configuration_source: str = ""
 
     snapshot = property(lambda self: json.loads(self.snapshot_json))
 
     @property
     def required_capabilities(self) -> tuple[str, ...]:
-        capabilities = list(REQUIRED_CAPABILITIES)
-        if self.recipe.action_source == "teacher":
-            capabilities.append(self.recipe.teacher_api)  # type: ignore[arg-type]
-        return tuple(capabilities)
+        return self.recipe.required_capabilities
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -367,7 +347,7 @@ def load_runtime_configuration(
     project_root: Path,
     *,
     seed: int | None = None,
-    overrides: tuple[str, ...] | list[str] = (),
+    policy_endpoint: str | None = None,
 ) -> RuntimeConfiguration:
     path = project_path(config_path, project_root).resolve()
     document = _load(path)
@@ -381,7 +361,7 @@ def load_runtime_configuration(
         source=str(path),
         base_dir=path.parent,
         project_root=project_root,
-        overrides=tuple(overrides),
+        policy_endpoint=policy_endpoint,
     )
 
 
@@ -391,7 +371,7 @@ def load_runtime_configuration_document(
     source: str,
     base_dir: Path,
     project_root: Path,
-    overrides: tuple[str, ...] | list[str] = (),
+    policy_endpoint: str | None = None,
     selection: dict[str, Any] | None = None,
 ) -> RuntimeConfiguration:
     """Validate one already-resolved in-memory recipe.
@@ -424,17 +404,16 @@ def load_runtime_configuration_document(
     for name in ("max_skew_ns", "max_age_ns"):
         observation.setdefault(name, observation_document[name])
     document = {**document, "observation": observation}
-    if overrides:
-        try:
-            document = apply_overrides(document, list(overrides))
-        except OverrideError as error:
-            raise _error(label, str(error)) from error
     follower, follower_document = _load_follower(document, base_dir, label, profile)
     observation_hash = semantic_hash(observation_document)
     action_hash = semantic_hash(action_document)
     policy = document.get("policy")
+    if policy_endpoint is not None and not isinstance(policy, dict):
+        raise _error(label, "--policy-endpoint requires a Policy recipe")
     if isinstance(policy, dict):
         policy = {**policy}
+        if policy_endpoint is not None:
+            policy["endpoint"] = policy_endpoint
         policy.setdefault("observation_schema_hash", observation_hash)
         policy.setdefault("action_schema_hash", action_hash)
         policy.setdefault("robot_profile_hash", profile.digest)
@@ -459,11 +438,7 @@ def load_runtime_configuration_document(
     if follower_document is not None:
         effective["follower_document"] = follower_document
     effective["follower"] = None if follower is None else follower.model_dump(mode="json")
-    required_capabilities = list(REQUIRED_CAPABILITIES)
-    if recipe.action_source == "teacher":
-        assert recipe.teacher_api is not None
-        required_capabilities.append(recipe.teacher_api)
-    effective["required_capabilities"] = required_capabilities
+    effective["required_capabilities"] = list(recipe.required_capabilities)
     effective["logging"] = dict(vars(recipe.logging))
     effective["recording"] = dict(vars(recipe.recording))
     snapshot = {
@@ -477,7 +452,6 @@ def load_runtime_configuration_document(
         "policy_test_only": None if recipe.policy is None else recipe.policy.expected_test_only,
         "recipe": effective,
         "selection": selection,
-        "overrides": list(overrides),
         "configuration_source": source,
     }
     return RuntimeConfiguration(
@@ -487,6 +461,5 @@ def load_runtime_configuration_document(
         control_document=control_document,
         snapshot_json=json.dumps(snapshot, sort_keys=True, separators=(",", ":"), allow_nan=False),
         selection=selection,
-        overrides=tuple(overrides),
         configuration_source=source,
     )

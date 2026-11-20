@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+from collections.abc import Iterable
+from itertools import chain
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +26,7 @@ from .dataset_common import (
 from .dataset_export import SourceEpisode
 
 _NORMALIZED_VECTOR_FEATURES = ("observation.state", "observation.velocity", "action")
+_SHARD_SIZE_MB = 256
 
 
 def _stable_vector_statistics(values: np.ndarray) -> dict[str, list]:
@@ -134,8 +137,8 @@ def _write_split(
             crf=config.rgb_encoder.crf,
             preset=config.rgb_encoder.preset,
         ),
-        video_files_size_in_mb=config.video_files_size_mb,
-        data_files_size_in_mb=config.data_files_size_mb,
+        video_files_size_in_mb=_SHARD_SIZE_MB,
+        data_files_size_in_mb=_SHARD_SIZE_MB,
         encoder_threads=config.encoder_threads,
         image_writer_threads=config.image_writer_threads,
     )
@@ -255,7 +258,7 @@ def _write_processors(temp: Path, output_name: str, config: DatasetConfig) -> No
     )
 
 
-def _source_facts_sha256(parsed: list[SourceEpisode]) -> str:
+def _source_facts_sha256(episodes: Iterable[SourceEpisode]) -> str:
     return canonical_hash(
         [
             {
@@ -267,7 +270,7 @@ def _source_facts_sha256(parsed: list[SourceEpisode]) -> str:
                     if key != "facts_sha256"
                 },
             }
-            for episode in parsed
+            for episode in episodes
         ]
     )
 
@@ -318,12 +321,10 @@ def _split_sections(
 
 def _manifest_body(
     *,
-    temp: Path,
     config: DatasetConfig,
     select_path: Path,
     select: dict[str, Any],
     config_path: Path | None,
-    parsed: list[SourceEpisode],
     train_section: dict[str, Any],
     validation_section: dict[str, Any],
     train_eps: list[SourceEpisode],
@@ -339,10 +340,8 @@ def _manifest_body(
     overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     manifest = {
-        "schema_version": 1,
         "status": "complete",
         "synthetic": bool(synthetic),
-        "diagnostic": bool(config.diagnostic),
         "created_wall_time_ns": time.time_ns(),
         "conversion_seconds": (time.time_ns() - started) / 1e9,
         "project_root": str(config.project_root),
@@ -357,7 +356,8 @@ def _manifest_body(
             "formal_episodes": config.expected_formal_episodes,
             "training_episodes": config.expected_training_episodes,
             "validation_episodes": config.expected_validation_episodes,
-            "validation_positions": list(config.validation_positions),
+            "validation_percent": config.validation_percent,
+            "validation_positions": [episode.global_index for episode in validation_eps],
         },
         "config": {
             "path": str(config_path.resolve()) if config_path else "",
@@ -394,7 +394,7 @@ def _manifest_body(
             "training_stats_only": True,
             "files": processor_files,
         },
-        "source_facts_sha256": _source_facts_sha256(parsed),
+        "source_facts_sha256": _source_facts_sha256(chain(train_eps, validation_eps)),
         "source_code_sha256": _code_hashes(config.project_root),
     }
     if selection is not None:
@@ -407,12 +407,10 @@ def _manifest_body(
 def build_manifest(
     *,
     temp: Path,
-    output_name: str,
     config: DatasetConfig,
     select_path: Path,
     select: dict[str, Any],
     config_path: Path | None,
-    parsed: list[SourceEpisode],
     train_eps: list[SourceEpisode],
     validation_eps: list[SourceEpisode],
     joint_names: tuple[str, ...],
@@ -424,17 +422,14 @@ def build_manifest(
     selection: dict[str, Any] | None = None,
     overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    del output_name
     train_section = _split_manifest(temp / "train", train_eps, config)
     validation_section = _split_manifest(temp / "validation", validation_eps, config)
     processor_files = tree_hashes(temp / "processors")
     manifest = _manifest_body(
-        temp=temp,
         config=config,
         select_path=select_path,
         select=select,
         config_path=config_path,
-        parsed=parsed,
         train_section=train_section,
         validation_section=validation_section,
         train_eps=train_eps,

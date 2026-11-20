@@ -13,7 +13,10 @@ from typing import Any, Protocol, runtime_checkable
 from robot_contracts.models import RobotProfile, RunContext
 from robot_contracts.task_state import TaskState
 
+CAPTURE_HISTORY_LIMIT = 2048
+
 __all__ = [
+    "CAPTURE_HISTORY_LIMIT",
     "SimTaskPlugin",
     "TaskChunk",
     "TaskChunkView",

@@ -14,7 +14,7 @@ from robot_run_logging import EventContext, EventLogger, LogFailure, LogSettings
 
 ROOT = Path(__file__).resolve().parents[2]
 SCHEMA = json.loads(
-    (ROOT / "shared/common/interfaces/schemas/v1/run_event.schema.json").read_text(encoding="utf-8")
+    (ROOT / "shared/common/interfaces/schemas/run_event.schema.json").read_text(encoding="utf-8")
 )
 VALIDATOR = jsonschema.Draft202012Validator(SCHEMA)
 
@@ -82,7 +82,6 @@ def test_event_shape_context_schema_and_summary(tmp_path: Path) -> None:
     for event, _ in events:
         VALIDATOR.validate(event)
     first = events[0][0]
-    assert first["schema_version"] == 1
     assert first["run_id"] == "run-1"
     assert first["component"] == "test"
     assert first["instance_id"] == logger.instance_id

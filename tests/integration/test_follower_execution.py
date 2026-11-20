@@ -22,17 +22,21 @@ pytest.importorskip("scipy")
 np = pytest.importorskip("numpy")
 
 ROOT = Path(__file__).resolve().parents[2]
-for source in (ROOT / "simulation/mujoco/src", ROOT / "shared/common/python/contracts/src"):
+for source in (
+    ROOT / "simulation/mujoco/src",
+    ROOT / "shared/common/python/contracts/src",
+    ROOT / "tests/unit",
+):
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
 
+from follower_fixtures import generate_prepared_follower  # noqa: E402
 from robot_backend_sim.common.config.backend_config import load_backend_config  # noqa: E402
 from robot_backend_sim.common.config.follower_config import load_follower_config  # noqa: E402
 from robot_backend_sim.common.config.motion_config import load_control_config  # noqa: E402
 from robot_backend_sim.common.config.stream_config import StreamConfig  # noqa: E402
 from robot_backend_sim.common.control.control import ControlSession  # noqa: E402
 from robot_backend_sim.common.control.control_state import PreparedControlCommand  # noqa: E402
-from robot_backend_sim.common.follower.follower_plan import prepare_follower_plan  # noqa: E402
 from robot_backend_sim.common.motion.motion_controller import MotionController, Phase  # noqa: E402
 from robot_backend_sim.common.motion.stream_schedule import next_grid_time  # noqa: E402
 from robot_backend_sim.marvin_sim.io import MarvinIO  # noqa: E402
@@ -196,7 +200,7 @@ def make_packet(
         source,
         follower.target_count,
     )
-    plan = prepare_follower_plan(
+    plan = generate_prepared_follower(
         anchor,
         window,
         profile,
@@ -854,7 +858,7 @@ def test_wrong_context_lease_expiry_reset_and_new_stream_mode(
         source,
         follower_config.target_count,
     )
-    wrong_plan = prepare_follower_plan(
+    wrong_plan = generate_prepared_follower(
         wrong_anchor,
         wrong_window,
         profile,
@@ -1000,7 +1004,7 @@ def test_raw_out_of_bounds_and_excess_deviation_are_rejected(
         follower_config.target_count,
     )
     with pytest.raises(ContractError) as caught:
-        prepare_follower_plan(
+        generate_prepared_follower(
             anchor,
             window_bad,
             profile,
@@ -1024,7 +1028,7 @@ def test_raw_out_of_bounds_and_excess_deviation_are_rejected(
         follower_config.target_count,
     )
     with pytest.raises(ContractError) as caught:
-        prepare_follower_plan(
+        generate_prepared_follower(
             anchor,
             window_fast,
             profile,
@@ -1081,7 +1085,7 @@ def test_follower_final_contact_keeps_raw_closing_target_and_real_opening(
         source,
         follower_config.target_count,
     )
-    prepared = prepare_follower_plan(
+    prepared = generate_prepared_follower(
         anchor,
         window,
         profile,

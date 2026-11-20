@@ -23,7 +23,6 @@ import yaml
 _PROJECT = Path(os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[6])
 
 from robot_contracts.models import RobotProfile  # noqa: E402
-from robot_contracts.overrides import OverrideError, apply_overrides  # noqa: E402
 from robot_contracts.project_paths import project_path  # noqa: E402
 
 from dual_arm_runtime.offline.audit.label_export import (  # noqa: E402
@@ -381,7 +380,7 @@ def _load_episode(
 
     manifest = json.loads((episode / "manifest.json").read_text(encoding="utf-8"))
     schema_root = project_path("shared/common/interfaces/schemas", _PROJECT)
-    validate_document(manifest, manifest_schema_path(schema_root, 1))
+    validate_document(manifest, manifest_schema_path(schema_root))
     if not manifest["recording"]["complete"]:
         raise ValueError(manifest["recording"]["failure_reason"])
     configuration = manifest.get("configuration", {})
@@ -425,7 +424,10 @@ def _quality(
         list(args.backend_log) or sorted(episode.rglob("backend*.log*"))
     )
     backend_events = [
-        event for event in backend_events if event.get("clock_epoch") == context["clock_epoch"]
+        event
+        for event in backend_events
+        if event.get("episode_id") == context["episode_id"]
+        and event.get("clock_epoch") == context["clock_epoch"]
     ]
     return quality_summary(
         backend_events,
@@ -470,7 +472,6 @@ def _write_documents(
     _json(
         out / "labels.json",
         {
-            "schema_version": 1,
             "episode_id": manifest["episode_id"],
             "robot_profile_hash": profile.digest,
             "seed": configuration["reset_seed"],
@@ -486,7 +487,6 @@ def _write_documents(
     _json(
         out / "raw_predictions.json",
         {
-            "schema_version": 1,
             "predictions": [
                 {
                     "chunk_seq": item.chunk_seq,
@@ -525,9 +525,6 @@ def main(argv: list[str] | None = None) -> int:
         help="override the campaign export.max_labels bound",
     )
     parser.add_argument("--no-previews", action="store_true", help="skip preview PNGs and GIFs")
-    parser.add_argument(
-        "--set", dest="overrides", action="append", default=[], metavar="PATH=VALUE"
-    )
     args = parser.parse_args(argv)
     from dual_arm_runtime.offline.scenario_selection import campaign_config_path
 
@@ -561,11 +558,6 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"error": str(error)}), file=sys.stderr)
         return 2
     campaign = yaml.safe_load(args.campaign_config.read_text(encoding="utf-8"))
-    try:
-        campaign = apply_overrides(campaign, list(args.overrides))
-    except OverrideError as error:
-        print(json.dumps({"error": str(error)}), file=sys.stderr)
-        return 2
     export = campaign.get("export") if isinstance(campaign.get("export"), dict) else {}
     max_labels = args.max_labels
     if max_labels is None:

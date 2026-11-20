@@ -30,7 +30,7 @@ FORBIDDEN = {
 
 
 def _audit():
-    path = ROOT / "shared/scenarios/marvin_sim/stack/profiles/robots/marvin_stack_v1/profile.json"
+    path = ROOT / "shared/scenarios/marvin_sim/stack/profiles/robots/marvin_stack/profile.json"
     profile = load_profile(path, ROOT / "shared/common/interfaces/schemas")
     context = RunContext(profile.robot_id, profile.digest, "backend", "time", 0, "episode", 1)
     configuration = {
@@ -71,6 +71,20 @@ def test_camera_validation_uses_decoded_metadata():
         audit.frame("/robot/cameras/global/frame", replace(frame, step=1))
     with pytest.raises(ContractError, match="CameraInfo frame_id differs"):
         audit.frame("/robot/cameras/global/frame", replace(frame, info_frame_id="wrong"))
+
+
+def test_recording_audit_checks_backend_kind_for_requested_simulation_only():
+    audit, context, profile = _audit()
+    configuration = {**audit.configuration, "source": "hardware"}
+    audit = StreamAudit("episode", configuration)
+    info = BackendInfo(
+        context, "hardware", False, profile.joint_names, profile.camera_names,
+        tuple(audit.required_capabilities),
+    )
+    audit.info(info)
+    reset_audit = StreamAudit("episode", {**configuration, "reset_used": True})
+    with pytest.raises(ContractError, match="simulation features require"):
+        reset_audit.info(info)
 
 
 def test_rule_imports_are_closed_to_ros_dependencies():

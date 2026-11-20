@@ -7,13 +7,15 @@ record is never reconstructed from convenience defaults.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from robot_api_msgs.msg import FollowerReference as FollowerReferenceMessage
 from robot_api_msgs.msg import ReferenceSegment as ReferenceSegmentMessage
 from robot_contracts.action_chunks import ActionWindow
 from robot_contracts.models import ContractError
 from robot_contracts.stream_request import plan_from_segments
 from robot_contracts.trajectory.follower_reference import FollowerReference
-from robot_contracts.trajectory.spline import CubicSegment
+from robot_contracts.trajectory.spline import CubicSegment, ReferencePlan
 
 from .stream_conversions import (
     anchor_from_message,
@@ -25,6 +27,8 @@ from .stream_conversions import (
 __all__ = [
     "follower_reference_from_message",
     "follower_reference_message",
+    "reference_segment_messages",
+    "reference_segments_from_messages",
 ]
 
 
@@ -39,6 +43,28 @@ def _segment_message(segment: CubicSegment) -> ReferenceSegmentMessage:
         c1=list(segment.c1),
         c2=list(segment.c2),
         c3=list(segment.c3),
+    )
+
+
+def reference_segment_messages(plan: ReferencePlan) -> list[ReferenceSegmentMessage]:
+    return [_segment_message(segment) for segment in plan.segments]
+
+
+def reference_segments_from_messages(
+    segments: Sequence[ReferenceSegmentMessage], joint_names: Sequence[str]
+) -> ReferencePlan:
+    return plan_from_segments(
+        joint_names,
+        tuple(
+            CubicSegment(
+                duration_ns=segment.duration_ns,
+                c0=tuple(segment.c0),
+                c1=tuple(segment.c1),
+                c2=tuple(segment.c2),
+                c3=tuple(segment.c3),
+            )
+            for segment in segments
+        ),
     )
 
 
@@ -58,7 +84,7 @@ def follower_reference_message(value: FollowerReference) -> FollowerReferenceMes
         handoff_time_ns=value.window.handoff_time_ns,
         target_count=value.window.target_count,
         selected_indices=list(value.window.selected_indices),
-        segments=[_segment_message(segment) for segment in value.plan.segments],
+        segments=reference_segment_messages(value.plan),
         raw_terminal_velocities=list(value.raw_terminal_velocities),
         restricted_terminal_velocities=list(value.restricted_terminal_velocities),
         actual_terminal_positions=list(value.actual_terminal_positions),
@@ -76,9 +102,7 @@ def follower_reference_message(value: FollowerReference) -> FollowerReferenceMes
         velocity_limited=list(value.velocity_limited),
         acceleration_limited=list(value.acceleration_limited),
         boundary_preserved=list(value.boundary_preserved),
-        algorithm_version=value.algorithm_version,
-        sampler_version=value.sampler_version,
-        normalization_version=value.normalization_version,
+        algorithm=value.algorithm,
         reference_digest=value.reference_digest or "",
     )
 
@@ -108,17 +132,7 @@ def follower_reference_from_message(value: object) -> FollowerReference:
         raise _invalid("window fields differ from the raw request")
     if request.anchor != anchor:
         raise _invalid("anchor fields differ from the raw request")
-    segments = tuple(
-        CubicSegment(
-            duration_ns=segment.duration_ns,
-            c0=tuple(segment.c0),
-            c1=tuple(segment.c1),
-            c2=tuple(segment.c2),
-            c3=tuple(segment.c3),
-        )
-        for segment in value.segments
-    )
-    plan = plan_from_segments(tuple(value.joint_names), segments)
+    plan = reference_segments_from_messages(value.segments, value.joint_names)
     reference = FollowerReference(
         request=request,
         motion_seq=value.motion_seq,
@@ -145,9 +159,7 @@ def follower_reference_from_message(value: object) -> FollowerReference:
         velocity_limited=tuple(value.velocity_limited),
         acceleration_limited=tuple(value.acceleration_limited),
         boundary_preserved=tuple(value.boundary_preserved),
-        algorithm_version=value.algorithm_version,
-        sampler_version=value.sampler_version,
-        normalization_version=value.normalization_version,
+        algorithm=value.algorithm,
         reference_digest=value.reference_digest or None,
     )
     if value.extension_ns != reference.extension_ns:

@@ -1,4 +1,4 @@
-"""Bounded planner threads: follower compilation and task preparation."""
+"""Bounded threads for follower admission and task preparation."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from dataclasses import replace
 
 from robot_contracts.models import ContractError, RobotProfile, RunContext
 from robot_contracts.stream_request import StreamRequest
+from robot_contracts.trajectory.spline import ReferencePlan
 
 from robot_backend_sim.common.config.backend_config import BackendConfig
 from robot_backend_sim.common.config.follower_config import FollowerConfig
@@ -26,7 +27,7 @@ from robot_backend_sim.common.follower.follower_protocol import (
     follower_reference_from_status,
     prepare_follower_request,
 )
-from robot_backend_sim.common.runtime.worker_owner import BackendClosed, SubmitOutcome, _LoggerSink, _Owner
+from robot_backend_sim.common.runtime.worker_owner import BackendClosed, SubmitOutcome, _Owner
 from robot_backend_sim.common.tasks import (
     SimTaskPlugin,
     TaskChunk,
@@ -39,7 +40,7 @@ __all__ = ["_Planner", "_TaskPlanner", "_failed_future"]
 
 
 class _Planner:
-    """One planner thread; at most one compile is in flight and queued work is bounded."""
+    """Validate one submitted follower reference at a time on a bounded queue."""
 
     def __init__(
         self,
@@ -47,7 +48,6 @@ class _Planner:
         config: BackendConfig,
         profile: RobotProfile,
         control_config: ControlConfig,
-        log: _LoggerSink | None,
         follower_config: FollowerConfig | None = None,
         duration_grid_ns: int | None = 2_000_000,
     ) -> None:
@@ -55,10 +55,9 @@ class _Planner:
         self._config = config
         self._profile = profile
         self._control_config = control_config
-        self._log = log
         self._follower_config: FollowerConfig | None = follower_config
         self._duration_grid_ns = duration_grid_ns
-        self._queue: queue.Queue[tuple[StreamRequest, Future]] = queue.Queue(
+        self._queue: queue.Queue[tuple[StreamRequest, ReferencePlan, Future]] = queue.Queue(
             maxsize=config.planner_queue_capacity
         )
         self._lock = threading.Lock()
@@ -75,12 +74,12 @@ class _Planner:
         with self._lock:
             return self._busy_since_ns
 
-    def submit(self, request: StreamRequest, future: Future) -> None:
+    def submit(self, request: StreamRequest, plan: ReferencePlan, future: Future) -> None:
         if self._closing.is_set():
             future.set_exception(BackendClosed("planner is closing"))
             return
         try:
-            self._queue.put_nowait((request, future))
+            self._queue.put_nowait((request, plan, future))
         except queue.Full as error:
             future.set_exception(
                 ContractError("BACKEND_BUSY", "planner queue is full; retry after querying")
@@ -93,14 +92,12 @@ class _Planner:
             self._thread.join(timeout=max(0.0, timeout_s))
         with self._lock:
             active = self._active_future
-        # Resolve the in-flight future even if a planner call cannot be
-        # interrupted; the caller must never wait on a planner that outlives the
-        # close budget.
+        # Resolve the in-flight future if admission outlives the close budget.
         if active is not None and not active.done():
             active.set_exception(BackendClosed("planner close budget expired"))
         while True:
             try:
-                _request, future = self._queue.get_nowait()
+                _request, _plan, future = self._queue.get_nowait()
             except queue.Empty:
                 break
             if not future.done():
@@ -110,7 +107,7 @@ class _Planner:
     def _run(self) -> None:
         while not self._closing.is_set():
             try:
-                request, future = self._queue.get(timeout=0.05)
+                request, plan, future = self._queue.get(timeout=0.05)
             except queue.Empty:
                 continue
             if not future.set_running_or_notify_cancel():
@@ -119,7 +116,7 @@ class _Planner:
                 self._busy_since_ns = time.monotonic_ns()
                 self._active_future = future
             try:
-                result = self._compile_and_admit(request)
+                result = self._validate_and_admit(request, plan)
                 if not future.done():
                     future.set_result(result)
             except BaseException as error:  # noqa: BLE001 - caller owns the outcome
@@ -131,7 +128,7 @@ class _Planner:
                     self._active_future = None
 
     @staticmethod
-    def _reference(request, packet, status, chunk):
+    def _reference(packet, status, chunk):
         if packet.request is None:
             return None
         if isinstance(chunk, ChunkStatus):
@@ -144,7 +141,7 @@ class _Planner:
         return follower_reference_from_status(packet.request, packet, status)
 
     def _lookup_outcome(
-        self, request: StreamRequest, context: object
+        self, request: StreamRequest, plan: ReferencePlan, context: RunContext
     ) -> SubmitOutcome | None:
         lookup = self._owner.submit(
             "lookup",
@@ -160,20 +157,15 @@ class _Planner:
         packet, _status = lookup  # type: ignore[misc]
         if not isinstance(packet, PreparedControlCommand):
             raise ContractError("RESULT_EXPIRED", "stored packet is not immutable")
-        if packet.request is not None:
-            if packet.request != request:
-                raise ContractError(
-                    "COMMAND_ID_CONFLICT",
-                    "same command_id has a different complete request",
-                )
-        elif packet.command != request.command:
-            raise ContractError(
-                "COMMAND_ID_CONFLICT", "same command_id has a different identity"
-            )
-        if packet.kind != "FOLLOWER":
+        if packet.request != request:
             raise ContractError(
                 "COMMAND_ID_CONFLICT",
-                "same command_id was not accepted through the follower entry",
+                "same command_id has a different complete request",
+            )
+        if packet.prepared.plan != plan:
+            raise ContractError(
+                "COMMAND_ID_CONFLICT",
+                "same command_id has a different submitted reference plan",
             )
         # Idempotent replies still pass through the authoritative lease
         # and generation checks; a history lookup is not control authority.
@@ -192,14 +184,17 @@ class _Planner:
             reply=reply,
             execution=status,
             chunk=chunk if isinstance(chunk, ChunkStatus) else None,
-            reference=self._reference(request, packet, status, chunk),
+            reference=self._reference(packet, status, chunk),
             idempotent=True,
         )
 
-    def _fresh_outcome(self, request: StreamRequest, context: object) -> SubmitOutcome:
+    def _fresh_outcome(
+        self, request: StreamRequest, plan: ReferencePlan, context: RunContext
+    ) -> SubmitOutcome:
         assert self._follower_config is not None
         packet = prepare_follower_request(
             request,
+            plan,
             self._profile,
             self._control_config,
             self._follower_config,
@@ -220,7 +215,7 @@ class _Planner:
             )
         reference = None
         if reply.accepted and status is not None and packet.request is not None:
-            reference = self._reference(request, packet, status, chunk)
+            reference = self._reference(packet, status, chunk)
         return SubmitOutcome(
             reply=reply,
             execution=status,
@@ -229,17 +224,17 @@ class _Planner:
             idempotent=False,
         )
 
-    def _compile_and_admit(self, request: StreamRequest) -> SubmitOutcome:
+    def _validate_and_admit(self, request: StreamRequest, plan: ReferencePlan) -> SubmitOutcome:
         if self._follower_config is None:
             raise ContractError(
                 "FOLLOWER_DISABLED",
                 "follower protocol is not enabled by this backend configuration",
             )
         context = request.command.context
-        existing = self._lookup_outcome(request, context)
+        existing = self._lookup_outcome(request, plan, context)
         if existing is not None:
             return existing
-        return self._fresh_outcome(request, context)
+        return self._fresh_outcome(request, plan, context)
 
 
 def _failed_future(error: BaseException) -> Future:

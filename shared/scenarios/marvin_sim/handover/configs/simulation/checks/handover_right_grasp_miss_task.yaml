@@ -2,7 +2,6 @@
 # its close command stays wider than the 60 mm block, so the right fingers never
 # contact or support it.  Used only to verify that the left hand keeps holding
 # and the task fails at the dual-hold gate.
-schema_version: 1
 planning_config: ../planning/handover_paths.yaml
 
 success:
@@ -42,13 +41,13 @@ teacher:
   phase_min_duration_s: 0.5
   left_close_opening_m: 0.05
   right_close_opening_m: 0.075
-  chunk_cache_entries: 256
+  chunk_cache_entries: &max_teacher_requests 400
 
 capacity:
   expected_chunks: 256
   expected_references: 256
   expected_events: 1024
   max_episode_chunks: 400
-  max_teacher_requests: 400
+  max_teacher_requests: *max_teacher_requests
   rpc_cache_entries: 400
   backend_chunk_history: 400

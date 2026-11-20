@@ -10,7 +10,6 @@ import time
 from pathlib import Path
 
 from robot_backend_sim.common.runtime.diagnostics import utc_now, write_json_atomic
-from robot_backend_sim.marvin_sim.stack.visibility import SceneCheckConfig
 from robot_backend_sim.tools.check_kinematics_common import (
     ArtifactBudget,
     KinematicsCheckFailure,
@@ -19,7 +18,6 @@ from robot_backend_sim.tools.check_kinematics_common import (
 
 COMPONENT = "kinematics_check"
 KIND = "kinematics"
-REPORT_SCHEMA_VERSION = 1
 
 
 def _serialized_size(document: object) -> int:
@@ -28,7 +26,6 @@ def _serialized_size(document: object) -> int:
 
 def _minimal_report(report: dict[str, object], reason: str, message: str) -> dict[str, object]:
     return {
-        "schema_version": REPORT_SCHEMA_VERSION,
         "kind": KIND,
         "component": COMPONENT,
         "run_id": report.get("run_id"),
@@ -46,7 +43,6 @@ def _minimal_report(report: dict[str, object], reason: str, message: str) -> dic
 
 def _new_report(arguments: object, instance_id: str) -> dict[str, object]:
     return {
-        "schema_version": REPORT_SCHEMA_VERSION,
         "kind": KIND,
         "component": COMPONENT,
         "run_id": arguments.run_id,
@@ -152,9 +148,7 @@ def _close_resources(
     report["logger_close_error"] = log_close_error
     return failure
 
-def _summarize_results(
-    results: list[dict[str, object]], check_config: SceneCheckConfig
-) -> dict[str, object]:
+def _summarize_results(results: list[dict[str, object]]) -> dict[str, object]:
     all_paths = [
         path
         for result in results
@@ -196,8 +190,6 @@ def _summarize_results(
         "path_samples": sum(path["sample_count"] for path in all_paths),
         "minimum_clearance": minimum,
         "phases_with_vision": sum(len(result["vision"]) for result in results),
-        "boundary_count": check_config.boundary_layout_count,
-        "seed_count": len(check_config.seeds),
     }
 
 def _publish_report(

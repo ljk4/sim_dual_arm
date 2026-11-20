@@ -1,4 +1,4 @@
-# marvin_stack_api_msgs capability: marvin_stack_api_msgs.teacher_chunk.v1.
+# marvin_stack_api_msgs capability: marvin_stack_api_msgs.teacher_chunk.
 # 60x16 raw teacher targets at 50 ms relative to the retained observation.
 # phase_codes use the fixed order: 0 pregrasp, 1 grasp, 2 close, 3 lift,
 # 4 transport, 5 lower, 6 open, 7 retreat, 8 stable.

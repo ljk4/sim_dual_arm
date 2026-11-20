@@ -15,7 +15,6 @@ def _campaign(tmp_path: Path) -> Path:
     path.write_text(
         yaml.safe_dump(
             {
-                "schema_version": 1,
                 "export": {"max_labels": 700},
                 "quality": {"sidecar": "export/quality.json"},
                 "paths": {"ledger": str(tmp_path / "logs/collection/attempts.jsonl")},
@@ -31,7 +30,6 @@ def _runtime_recipe(tmp_path: Path) -> Path:
     path.write_text(
         yaml.safe_dump(
             {
-                "schema_version": 1,
                 "reset": {"enabled": True, "seed": 0},
                 "action_source": "teacher",
             }
@@ -112,7 +110,7 @@ def test_collect_attempt_flattens_raw_logs_and_export_without_copies(
     assert Path(export_command[export_command.index("--out") + 1]) == attempt / "export"
 
 
-def test_collect_attempt_forwards_scenario_overrides(tmp_path, monkeypatch):
+def test_collect_attempt_forwards_worker_namespace(tmp_path, monkeypatch):
     attempt = tmp_path / "formal-10000-run"
     attempt.mkdir()
     campaign = _campaign(tmp_path)
@@ -154,7 +152,7 @@ def test_collect_attempt_forwards_scenario_overrides(tmp_path, monkeypatch):
             "--robot", "synthetic_sim",
             "--task", "stack",
             "--shared-root", str(tmp_path),
-            "--set", "observation.max_age_ns=250000000",
+            "--robot-namespace", "/record_pool_1",
             "--backend-log", str(tmp_path),
         ]
     ) == 0
@@ -162,7 +160,8 @@ def test_collect_attempt_forwards_scenario_overrides(tmp_path, monkeypatch):
     runtime_command = commands[0]
     assert runtime_command[runtime_command.index("--robot") + 1] == "synthetic_sim"
     assert runtime_command[runtime_command.index("--task") + 1] == "stack"
-    assert "observation.max_age_ns=250000000" in runtime_command
+    assert runtime_command[runtime_command.index("--robot-namespace") + 1] == "/record_pool_1"
+    assert runtime_command[runtime_command.index("--reset-seed") + 1] == "10000"
     logs = tmp_path / "logs/collection/attempts" / attempt.name
     assert not (attempt / "runtime.yaml").exists()
     assert not (logs / "runtime.yaml").exists()

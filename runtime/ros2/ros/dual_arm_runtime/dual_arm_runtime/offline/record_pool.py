@@ -11,6 +11,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -23,6 +24,7 @@ from dual_arm_runtime.offline.campaign_execution import (
     attempt_log_directory,
     handle_sigterm,
     shutil_disk_free,
+    stop_process,
 )
 from dual_arm_runtime.offline.campaign_ledger import (
     Attempt,
@@ -47,8 +49,8 @@ class ActiveRecording:
 def load_worker_plan(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     document = json.loads(path.read_text())
     workers = document.get("workers", [])
-    if document.get("schema_version") != 1 or not 1 <= len(workers) <= 16:
-        raise CampaignError("worker manifest must contain 1..16 workers with schema_version 1")
+    if not 1 <= len(workers) <= 16:
+        raise CampaignError("worker manifest must contain 1..16 workers")
     for field in ("id", "domain_id", "namespace", "runtime_config", "backend_log"):
         if len({item[field] for item in workers}) != len(workers):
             raise CampaignError(f"workers must have distinct {field}")
@@ -93,28 +95,6 @@ def load_worker_plan(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     return document, workers
 
 
-def stop_process(process: subprocess.Popen) -> None:
-    try:
-        os.killpg(process.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        process.wait()
-        return
-    deadline = time.monotonic() + 10
-    while time.monotonic() < deadline:
-        process.poll()
-        try:
-            os.killpg(process.pid, 0)
-        except ProcessLookupError:
-            break
-        time.sleep(0.05)
-    else:
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-    process.wait(timeout=5)
-
-
 class RecordingPool:
     def __init__(
         self,
@@ -127,6 +107,7 @@ class RecordingPool:
         self.args, self.config, self.ledger, self.workers = args, config, ledger, workers
         self.selection = selection
         self.output = project_path(config["paths"]["attempts_root"], args.project_root)
+        self.stop_grace_s = float(config["launch"].get("stop_grace_s", 10.0))
         self.active: list[ActiveRecording] = []
         self.qualified = self.attempted = self.cancelled = 0
         self.worker_failures: dict[str, int] = {
@@ -209,16 +190,12 @@ class RecordingPool:
                 **vars(self.args),
                 "runtime_config": Path(worker["runtime_config"]),
                 "backend_log": Path(worker["backend_log"]),
-                "overrides": [
-                    *getattr(self.args, "overrides", []),
-                    f"robot_namespace={worker['namespace']}",
-                ],
+                "robot_namespace": worker["namespace"],
             }
         )
         environment = _environment(attempt)
         environment.update(
             ROS_DOMAIN_ID=str(worker["domain_id"]),
-            MUJOCO_GL="egl",
             OMP_NUM_THREADS="1",
             OPENBLAS_NUM_THREADS="1",
             MKL_NUM_THREADS="1",
@@ -328,8 +305,9 @@ class RecordingPool:
 
     def cancel_active(self) -> None:
         if self.active:
+            stop = partial(stop_process, stop_grace_s=self.stop_grace_s)
             with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.active)) as executor:
-                list(executor.map(stop_process, [item.process for item in self.active]))
+                list(executor.map(stop, [item.process for item in self.active]))
         for active in tuple(self.active):
             active.console.close()
             campaign._finish_attempt(
@@ -351,7 +329,7 @@ class RecordingPool:
                     if code is None and time.monotonic() - active.started >= float(
                         self.config["launch"].get("timeout_s", 180)
                     ):
-                        stop_process(active.process)
+                        stop_process(active.process, self.stop_grace_s)
                         code = 124
                     if code is not None:
                         self.finish(active, code, "attempt timed out" if code == 124 else "")
@@ -436,7 +414,7 @@ class RecordingPool:
             flush=True,
         )
         if "formal_select" in summary:
-            print(f"训练/验证清单: {summary['formal_select']}", flush=True)
+            print(f"合格录制清单: {summary['formal_select']}", flush=True)
         print(f"运行摘要: {self.args.worker_manifest.with_name('summary.json')}", flush=True)
         return self.exit_code
 

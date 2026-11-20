@@ -32,7 +32,6 @@ class CollectionTree:
 
 def campaign_document(repo: Path, recipe_paths: list[Path]) -> dict[str, Any]:
     return {
-        "schema_version": 1,
         "budget": {
             "pilot_seed_first": 1000,
             "pilot_seed_last": 1009,
@@ -44,7 +43,6 @@ def campaign_document(repo: Path, recipe_paths: list[Path]) -> dict[str, Any]:
             "formal_seed_last": 10099,
             "formal_max_attempts": 100,
             "formal_target_qualified": 50,
-            "formal_validation_qualified_indices": [9, 19, 29, 39, 49],
             "test_seed_first": 20000,
             "test_seed_last": 20019,
             "test_max_attempts": 20,
@@ -69,10 +67,9 @@ def campaign_document(repo: Path, recipe_paths: list[Path]) -> dict[str, Any]:
 
 
 def _write_runtime_recipe(root: Path) -> Path:
-    (root / "configs/control.yaml").write_text("schema_version: 1\n", encoding="utf-8")
-    (root / "configs/follower.yaml").write_text("schema_version: 1\n", encoding="utf-8")
+    (root / "configs/control.yaml").write_text("{}\n", encoding="utf-8")
+    (root / "configs/follower.yaml").write_text("{}\n", encoding="utf-8")
     document = {
-        "schema_version": 1,
         "robot_profile": "../profiles/robot.json",
         "observation_schema": "../profiles/observation.json",
         "action_schema": "../profiles/action.json",
@@ -80,7 +77,7 @@ def _write_runtime_recipe(root: Path) -> Path:
         "follower_config": "follower.yaml",
         "robot_namespace": "/robot",
         "action_source": "teacher",
-        "teacher_api": "marvin_stack_api_msgs.teacher_chunk.v1",
+        "teacher_api": "marvin_stack_api_msgs.teacher_chunk",
         "reset": {"enabled": True, "seed": 0},
     }
     path = root / "configs/runtime_teacher.yaml"
@@ -90,7 +87,7 @@ def _write_runtime_recipe(root: Path) -> Path:
 
 def _write_backend_recipe(root: Path) -> Path:
     for name in ("scene.yaml", "stream.yaml", "task.yaml"):
-        (root / "configs" / name).write_text("schema_version: 1\n", encoding="utf-8")
+        (root / "configs" / name).write_text("{}\n", encoding="utf-8")
     document = {
         "robot": {
             "namespace": "/robot",

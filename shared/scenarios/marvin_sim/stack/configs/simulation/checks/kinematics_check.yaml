@@ -1,5 +1,4 @@
 # Key-pose IK, clearance and per-phase visibility check parameters for Marvin stack.
-schema_version: 1
 
 ik:
   dt_s: 0.02
@@ -77,7 +76,6 @@ visibility:
     - {camera: right_wrist, object: target, phase: retreat, mode: min_pixels, min_pixels: 64}
 
 budgets:
-  max_layouts: 100
   max_total_samples: 500000
   max_elapsed_s: 300.0
   max_png_count: 1000

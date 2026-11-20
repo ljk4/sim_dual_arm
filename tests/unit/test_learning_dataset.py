@@ -1,7 +1,10 @@
 import json
+import random
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from dual_arm_learning import dataset
 from dual_arm_learning.config import load_dataset_config
 from dual_arm_learning.dataset import ExportError, _validate_export, configure_local_caches
 from learning_fixtures import make_export, profile_hash
@@ -17,7 +20,65 @@ def config(tmp_path):
     return replace(value, output_root=tmp_path / "output", cache_root=tmp_path / "cache")
 
 
-def test_validate_export_accepts_034_shape_and_checks_png_pixels(config, tmp_path):
+@pytest.mark.parametrize(
+    ("count", "percent", "validation_positions"),
+    [(50, 10, [2, 16, 24, 26, 48]), (50, 6, [24, 26, 48]), (2, 10, [1])],
+)
+def test_ordered_selection_is_partitioned_by_recipe(
+    config, tmp_path, monkeypatch, count, percent, validation_positions
+):
+    config = replace(config, expected_formal_episodes=count, validation_percent=percent)
+    entries = [
+        {"attempt_id": f"episode-{seed}", "seed": seed, "attempt_dir": str(tmp_path / str(seed))}
+        for seed in range(count, 0, -1)
+    ]
+    visited = []
+
+    def predict(entry, _config, _profile_hash):
+        visited.append(entry["attempt_id"])
+        return SimpleNamespace(**entry)
+
+    monkeypatch.setattr(dataset, "_predict_episode", predict)
+    selection = {"status": "SELECTED", "qualified": count, "selected": entries}
+    global_rng_state = random.getstate()
+    train, validation = dataset._resolve_episodes(selection, config, "profile")
+    assert visited == [entry["attempt_id"] for entry in entries]
+    assert dataset._resolve_episodes(selection, config, "profile") == (train, validation)
+    assert random.getstate() == global_rng_state
+    assert len(train) == config.expected_training_episodes
+    assert [episode.global_index for episode in validation] == validation_positions
+    assert [episode.seed for episode in validation] == [
+        count - index for index in validation_positions
+    ]
+    assert [episode.global_index for episode in train] == [
+        index for index in range(count) if index not in validation_positions
+    ]
+
+
+@pytest.mark.parametrize("count", [2, 50])
+def test_selection_requires_complete_unpartitioned_unique_entries(config, count):
+    config = replace(config, expected_formal_episodes=count)
+    selection = {"status": "SELECTED", "qualified": count}
+    with pytest.raises(ExportError, match=rf"select\.qualified: expected {count}, got 1"):
+        dataset._select_entries({**selection, "qualified": 1, "selected": []}, config)
+    with pytest.raises(ExportError, match=r"select\.selected: expected an array"):
+        dataset._select_entries({**selection, "training": [], "validation": []}, config)
+    with pytest.raises(ExportError, match=rf"select\.selected: expected {count} entries"):
+        dataset._select_entries({**selection, "selected": []}, config)
+    entries = [
+        {"attempt_id": f"episode-{index}", "seed": index, "attempt_dir": str(index)}
+        for index in range(count)
+    ]
+    entries[1]["seed"] = entries[0]["seed"]
+    with pytest.raises(ExportError, match="duplicate seed"):
+        dataset._select_entries({**selection, "selected": entries}, config)
+    entries[1]["seed"] = 1
+    entries[1]["attempt_id"] = entries[0]["attempt_id"]
+    with pytest.raises(ExportError, match="duplicate attempt_id"):
+        dataset._select_entries({**selection, "selected": entries}, config)
+
+
+def test_validate_export_accepts_capture_labels_and_checks_png_pixels(config, tmp_path):
     make_export(
         attempt_dir=tmp_path / "attempt",
         config=config,

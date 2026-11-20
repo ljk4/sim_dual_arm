@@ -197,7 +197,6 @@ class _FollowerAudit(_Audit):
             raise record_error("completed follower stream has an unapplied accepted reference")
         result.update(
             {
-                "stream_format": "v1",
                 "policy_format": "continuous-bounded-follower",
                 "configured_chunks": configured_chunks,
                 "policy_chunks": policy_chunks,

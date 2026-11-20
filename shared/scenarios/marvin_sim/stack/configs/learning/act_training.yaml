@@ -1,5 +1,4 @@
 # Marvin stack ACT training configuration.
-schema_version: 1
 mode: smoke
 seed: 20261120
 device: cuda
@@ -41,7 +40,6 @@ training:
   log_every_steps: 10
   val_every_steps: 1000
   val_batches: 512
-  image_shift_px: 0
   deterministic: true
 modes:
   smoke:

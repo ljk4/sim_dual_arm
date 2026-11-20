@@ -66,7 +66,7 @@ def test_snapshot_is_frozen_fresh_and_complete():
 
 
 def test_candidate_file_loads_and_round_trips():
-    config = load_stream_config(PROFILES / "control/marvin_stream_v1.yaml")
+    config = load_stream_config(PROFILES / "control/marvin_stream.yaml")
     assert config.to_document() == {
         name: value for name, value in VALID.items() if name != "contact_unload_timeout_s"
     }

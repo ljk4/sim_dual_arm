@@ -1,4 +1,3 @@
-uint32 protocol_major
 robot_api_msgs/RunContext context
 string backend_kind
 bool ready

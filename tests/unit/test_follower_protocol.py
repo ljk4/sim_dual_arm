@@ -17,7 +17,9 @@ from robot_contracts.stream_request import (
     Trajectory,
 )
 from robot_contracts.trajectory.spline import ReferenceSample
+from robot_trajectory.follower import RUNTIME_FOLLOWER_ALGORITHM
 from robot_trajectory.follower_reference import validate
+from robot_trajectory.trajectory_generation import generate_follower_plan
 
 ROOT = Path(__file__).resolve().parents[2]
 PROFILES = ROOT / "shared/scenarios/marvin_sim/stack/profiles"
@@ -28,7 +30,6 @@ for source in (ROOT / "simulation/mujoco/src", ROOT / "shared/common/python/cont
 from robot_backend_sim.common.config.follower_config import load_follower_config  # noqa: E402
 from robot_backend_sim.common.config.motion_config import load_control_config  # noqa: E402
 from robot_backend_sim.common.control.control_state import ChunkStatus, ControlStatus  # noqa: E402
-from robot_backend_sim.common.follower.follower_plan import RUCKIG_ALGORITHM_VERSION  # noqa: E402
 from robot_backend_sim.common.follower.follower_protocol import (  # noqa: E402
     follower_reference,
     follower_reference_from_chunk_status,
@@ -38,14 +39,12 @@ from robot_backend_sim.common.follower.follower_protocol import (  # noqa: E402
 )
 from scenario_fixtures import MARVIN_SHARED_PROFILES  # noqa: E402
 
-ruckig = pytest.importorskip("ruckig")
-
 PROFILE = load_profile(
-    PROFILES / "robots/marvin_stack_v1/profile.json",
-    ROOT / "shared/common/interfaces/schemas/v1",
+    PROFILES / "robots/marvin_stack/profile.json",
+    ROOT / "shared/common/interfaces/schemas",
 )
-CONTROL = load_control_config(MARVIN_SHARED_PROFILES / "control/marvin_control_v1.yaml")
-FOLLOWER = load_follower_config(MARVIN_SHARED_PROFILES / "control/marvin_follower_v1.yaml")
+CONTROL = load_control_config(MARVIN_SHARED_PROFILES / "control/marvin_control.yaml")
+FOLLOWER = load_follower_config(MARVIN_SHARED_PROFILES / "control/marvin_follower.yaml")
 BASE = PROFILE.initial_positions
 COUNT = len(BASE)
 GRID_NS = 2_000_000
@@ -113,28 +112,30 @@ def command() -> ControlCommand:
     return value
 
 
-def test_follower_protocol_compiles_a_distinct_packet():
-    raw = request()
+def admit(raw: StreamRequest):
+    limits = validation_limits(CONTROL, FOLLOWER, duration_grid_ns=GRID_NS)
+    plan = generate_follower_plan(raw, PROFILE, limits)
     packet = prepare_follower_request(
-        raw,
-        PROFILE,
-        CONTROL,
-        FOLLOWER,
-        duration_grid_ns=GRID_NS,
+        raw, plan, PROFILE, CONTROL, FOLLOWER, duration_grid_ns=GRID_NS
     )
+    assert packet.prepared.plan == plan
+    return packet
+
+
+def test_follower_protocol_preserves_the_submitted_coefficients():
+    raw = request()
+    packet = admit(raw)
     assert packet.kind == "FOLLOWER"
     assert packet.request == raw
     assert packet.prepared.is_final is False
     assert packet.prepared.duration_grid_ns == GRID_NS
     assert packet.command == raw.command
-    assert packet.prepared.algorithm_version == RUCKIG_ALGORITHM_VERSION
+    assert packet.prepared.algorithm == RUNTIME_FOLLOWER_ALGORITHM
 
 
-def test_ruckig_curve_duration_and_sampling_semantics_are_preserved():
+def test_submitted_curve_duration_and_sampling_semantics_are_preserved():
     raw = request()
-    packet = prepare_follower_request(
-        raw, PROFILE, CONTROL, FOLLOWER, duration_grid_ns=GRID_NS
-    )
+    packet = admit(raw)
     prepared = packet.prepared
     assert prepared.curve_duration_ns >= prepared.plan.duration_ns
     assert prepared.curve_duration_ns % GRID_NS == 0
@@ -170,9 +171,7 @@ def test_ruckig_curve_duration_and_sampling_semantics_are_preserved():
 
 def test_retry_returns_the_original_acceptance_times_and_digest():
     raw = request()
-    packet = prepare_follower_request(
-        raw, PROFILE, CONTROL, FOLLOWER, duration_grid_ns=GRID_NS
-    )
+    packet = admit(raw)
     chunk = ChunkStatus(
         context=raw.command.context,
         command_id=raw.command.command_id,
@@ -230,7 +229,7 @@ def test_retry_returns_the_original_acceptance_times_and_digest():
     assert from_status.reference_digest == first.reference_digest
 
 
-def test_follower_protocol_rejects_motion_and_mismatched_final_flag():
+def test_follower_protocol_rejects_motion():
     motion = StreamRequest(
         trajectory=Trajectory(
             context(),
@@ -244,20 +243,15 @@ def test_follower_protocol_rejects_motion_and_mismatched_final_flag():
         ),
         kind=REQUEST_MOTION,
     )
+    plan = admit(request()).prepared.plan
     with pytest.raises(ContractError) as caught:
-        prepare_follower_request(motion, PROFILE, CONTROL, FOLLOWER)
-    assert caught.value.reason == "INVALID_FOLLOWER_REQUEST"
-
-    with pytest.raises(ContractError) as caught:
-        prepare_follower_request(
-            request(), PROFILE, CONTROL, FOLLOWER, is_final=True
-        )
+        prepare_follower_request(motion, plan, PROFILE, CONTROL, FOLLOWER)
     assert caught.value.reason == "INVALID_FOLLOWER_REQUEST"
 
 
 def test_successor_fingerprint_is_separate_from_strict_chunks():
     first = request()
-    packet = prepare_follower_request(first, PROFILE, CONTROL, FOLLOWER, duration_grid_ns=GRID_NS)
+    packet = admit(first)
     successor_request = StreamRequest(
         trajectory=Trajectory(
             context(),
@@ -285,9 +279,7 @@ def test_successor_fingerprint_is_separate_from_strict_chunks():
         target_count=FOLLOWER.target_count,
         settle_at_end=False,
     )
-    successor = prepare_follower_request(
-        successor_request, PROFILE, CONTROL, FOLLOWER, duration_grid_ns=GRID_NS
-    )
+    successor = admit(successor_request)
     assert successor.kind == "FOLLOWER"
     assert successor.prepared.seq == 2  # type: ignore[union-attr]
     assert successor.fingerprint != packet.fingerprint
@@ -327,7 +319,7 @@ def test_real_final_counterexample_checks_executed_tail_and_target_count():
         target_count=FOLLOWER.target_count,
         settle_at_end=True,
     )
-    packet = prepare_follower_request(raw, PROFILE, CONTROL, FOLLOWER, duration_grid_ns=GRID_NS)
+    packet = admit(raw)
     prepared = packet.prepared
     assert prepared.is_final is True
     assert prepared.requested_window_ns == FOLLOWER.target_count * 50_000_000
@@ -343,6 +335,10 @@ def test_real_final_counterexample_checks_executed_tail_and_target_count():
     assert validate(record, PROFILE, limits).plan == record.plan
 
     short_tail = replace(FOLLOWER, max_terminal_tail_duration_s=0.3)
+    with pytest.raises(ContractError, match="FOLLOWER_HORIZON_EXCEEDED"):
+        prepare_follower_request(
+            raw, prepared.plan, PROFILE, CONTROL, short_tail, duration_grid_ns=GRID_NS
+        )
     with pytest.raises(ContractError) as caught:
         validate(
             record,

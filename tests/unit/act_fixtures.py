@@ -23,10 +23,10 @@ from scenario_fixtures import MARVIN_SHARED_PROFILES
 
 ROOT = Path(__file__).resolve().parents[2]
 PROFILE = (
-    ROOT / "shared/scenarios/marvin_sim/stack/profiles/robots/marvin_stack_v1/profile.json"
+    ROOT / "shared/scenarios/marvin_sim/stack/profiles/robots/marvin_stack/profile.json"
 )
-OBSERVATION = MARVIN_SHARED_PROFILES / "observations/marvin_rgb_joint_v1.json"
-ACTION = MARVIN_SHARED_PROFILES / "actions/marvin_joint_position_v1.json"
+OBSERVATION = MARVIN_SHARED_PROFILES / "observations/marvin_rgb_joint.json"
+ACTION = MARVIN_SHARED_PROFILES / "actions/marvin_joint_position.json"
 CAMERAS = ("global", "left_wrist", "right_wrist")
 
 
@@ -123,7 +123,6 @@ def make_act_model(root: Path, *, synthetic: bool = True) -> Path:
         "fps": 20,
     }
     metadata = {
-        "format": "dual-arm-act-model-v2",
         "policy": "act",
         "step": "10",
         "act_config_json": json.dumps(_act_config_values(), sort_keys=True),

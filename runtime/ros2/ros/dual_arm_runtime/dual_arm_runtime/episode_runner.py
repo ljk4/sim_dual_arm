@@ -15,8 +15,6 @@ from collections.abc import Callable
 from pathlib import Path
 
 from robot_contracts.episodes import (
-    DIAGNOSTIC_EPISODE_SCHEMA_VERSION,
-    POLICY_EPISODE_SCHEMA_VERSION,
     RuntimeOutcome,
     RuntimeResult,
     TaskResult,
@@ -32,6 +30,7 @@ from dual_arm_runtime.episode_runner_io import (
 )
 from dual_arm_runtime.run_logging import check_health, emit_best_effort
 from dual_arm_runtime.runtime_config import RuntimeConfiguration
+from dual_arm_runtime.simulation.options import require_simulation_backend
 
 
 class EpisodeRunner:
@@ -587,18 +586,12 @@ class EpisodeRunner:
         )
         if bool(info.test_only) != self._configuration.recipe.test_only:
             raise ContractError("UNSUPPORTED_CAPABILITY", "backend test_only differs")
-        if info.backend_kind != "mujoco":
-            raise ContractError("UNSUPPORTED_CAPABILITY", f"backend kind {info.backend_kind!r}")
-        required = list(self._configuration.required_capabilities)
-        if self._configuration.recipe.observation.reliable:
-            required.append("reliable_sensor_streams_v1")
-        recipe = self._configuration.recipe
-        if recipe.action_source in {"policy", "teacher"}:
-            required.append("bounded_target_follower_v1")
-        stream = recipe.policy if recipe.action_source == "policy" else recipe.teacher
-        if stream is not None and stream.termination_mode == "task":
-            required.extend(("task_plugin", "task_state"))
-        missing = [capability for capability in required if capability not in info.capabilities]
+        if self._configuration.recipe.simulation_capabilities:
+            require_simulation_backend(info.backend_kind)
+        missing = [
+            capability for capability in self._configuration.required_capabilities
+            if capability not in info.capabilities
+        ]
         if missing:
             raise ContractError(
                 "UNSUPPORTED_CAPABILITY", f"missing backend capabilities: {', '.join(missing)}"
@@ -651,9 +644,6 @@ class EpisodeRunner:
             run_id=str(snapshot.get("run_id", self._run_id)),
             source=str(snapshot.get("source", "")),
             test_only=bool(snapshot.get("test_only", False)),
-            format_version=POLICY_EPISODE_SCHEMA_VERSION
-            if self._configuration.recipe.action_source in {"policy", "teacher"}
-            else DIAGNOSTIC_EPISODE_SCHEMA_VERSION,
             episode_directory=self._episode_output,
         )
 

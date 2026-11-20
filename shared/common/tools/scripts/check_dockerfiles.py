@@ -302,7 +302,7 @@ def check_compose_document(
             issues.append(
                 f"{name}: service {service_name} must move {key} to configs/container.env"
             )
-        for legacy in ("LEARNING_VENV", "DEV_IMAGE", "DEV_WORKSPACE_VERSION"):
+        for legacy in ("LEARNING_VENV", "DEV_IMAGE"):
             if legacy in environment:
                 issues.append(f"{name}: service {service_name} must not define {legacy}")
         volumes = _mounts(service)

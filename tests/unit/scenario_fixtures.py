@@ -55,7 +55,6 @@ class ScenarioTree:
 
 def base_binding() -> dict[str, Any]:
     return {
-        "schema_version": 1,
         "robot_id": "synthetic_sim",
         "task_id": "stack",
         "description": "Synthetic phase-02 binding",
@@ -71,8 +70,8 @@ def base_binding() -> dict[str, Any]:
         "interfaces": {
             "common_ros": ["robot_api_msgs"],
             "extension_ros": ["extensions/ros/marvin_stack_api_msgs"],
-            "teacher_api": "marvin_stack_api_msgs.teacher_chunk.v1",
-            "policy_api": "bimanual.policy.v1",
+            "teacher_api": "marvin_stack_api_msgs.teacher_chunk",
+            "policy_api": "bimanual.policy",
         },
         "source_roots": [],
         "artifact_roots": [],
@@ -84,15 +83,15 @@ def _copy_profile_documents(root: Path) -> None:
     profiles = root / "profiles"
     profiles.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(
-        MARVIN_STACK_PROFILES / "robots/marvin_stack_v1/profile.json",
+        MARVIN_STACK_PROFILES / "robots/marvin_stack/profile.json",
         profiles / "robot.json",
     )
     shutil.copyfile(
-        MARVIN_SHARED_PROFILES / "observations/marvin_rgb_joint_v1.json",
+        MARVIN_SHARED_PROFILES / "observations/marvin_rgb_joint.json",
         profiles / "observation.json",
     )
     shutil.copyfile(
-        MARVIN_SHARED_PROFILES / "actions/marvin_joint_position_v1.json",
+        MARVIN_SHARED_PROFILES / "actions/marvin_joint_position.json",
         profiles / "action.json",
     )
 
@@ -103,7 +102,7 @@ def build_scenario(root: Path, document: dict[str, Any] | None = None) -> Scenar
     configs = root / "configs"
     configs.mkdir(exist_ok=True)
     for name in RECIPES:
-        (configs / f"{name}.yaml").write_text("schema_version: 1\n", encoding="utf-8")
+        (configs / f"{name}.yaml").write_text("{}\n", encoding="utf-8")
     extension = root / "extensions/ros/marvin_stack_api_msgs"
     (extension / "msg").mkdir(parents=True, exist_ok=True)
     (extension / "srv").mkdir(parents=True, exist_ok=True)
@@ -111,7 +110,7 @@ def build_scenario(root: Path, document: dict[str, Any] | None = None) -> Scenar
         "<package format='3'><name>marvin_stack_api_msgs</name></package>\n", encoding="utf-8"
     )
     (extension / "msg/TeacherCapability.msg").write_text(
-        "string ID=marvin_stack_api_msgs.teacher_chunk.v1\n", encoding="utf-8"
+        "string ID=marvin_stack_api_msgs.teacher_chunk\n", encoding="utf-8"
     )
     (extension / "srv/GetTeacherChunk.srv").write_text("---\n", encoding="utf-8")
     tree = ScenarioTree(root, root / "binding.yaml", document or base_binding())

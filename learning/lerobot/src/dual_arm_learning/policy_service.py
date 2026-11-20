@@ -145,7 +145,7 @@ class PolicyService:
         return self._policy_info_message()
 
     def _policy_info_message(self) -> object:
-        from dual_arm_policy.v1 import policy_pb2
+        from dual_arm_policy import policy_pb2
 
         fields = {
             name: getattr(self.info, name) for name in self.info.__dataclass_fields__
@@ -226,7 +226,7 @@ class PolicyService:
         return self._open_reply(session)
 
     def _open_reply(self, session: _Session) -> object:
-        from dual_arm_policy.v1 import policy_pb2
+        from dual_arm_policy import policy_pb2
 
         return policy_pb2.OpenSessionReply(
             session_id=session.session_id,
@@ -236,7 +236,7 @@ class PolicyService:
 
     @staticmethod
     def _context_message(context: ProviderContext) -> object:
-        from dual_arm_policy.v1 import policy_pb2
+        from dual_arm_policy import policy_pb2
 
         return policy_pb2.RunContext(**asdict(context))
 
@@ -349,7 +349,7 @@ class PolicyService:
         prediction: ProviderPrediction,
         inference_duration: int,
     ) -> object:
-        from dual_arm_policy.v1 import policy_pb2
+        from dual_arm_policy import policy_pb2
 
         return policy_pb2.PredictReply(
             session_id=session.session_id,
@@ -562,7 +562,7 @@ class PolicyService:
         return len(targets), duration
 
     def reset_session(self, request: object) -> object:
-        from dual_arm_policy.v1 import policy_pb2
+        from dual_arm_policy import policy_pb2
 
         session = self._session(str(request.session_id))  # type: ignore[attr-defined]
         reset_id = str(request.reset_id)  # type: ignore[attr-defined]
@@ -605,7 +605,7 @@ class PolicyService:
             return reply
 
     def close_session(self, request: object) -> object:
-        from dual_arm_policy.v1 import policy_pb2
+        from dual_arm_policy import policy_pb2
 
         session_id = str(request.session_id)  # type: ignore[attr-defined]
         if not session_id:

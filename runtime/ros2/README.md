@@ -13,7 +13,7 @@ ROS 2 运行端负责连接仿真/真机后端（Robot API）与策略服务端�
 - **宿主机并行推理**：仓库根目录 [`./inference_parallel.sh`](../../inference_parallel.sh)（自动管理多个无界面仿真 worker 与批量统计报告）。
   - `scripts/test.sh`：运行容器内 `pytest` 测试。
 
-所有运行入口直接通过 `--robot <robot> --task <task>`（或显式 `--config <path>`）在内存中解析 `<shared>/scenarios/<robot>/<task>/binding.yaml`，支持 `--set dot.path=value` 覆盖参数，不生成准备目录。运行端只通过 gRPC 连接 Policy Service，不读取模型 Bundle。
+使用 `--robot <robot> --task <task>` 从 `<shared>/scenarios/<robot>/<task>/binding.yaml` 在内存中选择配方。直接配置模式的路径参数见各命令帮助。策略客户端使用 `--policy-endpoint HOST:PORT` 连接指定的 gRPC 服务，其他业务参数在 Runtime 配方中修改。
 
 MCAP 录制使用 `zstd_fast` 原生无损块压缩；消息字节、主题和时间戳保持完整，离线读取与审计入口相同。
 

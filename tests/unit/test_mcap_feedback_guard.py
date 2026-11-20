@@ -143,7 +143,7 @@ class _FakeAudit:
     reference_topic = "/robot/follower_references"
     camera_names = ("global",)
     required_capabilities = frozenset(
-        {"execution_feedback.gripper_set.v1", "bounded_target_follower_v1"}
+        {"execution_feedback.gripper_set", "bounded_target_follower"}
     )
 
     def __init__(self) -> None:

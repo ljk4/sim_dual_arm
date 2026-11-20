@@ -2,8 +2,8 @@
 
 The marker records the exact package set, each package's source provenance and
 non-README digest, the generated module origin and the build environment.  A
-package-set mismatch, changed IDL/build metadata, missing/duplicated generated
-modules or an old marker schema is rejected with a rebuild instruction.
+package-set mismatch, changed IDL/build metadata or missing/duplicated generated
+modules is rejected with a rebuild instruction.
 """
 
 from __future__ import annotations
@@ -31,7 +31,6 @@ from sdk_packages import (
 )
 
 MARKER_NAME = "contracts.json"
-MARKER_SCHEMA_VERSION = 2
 BUILD_COMMAND = "scripts/build_sdk.sh inside the runtime container"
 
 
@@ -49,7 +48,6 @@ def environment_record() -> dict[str, object]:
         },
         "ros": {"distro": distro, "prefix": prefix},
         "image": os.environ.get("PROJECT_IMAGE") or "unknown",
-        "workspace_version": os.environ.get("PROJECT_WORKSPACE_VERSION") or "unknown",
     }
 
 
@@ -95,7 +93,6 @@ def build_marker_document(
         record["module_root"] = module.relative_to(root).as_posix()
         packages[package.name] = record
     return {
-        "schema_version": MARKER_SCHEMA_VERSION,
         "kind": "sim-dual-arm-ros-sdk",
         "selection": selection.summary(),
         "packages": packages,
@@ -184,12 +181,11 @@ def _check_environment(document: dict[str, object], marker_path: Path) -> None:
             f"completion marker is missing ROS provenance: {marker_path}; "
             f"rebuild with: {BUILD_COMMAND}"
         )
-    for key in ("image", "workspace_version"):
-        if not isinstance(environment.get(key), str):
-            raise SdkCheckError(
-                f"completion marker is missing {key} provenance: {marker_path}; "
-                f"rebuild with: {BUILD_COMMAND}"
-            )
+    if not isinstance(environment.get("image"), str):
+        raise SdkCheckError(
+            f"completion marker is missing image provenance: {marker_path}; "
+            f"rebuild with: {BUILD_COMMAND}"
+        )
     current_distro = os.environ.get("ROS_DISTRO")
     if current_distro and ros["distro"] != current_distro:
         raise SdkCheckError(
@@ -270,11 +266,6 @@ def verify_workspace(
     root = validate_build_root(project, build_root, shared)
     marker_path = root / MARKER_NAME
     document = _load_marker(marker_path)
-    if document.get("schema_version") != MARKER_SCHEMA_VERSION:
-        raise SdkCheckError(
-            f"completion marker schema is not {MARKER_SCHEMA_VERSION}: {marker_path}; "
-            f"rebuild with: {BUILD_COMMAND}"
-        )
     if document.get("kind") != "sim-dual-arm-ros-sdk":
         raise SdkCheckError(
             f"completion marker kind is not a ROS SDK: {document.get('kind')!r}; "
@@ -344,7 +335,6 @@ def print_status(document: dict[str, object], build_root: Path) -> None:
     print("sdk_kind: sim-dual-arm-ros-sdk")
     print(f"package_set: {', '.join(sorted(packages))}")
     print(f"package_set_sha256: {document['package_set_sha256']}")
-    print(f"workspace_version: {environment['workspace_version']}")
     print(f"generated_install: {Path(build_root).resolve() / str(install['directory'])}")
     print(
         "ros: "

@@ -163,7 +163,6 @@ def test_initialize_run_writes_metadata_and_exclusive_directory(tmp_path, monkey
 
         versions = json.loads((session.run_directory / "versions.json").read_text())
         assert set(versions) == {
-            "schema_version",
             "run_id",
             "instance_id",
             "python",
@@ -176,13 +175,7 @@ def test_initialize_run_writes_metadata_and_exclusive_directory(tmp_path, monkey
             "git",
         }
         assert versions["python"]["version"]
-        assert set(versions["dependencies"]) == {
-            "dual-arm-robot-contracts",
-            "dual-arm-run-logging",
-            "dual-arm-ros-support",
-            "PyYAML",
-            "jsonschema",
-        }
+        assert set(versions["dependencies"]) == {"PyYAML", "jsonschema"}
         assert set(versions["sources"]) == {
             "dual_arm_runtime",
             "robot_contracts",

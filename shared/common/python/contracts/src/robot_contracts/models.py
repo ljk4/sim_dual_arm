@@ -31,7 +31,6 @@ _SAFE_CAMERA_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 FloatVector = Annotated[tuple[StrictFloat, ...], BeforeValidator(as_tuple),
                         Field(min_length=1, max_length=MAX_JOINTS)]
 CameraDigest = Annotated[str, Field(strict=True, pattern=r"^[0-9a-f]{64}$")]
-SchemaVersion = Annotated[int, Field(strict=True, ge=2, le=2)]
 
 
 class RunContext(StrictContractModel):
@@ -82,7 +81,6 @@ class RobotProfile(StrictContractModel):
                       Field(min_length=1, max_length=MAX_JOINTS)]
     cameras: Annotated[tuple[CameraSpec, ...], BeforeValidator(as_tuple),
                        Field(min_length=1, max_length=MAX_CAMERAS)]
-    schema_version: SchemaVersion = 2
 
     @model_validator(mode="after")
     def _profile_identity(self) -> RobotProfile:

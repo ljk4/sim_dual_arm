@@ -112,7 +112,7 @@ def run_teacher(
     runner: EpisodeLifecycle, episode_id: str, actual_context: RunContext, task_id: str
 ) -> None:
     from dual_arm_runtime.chunk_stream import follower_limits
-    from dual_arm_runtime.teacher_source import TeacherStreamRunner, TeacherTargetSource
+    from dual_arm_runtime.simulation.teacher_source import TeacherStreamRunner, TeacherTargetSource
 
     teacher = runner.configuration.recipe.teacher
     if teacher is None:

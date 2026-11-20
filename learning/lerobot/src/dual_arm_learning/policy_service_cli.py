@@ -58,7 +58,6 @@ def _write_startup_failure(
     try:
         directory.mkdir(parents=True, exist_ok=True)
         payload = {
-            "schema_version": 1,
             "status": "failed",
             "stage": stage,
             "error_type": type(error).__name__,
@@ -105,14 +104,6 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         help="model directory or model.safetensors; defaults to the newest act_* model",
     )
-    parser.add_argument(
-        "--set",
-        dest="overrides",
-        action="append",
-        default=[],
-        metavar="PATH=VALUE",
-        help="override one existing policy/service recipe path (repeatable)",
-    )
     parser.add_argument("--robot-profile", type=Path)
     parser.add_argument("--observation-schema", type=Path)
     parser.add_argument("--action-schema", type=Path)
@@ -138,7 +129,6 @@ def _snapshot(
     overrides: dict[str, object] | None = None,
 ) -> dict:
     record = {
-        "schema_version": 1,
         "model": summary,
         "service": config.to_document(),
         "provider": adapter.summary(),
@@ -297,14 +287,11 @@ def main(argv: list[str] | None = None) -> int:
                 observation_schema_path=selection.profile_path("observation"),
                 action_schema_path=selection.profile_path("action"),
                 device=args.device,
-                set_overrides=args.overrides,
             )
             if args.model_path is not None:
                 overrides["model_path"] = {"value": str(model_path), "source": "argument"}
             if args.device is not None:
                 overrides["device"] = {"value": args.device, "source": "argument"}
-            if args.overrides:
-                overrides["set"] = {"value": list(args.overrides), "source": "argument"}
         else:
             config = load_policy_config(
                 config_path,
@@ -327,10 +314,7 @@ def main(argv: list[str] | None = None) -> int:
                     else project_path(args.action_schema, project_root)
                 ),
                 device=args.device,
-                set_overrides=args.overrides,
             )
-            if args.overrides:
-                overrides["set"] = {"value": list(args.overrides), "source": "argument"}
         if config.model_path is None and not config.test_only:
             raise ModelError("--model is required for a non-test policy service")
         stage = "load_warm"

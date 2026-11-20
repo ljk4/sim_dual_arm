@@ -1,9 +1,9 @@
-// Policy API v1.  Joint positions are SI radians for arm joints and metres for
+// Policy API. Joint positions are SI radians for arm joints and metres for
 // each total gripper opening, in the RobotProfile's declared joint order.  The
 // configured profile fixes the joint count and camera names; this file
 // intentionally declares no framework and no fixed robot recipe.
 syntax = "proto3";
-package bimanual.policy.v1;
+package bimanual.policy;
 
 service PolicyService {
   rpc GetPolicyInfo(GetPolicyInfoRequest) returns (PolicyInfo);
@@ -29,7 +29,6 @@ message GetPolicyInfoRequest {
 }
 
 message PolicyInfo {
-  uint32 protocol_major = 1;
   string model_bundle_digest = 2;
   string processor_digest = 3;
   string observation_schema_hash = 4;
@@ -44,7 +43,7 @@ message PolicyInfo {
   uint64 action_period_ns = 10;
   bool stateful = 11;
   bool ready = 12;
-  // v1 accepts only "joint_position"; units are declared in the RobotProfile.
+  // The command space is "joint_position". RobotProfile declares the units.
   string command_space = 13;
   uint32 chunk_size = 14;
   bool test_only = 15;
@@ -55,7 +54,7 @@ message OpenSessionRequest {
   string model_bundle_digest = 2;
   string observation_schema_hash = 3;
   string action_schema_hash = 4;
-  // Canonical JSON validated against the versioned schema, never Python pickle.
+  // Canonical JSON validated against the shared schema.
   bytes robot_profile_json = 5;
   bytes observation_schema_json = 6;
   bytes action_schema_json = 7;

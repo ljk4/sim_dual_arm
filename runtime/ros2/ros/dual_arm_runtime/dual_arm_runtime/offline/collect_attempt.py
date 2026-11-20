@@ -10,7 +10,6 @@ import sys
 from pathlib import Path
 
 import yaml
-from robot_contracts.overrides import OverrideError, apply_overrides
 from robot_contracts.project_paths import project_path
 
 from dual_arm_runtime.artifact_paths import default_backend_log
@@ -80,9 +79,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--task")
     parser.add_argument("--shared-root", type=Path)
     parser.add_argument("--runtime-config", type=Path)
-    parser.add_argument(
-        "--set", dest="overrides", action="append", default=[], metavar="PATH=VALUE"
-    )
+    parser.add_argument("--robot-namespace", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if args.robot is None and args.runtime_config is None:
         parser.error("one of --robot/--task or --runtime-config is required")
@@ -118,6 +115,8 @@ def main(argv: list[str] | None = None) -> int:
         runtime_arguments = ["--robot", robot, "--task", task, "--role", "teacher"]
         if shared_root is not None:
             runtime_arguments += ["--shared-root", str(shared_root)]
+        if args.robot_namespace is not None:
+            runtime_arguments += ["--robot-namespace", args.robot_namespace]
     else:
         template = project_path(args.runtime_config, ROOT).resolve()
         recipe = yaml.safe_load(template.read_text(encoding="utf-8"))
@@ -127,15 +126,9 @@ def main(argv: list[str] | None = None) -> int:
         if "reset" not in recipe or not isinstance(recipe["reset"], dict):
             raise ValueError("runtime recipe has no reset object")
         recipe["reset"]["seed"] = seed
-        try:
-            recipe = apply_overrides(recipe, list(args.overrides))
-        except OverrideError as error:
-            raise ValueError(str(error)) from error
         config = logs / "runtime.yaml"
         config.write_text(yaml.safe_dump(recipe, sort_keys=False), encoding="utf-8")
         runtime_arguments = ["--config", str(config)]
-    for override in args.overrides:
-        runtime_arguments += ["--set", override]
     result = subprocess.run(
         [
             sys.executable,

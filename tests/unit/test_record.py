@@ -13,7 +13,6 @@ from dual_arm_runtime.offline import record
 @pytest.fixture
 def recording(tmp_path, monkeypatch):
     config = {
-        "schema_version": 1,
         "budget": {
             "formal_seed_first": 10000, "formal_seed_last": 10099,
             "formal_max_attempts": 10, "formal_target_qualified": 5,
@@ -55,7 +54,16 @@ task = "failed" if state == "task_failure" else "succeeded"
     "runtime": {"outcome": runtime, "reason": "TEST"},
 }))
 (raw / "task_result.json").write_text(json.dumps({"result": {"outcome": task}}))
-(export / "quality.json").write_text(json.dumps({"qualified": state != "quality_failure"}))
+quality_ok = state != "quality_failure"
+(export / "quality.json").write_text(json.dumps({
+    "qualified": quality_ok,
+    "visibility_qualified": quality_ok,
+    "trajectory_qualified": True,
+    "failure_reasons": [] if quality_ok else ["global target pixels missing"],
+}))
+(export / "labels.json").write_text(json.dumps({
+    "summary": {"rejected": {"no_started_block": 2}},
+}))
 raise SystemExit(130 if state == "interrupted" else 1 if state == "runtime_failure" else 0)
 '''
     )
@@ -120,6 +128,20 @@ def test_default_stops_after_three_consecutive_failures(recording, capsys):
     assert _seeds(root) == [10000, 10001, 10002]
 
 
+def test_failed_export_keeps_diagnostics_in_ledger_after_cleanup(recording):
+    root, _, _, run = recording
+    assert run(["quality_failure"], "--max-consecutive-failures", "1") == 1
+
+    terminal = json.loads((root / "out/attempts.jsonl").read_text().splitlines()[-1])
+    assert not Path(terminal["attempt_dir"]).exists()
+    assert terminal["diagnostics"]["quality_failure_reasons"] == [
+        "global target pixels missing"
+    ]
+    assert terminal["diagnostics"]["visibility_qualified"] is False
+    assert terminal["diagnostics"]["trajectory_qualified"] is True
+    assert terminal["diagnostics"]["label_rejections"] == {"no_started_block": 2}
+
+
 def test_configured_consecutive_failure_limit(recording, capsys):
     root, _, _, run = recording
     assert run(["task_failure", "quality_failure", "qualified"],
@@ -174,7 +196,6 @@ def test_interrupt_does_not_start_next_attempt(recording, capsys):
 def test_formal_target_reached_publishes_formal_select_atomically(recording, capsys):
     root, config, _, run = recording
     config["budget"]["formal_target_qualified"] = 2
-    config["budget"]["formal_validation_qualified_indices"] = [1]
     (root / "campaign.yaml").write_text(yaml.safe_dump(config))
 
     assert run(["qualified", "qualified"], "--count", "2") == 0
@@ -183,15 +204,19 @@ def test_formal_target_reached_publishes_formal_select_atomically(recording, cap
     assert _summary(capsys)["formal_select"] == str(destination)
     document = json.loads(destination.read_text())
     assert document["status"] == "SELECTED"
-    assert [item["seed"] for item in document["validation"]] == [10001]
+    assert document["target"] == document["qualified"] == 2
+    assert [item["seed"] for item in document["selected"]] == [10000, 10001]
     assert not list(destination.parent.glob("*.tmp"))
+
+    assert record.main(["status", "--project-root", str(root), "--config", "campaign.yaml"]) == 0
+    assert "SELECTED（2 条）" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(
     "arguments", [["--count", "0"], ["--count", "-1"], ["--count", "abc"],
-                  ["--max-consecutive-failures", "0"]],
+                  ["--max-consecutive-failures", "0"], ["--set", "reset.seed=9"]],
 )
-def test_invalid_counts_do_not_reserve_or_check_sdk(recording, arguments):
+def test_invalid_options_do_not_reserve_or_check_sdk(recording, arguments):
     root, _, sdk_check, run = recording
     with pytest.raises(SystemExit) as error:
         run([], *arguments)

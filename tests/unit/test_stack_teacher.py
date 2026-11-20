@@ -48,10 +48,10 @@ def fixture():
     scene.reset(0)
     task_config = load_task_config(SCENARIO / "configs/simulation/scene/marvin_stack_task.yaml")
     profile = load_profile(
-        PROFILES / "robots/marvin_stack_v1/profile.json",
+        PROFILES / "robots/marvin_stack/profile.json",
         ROOT / "shared/common/interfaces/schemas",
     )
-    control = load_control_config(MARVIN_SHARED_PROFILES / "control/marvin_control_v1.yaml")
+    control = load_control_config(MARVIN_SHARED_PROFILES / "control/marvin_control.yaml")
     kinematics = load_kinematics_config(
         SCENARIO / "configs/simulation/checks/kinematics_check.yaml", scene_config
     )

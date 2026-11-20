@@ -7,10 +7,6 @@ import statistics
 import time
 from pathlib import Path
 
-from robot_backend_sim.marvin_sim.scene_base import (
-    base_world_point,
-    combined_yaw_quaternion,
-)
 from robot_backend_sim.marvin_sim.stack.scene_config import MarvinStackSceneConfig
 from robot_backend_sim.marvin_sim.stack.visibility import (
     LayoutSpec,
@@ -39,53 +35,6 @@ def _actual_object_poses(
         )
     return poses
 
-
-def _boundary_object_poses(
-    layout: LayoutSpec, scene_config: MarvinStackSceneConfig
-) -> list[dict[str, object]]:
-    by_name = {placement.name: placement for placement in layout.placements}
-    poses: list[dict[str, object]] = []
-    base = scene_config.robot
-    for obj in scene_config.objects:
-        placement = by_name[obj.name]
-        world = base_world_point(
-            (placement.x, placement.y, scene_config.table.top_z + obj.half_extents[2]),
-            base.base_position,
-            base.base_yaw_deg,
-        )
-        poses.append(
-            {
-                "name": obj.name,
-                "x": world[0],
-                "y": world[1],
-                "z": world[2],
-                "yaw_deg": base.base_yaw_deg + placement.yaw_deg,
-            }
-        )
-    return poses
-
-
-def _boundary_updates(
-    layout: LayoutSpec, scene: object, scene_config: MarvinStackSceneConfig
-) -> dict[int, tuple[float, ...]]:
-    by_name = {placement.name: placement for placement in layout.placements}
-    updates: dict[int, tuple[float, ...]] = {}
-    base = scene_config.robot
-    for obj in scene_config.objects:
-        placement = by_name[obj.name]
-        address = scene.indices.environment.object_free_joint_qpos[obj.name]
-        world = base_world_point(
-            (placement.x, placement.y, scene_config.table.top_z + obj.half_extents[2]),
-            base.base_position,
-            base.base_yaw_deg,
-        )
-        updates[address] = (
-            world[0],
-            world[1],
-            world[2],
-            *combined_yaw_quaternion(base.base_yaw_deg, placement.yaw_deg),
-        )
-    return updates
 
 def _save_rgb_images(
     run_dir: Path,
@@ -157,7 +106,7 @@ def _layout_document(
         "rgb": rgb_paths,
     }
 
-def _first_visibility_failure(result: LayoutVisibility) -> tuple[str, str, int, int] | None:
+def _first_visibility_failure(result: LayoutVisibility) -> tuple[str, str, str, int] | None:
     for camera in result.cameras:
         for item in camera.objects:
             if not item.passed:
@@ -210,27 +159,11 @@ def _measure_throughput(
         ),
     }
 
-def _select_contact_layouts(results: list[dict[str, object]]) -> list[dict[str, object]]:
-    if not results:
-        return []
-    first = results[0]
-    worst = min(
-        results,
-        key=lambda item: (
-            int(item["minimum_margin"]),
-            int(item["total_pixels"]),
-            str(item["layout_id"]),
-        ),
-    )
-    if worst["layout_id"] == first["layout_id"]:
-        return [first, first]
-    return [first, worst]
-
 def _write_contact_sheet(
-    run_dir: Path, results: list[dict[str, object]], check_config: SceneCheckConfig
+    run_dir: Path, layout: dict[str, object], check_config: SceneCheckConfig
 ) -> str:
     try:
-        return _compose_contact_sheet(run_dir, results, check_config)
+        return _compose_contact_sheet(run_dir, layout, check_config)
     except SceneCheckFailure:
         raise
     except Exception as error:
@@ -240,48 +173,39 @@ def _write_contact_sheet(
         ) from error
 
 def _compose_contact_sheet(
-    run_dir: Path, results: list[dict[str, object]], check_config: SceneCheckConfig
+    run_dir: Path, layout: dict[str, object], check_config: SceneCheckConfig
 ) -> str:
     from PIL import Image, ImageDraw
 
-    selected = _select_contact_layouts(results)
-    cameras = list(check_config.camera_names)
-    opened: list[list[Image.Image]] = []
-    for layout in selected:
-        row: list[Image.Image] = []
-        for camera in cameras:
-            with Image.open(run_dir / str(layout["rgb"][camera])) as source:
-                row.append(source.convert("RGB"))
-        opened.append(row)
-    tile_width = max(image.width for row in opened for image in row)
-    tile_height = max(image.height for row in opened for image in row)
+    cameras = check_config.camera_names
+    images = []
+    for camera in cameras:
+        with Image.open(run_dir / str(layout["rgb"][camera])) as source:
+            images.append(source.convert("RGB"))
+    tile_width = max(image.width for image in images)
+    tile_height = max(image.height for image in images)
     margin = 8
     gap = 6
     header = 16
     label = 14
-    columns = len(cameras)
-    rows = len(selected)
-    sheet_width = margin * 2 + columns * (tile_width + gap) - gap
-    sheet_height = margin * 2 + rows * (header + tile_height + label + gap) - gap
+    sheet_width = margin * 2 + len(cameras) * (tile_width + gap) - gap
+    sheet_height = margin * 2 + header + tile_height + label
     sheet = Image.new("RGB", (sheet_width, sheet_height), (245, 245, 245))
     draw = ImageDraw.Draw(sheet)
-    for row_index, (layout, images) in enumerate(zip(selected, opened, strict=True)):
-        top = margin + row_index * (header + tile_height + label + gap)
-        draw.text(
-            (margin, top),
-            f"{layout['layout_id']}  kind={layout['kind']}  "
-            f"total_pixels={layout['total_pixels']}  passed={layout['passed']}",
+    draw.text(
+        (margin, margin),
+        f"{layout['layout_id']}  total_pixels={layout['total_pixels']}  passed={layout['passed']}",
+        fill=(0, 0, 0),
+    )
+    image_top = margin + header
+    for column, (camera, image) in enumerate(zip(cameras, images, strict=True)):
+        left = margin + column * (tile_width + gap)
+        sheet.paste(image, (left, image_top))
+        draw.rectangle(
+            (left, image_top, left + 110, image_top + label),
             fill=(0, 0, 0),
         )
-        image_top = top + header
-        for column, (camera, image) in enumerate(zip(cameras, images, strict=True)):
-            left = margin + column * (tile_width + gap)
-            sheet.paste(image, (left, image_top))
-            draw.rectangle(
-                (left, image_top, left + 110, image_top + label),
-                fill=(0, 0, 0),
-            )
-            draw.text((left + 3, image_top + 1), camera, fill=(255, 255, 255))
+        draw.text((left + 3, image_top + 1), camera, fill=(255, 255, 255))
     path = run_dir / "artifacts" / "contact_sheet.png"
     path.parent.mkdir(parents=True, exist_ok=True)
     sheet.save(path, format="PNG")

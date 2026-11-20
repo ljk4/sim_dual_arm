@@ -263,6 +263,8 @@ class InferencePool:
             run_id,
             "--reset-seed",
             str(seed),
+            *(["--policy-endpoint", self.args.policy_endpoint]
+              if self.args.policy_endpoint is not None else []),
             "--output",
             str(self.recordings),
             "--runs-output",
@@ -420,7 +422,6 @@ class InferencePool:
             bucket["reasons"][reason] = bucket["reasons"].get(reason, 0) + 1
             bucket["seeds"].append(item["seed"])
         return {
-            "schema_version": 1,
             "batch_id": self.args.batch_id,
             "requested": self.args.count,
             "attempted": attempted,
@@ -449,6 +450,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--batch-id", required=True)
     parser.add_argument("--count", type=int, required=True)
     parser.add_argument("--seed-start", type=int, required=True)
+    parser.add_argument("--policy-endpoint", metavar="HOST:PORT")
     parser.add_argument("--max-consecutive-failures", type=int, default=None)
     args = parser.parse_args(argv)
     document = json.loads(args.manifest.read_text(encoding="utf-8"))

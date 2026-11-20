@@ -62,10 +62,10 @@ def test_task_mode_rejects_a_chunk_budget_that_cannot_cover_30s(tmp_path):
 
 def test_teacher_requires_an_explicit_capability_identifier(tmp_path):
     configuration = load_runtime_configuration(TEACHER, ROOT)
-    assert configuration.recipe.teacher_api == "marvin_stack_api_msgs.teacher_chunk.v1"
-    assert "marvin_stack_api_msgs.teacher_chunk.v1" in configuration.required_capabilities
+    assert configuration.recipe.teacher_api == "marvin_stack_api_msgs.teacher_chunk"
+    assert "marvin_stack_api_msgs.teacher_chunk" in configuration.required_capabilities
     assert (
-        "marvin_stack_api_msgs.teacher_chunk.v1"
+        "marvin_stack_api_msgs.teacher_chunk"
         in configuration.snapshot["recipe"]["required_capabilities"]
     )
     assert "teacher_chunk" not in configuration.required_capabilities

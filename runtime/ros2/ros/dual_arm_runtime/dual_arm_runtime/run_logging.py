@@ -30,9 +30,6 @@ from robot_run_logging import (
 
 _RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _DEPENDENCY_DISTRIBUTIONS = (
-    "dual-arm-robot-contracts",
-    "dual-arm-run-logging",
-    "dual-arm-ros-support",
     "PyYAML",
     "jsonschema",
 )
@@ -184,7 +181,6 @@ def initialize_run(
     run_directory.mkdir(exist_ok=False)
     instance_id = str(uuid.uuid4())
     resolved = {
-        "schema_version": 1,
         "run_id": run_id,
         "instance_id": instance_id,
         **configuration.snapshot,
@@ -226,7 +222,6 @@ def collect_versions(
     snapshot = configuration.snapshot
     recipe = snapshot["recipe"]
     return {
-        "schema_version": 1,
         "run_id": run_id,
         "instance_id": instance_id,
         "python": {

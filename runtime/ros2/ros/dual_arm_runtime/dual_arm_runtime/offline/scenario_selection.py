@@ -51,7 +51,7 @@ SIMULATION_REFERENCE_FIELDS = (
 # The current collection implementation calls these common services directly.
 REQUIRED_COMMON_ROS = ("robot_api_msgs", "sim_api_msgs")
 # A Teacher extension package publishes these files; the capability id inside
-# TeacherCapability.msg is the explicit wire/version identity.
+# TeacherCapability.msg declares the capability implemented by the extension.
 TEACHER_SERVICE = "srv/GetTeacherChunk.srv"
 TEACHER_CAPABILITY_FILE = "msg/TeacherCapability.msg"
 _CAPABILITY_ID = re.compile(r"^\s*string\s+ID\s*=\s*(\S+)\s*$")
@@ -170,7 +170,7 @@ def _check_capabilities(resolved: ResolvedBinding, shared_root: Path) -> dict[st
     if not teacher_api:
         raise CampaignError(
             "unsupported Teacher capability: interfaces.teacher_api must name the "
-            "selected extension's capability/version"
+            "selected extension's capability"
         )
     matches: list[tuple[str, Path]] = []
     for index, _declared in enumerate(resolved.binding.interfaces.extension_ros):

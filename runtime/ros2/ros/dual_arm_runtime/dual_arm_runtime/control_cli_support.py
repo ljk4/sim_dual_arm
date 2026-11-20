@@ -22,7 +22,6 @@ from rclpy.signals import SignalHandlerOptions
 from robot_api_msgs.msg import RuntimeStatus
 from robot_api_msgs.srv import EndEpisode, StartEpisode
 from robot_contracts.episodes import (
-    EPISODE_SCHEMA_VERSION,
     RecordingResult,
     RuntimeOutcome,
     RuntimeResult,
@@ -484,11 +483,6 @@ def _validate_manifest(
 ) -> dict[str, Any]:
     if not isinstance(document, dict):
         raise CliError("MANIFEST_INVALID", "manifest must be a JSON object")
-    if document.get("schema_version") != EPISODE_SCHEMA_VERSION:
-        raise CliError(
-            "MANIFEST_INVALID",
-            f"manifest schema_version must be {EPISODE_SCHEMA_VERSION}",
-        )
     if document.get("run_id") != run_id:
         raise CliError("MANIFEST_INVALID", "manifest run_id does not match the request")
     if document.get("episode_id") != episode_id:
@@ -512,7 +506,6 @@ def _validate_manifest(
     except (KeyError, TypeError, ValueError) as error:
         raise CliError("MANIFEST_INVALID", f"manifest result is invalid: {error}") from error
     return {
-        "schema_version": EPISODE_SCHEMA_VERSION,
         "run_id": run_id,
         "episode_id": episode_id,
         "directory": str(directory),

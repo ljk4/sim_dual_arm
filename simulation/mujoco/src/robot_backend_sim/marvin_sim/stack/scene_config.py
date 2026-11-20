@@ -42,7 +42,6 @@ __all__ = [
     "MarvinStackSceneConfig",
     "ObjectConfig",
     "PhysicsConfig",
-    "RandomizationConfig",
     "StackEnvironmentConfig",
     "StackSceneConfigError",
     "TableConfig",
@@ -54,11 +53,6 @@ StackSceneConfigError = StrictMappingError
 _OBJECT_NAME_PATTERN = r"^[A-Za-z][A-Za-z0-9_]*$"
 
 
-class RandomizationConfig(StrictMappingModel):
-    xy_m: Annotated[StrictFloat, Field(ge=0.0, le=0.25)]
-    yaw_deg: Annotated[StrictFloat, Field(ge=0.0, le=180.0)]
-
-
 class ObjectConfig(StrictMappingModel):
     name: Annotated[NonEmptyStr, Field(pattern=_OBJECT_NAME_PATTERN)]
     half_extents: Vec3
@@ -66,7 +60,6 @@ class ObjectConfig(StrictMappingModel):
     nominal_yaw_deg: Annotated[StrictFloat, Field(ge=-180.0, le=180.0)]
     mass: Annotated[PositiveFloat, Field(ge=0.001, le=10.0)]
     rgba: Rgba
-    randomization: RandomizationConfig
 
     @model_validator(mode="after")
     def _object(self) -> ObjectConfig:
@@ -96,36 +89,23 @@ class StackEnvironmentConfig(StrictMappingModel):
         table_half_y = self.table.size_xy[1] / 2.0
         for field_name, obj in (("source", self.source), ("target", self.target)):
             radius = math.hypot(*obj.half_extents[:2])
-            randomization = obj.randomization.xy_m
-            reach_x = abs(obj.nominal_xy[0] - self.table.center_xy[0]) + randomization + radius
-            reach_y = abs(obj.nominal_xy[1] - self.table.center_xy[1]) + randomization + radius
+            reach_x = abs(obj.nominal_xy[0] - self.table.center_xy[0]) + radius
+            reach_y = abs(obj.nominal_xy[1] - self.table.center_xy[1]) + radius
             if reach_x > table_half_x + 1e-9 or reach_y > table_half_y + 1e-9:
                 raise contract_error(
                     f"{field_name}.nominal_xy",
-                    "randomized footprint crosses the table edge",
+                    "footprint crosses the table edge",
                 )
-        gap_x = max(
-            0.0,
-            abs(self.source.nominal_xy[0] - self.target.nominal_xy[0])
-            - self.source.randomization.xy_m
-            - self.target.randomization.xy_m,
-        )
-        gap_y = max(
-            0.0,
-            abs(self.source.nominal_xy[1] - self.target.nominal_xy[1])
-            - self.source.randomization.xy_m
-            - self.target.randomization.xy_m,
-        )
-        min_center_distance = math.hypot(gap_x, gap_y)
+        center_distance = math.dist(self.source.nominal_xy, self.target.nominal_xy)
         min_required = (
             math.hypot(*self.source.half_extents[:2])
             + math.hypot(*self.target.half_extents[:2])
             + 0.005
         )
-        if min_center_distance < min_required:
+        if center_distance < min_required:
             raise contract_error(
                 "source.nominal_xy",
-                "source and target randomization domains can overlap or lack clearance",
+                "source and target footprints can overlap or lack clearance",
             )
         return self
 

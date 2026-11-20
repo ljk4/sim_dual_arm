@@ -23,7 +23,6 @@ import numpy as np
 from .config_yaml import integer, text
 from .dataset_common import file_sha256
 from .sample_filter_mask import (  # noqa: F401 - public re-exports
-    FILTER_FORMAT,
     SampleFilterMask,
     load_filter_mask,
     mask_digest,
@@ -542,7 +541,6 @@ def _source_document(
         "path": str(rule.source),
         "sha256": rule.sha256,
         "resolved": {
-            "schema_version": rule.schema_version,
             "fps": rule.fps,
             "chunk_size": rule.chunk_size,
             "arm_indices": list(rule.arm_indices),
@@ -609,7 +607,6 @@ def _filter_document(
     excluded = source_frames - eligible
     dataset_document, rule_document = _source_document(root, manifest_path, rule)
     document: dict[str, Any] = {
-        "format": FILTER_FORMAT,
         "created_wall_time_ns": time.time_ns(),
         "dataset": dataset_document,
         "rule": rule_document,
@@ -694,7 +691,6 @@ def build_filter_mask(
 
 
 __all__ = [
-    "FILTER_FORMAT",
     "FilterError",
     "FilterRule",
     "SampleFilterMask",
