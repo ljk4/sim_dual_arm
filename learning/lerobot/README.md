@@ -2,105 +2,157 @@
 
 提供无 ROS 依赖的 LeRobot 数据集转换、ACT 训练与 gRPC Policy 推理服务。
 
-## 在云服务器上用 uv 搭建学习端环境
-
-学习端只需要 Python 3.12、NVIDIA 驱动/CUDA 与仓库源码，不需要 ROS 或 Docker。以下步骤在一台 Ubuntu 云服务器（建议 ≥16 GB 显存）上执行：
-
-```bash
-# 1. 安装 uv（独立安装到 ~/.local/bin，不依赖系统 Python）
-curl -LsSf https://astral.sh/uv/install.sh | sh
-export PATH="$HOME/.local/bin:$PATH"
-uv --version
-
-# 2. 取得仓库与固定版本 LeRobot 源码
-git clone https://github.com/ljk4/sim_dual_arm.git
-cd sim_dual_arm
-# third_party/src 被 .gitignore 忽略；按 third_party/README.md 恢复
-# lerobot-act-v0.6.1 到 third_party/src/lerobot-act-v0.6.1，
-# 并把 resnet18-f37072fd.pth 放到 third_party/weights/。
-
-# 3. 创建独立环境并安装依赖（先按显卡/CUDA 版本选择 PyTorch 轮子）
-uv python install 3.12
-uv venv --python 3.12 .venv
-source .venv/bin/activate
-uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
-uv pip install -e third_party/src/lerobot-act-v0.6.1
-uv pip install pydantic pyyaml jsonschema pillow pyarrow safetensors grpcio grpcio-tools av
-```
-
-在 Runtime 容器运行 `scripts/build_sdk.sh --policy-only` 生成 Policy gRPC SDK。把 `build/generated/policy-sdk/` 整个目录复制到云服务器仓库的同名路径，保留 `dual_arm_policy` 包和 `source.sha256`。训练使用本地权重 `third_party/weights/resnet18-f37072fd.pth`。
-
-云服务器上没有项目容器，脚本内的 `setup.sh` 需要一个显式环境。把下面内容写入 `~/.bashrc`（路径按实际仓库位置调整）：
-
-```bash
-export PROJECT_CONTAINER=1
-export PROJECT_ROOT="$HOME/sim_dual_arm"
-export SHARED_ROOT="$PROJECT_ROOT/shared"
-export DATA_ROOT="$PROJECT_ROOT/var"
-export HF_HOME="$PROJECT_ROOT/var/_system/hf-cache"
-export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1
-export PYTHONPATH="$PROJECT_ROOT/learning/lerobot/src:$PROJECT_ROOT/shared/common/python/run_logging/src:$PROJECT_ROOT/shared/common/python/contracts/src:$PROJECT_ROOT/third_party/src/lerobot-act-v0.6.1/src:$PROJECT_ROOT/build/generated/policy-sdk"
-```
-
-之后在仓库根目录直接运行：
-
-```bash
-bash learning/lerobot/scripts/convert.sh --robot marvin_sim --task stack
-bash learning/lerobot/scripts/train.sh --robot marvin_sim --task stack --mode full
-bash learning/lerobot/scripts/server_policy.sh --robot marvin_sim --task stack
-```
-
-`server_policy.sh` 默认监听 `0.0.0.0:50051`。云服务器安全组只需放行 SSH；学习端与运行端之间通过 SSH 隧道通信（见下节），不要直接对公网开放 50051。
-
-## 推荐拓扑：云服务器跑学习端，本机跑运行端与仿真端
+除了全部四端跑在本机之外，也可以把**学习端放在远端 GPU 机器**（训练 + 策略推理），**本机只跑运行端与仿真端**，两者通过 SSH 隧道连接：
 
 ```text
-本机: runtime (ROS 2) ──gRPC──▶ 127.0.0.1:50051 ──SSH 隧道──▶ 云服务器:50051 (learning)
-本机: simulation (MuJoCo) ◀──ROS 2── runtime
+本机: simulation ◀──ROS 2──▶ runtime ──gRPC──▶ host.docker.internal:15051
+                                                         │
+                                                     SSH 隧道
+                                                         ▼
+远端:                                          127.0.0.1:50051 (learning)
 ```
 
-1. **同步数据**：在本机采集完成后，把训练输入同步到云服务器（模型与数据集都按 `var/<robot>/<task>/` 结构存放）：
+---
+
+## 第一步：搭建远端学习端环境（二选一）
+
+两种方式均把工具、依赖和运行产物限制在当前仓库目录内，不修改系统环境或用户主目录（`~`）。
+
+### 方式 A：云服务器（无 Docker，使用 `uv` 在本目录配环境）
+
+适用于没有 Docker、只提供 NVIDIA 驱动与 CUDA 的云服务器。以下全部命令在**远端仓库根目录**执行：
+
+1. **拉取仓库并准备第三方源码与权重**（详见 [`third_party/README.md`](../../third_party/README.md)）。
+2. **在本目录内安装 `uv`、Python 3.12 与依赖**：所有文件收敛在已被 `.gitignore` 忽略的 `var/_system/uv/` 和 `.venv/` 中，不会写入 `~/.local` 或 `~/.bashrc`。
 
    ```bash
-   rsync -av --delete var/marvin_sim/stack/datasets/ \
-     user@cloud:/home/user/sim_dual_arm/var/marvin_sim/stack/datasets/
+   export UV_INSTALL_DIR="$PWD/var/_system/uv/bin"
+   export UV_PYTHON_INSTALL_DIR="$PWD/var/_system/uv/python"
+   export UV_CACHE_DIR="$PWD/var/_system/uv/cache"
+   export PATH="$UV_INSTALL_DIR:$PATH"
+
+   mkdir -p "$UV_INSTALL_DIR" "$UV_PYTHON_INSTALL_DIR" "$UV_CACHE_DIR" build var
+   curl -LsSf https://astral.sh/uv/install.sh | env UV_NO_MODIFY_PATH=1 UV_INSTALL_DIR="$UV_INSTALL_DIR" sh
+
+   uv python install 3.12
+   uv venv --python 3.12 .venv
+   source .venv/bin/activate
+
+   # 按显卡 CUDA 版本选择 PyTorch 轮子（示例为 CUDA 12.4）
+   uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+   uv pip install -e third_party/src/lerobot-act-v0.6.1
+   uv pip install pydantic pyyaml jsonschema pillow pyarrow safetensors grpcio grpcio-tools av
    ```
 
-2. **云端转换与训练**：在云服务器执行上面的 `convert.sh` 与 `train.sh`；训练产物写入 `var/<robot>/<task>/models/act_<时间戳>/`。
-
-3. **云端启动策略服务**（保持运行）：
+3. **生成 Policy SDK 与目录内环境文件 `.env.learning`**（已被 `.gitignore` 忽略）：
 
    ```bash
+   python3 shared/common/tools/scripts/generate_policy_sdk.py
+
+   cat > .env.learning <<EOF
+   source "$PWD/.venv/bin/activate"
+   export PROJECT_CONTAINER=1
+   export PROJECT_ROOT="$PWD"
+   export SHARED_ROOT="$PWD/shared"
+   export DATA_ROOT="$PWD/var"
+   export BUILD_ROOT="$PWD/build"
+   export THIRD_PARTY_ROOT="$PWD/third_party"
+   export POLICY_SDK_ROOT="$PWD/build/generated/policy-sdk"
+   export HF_HOME="$PWD/var/_system/hf-cache"
+   export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+   export PATH="$PWD/var/_system/uv/bin:\$PATH"
+   export PYTHONPATH="$PWD/learning/lerobot/src:$PWD/shared/common/python/run_logging/src:$PWD/shared/common/python/contracts/src:$PWD/third_party/src/lerobot-act-v0.6.1/src:$PWD/build/generated/policy-sdk"
+   EOF
+   ```
+
+4. **激活环境并运行**（以后每次新开终端只需先执行 `source .env.learning`）：
+
+   ```bash
+   source .env.learning
+   bash learning/lerobot/scripts/convert.sh --robot marvin_sim --task stack
+   bash learning/lerobot/scripts/train.sh --robot marvin_sim --task stack --mode full
    bash learning/lerobot/scripts/server_policy.sh --robot marvin_sim --task stack
    ```
 
-4. **本机建立 SSH 本地转发**（保持运行，`50051` 为云端服务端口）：
+### 方式 B：GPU 工作站（有 Docker，使用项目容器）
 
-   ```bash
-   ssh -N -L 127.0.0.1:50051:127.0.0.1:50051 user@cloud
+适用于已安装 NVIDIA 驱动、Docker Compose 插件和 NVIDIA Container Toolkit 的工作站。所有命令在**远端仓库根目录**执行：
+
+1. **拉取仓库并准备第三方源码与权重**（详见 [`third_party/README.md`](../../third_party/README.md)）。
+2. **暴露工作站本机回环端口**：在工作站的 [`learning/lerobot/docker/docker-compose.yml`](docker/docker-compose.yml) 中为 `services.learning` 添加以下 `ports` 配置（仅监听工作站 `127.0.0.1`，不对外开放）：
+
+   ```yaml
+   services:
+     learning:
+       ports:
+         - "127.0.0.1:50051:50051"
    ```
 
-5. **本机运行端指向隧道**：运行端容器通过 `host.docker.internal` 访问宿主机端口（Compose 已声明 `extra_hosts`）。启动推理脚本时追加：
+3. **构建、启动容器并生成 Policy SDK**：
 
    ```bash
-   scripts/client_policy.sh --robot marvin_sim --task stack \
-     --reset-seed 20000 --policy-endpoint host.docker.internal:50051
-   scripts/client_interactive.sh --robot marvin_sim --task stack \
-     --seed 20000 --policy-endpoint host.docker.internal:50051
+   ./env.sh build learning
+   ./env.sh up learning
+   ./env.sh exec learning python3 /shared/common/tools/scripts/generate_policy_sdk.py --output /build/generated/policy-sdk
    ```
 
-   若策略服务改为在云服务器的 Docker 容器中运行，用 `docker compose` 的 `ports: ["50051:50051"]`（只绑定 `127.0.0.1`）暴露服务，再按第 4 步建立隧道即可。
+4. **在容器内运行转换、训练与策略服务**：
 
-6. **批量并行推理**。在本机项目根目录执行 `./inference_parallel.sh --robot marvin_sim --task stack --count 10 --workers auto --policy-endpoint host.docker.internal:50051`。各仿真 worker 独立运行，复用同一个云端策略服务。
+   ```bash
+   ./env.sh exec learning scripts/convert.sh --robot marvin_sim --task stack
+   ./env.sh exec learning scripts/train.sh --robot marvin_sim --task stack --mode full
+   ./env.sh exec learning scripts/server_policy.sh --robot marvin_sim --task stack
+   ```
 
-> `ssh` 建议使用密钥登录与 `~/.ssh/config` 别名；连接中断会同时断开策略服务，长时批量评测请使用 `tmux`/`systemd` 保持隧道。
+---
+
+## 第二步：本机通过 SSH 隧道联调（通用）
+
+远端环境就绪后，按以下顺序完成数据同步与跨机推理（示例中的 `user@remote:/path/to/sim_dual_arm/` 请替换为实际 SSH 地址与远端仓库路径）：
+
+1. **同步数据或模型（在本机仓库根目录执行）**：
+
+   ```bash
+   # 将本机采集的原始数据传给远端用于转换和训练
+   rsync -aR var/marvin_sim/stack/datasets/raw/ user@remote:/path/to/sim_dual_arm/
+
+   # 或直接把本机已有模型传给远端用于推理
+   rsync -aR var/marvin_sim/stack/models/act_YYYYMMDD_HHMMSS/ user@remote:/path/to/sim_dual_arm/
+   ```
+
+2. **远端启动策略服务并保持运行**：按方式 A 或方式 B 启动 `server_policy.sh`（默认监听 `50051`）。
+3. **本机建立 SSH 本地转发（在本机宿主机新终端保持运行）**：
+   本机的 `runtime` 在容器内，通过 `host.docker.internal` 访问宿主机网络，因此把隧道绑定到 `runtime` 容器解析出的 Docker 网关 IP（示例使用本地 `15051` 端口）：
+
+   ```bash
+   ./env.sh up runtime
+   GATEWAY_IP=$(./env.sh exec runtime getent ahostsv4 host.docker.internal | awk 'NR == 1 { print $1 }')
+   ssh -NT -o ExitOnForwardFailure=yes -L "${GATEWAY_IP}:15051:127.0.0.1:50051" user@remote
+   ```
+
+4. **本机启动仿真与推理**：
+   在本机按[推理仿真后端启动步骤](../../README.md#34-直接启动推理仿真后端)启动仿真后端，并在推理命令中追加 `--policy-endpoint host.docker.internal:15051`：
+
+   ```bash
+   # 单局或交互推理（在 runtime 容器内执行）
+   ./env.sh exec runtime scripts/client_policy.sh --robot marvin_sim --task stack \
+     --reset-seed 20000 --policy-endpoint host.docker.internal:15051
+   ./env.sh exec runtime scripts/client_interactive.sh --robot marvin_sim --task stack \
+     --seed 20000 --policy-endpoint host.docker.internal:15051
+
+   # 批量并行推理（在本机宿主机仓库根目录执行）
+   ./inference_parallel.sh --robot marvin_sim --task stack \
+     --count 10 --workers auto --policy-endpoint host.docker.internal:15051
+   ```
+
+---
 
 ## 目录结构
 
 - [`src/dual_arm_learning/`](src/dual_arm_learning/README.md)：`dual_arm_learning` 核心 Python 包。
 - [`configs/`](configs/README.md)：容器环境配置 `container.env` 与测试替身配置。
 - [`docker/`](docker/README.md)：`Dockerfile`、`docker-compose.yml` 与源码声明。
-- [`scripts/`](scripts/README.md)：容器内单职责入口脚本（`convert.sh`、`train.sh`、`policy.sh`、`test.sh`）。
+- [`scripts/`](scripts/README.md)：容器内单职责入口脚本（`convert.sh`、`train.sh`、`server_policy.sh`、`test.sh`）。
 
 ## 常用脚本
 

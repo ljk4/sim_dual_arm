@@ -544,3 +544,23 @@ def test_template_example_is_unfilled_and_not_runnable():
     assert caught.value.reason == "BINDING_REFERENCE"
     assert "profiles.robot" in str(caught.value)
     assert "REPLACE_ME" in str(caught.value)
+
+
+def test_artifact_root_data_resolves_via_data_root_env(scenario, tmp_path, monkeypatch):
+    artifacts = tmp_path / "var"
+    bundle = artifacts / "marvin_sim/stack/models/act_20261121_000000"
+    bundle.mkdir(parents=True)
+    document = scenario.copy()
+    document["artifact_roots"] = ["/data"]
+    _write(scenario, document)
+
+    monkeypatch.setenv("DATA_ROOT", str(artifacts))
+    resolved = _load(scenario, model=bundle)
+    assert resolved.artifact_roots == (artifacts.resolve(),)
+    assert resolved.bundle.path == bundle.resolve()
+    assert resolved.bundle.source == "override"
+
+    resolved_container_model = _load(
+        scenario, model="/data/marvin_sim/stack/models/act_20261121_000000"
+    )
+    assert resolved_container_model.bundle.path == bundle.resolve()

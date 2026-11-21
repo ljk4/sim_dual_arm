@@ -13,6 +13,7 @@ process or writes a file.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -367,6 +368,16 @@ def _inside_roots(path: Path, roots: tuple[Path, ...]) -> bool:
     return any(_is_within(path, root) for root in roots)
 
 
+def _resolve_artifact_path(path: Path, binding_dir: Path) -> Path:
+    if path.is_absolute():
+        data_root = os.environ.get("DATA_ROOT")
+        container_data = Path("/data")
+        if data_root and (path == container_data or _is_within(path, container_data)):
+            return _resolved(Path(data_root) / path.relative_to(container_data))
+        return _resolved(path)
+    return _resolved(binding_dir / path)
+
+
 def _root_list(
     source: Path, roots: tuple[str, ...], kind: str, binding_dir: Path
 ) -> tuple[Path, ...]:
@@ -379,7 +390,11 @@ def _root_list(
                 "BINDING_REFERENCE",
                 f"{source}: {field}: source roots must be relative to the binding directory",
             )
-        candidate = _resolved(path if path.is_absolute() else binding_dir / path)
+        candidate = (
+            _resolve_artifact_path(path, binding_dir)
+            if kind == "artifact"
+            else _resolved(binding_dir / path)
+        )
         if not candidate.is_dir():
             raise BindingError(
                 "BINDING_REFERENCE", f"{source}: {field}: root is not a directory: {candidate}"
@@ -445,7 +460,7 @@ def _resolve_model_reference(
     binding_dir: Path,
 ) -> Path:
     path = Path(declared)
-    candidate = _resolved(path if path.is_absolute() else binding_dir / path)
+    candidate = _resolve_artifact_path(path, binding_dir)
     if not _inside_roots(candidate, roots):
         raise BindingError(
             "BINDING_REFERENCE",
