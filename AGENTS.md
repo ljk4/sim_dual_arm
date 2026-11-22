@@ -49,10 +49,10 @@ Agent 必须严格区分当前处于**开发阶段**还是**规范阶段**，严
 │  • 核心目标：在不破坏已验证功能的前提下，对照本文 §2～§4     │
 │    彻底去除和修正开发阶段遗留的不符合规范之处               │
 │  • 必做清理：删除临时探针/备份/无用校验、消除硬编码与多余    │
-│    中间层、归正 var/ 与 build/ 产物、按 §3.4 跑通硬验收门禁 │
+│    中间层、归正 var/ 与 build/ 产物、按 §3.4～§3.5 验收门禁 │
 └──────────────────────────────────────────────────────────┘
        │
-       ▼  4. 请示用户确认规范达标 → 按指令 commit → 默认 squash 合并回 main
+       ▼  4. 跑通 §3.5 合入前审查门禁并请示确认 → commit → squash 合并回 main
        │     → 删除开发分支与规范分支（一次闭环修正结束）
 ```
 
@@ -71,8 +71,8 @@ Agent 必须严格区分当前处于**开发阶段**还是**规范阶段**，严
 2. **全面去芜存菁与规范对齐**：对照本文 `§2～§4` 逐项审查并修正开发分支中的临时改动：
    - 清理开发排查期遗留的临时脚本、调试打印、冗余防御分支、废弃配置字段与未消费产物；
    - 将硬编码参数、方案耦合逻辑、不对称插件结构重构至符合架构隔离与 SSOT 要求；
-   - **必须按 `§3.4` 的改动-验证触发清单执行回归测试与最小闭环实测验收**，严禁仅凭语法检查或口头宣称逻辑等价，确保规范化重整未改变已验证通过的任务效果。
-3. **阶段二收尾与闭环结束**：向用户展示规范化改动摘要及 `§3.4` 实测验收结果，**请示用户确认规范达标**；仅在用户确认并下达指令后，按显式文件范围执行 `git commit`，将规范分支以 **`git merge --squash`（或单次干净 commit）方式合并回 `main`**（避免把开发分支的杂乱试错提交带入主分支），确认合入无误后再删除本次的开发分支与规范分支，完成一次完整的闭环修正。
+   - **必须按 `§3.4` 的改动-验证触发清单执行回归测试与最小闭环实测验收**，严禁仅凭语法检查或口头宣称逻辑等价，确保规范化重整未改变已验证通过的任务效果；合入 `main` 前，还须按 `§3.5` 对项目现有全部任务跑通四步全链路审查（符合 `§1` 轻量改动豁免条件者除外）。
+3. **阶段二收尾与闭环结束**：向用户展示规范化改动摘要及 `§3.4`、`§3.5` 实测验收结果，**请示用户确认规范达标**；仅在用户确认并下达指令后，按显式文件范围执行 `git commit`，将规范分支以 **`git merge --squash`（或单次干净 commit）方式合并回 `main`**（避免把开发分支的杂乱试错提交带入主分支），确认合入无误后再删除本次的开发分支与规范分支，完成一次完整的闭环修正。
 
 ---
 
@@ -103,7 +103,7 @@ Agent 必须严格区分当前处于**开发阶段**还是**规范阶段**，严
 - **第一级判断：与端无关（`shared/`） vs 与四端有关（`simulation` / `runtime` / `learning` / `hardware`）**
   - **与具体运行端无关**（跨端接口契约、通用数学/轨迹工具、方案绑定与配方）：统一归属 `shared/`。
     - 与机器人和任务均无关 → 归属 `shared/common/`（严禁出现任何机器人名、任务名或场景特定阈值/魔数）；
-    - 与机器人或任务有关 → 归属 `shared/scenarios/<robot-id>/<task-id>/`（机器人级契约档案置于 `profiles/robots/`、`profiles/control/` 等，任务级配方与扩展置于 `configs/`、`extensions/`）。
+    - 与机器人或任务有关 → 归属 `shared/scenarios/<robot-id>/`（跨任务共享的机器人级契约档案与扩展置于 `profiles/`、`extensions/`）及 `shared/scenarios/<robot-id>/<task-id>/`（任务级档案置于 `profiles/{robot,control}/`，任务级配方置于 `configs/`）。
   - **与四端之一有关**（属于 `simulation/mujoco/`、`runtime/ros2/`、`learning/lerobot/`、`hardware/` 某一端的具体实现）：先确定归属哪一端，再按第二级判断端内归属。
 - **第二级判断：端内机器人/任务无关（`common/`） vs 机器人专属（`<robot-id>/`） vs 任务专属（`<robot-id>/<task-id>/`）**
   - **与机器人和任务均无关**（通用控制、运动规划、跟随器、渲染、ROS 通信、训练与推理管线等通用机制） → 归属该端的 `common/`（或完全方案无关的端主包，严禁硬编码 `<robot-id>` 或 `<task-id>`）；
@@ -129,7 +129,7 @@ Agent 必须严格区分当前处于**开发阶段**还是**规范阶段**，严
 | **宿主机（仓库根目录）** | — | 全部工作区源码、`build/`、`var/` | `./env.sh`、`./record_parallel.sh`、`./inference_parallel.sh`、`./env.sh viewer ...` |
 | **`simulation` 容器** | `/app`（`simulation/mujoco/`）、`/shared`（`shared/`）、`/opt/ros-dev`（`build/ros-dev/`） | `/data`（`var/`） | `scripts/teacher_backend.sh`、`scripts/inference_backend.sh`、`scripts/backend.sh`、`scripts/test.sh` |
 | **`runtime` 容器** | `/app`（`runtime/ros2/`）、`/shared`（`shared/`） | `/build`（`build/`）、`/data`（`var/`） | `scripts/build_sdk.sh`、`scripts/record.sh`、`scripts/client_interactive.sh`、`scripts/client_policy.sh`、`scripts/test.sh` |
-| **`learning` 容器** | `/app`（`learning/lerobot/`）、`/shared`（`shared/`）、`/third_party`（`third_party/`） | `/build`（`build/`）、`/data`（`var/`） | `scripts/convert.sh`、`scripts/train.sh`、`scripts/server_policy.sh`、`scripts/test.sh` |
+| **`learning` 容器** | `/app`（`learning/lerobot/`）、`/shared`（`shared/`）、`/third_party`（`third_party/`）、`/opt/policy-sdk`（`build/generated/policy-sdk/`） | `/data`（`var/`） | `scripts/convert.sh`、`scripts/train.sh`、`scripts/server_policy.sh`、`scripts/test.sh` |
 
 > 容器内测试（`tests/`）统一按 [`tests/README.md`](tests/README.md) 方式将工作区源码打包送入容器 `/tmp` 临时目录，并调用对应端的 `/app/scripts/test.sh` 执行。
 
@@ -153,6 +153,16 @@ Agent 必须严格区分当前处于**开发阶段**还是**规范阶段**，严
 | **Docker Compose 挂载/环境或 Dockerfile 依赖** | 执行 `./env.sh up <env>` 或 `./env.sh build <env>`，并确认对应容器内入口脚本可正常运行 |
 
 > **验收防污染与进程回收**：Agent 自测严禁使用 `--purpose formal` 污染正式台账；验收期间启动的临时后端或 Policy 服务在测试结束后必须立即停止清理，避免残留进程占用 `50051` 端口、ROS 2 话题或显存。
+
+### 3.5 合并主分支前全任务闭环审查门禁（`norm/*` → `main` 必检）
+除符合 `§1` 轻量改动豁免（纯文档、单文件参数微调等低风险小改）外，任何改动从 `norm/*` 合并回 `main` 前，**必须对项目中全部现有任务**（当前为 `marvin_sim/stack` 与 `marvin_sim/handover`；后续新增任务同步纳入）依次跑通以下 4 步全链路实测审查，并将结果汇报用户：
+
+- **执行原则（优先模拟真实用户入口）**：每一步尽量直接调用各端 `README.md` 与 [`tests/README.md`](tests/README.md) 文档化的标准脚本入口（如 `simulation/mujoco/scripts/teacher_backend.sh`、`simulation/mujoco/scripts/inference_backend.sh`、`./env.sh exec runtime scripts/*.sh`、`./env.sh exec learning scripts/*.sh`）；若个别步骤因小样本转换/回放需求不易直接复用生产默认配方，允许在 `var/<robot-id>/<task-id>/debug/` 下生成临时 `--config` 配方或使用 [`tests/fakes/policy/run_fake.py`](tests/fakes/policy/run_fake.py)，不必为了凑参数而强行修改生产脚本或正式配方。
+1. **试采（Pilot 采集）**：启动对应任务的 `teacher_backend.sh --robot <robot-id> --task <task-id>`（等待 `ready.json` 就绪），在 `runtime` 容器执行 `scripts/record.sh --robot <robot-id> --task <task-id> --purpose pilot --count 2 --max-consecutive-failures 2`（至少 2 局以满足 train/validation 划分），确认退出码为 `0` 且 `qualified` 为 `2`，并记录合格录制目录、对应 `seed` 与 `export/labels.json` 路径。
+2. **试训（数据转换 + Smoke 训练）**：基于第 1 步生成的 pilot 录制，在 `learning` 容器依次执行 `scripts/convert.sh` 与 `scripts/train.sh --mode smoke`（小样本试采可使用 `var/<robot-id>/<task-id>/debug/` 下的临时 `--config` 配方并配合 `--max-steps`），确认退出码为 `0` 且输出可用于推理加载的模型产物（含 `model.safetensors`）。
+3. **试推（真实模型闭环推理，不要求任务成功）**：基于第 2 步产出的 smoke 模型，启动 `learning` 端 `scripts/server_policy.sh`（指向 smoke 模型目录）与 `simulation` 端 `scripts/inference_backend.sh --robot <robot-id> --task <task-id>`，在 `runtime` 容器运行 `scripts/client_policy.sh` 执行单局闭环推理，确认三端 gRPC / ROS 2 控制与观测流转无报错、正常退出并完成录制（**不要求**少步数 smoke 模型完成任务成功）。
+4. **采集数据推理源成功判定与完整推理链路验证**：使用第 1 步真实 pilot 录制导出的 `export/labels.json` 作为推理源（通过 [`tests/fakes/policy/run_fake.py`](tests/fakes/policy/run_fake.py) 启动真实 gRPC `PolicyService` 回放录制标签），以与该 pilot 录制一致的 `--seed` 启动 `scripts/inference_backend.sh`，在 `runtime` 容器通过 `scripts/client_policy.sh --config <debug_replay_yaml> --reset-seed <pilot_seed>` 运行单局闭环测试（临时配置允许测试策略并对齐首帧时序），确认最终评价返回 `TASK_SUCCEEDED`（`action_source` 为 `policy`、`evaluated` 为 `true`、`conditions_passed` 为 `true` 且 `recording.complete` 为 `true`）。
+- **审查后清理边界**：四步全流程严禁使用 `--purpose formal` 污染正式台账；完成后必须立即停止全部临时后台进程并清理本次审查产生的临时 pilot 录制、debug 配方、smoke 模型、日志与试采台账，待确认工作区与 `var/` 洁净后再请示用户合并 `main`。
 
 ---
 
