@@ -9,10 +9,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
-import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
+
+from robot_contracts.io import sha256_file, write_json_atomic
 
 __all__ = [
     "code_provenance",
@@ -25,35 +25,6 @@ __all__ = [
 
 def utc_now() -> str:
     return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-
-
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def write_json_atomic(path: Path, document: object) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    body = (json.dumps(document, indent=2, sort_keys=True, allow_nan=False) + "\n").encode()
-    handle = tempfile.NamedTemporaryFile(
-        mode="wb", dir=path.parent, prefix=f".{path.name}.", delete=False
-    )
-    temporary = Path(handle.name)
-    try:
-        with handle:
-            handle.write(body)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-    except BaseException:
-        try:
-            temporary.unlink()
-        except OSError:
-            pass
-        raise
 
 
 def python_source_manifest(directory: Path) -> dict[str, object]:

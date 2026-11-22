@@ -1,15 +1,7 @@
-"""Resolve a ``(robot, task)`` binding into one in-memory runtime configuration.
-
-The runtime consumes the same public binding as the simulation and learning
-ends.  A teacher selection injects ``interfaces.teacher_api`` and checks the
-stream budget against the simulation task judge.  A policy selection only
-needs the runtime recipe and profiles: model identity comes from the Policy
-Service handshake, so the runtime never reads a bundle or any model file.
-"""
+"""Resolve a ``(robot, task)`` binding into one in-memory runtime configuration."""
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -20,8 +12,9 @@ from robot_contracts.binding import (
     load_binding,
     resolve_binding_path,
 )
+from robot_contracts.io import read_yaml_unique_mapping
 from robot_contracts.models import ContractError
-from robot_contracts.validation import UniqueKeyError, read_unique_yaml
+from robot_contracts.project_paths import resolve_shared_root as _contracts_shared_root
 
 from dual_arm_runtime.simulation.scenario import configure_simulation_scenario
 
@@ -55,15 +48,7 @@ class ScenarioRuntime:
 
 
 def resolve_shared_root(explicit: Path | None, project_root: Path) -> Path:
-    if explicit is not None:
-        return Path(explicit)
-    environment = os.environ.get("SHARED_ROOT")
-    if environment:
-        return Path(environment)
-    candidate = Path(project_root) / "shared"
-    if candidate.is_dir():
-        return candidate
-    return Path("/shared")
+    return _contracts_shared_root(explicit, project_root)
 
 
 def _binding_path(shared_root: Path, robot: str, task: str) -> Path:
@@ -77,13 +62,9 @@ def _binding_path(shared_root: Path, robot: str, task: str) -> Path:
 
 
 def _load_recipe(path: Path) -> dict[str, Any]:
-    try:
-        document = read_unique_yaml(path)
-    except (UniqueKeyError, OSError) as error:
-        raise ScenarioRuntimeError(f"cannot read runtime recipe {path}: {error}") from error
-    if not isinstance(document, dict):
-        raise ScenarioRuntimeError(f"runtime recipe must be one YAML object: {path}")
-    return document
+    return read_yaml_unique_mapping(
+        path, label="runtime recipe", error_cls=ScenarioRuntimeError
+    )
 
 
 def _override_profile_paths(document: dict[str, Any], resolved: ResolvedBinding) -> None:

@@ -10,5 +10,7 @@ source "$SHARED_ROOT/common/tools/docker/setup.sh"
 # ROS launch_testing otherwise imports unselected sibling modules, allowing an
 # unrelated optional dependency to skip an entire directory during collection.
 export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
-export PYTHONPATH="$ROOT/tests/fakes/policy${PYTHONPATH:+:$PYTHONPATH}"
+if [[ "${CONTAINER_NAME:-}" != "simulation" && -d "$ROOT/tests/fakes/policy" ]]; then
+  export PYTHONPATH="$ROOT/tests/fakes/policy${PYTHONPATH:+:$PYTHONPATH}"
+fi
 exec python3 -m pytest -p no:cacheprovider "$@"

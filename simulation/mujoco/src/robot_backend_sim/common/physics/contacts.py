@@ -10,7 +10,7 @@ are not treated as normal force.
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -29,10 +29,6 @@ __all__ = [
     "validated_gripper_completions",
 ]
 
-_RESERVED_BODY_NAMES = frozenset({"world", "column", "table"})
-_SIDES = ("left", "right")
-_FINGER_COUNT = 2
-
 
 @dataclass(frozen=True, slots=True)
 class FingerBinding:
@@ -45,10 +41,11 @@ class FingerBinding:
 
 @dataclass(frozen=True, slots=True)
 class ContactBinding:
-    """Resolved names/indices for configured free objects and both grippers."""
+    """Resolved names/indices for configured free objects and named grippers."""
 
     object_bodies: tuple[tuple[str, int], ...]
     fingers: tuple[FingerBinding, ...]
+    sides: tuple[str, ...] = ()
 
     def object_name(self, body_id: int) -> str | None:
         for name, identifier in self.object_bodies:
@@ -84,24 +81,27 @@ def resolve_contact_binding(
     model: Any,
     object_names: tuple[str, ...],
     finger_bodies: Mapping[str, tuple[tuple[str, str], ...]],
+    *,
+    reserved_bodies: Iterable[str] = ("world",),
 ) -> ContactBinding:
-    """Validate the configured free objects and the robot's named finger pairs.
+    """Validate the configured free objects and the robot's named finger bindings.
 
     Only the configured scene objects are admitted as contact targets.  A
     configured object must have exactly one free joint and must not be a
-    reserved world/table/robot body.  Each side must name exactly two
-    ``(body_name, joint_name)`` fingers; the robot adapter supplies those names.
+    reserved structural body.  Each gripper side binds one or more
+    ``(body_name, joint_name)`` fingers supplied by the robot adapter.
     """
     if not isinstance(object_names, tuple) or not object_names:
         raise ContractError("MODEL_MISMATCH", "scene must configure at least one free object")
-    if not isinstance(finger_bodies, Mapping):
-        raise ContractError("MODEL_MISMATCH", "finger bindings must be a mapping")
+    if not isinstance(finger_bodies, Mapping) or not finger_bodies:
+        raise ContractError("MODEL_MISMATCH", "finger bindings must be a non-empty mapping")
+    reserved = frozenset(reserved_bodies)
     objects: list[tuple[str, int]] = []
     seen: set[str] = set()
     for name in object_names:
         if not isinstance(name, str) or not name or name in seen:
             raise ContractError("MODEL_MISMATCH", "configured object names must be unique strings")
-        if name in _RESERVED_BODY_NAMES:
+        if name in reserved:
             raise ContractError("MODEL_MISMATCH", f"reserved body {name!r} is not a free object")
         body_id = _body_id(model, name)
         if body_id == 0:
@@ -115,12 +115,13 @@ def resolve_contact_binding(
         objects.append((name, body_id))
 
     fingers: list[FingerBinding] = []
-    for side in _SIDES:
-        specs = finger_bodies.get(side)
-        if not isinstance(specs, tuple) or len(specs) != _FINGER_COUNT:
+    sides = tuple(finger_bodies.keys())
+    for side in sides:
+        specs = finger_bodies[side]
+        if not isinstance(specs, tuple) or not specs:
             raise ContractError(
                 "MODEL_MISMATCH",
-                f"finger bindings for {side!r} must name exactly two fingers",
+                f"finger bindings for {side!r} must name at least one finger",
             )
         for finger_index, spec in enumerate(specs, start=1):
             if not isinstance(spec, tuple) or len(spec) != 2:
@@ -141,7 +142,7 @@ def resolve_contact_binding(
                     "MODEL_MISMATCH", f"finger joint {joint_name!r} has an invalid dof address"
                 )
             fingers.append(FingerBinding(side, finger_index, body_name, body_id, dof_address))
-    return ContactBinding(tuple(objects), tuple(fingers))
+    return ContactBinding(tuple(objects), tuple(fingers), sides)
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,7 +181,7 @@ class GripperContactEvidence:
     """Immutable contact snapshot for one gripper at one measurement time."""
 
     side: str
-    fingers: tuple[FingerContactEvidence, FingerContactEvidence]
+    fingers: tuple[FingerContactEvidence, ...]
     candidate_object: str | None
     ambiguous: bool
 
@@ -263,15 +264,14 @@ def measure_contact_evidence(
     calling this function; the returned values are then evidence for the same
     measurement time as the corresponding qpos/qvel read.
     """
-    if side not in _SIDES:
-        raise ContractError("INVALID_CONTACT", f"unknown gripper side {side!r}")
-    fingerprints: list[FingerContactEvidence] = []
-    for finger in sorted(
+    side_fingers = sorted(
         (item for item in binding.fingers if item.side == side),
         key=lambda item: item.finger_index,
-    ):
-        if finger.finger_index > _FINGER_COUNT:
-            raise ContractError("MODEL_MISMATCH", "finger binding index exceeds two")
+    )
+    if not side_fingers:
+        raise ContractError("INVALID_CONTACT", f"unknown gripper side {side!r}")
+    fingerprints: list[FingerContactEvidence] = []
+    for finger in side_fingers:
         speed = abs(float(data.qvel[finger.dof_address]))
         if not math.isfinite(speed):
             raise ContractError("INVALID_CONTACT", f"{finger.body_name}.speed is not finite")
@@ -284,11 +284,8 @@ def measure_contact_evidence(
                 joint_speed_m_s=speed,
             )
         )
-    if len(fingerprints) != _FINGER_COUNT:
-        raise ContractError("MODEL_MISMATCH", f"{side} gripper must bind two fingers")
 
-    common: set[str] = set(fingerprints[0].object_names)
-    common.intersection_update(fingerprints[1].object_names)
+    common = set.intersection(*(set(item.object_names) for item in fingerprints))
     if len(common) == 1:
         candidate = next(iter(common))
         ambiguous = False
@@ -298,7 +295,7 @@ def measure_contact_evidence(
     else:
         candidate = None
         ambiguous = False
-    return GripperContactEvidence(side, (fingerprints[0], fingerprints[1]), candidate, ambiguous)
+    return GripperContactEvidence(side, tuple(fingerprints), candidate, ambiguous)
 
 
 def empty_contact_evidence(data: Any, binding: ContactBinding, side: str) -> GripperContactEvidence:
@@ -307,14 +304,23 @@ def empty_contact_evidence(data: Any, binding: ContactBinding, side: str) -> Gri
     Used before the first step, where reading post-step contact forces would
     mislabel a previous state.  It deliberately records no force evidence.
     """
-    fingerprints = []
-    for finger_index in range(1, _FINGER_COUNT + 1):
-        finger = binding.finger(side, finger_index)
-        speed = abs(float(data.qvel[finger.dof_address]))
-        fingerprints.append(
-            FingerContactEvidence(side, finger_index, finger.body_name, (), speed)
+    side_fingers = sorted(
+        (item for item in binding.fingers if item.side == side),
+        key=lambda item: item.finger_index,
+    )
+    if not side_fingers:
+        raise ContractError("INVALID_CONTACT", f"unknown gripper side {side!r}")
+    fingerprints = tuple(
+        FingerContactEvidence(
+            side,
+            finger.finger_index,
+            finger.body_name,
+            (),
+            abs(float(data.qvel[finger.dof_address])),
         )
-    return GripperContactEvidence(side, (fingerprints[0], fingerprints[1]), None, False)
+        for finger in side_fingers
+    )
+    return GripperContactEvidence(side, fingerprints, None, False)
 
 
 def evaluate_gripper_completion(
@@ -385,26 +391,28 @@ def evaluate_gripper_completion(
 
 def validated_gripper_completions(
     completions: tuple[GripperCompletion, ...],
+    *,
+    expected_sides: Sequence[str] | None = None,
 ) -> tuple[GripperCompletion, ...]:
-    """Keep the two-sided, two-finger evidence rule explicit.
-
-    The shared feedback container accepts any bounded, named gripper/finger
-    set.  This backend still requires exactly the left then right grippers, each
-    with finger indices 1 and 2, because its completion and same-object contact
-    rules are defined for that named pair on both robots.
-    """
+    """Validate ordered unique gripper completion records for all configured grippers."""
+    if not completions:
+        raise ContractError("INVALID_GRIPPER_FEEDBACK", "gripper completions must not be empty")
     sides = tuple(completion.side for completion in completions)
-    if sides != _SIDES:
-        raise ContractError(
-            "INVALID_GRIPPER_FEEDBACK",
-            "requires exactly left then right gripper completions",
-        )
-    for completion in completions:
-        indices = tuple(finger.finger_index for finger in completion.fingers)
-        if indices != (1, 2):
+    if expected_sides is not None:
+        if sides != tuple(expected_sides):
             raise ContractError(
                 "INVALID_GRIPPER_FEEDBACK",
-                f"{completion.side} gripper requires finger indices 1 then 2",
+                f"requires gripper completions in order {tuple(expected_sides)!r}, got {sides!r}",
+            )
+    elif len(set(sides)) != len(sides):
+        raise ContractError("INVALID_GRIPPER_FEEDBACK", "duplicate gripper sides in completions")
+    for completion in completions:
+        indices = tuple(finger.finger_index for finger in completion.fingers)
+        expected_indices = tuple(range(1, len(indices) + 1))
+        if not indices or indices != expected_indices:
+            raise ContractError(
+                "INVALID_GRIPPER_FEEDBACK",
+                f"{completion.side} gripper requires sequential 1-based finger indices",
             )
         if any(finger.side != completion.side for finger in completion.fingers):
             raise ContractError(

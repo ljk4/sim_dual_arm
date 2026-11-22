@@ -8,7 +8,7 @@ rosbag2_py = pytest.importorskip("rosbag2_py")
 pytest.importorskip("rclpy")
 
 
-from dual_arm_runtime.offline.export_media import write_images  # noqa: E402
+from dual_arm_runtime.offline.export.export_media import write_images  # noqa: E402
 from PIL import Image as PillowImage  # noqa: E402
 from rclpy.serialization import serialize_message  # noqa: E402
 from robot_api_msgs.msg import CameraFrame  # noqa: E402
@@ -35,7 +35,7 @@ def test_previews_are_optional_but_rgb_is_always_exported(tmp_path, previews):
     out = tmp_path / "export"
     mapping = write_images(
         recording, out, ("global",),
-        [{"observation_id": 1, "observation_sim_time_ns": 1}],
+        [{"observation_id": 1, "observation_backend_time_ns": 1}],
         {1: (1,)}, {"stable": 1}, {"global": (2, 1)}, previews=previews,
     )
     png = out / mapping[0]["global"]["path"]

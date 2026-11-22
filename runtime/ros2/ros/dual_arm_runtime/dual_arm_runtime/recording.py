@@ -19,10 +19,10 @@ from robot_contracts.episodes import (
     TaskResult,
     manifest_schema_path,
 )
+from robot_contracts.io import sha256_file
 from robot_contracts.models import ContractError
 from robot_contracts.profiles import validate_document
 
-from dual_arm_runtime.offline.mcap_reader import audit_follower_recording
 from dual_arm_runtime.recording_queue import (
     BoundedRecordingQueue,
     RecordingQueueError,
@@ -30,16 +30,26 @@ from dual_arm_runtime.recording_queue import (
     RecordingStats,
 )
 
-_HASH_CHUNK_BYTES = 1024 * 1024
 
-
-def sha256_file(path: Path) -> str:
-    """Hash a file in fixed-size chunks; callers never read the whole file at once."""
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        while chunk := stream.read(_HASH_CHUNK_BYTES):
-            digest.update(chunk)
-    return digest.hexdigest()
+def _verify_mcap_counts(directory: Path, expected_counts: dict[str, int]) -> None:
+    reader = rosbag2_py.SequentialReader()
+    try:
+        reader.open(
+            rosbag2_py.StorageOptions(uri=str(directory), storage_id="mcap"),
+            rosbag2_py.ConverterOptions("", ""),
+        )
+    except Exception as error:
+        raise ContractError("RECORDING_ERROR", f"cannot open recording: {error}") from error
+    try:
+        counts: dict[str, int] = {}
+        while reader.has_next():
+            topic, _payload, _bag_time_ns = reader.read_next()
+            counts[topic] = counts.get(topic, 0) + 1
+        filtered_expected = {topic: count for topic, count in expected_counts.items() if count > 0}
+        if counts != filtered_expected:
+            raise ContractError("RECORDING_ERROR", "message counts differ")
+    finally:
+        reader.close()
 
 
 class _RosbagWriter:
@@ -227,13 +237,10 @@ class EpisodeRecorder:
 
     def _audit(self, stats) -> str:
         try:
-            report = audit_follower_recording(
+            _verify_mcap_counts(
                 self.directory / "recording",
-                self._episode_id,
-                self._configuration,
+                dict(stats.written_counts),
             )
-            if report["message_counts"] != dict(stats.written_counts):
-                return "RECORDING_ERROR: message counts differ"
         except ContractError as error:
             return str(error) if error.reason else f"RECORDING_ERROR: {error}"
         except Exception as error:

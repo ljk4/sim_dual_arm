@@ -49,7 +49,7 @@ def resolve_chunk_anchor(
     profile_digest: str,
     now_sim_ns: int,
     step_ns: int,
-    start_sim_time_ns: int | None,
+    start_backend_time_ns: int | None,
 ) -> ChunkAnchor:
     """Validate the current phase and return the one admissible anchor."""
     if stream_config is None:
@@ -61,7 +61,9 @@ def resolve_chunk_anchor(
     if schedule is None and phase in ACTIVE_PHASES:
         raise invalid("MOTION_ACTIVE", "single-shot motion is active")
     if schedule is not None and phase in (Phase.ACCEPTED, Phase.RUNNING, Phase.SETTLING):
-        return compute_active_chunk_anchor(schedule, phase, start_sim_time_ns, profile_digest)
+        return compute_active_chunk_anchor(
+            schedule, phase, start_backend_time_ns, profile_digest
+        )
     return compute_idle_chunk_anchor(
         instance_id=instance_id,
         motion_seq=motion_seq,
@@ -70,7 +72,7 @@ def resolve_chunk_anchor(
         now_sim_ns=now_sim_ns,
         stream_config=stream_config,
         step_ns=step_ns,
-        start_sim_time_ns=start_sim_time_ns,
+        start_backend_time_ns=start_backend_time_ns,
     )
 
 
@@ -222,7 +224,7 @@ def stream_boundary(
                 started.plan, started.plan.duration_ns
             ).positions
             final_targets = tuple(started.window.targets[-1].positions)
-            final_end = started.end_sim_time_ns
+            final_end = started.end_backend_time_ns
         return BoundaryEffect(
             Phase.RUNNING,
             None,

@@ -43,7 +43,6 @@
 # policy.termination_mode：终止模式，finite_chunks 按块数结束，task 按任务判定结束。
 # policy.task_stop_margin_s：任务截止前预留的停车余量，单位 s。
 # policy.task_sim_budget_ns：任务阶段仿真预算，单位 ns。
-# motions：诊断动作列表；policy/teacher 运行通常为空。
 # logging.queue_capacity：事件日志内存队列容量。
 # logging.max_event_bytes：单条日志最大字节数。
 # logging.max_file_bytes：单个日志文件最大字节数。
@@ -61,11 +60,11 @@
 # Paths are relative to this file; all times are integer ns unless a field says
 # seconds.  Three RGB cameras and the full 16-joint order are fixed by the
 # referenced profile and the Policy service configuration.
-robot_profile: ../../../shared/scenarios/marvin_sim/stack/profiles/robots/marvin_stack/profile.json
-observation_schema: ../../../shared/scenarios/marvin_sim/handover/profiles/observations/marvin_rgb_joint.json
-action_schema: ../../../shared/scenarios/marvin_sim/handover/profiles/actions/marvin_joint_position.json
-control_constraints: ../../../shared/scenarios/marvin_sim/handover/profiles/control/marvin_control.yaml
-follower_config: ../../../shared/scenarios/marvin_sim/handover/profiles/control/marvin_follower.yaml
+robot_profile: ../../../shared/scenarios/marvin_sim/stack/profiles/robot/profile.json
+observation_schema: ../../../shared/scenarios/marvin_sim/profiles/observations/marvin_rgb_joint.json
+action_schema: ../../../shared/scenarios/marvin_sim/profiles/actions/marvin_joint_position.json
+control_constraints: ../../../shared/scenarios/marvin_sim/profiles/control/marvin_control.yaml
+follower_config: ../../../shared/scenarios/marvin_sim/profiles/control/marvin_follower.yaml
 robot_namespace: /robot
 
 action_source: policy
@@ -116,9 +115,6 @@ policy:
   close_deadline_s: 2.0
   max_message_bytes: 16777216
   poll_interval_s: 0.02
-
-# Kept empty on purpose: the streaming runtime has no diagnostic motion list.
-motions: []
 
 logging:
   queue_capacity: 256

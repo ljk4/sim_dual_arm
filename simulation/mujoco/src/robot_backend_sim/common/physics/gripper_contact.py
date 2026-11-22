@@ -29,7 +29,6 @@ __all__ = ["REFERENCE_VELOCITY_ATOL_M_S", "ContactUnloader", "GripperContactTrac
 # A reference velocity this close to zero is numerical standstill, not a
 # measured opening command.
 REFERENCE_VELOCITY_ATOL_M_S = 1e-9
-_SIDES = ("left", "right")
 
 
 @dataclass(slots=True)
@@ -100,13 +99,14 @@ class GripperContactTracker:
         self._binding = binding
         self._config = config
         self._gripper_index = gripper_indices(joint_names)
+        self._sides = tuple(self._gripper_index)
         self._arm_indices = tuple(
             index
             for index in range(len(joint_names))
             if index not in self._gripper_index.values()
         )
         self._contact_unload_timeout_ns = int(contact_unload_timeout_ns)
-        self._unloaders = {side: ContactUnloader() for side in _SIDES}
+        self._unloaders = {side: ContactUnloader() for side in self._sides}
         self._unloading_axes: frozenset[int] = frozenset()
 
     @property
@@ -121,13 +121,13 @@ class GripperContactTracker:
     def empty_contacts(self) -> tuple[GripperContactEvidence, ...]:
         return tuple(
             empty_contact_evidence(self._scene.data, self._binding, side)
-            for side in _SIDES
+            for side in self._sides
         )
 
     def measure_contacts(self) -> tuple[GripperContactEvidence, ...]:
         return tuple(
             measure_contact_evidence(self._scene.model, self._scene.data, self._binding, side)
-            for side in _SIDES
+            for side in self._sides
         )
 
     def _completion(
@@ -161,16 +161,19 @@ class GripperContactTracker:
         initial_positions: tuple[float, ...],
         final_positions: tuple[float, ...],
     ) -> tuple[GripperCompletion, ...]:
-        return validated_gripper_completions(tuple(
-            self._completion(
-                side,
-                measurement,
-                contacts,
-                initial_positions[self._gripper_index[side]],
-                final_positions[self._gripper_index[side]],
-            )
-            for side in _SIDES
-        ))
+        return validated_gripper_completions(
+            tuple(
+                self._completion(
+                    side,
+                    measurement,
+                    contacts,
+                    initial_positions[self._gripper_index[side]],
+                    final_positions[self._gripper_index[side]],
+                )
+                for side in self._sides
+            ),
+            expected_sides=self._sides,
+        )
 
     def completion_bounds(
         self,
@@ -233,16 +236,19 @@ class GripperContactTracker:
         contacts: tuple[GripperContactEvidence, ...],
         hold_positions: tuple[float, ...],
     ) -> tuple[GripperCompletion, ...]:
-        return validated_gripper_completions(tuple(
-            self._completion(
-                side,
-                measurement,
-                contacts,
-                hold_positions[self._gripper_index[side]],
-                hold_positions[self._gripper_index[side]],
-            )
-            for side in _SIDES
-        ))
+        return validated_gripper_completions(
+            tuple(
+                self._completion(
+                    side,
+                    measurement,
+                    contacts,
+                    hold_positions[self._gripper_index[side]],
+                    hold_positions[self._gripper_index[side]],
+                )
+                for side in self._sides
+            ),
+            expected_sides=self._sides,
+        )
 
     def constrained_axes(
         self,
@@ -259,7 +265,7 @@ class GripperContactTracker:
         """
         constrained: set[int] = set()
         unloading: set[int] = set()
-        for side in _SIDES:
+        for side in self._sides:
             index = self._gripper_index[side]
             target = reference.positions[index]  # type: ignore[attr-defined]
             contact = next(item for item in contacts if item.side == side)

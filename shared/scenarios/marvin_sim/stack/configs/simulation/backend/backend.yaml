@@ -1,12 +1,12 @@
 # Marvin stack direct Robot API backend (no task plugin).
 robot:
   namespace: /robot
-  profile: ../../../profiles/robots/marvin_stack/profile.json
+  profile: ../../../profiles/robot/profile.json
   schemas: ../../../../../../common/interfaces/schemas
   scene: ../scene/marvin_stack.yaml
-  control: ../../../../handover/profiles/control/marvin_control.yaml
+  control: ../../../../profiles/control/marvin_control.yaml
   stream: ../../../profiles/control/marvin_stream.yaml
-  follower: ../../../../handover/profiles/control/marvin_follower.yaml
+  follower: ../../../../profiles/control/marvin_follower.yaml
   velocity_feedforward: true
   reliable_sensors: true
 

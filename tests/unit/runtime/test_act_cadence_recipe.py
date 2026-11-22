@@ -1,0 +1,116 @@
+"""ACT inference recipes bind execution windows while preserving physical limits."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import yaml
+from dual_arm_runtime.runtime_config import load_runtime_configuration
+from robot_backend_sim.common.config.backend_config import load_backend_config
+from robot_backend_sim.common.config.follower_config import load_follower_config
+from scenario_fixtures import MARVIN_SHARED_PROFILES
+
+ROOT = Path(__file__).resolve().parents[3]
+SCENARIO = ROOT / "shared/scenarios/marvin_sim/stack"
+TEACHER_FOLLOWER = MARVIN_SHARED_PROFILES / "control/marvin_follower.yaml"
+INFERENCE_FOLLOWER = MARVIN_SHARED_PROFILES / "control/marvin_follower_inference.yaml"
+BACKEND_CHUNKED = SCENARIO / "configs/simulation/backend/backend_stack_policy.yaml"
+RUNTIME_CHUNKED = SCENARIO / "configs/runtime/policy_rollout.yaml"
+RUNTIME_TEACHER = SCENARIO / "configs/runtime/teacher_collect.yaml"
+
+_REFERENCED_FILES = (
+    "robot_profile",
+    "observation_schema",
+    "action_schema",
+    "control_constraints",
+    "follower_config",
+)
+
+
+def materialize_runtime(template: Path, directory: Path) -> Path:
+    """Apply absolute paths used by the runtime recipe loader."""
+    document = yaml.safe_load(template.read_text(encoding="utf-8"))
+    for field in _REFERENCED_FILES:
+        document[field] = str((template.parent / document[field]).resolve())
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / template.name
+    path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+    return path
+
+
+def load_runtime(template: Path, directory: Path):
+    path = materialize_runtime(template, directory)
+    return load_runtime_configuration(path, ROOT)
+
+
+def test_single_follower_source_owns_target_count_and_deviation_budget():
+    teacher = load_follower_config(TEACHER_FOLLOWER)
+    assert teacher.target_count == 10
+    assert teacher.target_count * 50_000_000 == 500_000_000
+    inference = load_follower_config(INFERENCE_FOLLOWER)
+    assert inference.target_count == 20
+    assert inference.target_count * 50_000_000 == 1_000_000_000
+    assert all(
+        inference_deviation >= teacher_deviation
+        for inference_deviation, teacher_deviation in zip(
+            inference.max_target_deviations, teacher.max_target_deviations, strict=True
+        )
+    )
+    assert inference.max_terminal_tail_duration_s == 3.0
+
+
+def test_policy_backend_references_the_single_follower_source():
+    chunked = load_backend_config(BACKEND_CHUNKED)
+    assert chunked.follower_path == INFERENCE_FOLLOWER.resolve()
+    assert chunked.task_mode == "inference"
+    assert chunked.realtime_speed == 0.5
+    assert chunked.chunk_history_capacity == 256
+
+
+def test_runtime_configs_reference_the_single_follower_source():
+    expected = {
+        RUNTIME_CHUNKED: INFERENCE_FOLLOWER,
+        RUNTIME_TEACHER: TEACHER_FOLLOWER,
+    }
+    for template, follower_file in expected.items():
+        document = yaml.safe_load(template.read_text(encoding="utf-8"))
+        assert "target_count" not in document.get("policy", {})
+        assert "target_count" not in document.get("teacher", {})
+        assert (template.parent / document["follower_config"]).resolve() == follower_file.resolve()
+
+
+def test_chunked_runtime_keeps_the_60x16_interface_and_covers_the_task(tmp_path):
+    runtime = load_runtime(RUNTIME_CHUNKED, tmp_path / "chunked")
+    policy = runtime.recipe.policy
+    follower = runtime.recipe.follower
+    assert policy is not None
+    assert follower is not None
+    assert runtime.recipe.action_source == "policy"
+    assert runtime.recipe.teacher is None
+
+    loaded_follower = load_follower_config(INFERENCE_FOLLOWER)
+    assert follower.target_count == loaded_follower.target_count == 20
+    assert policy.chunk_size == 60
+    assert policy.action_period_ns == 50_000_000
+    assert follower.duration_grid_ns == 2_000_000
+
+    window_ns = follower.target_count * policy.action_period_ns
+    assert window_ns == 1_000_000_000
+    assert policy.max_chunks == 256
+    assert policy.max_chunks * window_ns == 256_000_000_000
+    assert policy.startup_settle_sim_ns == 3_000_000_000
+    assert policy.warmup_on_settle is True
+    assert policy.async_inference is True
+    assert policy.max_chunks * window_ns >= policy.task_sim_budget_ns
+    assert policy.total_sim_deadline_ns == policy.task_sim_budget_ns == 90_000_000_000
+    simulation_speed = load_backend_config(BACKEND_CHUNKED).realtime_speed
+    required_wall_s = policy.task_sim_budget_ns / 1e9 / simulation_speed
+    assert policy.total_wall_deadline_s >= (
+        required_wall_s + runtime.recipe.control.terminal_timeout_s
+    )
+
+    assert follower.max_target_deviations == loaded_follower.max_target_deviations
+    assert follower.max_terminal_tail_duration_ns == loaded_follower.max_terminal_tail_duration_ns
+    assert len(runtime.snapshot["action"]["joint_names"]) == 16
+    assert policy.task_id == "marvin-stack"
+    assert policy.task_text.startswith("Pick up the red source cube")

@@ -156,7 +156,7 @@ class RuntimeCallbacks:
             event.chunk_seq,
             event.phase,
             event.reason,
-            event.sim_time_ns,
+            event.backend_time_ns,
         )
         with node._condition:
             previous = node._events.get(event.event_seq)
@@ -172,7 +172,7 @@ class RuntimeCallbacks:
                 node._episode.report_control_fault("CONTROL_EVENT_CACHE_FULL")
                 return
             node._events[event.event_seq] = signature
-        node._episode.record(f"{node._root}/control_events", message, event.sim_time_ns)
+        node._episode.record(f"{node._root}/control_events", message, event.backend_time_ns)
         with node._condition:
             key = (event.command_id, event.chunk_seq)
             if event.is_chunk:

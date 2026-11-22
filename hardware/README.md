@@ -20,9 +20,9 @@
 
 ## 当前耦合点
 
-- 通用 Policy 运行按 Robot API 能力接入。仿真复位、任务判定和程序示教通过仿真路径启用。当前采集方案解析要求 simulation Binding、Sim API 和 Teacher 扩展。见 [每局准备](../runtime/ros2/ros/dual_arm_runtime/dual_arm_runtime/episode_runner.py)和[采集方案解析](../runtime/ros2/ros/dual_arm_runtime/dual_arm_runtime/offline/scenario_selection.py)。
-- 当前导出与资格判定依赖 MuJoCo 分割数据和真值任务状态。并行采集入口启动独立 MuJoCo 实例，属于仿真批采。见 [导出](../runtime/ros2/ros/dual_arm_runtime/dual_arm_runtime/offline/export_episode.py)和[并行采集入口](../record_parallel.sh)。
-- Robot API 中部分时间字段名为 `sim_time_ns`。真机需提供统一的后端单调采样时钟和重连 epoch 语义。目前运行配方按 2 ms 规划周期验收，接入真机前需对齐其执行时钟和轨迹交接网格。
+- 通用 Policy 运行按 Robot API 能力接入。仿真复位、任务判定和程序示教通过 `dual_arm_runtime/simulation/` 路径按需启用。当前采集方案解析要求 simulation Binding、Sim API 和 Teacher 扩展。见 [每局准备](../runtime/ros2/ros/dual_arm_runtime/dual_arm_runtime/episode_runner.py)和[采集方案解析](../runtime/ros2/ros/dual_arm_runtime/dual_arm_runtime/offline/collection/scenario_selection.py)。
+- 当前导出与资格判定依赖物理后端/仿真日志状态与质量元数据。并行采集入口启动独立 MuJoCo 实例，属于仿真批采。见 [导出](../runtime/ros2/ros/dual_arm_runtime/dual_arm_runtime/offline/export/export_episode.py)和[并行采集入口](../record_parallel.sh)。
+- Robot API 时间字段已统一为硬件中性的 `*_backend_time_ns`，并由 `BackendInfo.control_grid_ns` 协商控制执行周期（Marvin MuJoCo 为 `2_000_000 ns`）；真机驱动需提供单调递增的后端采样时钟、一致的重连 epoch 语义，以及实际支持的 `control_grid_ns`。
 
 ## Runtime 分层方案
 

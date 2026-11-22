@@ -17,7 +17,7 @@ Stack 与 Handover 均按各自配方的固定物块位姿复位。采集和评�
 - **`runtime/ros2/`**：ROS 2 运行端，负责观测同步、控制租约、Policy 和 Teacher 的轨迹生成与提交、MCAP 录制与离线审计。仿真运行代码负责仿真任务和采集组织。
 - **`learning/lerobot/`**：ROS-free 学习与策略服务端，负责数据集转换、ACT 混合精度训练、模型（`model.safetensors` + `training_args.yaml`）写出与 gRPC Policy 推理服务。
 - **`hardware/`**：真机 Robot API 边界说明；当前没有可验证的真实驱动。
-- **`shared/common/`**：公共层，只放跨端接口约束（Policy Protobuf、ROS 2 IDL、JSON Schema）、共享 Python 包与通用工具，不选择具体任务、机器人或算法。
+- **`shared/common/`**：公共层，只放跨端接口约束（Policy Protobuf、ROS 2 IDL、JSON Schema）、共享 Python 包与通用工具（含宿主机并行编排），不选择具体任务、机器人或算法。
 - **`shared/scenarios/<robot-id>/<task-id>/`**：两级方案绑定层，用 `binding.yaml` 选择档案、配方与方案专用接口（如 `shared/scenarios/marvin_sim/stack/`、`shared/scenarios/marvin_sim/handover/`）；[`_template`](shared/scenarios/_template/README.md) 说明新增方案的方法。
 
 使用 `--robot <robot-id> --task <task-id>` 时，该方案的 `binding.yaml` 在内存中选择并展开配方。条数、并发数和仿真倍速等运行参数使用专用选项，其余参数在对应配方中修改。直接配置模式使用各命令帮助列出的配置路径参数。
@@ -27,6 +27,8 @@ simulation backend ──ROS 2──▶ runtime ──gRPC──▶ learning pol
         ▲                        │
         └──── 观测 / 执行反馈 ─────┘
 ```
+
+各端的详细职责分工、ROS 2 / gRPC 通信契约、两条核心协作闭环以及当前实现的架构审查与解耦规划，见 [跨端架构分工与解耦审查](docs/features/跨端架构分工与解耦审查.md)。
 
 ---
 
@@ -57,7 +59,7 @@ mkdir -p build var
 
 `build/` 仅存放运行时加载的生成 SDK，`var/` 存放运行日志、录制、数据集、模型与报告。各构建和运行命令按需创建子目录。首次启动前由宿主机用户创建这两个根目录，避免 Docker 自动创建后归 root 所有；UID/GID 应与 Compose 中的运行用户一致。
 
-三端容器统一将各自的实现目录只读挂载为 `/app`（`working_dir: /app`），公共目录 `shared/` 只读挂载为 `/shared`，运行输出 `var/` 挂载为 `/data`；runtime/learning 额外将 `build/` 挂载为 `/build`，simulation 仅只读挂载所需的 `build/ros-dev` 至 `/opt/ros-dev`。更新挂载配置后，重新执行 `./env.sh up <env>` 使配置生效。
+三端容器统一将各自的实现目录只读挂载为 `/app`（`working_dir: /app`），公共目录 `shared/` 只读挂载为 `/shared`，运行输出 `var/` 挂载为 `/data`；runtime 将 `build/` 挂载为 `/build`，simulation 只读挂载 `build/ros-dev` 至 `/opt/ros-dev`，learning 只读挂载 `build/generated/policy-sdk` 至 `/opt/policy-sdk`。更新挂载配置后，重新执行 `./env.sh up <env>` 使配置生效。
 
 所有运行期产物按机器人/任务对归入 `var/<robot-id>/<task-id>/`（容器 `/data/<robot-id>/<task-id>/`，如 `var/marvin_sim/stack/`、`var/marvin_sim/handover/`），任务目录内严格分为四个平级目录：
 
@@ -232,7 +234,7 @@ scripts/inference_backend.sh \
   --seed 6000 --run-id policy-backend
 ```
 
-运行快照与日志分别位于 `/data/marvin_sim/stack/logs/backend/policy-backend/backend.yaml` 与 `/data/marvin_sim/stack/logs/backend/policy-backend/log`。后端与第 3.3 节的 Policy 服务、第 3.5 节的 runtime 需同时在线。
+就绪标记、运行快照与日志分别位于 `/data/marvin_sim/stack/logs/backend/policy-backend/ready.json`、`backend.yaml` 与 `log`。后端与第 3.3 节的 Policy 服务、第 3.5 节的 runtime 需同时在线。
 
 ### 3.5 直接运行推理或交互闭环
 
@@ -286,7 +288,7 @@ var/marvin_sim/stack/
 │       ├── model.safetensors          # 网络权重与归一化统计量，推理直接加载
 │       └── training_args.yaml         # 训练参数备忘，不被消费
 ├── logs/
-│   ├── backend/<run-id>/              # 后端快照、run.json 与事件日志
+│   ├── backend/<run-id>/              # 后端就绪标记（ready.json）、快照、run.json 与事件日志
 │   ├── collection/
 │   │   ├── attempts.jsonl             # 追加式台账：预算、种子、终态
 │   │   ├── attempts/<attempt>/        # 每次尝试的运行日志
@@ -343,4 +345,4 @@ scripts/client_interactive.sh --robot marvin_sim --task handover \
 
 ---
 
-目录导航：[文档索引](docs/README.md) · [重要实践与经验](docs/experiments/README.md) · [公共层与方案绑定](shared/README.md) · [Agent 指导与规范](AGENTS.md)
+目录导航：[文档索引](docs/README.md) · [跨端架构分工与解耦审查](docs/features/跨端架构分工与解耦审查.md) · [重要实践与经验](docs/experiments/README.md) · [公共层与方案绑定](shared/README.md) · [Agent 指导与规范](AGENTS.md)

@@ -27,6 +27,7 @@ _MAX_STACK_CHARS = 16384
 _MAX_CONSOLE_CHARS = 512
 
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")
+IDENTIFIER_PATTERN = _IDENTIFIER_PATTERN
 _EVENT_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]*$")
 _LEVEL_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{0,15}$")
 _FIELD_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,63}$")
@@ -90,6 +91,15 @@ class EncodedEvent:
     body: bytes
     critical: bool
     console: str | None
+
+
+def is_valid_identifier(value: object, *, max_chars: int = _MAX_IDENTIFIER_CHARS) -> bool:
+    """Return True if value is a bounded safe run-log identifier string."""
+    return (
+        isinstance(value, str)
+        and 1 <= len(value) <= max_chars
+        and _IDENTIFIER_PATTERN.fullmatch(value) is not None
+    )
 
 
 def validate_identifier(value: str, label: str, *, max_chars: int = _MAX_IDENTIFIER_CHARS) -> str:

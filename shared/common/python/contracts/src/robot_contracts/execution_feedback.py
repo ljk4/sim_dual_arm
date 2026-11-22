@@ -145,17 +145,17 @@ class ExecutionFeedback(StrictContractModel):
     motion_seq: Annotated[int, Field(strict=True, ge=0, le=UINT64_MAX)] | None
     stream_id: Annotated[str, Field(max_length=MAX_ID_LENGTH)]
     chunk_seq: Annotated[NonNegativeInt, Field(le=UINT64_MAX)]
-    accepted_sim_time_ns: Annotated[NonNegativeInt, Field(le=INT64_MAX)]
+    accepted_backend_time_ns: Annotated[NonNegativeInt, Field(le=INT64_MAX)]
     accepted_wall_time_ns: Annotated[NonNegativeInt, Field(le=INT64_MAX)]
     has_started: bool
-    started_sim_time_ns: OptionalInt64
+    started_backend_time_ns: OptionalInt64
     started_wall_time_ns: OptionalInt64
     has_finished: bool
-    finished_sim_time_ns: OptionalInt64
+    finished_backend_time_ns: OptionalInt64
     finished_wall_time_ns: OptionalInt64
     motion_phase: str
-    reference_application_sim_time_ns: Annotated[NonNegativeInt, Field(le=INT64_MAX)]
-    measurement_sim_time_ns: Annotated[NonNegativeInt, Field(le=INT64_MAX)]
+    reference_application_backend_time_ns: Annotated[NonNegativeInt, Field(le=INT64_MAX)]
+    measurement_backend_time_ns: Annotated[NonNegativeInt, Field(le=INT64_MAX)]
     reference_elapsed_ns: Annotated[NonNegativeInt, Field(le=INT64_MAX)]
     stable_for_ns: Annotated[NonNegativeInt, Field(le=INT64_MAX)]
     joint_names: Names
@@ -178,29 +178,29 @@ class ExecutionFeedback(StrictContractModel):
             raise contract_error("phase", "unknown command phase")
         if self.motion_seq == 0:
             raise contract_error("motion_seq", "zero is not a motion sequence")
-        if self.has_started != (self.started_sim_time_ns is not None
+        if self.has_started != (self.started_backend_time_ns is not None
                                 and self.started_wall_time_ns is not None):
-            raise contract_error("has_started", "must match started sim/wall presence")
-        if self.has_finished != (self.finished_sim_time_ns is not None
+            raise contract_error("has_started", "must match started backend/wall presence")
+        if self.has_finished != (self.finished_backend_time_ns is not None
                                  and self.finished_wall_time_ns is not None):
-            raise contract_error("has_finished", "must match finished sim/wall presence")
-        if (self.started_sim_time_ns is not None
-                and self.started_sim_time_ns < self.accepted_sim_time_ns):
-            raise contract_error("started_sim_time_ns", "must not precede acceptance")
-        if (self.finished_sim_time_ns is not None
-                and self.finished_sim_time_ns < self.accepted_sim_time_ns):
-            raise contract_error("finished_sim_time_ns", "must not precede acceptance")
-        if (self.started_sim_time_ns is not None and self.finished_sim_time_ns is not None
-                and self.finished_sim_time_ns < self.started_sim_time_ns):
-            raise contract_error("finished_sim_time_ns", "must not precede start")
+            raise contract_error("has_finished", "must match finished backend/wall presence")
+        if (self.started_backend_time_ns is not None
+                and self.started_backend_time_ns < self.accepted_backend_time_ns):
+            raise contract_error("started_backend_time_ns", "must not precede acceptance")
+        if (self.finished_backend_time_ns is not None
+                and self.finished_backend_time_ns < self.accepted_backend_time_ns):
+            raise contract_error("finished_backend_time_ns", "must not precede acceptance")
+        if (self.started_backend_time_ns is not None and self.finished_backend_time_ns is not None
+                and self.finished_backend_time_ns < self.started_backend_time_ns):
+            raise contract_error("finished_backend_time_ns", "must not precede start")
         if (self.phase in TERMINAL_COMMAND_PHASES) != self.has_finished:
             raise contract_error("has_finished", "must match terminal command phases")
         if self.motion_phase not in MOTION_PHASES:
             raise contract_error("motion_phase", "unknown motion phase")
         if (self.motion_phase in ("COMPLETED", "STOPPED", "FAILED")) != self.has_finished:
             raise contract_error("motion_phase", "terminal phases require has_finished")
-        if self.measurement_sim_time_ns < self.reference_application_sim_time_ns:
-            raise contract_error("measurement_sim_time_ns", "must not precede application")
+        if self.measurement_backend_time_ns < self.reference_application_backend_time_ns:
+            raise contract_error("measurement_backend_time_ns", "must not precede application")
         count = len(self.joint_names)
         if len(set(self.joint_names)) != count:
             raise contract_error("joint_names", "must be unique")
@@ -244,34 +244,34 @@ class StreamChunkStatus(StrictContractModel):
     observation_id: Annotated[PositiveInt, Field(le=UINT64_MAX)]
     phase: str
     reason: str
-    accepted_sim_time_ns: Annotated[NonNegativeInt, Field(le=INT64_MAX)]
+    accepted_backend_time_ns: Annotated[NonNegativeInt, Field(le=INT64_MAX)]
     accepted_wall_time_ns: Annotated[NonNegativeInt, Field(le=INT64_MAX)]
     has_started: bool
-    started_sim_time_ns: OptionalInt64
+    started_backend_time_ns: OptionalInt64
     started_wall_time_ns: OptionalInt64
     has_finished: bool
-    finished_sim_time_ns: OptionalInt64
+    finished_backend_time_ns: OptionalInt64
     finished_wall_time_ns: OptionalInt64
 
     @model_validator(mode="after")
     def _chunk(self) -> Self:
         if self.phase not in CHUNK_PHASES:
             raise contract_error("phase", "unknown chunk phase")
-        if self.has_started != (self.started_sim_time_ns is not None
+        if self.has_started != (self.started_backend_time_ns is not None
                                 and self.started_wall_time_ns is not None):
             raise contract_error("has_started", "must match started presence")
-        if self.has_finished != (self.finished_sim_time_ns is not None
+        if self.has_finished != (self.finished_backend_time_ns is not None
                                  and self.finished_wall_time_ns is not None):
             raise contract_error("has_finished", "must match finished presence")
-        if (self.started_sim_time_ns is not None
-                and self.started_sim_time_ns < self.accepted_sim_time_ns):
-            raise contract_error("started_sim_time_ns", "must not precede acceptance")
-        if (self.finished_sim_time_ns is not None
-                and self.finished_sim_time_ns < self.accepted_sim_time_ns):
-            raise contract_error("finished_sim_time_ns", "must not precede acceptance")
-        if (self.started_sim_time_ns is not None and self.finished_sim_time_ns is not None
-                and self.finished_sim_time_ns < self.started_sim_time_ns):
-            raise contract_error("finished_sim_time_ns", "must not precede start")
+        if (self.started_backend_time_ns is not None
+                and self.started_backend_time_ns < self.accepted_backend_time_ns):
+            raise contract_error("started_backend_time_ns", "must not precede acceptance")
+        if (self.finished_backend_time_ns is not None
+                and self.finished_backend_time_ns < self.accepted_backend_time_ns):
+            raise contract_error("finished_backend_time_ns", "must not precede acceptance")
+        if (self.started_backend_time_ns is not None and self.finished_backend_time_ns is not None
+                and self.finished_backend_time_ns < self.started_backend_time_ns):
+            raise contract_error("finished_backend_time_ns", "must not precede start")
         if (self.phase in TERMINAL_CHUNK_PHASES) != self.has_finished:
             raise contract_error("has_finished", "must match terminal chunk phases")
         return self
@@ -291,7 +291,7 @@ class ControlEvent(StrictContractModel):
     chunk_seq: Annotated[PositiveInt, Field(le=UINT64_MAX)] | None
     phase: str
     reason: str
-    sim_time_ns: Annotated[NonNegativeInt, Field(le=INT64_MAX)]
+    backend_time_ns: Annotated[NonNegativeInt, Field(le=INT64_MAX)]
 
     @model_validator(mode="after")
     def _event(self) -> Self:

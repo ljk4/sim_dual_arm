@@ -7,9 +7,7 @@ loop live here so ``node.py`` stays focused on ROS conversion/lifecycle.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import importlib.metadata
-import json
 import os
 import re
 import signal
@@ -22,7 +20,8 @@ import rclpy
 import yaml
 from rclpy.executors import ExternalShutdownException, SingleThreadedExecutor
 from rclpy.signals import SignalHandlerOptions
-from robot_contracts.project_paths import project_path
+from robot_contracts.io import sha256_file, write_json_atomic
+from robot_contracts.project_paths import container_data_root, logs_root, project_path
 from robot_contracts.validation import UniqueKeyError, read_unique_yaml
 from robot_run_logging import EventLogger, LogFailure, LogSettings
 
@@ -43,7 +42,6 @@ from robot_backend_sim.common.runtime.diagnostics import code_provenance
 from robot_backend_sim.common.runtime.worker import WorkerSummary
 
 _RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
-_SEGMENT_PATTERN = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$")
 _EXIT_OK = 0
 _EXIT_FAILURE = 1
 
@@ -79,14 +77,6 @@ def _inside(path: Path, root: Path) -> bool:
         return False
 
 
-def _write_json(path: Path, document: dict[str, Any]) -> None:
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(
-        json.dumps(document, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8"
-    )
-    temporary.replace(path)
-
-
 def _package_version(name: str) -> str | None:
     try:
         return importlib.metadata.version(name)
@@ -115,6 +105,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--realtime-speed", type=float, help="simulation seconds per wall-clock second"
     )
+    parser.add_argument("--namespace", default=None, help="override robot.namespace")
+    parser.add_argument(
+        "--no-visualization",
+        action="store_true",
+        help="disable MuJoCo state visualization topic",
+    )
     parser.add_argument("--run-root", type=Path, default=None)
     parser.add_argument("--run-id", default=None)
     return parser
@@ -129,21 +125,17 @@ def _target(parsed: argparse.Namespace) -> tuple[str, str] | None:
 
 
 def _default_run_root(robot: str | None, task: str | None) -> Path:
-    if robot is None or task is None:
-        segment = "_direct"
-    else:
-        for value in (robot, task):
-            if not _SEGMENT_PATTERN.fullmatch(value) or ".." in value:
-                raise SystemExit("robot/task id is not a safe artifact directory")
-        segment = f"{robot}/{task}"
-    return Path(os.environ.get("DATA_ROOT", "/data")) / segment / "logs" / "backend"
+    try:
+        return logs_root(container_data_root(), robot, task) / "backend"
+    except ValueError as error:
+        raise SystemExit(f"robot/task id is not a safe artifact directory: {error}") from error
 
 
 def _configuration_sources(config) -> dict[str, dict[str, str]]:
     return {
         name: {
             "path": str(path.resolve()),
-            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "sha256": sha256_file(path),
             "content": path.read_text(),
         }
         for name, path in {
@@ -256,6 +248,14 @@ def _prepare_run(parsed: argparse.Namespace):
         else:
             document = _direct_document(parsed)
             selection = {"mode": "direct", "robot": None, "task": None, "role": None}
+        if parsed.namespace is not None or parsed.no_visualization:
+            robot_section = document.get("robot")
+            if not isinstance(robot_section, dict):
+                raise SystemExit("backend config must contain a robot mapping")
+            if parsed.namespace is not None:
+                robot_section["namespace"] = parsed.namespace
+            if parsed.no_visualization:
+                robot_section["visualization_enabled"] = False
         # Validate before creating the run directory so a bad recipe leaves no
         # orphan directory behind.
         load_backend_document(document, parsed.config or "scenario:selection")
@@ -299,7 +299,7 @@ def _robot_metadata(config) -> dict[str, str]:
 def _write_run_document(
     run_dir: Path, config, run_id: str, selection: dict[str, Any]
 ) -> None:
-    _write_json(
+    write_json_atomic(
         run_dir / "run.json",
         {
             "run_id": run_id,
@@ -351,7 +351,9 @@ def _emit_backend_start(logger, config, run_id: str) -> None:
     )
 
 
-def _serve_node(config, logger, run_id: str, signals, executor) -> tuple[object, str | None, int]:
+def _serve_node(
+    config, logger, run_id: str, run_dir: Path, signals, executor
+) -> tuple[object, str | None, int]:
     node: BackendNode | None = None
     summary: WorkerSummary | None = None
     failure: str | None = None
@@ -360,6 +362,18 @@ def _serve_node(config, logger, run_id: str, signals, executor) -> tuple[object,
         node = BackendNode(config, log=logger)
         executor.add_node(node)
         _emit_backend_start(logger, config, run_id)
+        write_json_atomic(
+            run_dir / "ready.json",
+            {
+                "ready": True,
+                "run_id": run_id,
+                "namespace": config.namespace,
+                "role": config.task_mode or "robot",
+                "seed": config.seed,
+                "pid": os.getpid(),
+                "ready_utc": _now_utc(),
+            },
+        )
         role_text = config.task_mode or "robot"
         print(
             f"仿真后端已就绪，正在等待连接 (namespace={config.namespace}, role={role_text}, "
@@ -467,7 +481,7 @@ def run(argv: list[str] | None = None) -> int:
     executor = SingleThreadedExecutor()
     started = time.monotonic()
     (node, summary), failure, exit_code = _serve_node(
-        config, logger, run_id, signals, executor
+        config, logger, run_id, run_dir, signals, executor
     )
     failure, exit_code = _teardown(executor, node, logger, previous, failure, exit_code)
     status = {
@@ -479,7 +493,7 @@ def run(argv: list[str] | None = None) -> int:
         "failure": failure,
         "summary": _summary_document(summary),
     }
-    _write_json(run_dir / "status.json", status)
+    write_json_atomic(run_dir / "status.json", status)
     print(f"仿真后端已停止 (run_id={run_id}, exit_code={exit_code})", flush=True)
     return exit_code
 

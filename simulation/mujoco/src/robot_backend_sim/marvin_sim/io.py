@@ -22,7 +22,6 @@ from collections.abc import Mapping, Sequence
 from robot_contracts.models import ContractError, JointSpec, RobotProfile
 
 from robot_backend_sim.common.physics.robot_io import (
-    PUBLIC_JOINT_NAMES,
     Measurement,
     RobotIO,
     check_owner_thread,
@@ -35,12 +34,13 @@ from robot_backend_sim.common.physics.robot_io import (
     validate_targets,
 )
 from robot_backend_sim.marvin_sim.assembly import MarvinBinding, gripper_opening
+from robot_backend_sim.marvin_sim.robot_config import MARVIN_CONTROL_JOINT_NAMES
 from robot_backend_sim.marvin_sim.scene_base import MarvinSceneBase
 
 __all__ = ["MarvinIO", "JOINT_NAMES"]
 
 SIDES = ("left", "right")
-JOINT_NAMES = PUBLIC_JOINT_NAMES
+JOINT_NAMES = MARVIN_CONTROL_JOINT_NAMES
 _ARM_COUNT = 7
 
 
@@ -57,7 +57,7 @@ class MarvinIO(RobotIO):
         self._owner_thread = threading.current_thread()
         self._scene = scene
         self._profile = profile
-        self._joint_specs = validate_profile_contract(profile)
+        self._joint_specs = validate_profile_contract(profile, JOINT_NAMES)
         self._camera_frame_ids = validate_camera_contract(profile, scene)
         self._binding = scene.indices.robot
         _validate_scene_contract(scene, self._joint_specs)

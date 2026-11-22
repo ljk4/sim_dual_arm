@@ -81,13 +81,16 @@ def robot_plugins() -> dict[str, RobotPlugin]:
 
 
 @lru_cache(maxsize=1)
-def task_plugins() -> dict[str, TaskPluginEntry]:
-    discovered: dict[str, TaskPluginEntry] = {}
+def task_plugins() -> dict[tuple[str, str], TaskPluginEntry]:
+    discovered: dict[tuple[str, str], TaskPluginEntry] = {}
     for plugin in robot_plugins().values():
         for entry in plugin.tasks:
-            if entry.task_type in discovered:
-                raise RuntimeError(f"duplicate task plugin registration: {entry.task_type!r}")
-            discovered[entry.task_type] = entry
+            key = (plugin.assembly, entry.task_type)
+            if key in discovered:
+                raise RuntimeError(
+                    f"duplicate task plugin registration: {plugin.assembly!r}/{entry.task_type!r}"
+                )
+            discovered[key] = entry
     return discovered
 
 
@@ -99,13 +102,17 @@ def get_robot_plugin(assembly: str) -> RobotPlugin:
         raise KeyError(f"unsupported robot assembly: {assembly!r}") from error
 
 
-def supported_task_types() -> tuple[str, ...]:
-    return tuple(sorted(task_plugins()))
+def supported_task_types(assembly: str | None = None) -> tuple[str, ...]:
+    if assembly is None:
+        return tuple(sorted({task_type for _assembly, task_type in task_plugins()}))
+    return tuple(sorted(entry.task_type for entry in get_robot_plugin(assembly).tasks))
 
 
-def get_task_plugin(task_type: str) -> TaskPluginEntry:
+def get_task_plugin(assembly: str, task_type: str) -> TaskPluginEntry:
     plugins = task_plugins()
     try:
-        return plugins[task_type]
+        return plugins[(assembly, task_type)]
     except KeyError as error:
-        raise ValueError(f"unknown simulation task type: {task_type!r}") from error
+        raise ValueError(
+            f"unknown simulation task type {task_type!r} for robot assembly {assembly!r}"
+        ) from error

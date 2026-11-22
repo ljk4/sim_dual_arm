@@ -11,20 +11,17 @@ The episode checks the advertised capability against the extension's generated
 
 from __future__ import annotations
 
-import importlib
-import re
 import threading
 from dataclasses import dataclass
 
 from robot_contracts.models import ContractError, RunContext
 from robot_ros_support.conversions import context_message, stamp, time_ns
+from robot_ros_support.teacher_extension import teacher_extension_modules
 
 from dual_arm_runtime.run_logging import EventSink
 from dual_arm_runtime.simulation.task_client import TaskClient
 
 __all__ = ["TeacherChunkFact", "TeacherTaskClient", "teacher_service_type"]
-
-_CAPABILITY = re.compile(r"^([a-z][a-z0-9_]*)\.teacher_chunk$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,30 +47,7 @@ class TeacherChunkFact:
 
 def teacher_service_type(capability: str):
     """Resolve the generated service type named by one Teacher capability."""
-    match = _CAPABILITY.fullmatch(str(capability))
-    if match is None:
-        raise ContractError(
-            "UNSUPPORTED_TEACHER_CAPABILITY",
-            f"expected <package>.teacher_chunk, got {capability!r}",
-        )
-    package = match.group(1)
-    try:
-        messages = importlib.import_module(f"{package}.msg")
-        services = importlib.import_module(f"{package}.srv")
-        capability_type = messages.TeacherCapability
-        service_type = services.GetTeacherChunk
-    except (ImportError, AttributeError) as error:
-        raise ContractError(
-            "TEACHER_EXTENSION_MISSING",
-            f"teacher capability {capability!r} requires the built "
-            f"{package} extension: {error}",
-        ) from error
-    if str(capability_type.ID) != capability:
-        raise ContractError(
-            "UNSUPPORTED_TEACHER_CAPABILITY",
-            f"runtime selected {capability!r}, extension implements "
-            f"{str(capability_type.ID)!r}",
-        )
+    _package, _capability_type, service_type = teacher_extension_modules(capability)
     return service_type
 
 

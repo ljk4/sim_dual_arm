@@ -30,6 +30,7 @@ from robot_backend_sim.common.motion.planner import (
     _request_digest,
     _TaskPlanner,
 )
+from robot_backend_sim.common.physics.robot_adapters import scene_assembly
 from robot_backend_sim.common.render.render_worker import (
     Capture,
     RenderCloseSummary,
@@ -82,8 +83,11 @@ class Worker:
         task_plugin = (
             None if config.task_path is None
             else create_task_plugin(
-                config.task_type, task_path=config.task_path,
-                task_mode=config.task_mode, scene_config=scene_config,
+                scene_assembly(scene_config),
+                config.task_type,
+                task_path=config.task_path,
+                task_mode=config.task_mode,
+                scene_config=scene_config,
             )
         )
         kinematics_config = (
@@ -97,6 +101,7 @@ class Worker:
         self.follower_config = follower_config
         self.task_plugin = task_plugin
         self.task_kinematics = kinematics_config
+        self.control_grid_ns = duration_grid_ns
         self.follower_duration_grid_ns = duration_grid_ns
         self._owner = _Owner(
             config,

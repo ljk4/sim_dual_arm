@@ -19,7 +19,7 @@ from robot_backend_sim.common.render.rendering import SceneRenderer, SceneRender
 from robot_backend_sim.marvin_sim.stack import visibility as marvin_visibility  # noqa: E402
 from robot_backend_sim.marvin_sim.stack.scene import build_marvin_stack_scene  # noqa: E402
 from robot_backend_sim.marvin_sim.stack.scene_config import load_marvin_stack_scene_config  # noqa: E402
-from robot_backend_sim.tools import check_scene  # noqa: E402
+from robot_backend_sim.marvin_sim.stack.checks import check_scene  # noqa: E402
 
 CONFIG_PATH = ROOT / "shared/scenarios/marvin_sim/stack/configs/simulation/scene/marvin_stack.yaml"
 CHECK_PATH = ROOT / "shared/scenarios/marvin_sim/stack/configs/simulation/checks/scene_check.yaml"

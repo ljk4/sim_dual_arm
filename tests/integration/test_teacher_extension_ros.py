@@ -23,10 +23,7 @@ from robot_backend_sim.common.ros.teacher_extension import (  # noqa: E402
 )
 from robot_contracts.models import ContractError  # noqa: E402
 
-CAPABILITIES = (
-    "marvin_stack_api_msgs.teacher_chunk",
-    "marvin_handover_api_msgs.teacher_chunk",
-)
+CAPABILITIES = ("marvin_teacher_api_msgs.teacher_chunk",)
 
 
 class _Node:

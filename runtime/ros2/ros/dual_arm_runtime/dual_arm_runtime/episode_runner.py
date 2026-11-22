@@ -614,7 +614,7 @@ class EpisodeRunner:
         )
 
     def _finish(self, episode_id: str) -> None:
-        from dual_arm_runtime.offline.episode_finalization import finish
+        from dual_arm_runtime.episode_finalization import finish
 
         finish(self, episode_id)
 

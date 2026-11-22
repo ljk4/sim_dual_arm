@@ -155,8 +155,8 @@ def main() -> int:
     exit_ok = False
     try:
         viewer = mujoco.viewer.launch_passive(model, data)
-        viewer.cam.lookat[:] = (0.2, 0.55, 0.8)
-        viewer.cam.distance = 1.55
+        viewer.cam.lookat[:] = model.stat.center
+        viewer.cam.distance = max(1.0, float(model.stat.extent) * 1.5)
         viewer.cam.azimuth = 135.0
         viewer.cam.elevation = -20.0
         period_s = 1.0 / args.poll_hz

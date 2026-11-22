@@ -14,15 +14,15 @@ pytestmark = pytest.mark.skipif(
 )
 ROOT = Path(__file__).resolve().parents[2]
 SCENARIO = ROOT / "shared/scenarios/marvin_sim/stack"
-sys.path.insert(0, str(ROOT / "tests/unit"))
+sys.path.insert(0, str(ROOT / "tests/unit/fixtures"))
 from learning_fixtures import make_select  # noqa: E402
 
 
 def test_public_act_training_writes_a_self_contained_model(tmp_path):
     torch = pytest.importorskip("torch")
-    from dual_arm_learning.bundle import load_model, verify_model_dir
+    from dual_arm_learning.training.bundle import load_model, verify_model_dir
     from dual_arm_learning.config import load_dataset_config
-    from dual_arm_learning.dataset import convert
+    from dual_arm_learning.dataset.dataset import convert
     from model_helpers import replace
     from torchvision.models import resnet18
 

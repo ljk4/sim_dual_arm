@@ -11,6 +11,10 @@ import numpy as np
 from robot_contracts.models import ContractError, RunContext
 from robot_contracts.task_state import TaskState
 
+from robot_backend_sim.common.tasks.math import (
+    contact_normal_force,
+    quaternion_wxyz_to_matrix,
+)
 from robot_backend_sim.marvin_sim.assembly import gripper_opening
 from robot_backend_sim.marvin_sim.stack.config import StackTaskConfig
 from robot_backend_sim.marvin_sim.stack.gate import StackGateFact, TeacherProgress
@@ -177,12 +181,6 @@ def make_task_binding(
     )
 
 
-def _normal_force(model: Any, data: Any, contact_index: int) -> float:
-    value = np.zeros(6, dtype=float)
-    mujoco.mj_contactForce(model, data, contact_index, value)
-    return abs(float(value[0]))
-
-
 def _contacts_between(
     model: Any, data: Any, body_a: int, body_b: int
 ) -> list[tuple[int, Any, float]]:
@@ -195,7 +193,7 @@ def _contacts_between(
         b1 = int(body_of_geom[int(contact.geom1)])
         b2 = int(body_of_geom[int(contact.geom2)])
         if (b1 == body_a and b2 == body_b) or (b1 == body_b and b2 == body_a):
-            hits.append((index, contact, _normal_force(model, data, index)))
+            hits.append((index, contact, contact_normal_force(model, data, index)))
     return hits
 
 
@@ -220,7 +218,7 @@ def _finger_contacts(
         if (b1 in finger_set and b2 in object_set) or (b2 in finger_set and b1 in object_set):
             finger_id = b1 if b1 in finger_set else b2
             active_fingers.add(finger_id)
-            max_force = max(max_force, _normal_force(model, data, index))
+            max_force = max(max_force, contact_normal_force(model, data, index))
     return len(active_fingers), max_force
 
 
@@ -242,7 +240,7 @@ def _right_finger_source_evidence(
             b2 in right_fingers and b1 == binding.source_body_id
         ):
             fid = b1 if b1 in right_fingers else b2
-            per_finger_force[fid] = per_finger_force.get(fid, 0.0) + _normal_force(
+            per_finger_force[fid] = per_finger_force.get(fid, 0.0) + contact_normal_force(
                 model, data, index
             )
     max_speed = max(
@@ -362,15 +360,7 @@ def capture_task_observation(
 
 
 def _quat_to_rot(q: tuple[float, float, float, float]) -> np.ndarray:
-    w, x, y, z = q
-    return np.array(
-        [
-            [1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - z * w), 2.0 * (x * z + y * w)],
-            [2.0 * (x * y + z * w), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - x * w)],
-            [2.0 * (x * z - y * w), 2.0 * (y * z + x * w), 1.0 - 2.0 * (x * x + y * y)],
-        ],
-        dtype=np.float64,
-    )
+    return np.asarray(quaternion_wxyz_to_matrix(q), dtype=np.float64)
 
 
 def _upright_tilt_rad(q: tuple[float, float, float, float]) -> float:

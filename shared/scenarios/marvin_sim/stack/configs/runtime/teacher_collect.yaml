@@ -1,13 +1,13 @@
 # Marvin stack Teacher collection configuration.
-robot_profile: ../../profiles/robots/marvin_stack/profile.json
-observation_schema: ../../../handover/profiles/observations/marvin_rgb_joint.json
-action_schema: ../../../handover/profiles/actions/marvin_joint_position.json
-control_constraints: ../../../handover/profiles/control/marvin_control.yaml
-follower_config: ../../../handover/profiles/control/marvin_follower.yaml
+robot_profile: ../../profiles/robot/profile.json
+observation_schema: ../../../profiles/observations/marvin_rgb_joint.json
+action_schema: ../../../profiles/actions/marvin_joint_position.json
+control_constraints: ../../../profiles/control/marvin_control.yaml
+follower_config: ../../../profiles/control/marvin_follower.yaml
 robot_namespace: /robot
 
 action_source: teacher
-teacher_api: marvin_stack_api_msgs.teacher_chunk
+teacher_api: marvin_teacher_api_msgs.teacher_chunk
 
 lease_duration_ns: 2000000000
 renew_interval_ns: 500000000
@@ -46,8 +46,6 @@ teacher:
   task_stop_margin_s: 1.0
   task_sim_budget_ns: 90000000000
   task_id: marvin-stack
-
-motions: []
 
 logging:
   queue_capacity: 256

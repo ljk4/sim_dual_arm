@@ -2,6 +2,7 @@
 
 import argparse
 import hashlib
+import os
 import shutil
 import subprocess
 import sys
@@ -9,8 +10,16 @@ import tempfile
 from pathlib import Path
 
 
-def generate(root: Path, output: Path) -> None:
-    source = root / "shared/common/interfaces/policy/policy.proto"
+def _proto_source() -> Path:
+    shared_root = os.environ.get("SHARED_ROOT")
+    if shared_root:
+        candidate = Path(shared_root) / "common/interfaces/policy/policy.proto"
+        if candidate.is_file():
+            return candidate
+    return Path(__file__).resolve().parents[4] / "shared/common/interfaces/policy/policy.proto"
+
+
+def generate(source: Path, output: Path) -> None:
     output.mkdir(parents=True, exist_ok=True)
     # A previous SDK must never be mistaken for this source revision.
     stale = output / "dual_arm_policy"
@@ -42,7 +51,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=Path("build/generated/policy-sdk"))
     args = parser.parse_args()
-    generate(Path(__file__).resolve().parents[4], args.output.resolve())
+    generate(_proto_source(), args.output.resolve())
 
 
 if __name__ == "__main__":

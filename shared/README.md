@@ -9,10 +9,12 @@ shared/
 ├── common/
 │   ├── interfaces/      # 公共接口约束：Policy Protobuf、ROS 2 IDL、JSON Schema
 │   ├── python/          # 公共 Python 包：contracts、ros_support、trajectory、run_logging
-│   └── tools/           # 容器环境、SDK 构建、测试、binding 校验与部署检查
+│   └── tools/           # 容器环境、SDK 构建、测试、binding 校验、边界检查与宿主机并行编排
 └── scenarios/
     ├── _template/       # 新方案说明与不可直接运行的 binding.example.yaml
     └── marvin_sim/
+        ├── profiles/    # Marvin 共享观测、动作与控制档案
+        ├── extensions/  # Marvin 共享 Teacher ROS 扩展（marvin_teacher_api_msgs）
         ├── stack/       # 实例：Marvin 固定基座双臂单臂堆叠、ROS 2 运行端、LeRobot ACT
         └── handover/    # 实例：Marvin 抓取—空中交接—入箱
 ```
@@ -21,7 +23,7 @@ shared/
 | --- | --- | --- |
 | [`common/interfaces`](common/interfaces/policy/README.md) | 跨机器人、跨算法都必须遵守的协议与结构约束 | 具体关节顺序、相机标定、训练数值 |
 | [`common/python`](common/python/README.md) | 可被多端复用的纯数据契约、数学与日志实现 | ROS 运行生命周期、仿真物理、模型训练 |
-| [`common/tools`](common/tools/README.md) | SDK、容器、测试与只读校验入口 | 业务选择、模型权重、数据产物 |
+| [`common/tools`](common/tools/README.md) | SDK、容器、测试、宿主机并行编排与只读校验入口 | 业务选择、模型权重、数据产物 |
 | [`scenarios/<robot>/<task>`](scenarios/marvin_sim/stack/README.md) | 当前方案选择哪套档案、配方与专用接口 | 四端业务实现和数值门禁本身 |
 | `simulation` / `runtime` / `learning` / `hardware` | 实际能力、依赖、容器与入口脚本 | 公共协议的私有副本 |
 
@@ -36,4 +38,4 @@ shared/
 
 `build/` 和 `var/` 是运行时输出目录，由使用者初始化、由命令创建子目录，均不纳入 Git。初始化步骤见[根 README](../README.md)。
 
-目录导航：[上级目录](../README.md) · [Agent 指导与规范](../AGENTS.md) · [方案模板](scenarios/_template/README.md)
+目录导航：[上级目录](../README.md) · [Agent 指导与规范](../AGENTS.md) · [方案模板](scenarios/_template/README.md) · [跨端架构分工与解耦审查](../docs/features/跨端架构分工与解耦审查.md)

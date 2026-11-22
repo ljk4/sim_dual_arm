@@ -150,6 +150,44 @@ def _check_joint_range(positions: Sequence[float], joints: Sequence[JointSpec], 
                                 f"{location}[{index}] ({joint.name}) {position!r} out of range")
 
 
+def evaluate_cubic_segment(segment: object, local_s: float, location: str = "segment"):
+    """Evaluate position, velocity and acceleration on one cubic polynomial segment."""
+    return _state_at(segment, local_s, location)
+
+
+def check_c1_continuity(
+    left_positions: Sequence[float],
+    left_velocities: Sequence[float],
+    right_positions: Sequence[float],
+    right_velocities: Sequence[float],
+    *,
+    location: str = "boundary",
+    joint_names: Sequence[str] | None = None,
+) -> None:
+    """Verify position and velocity continuity across a segment boundary."""
+    names = (
+        tuple(f"joint[{index}]" for index in range(len(left_positions)))
+        if joint_names is None
+        else joint_names
+    )
+    _check_vector_close(
+        left_positions,
+        right_positions,
+        atol=POSITION_ATOL,
+        location=f"{location}.positions",
+        quantity="position",
+        joint_names=names,
+    )
+    _check_vector_close(
+        left_velocities,
+        right_velocities,
+        atol=VELOCITY_ATOL,
+        location=f"{location}.velocities",
+        quantity="velocity",
+        joint_names=names,
+    )
+
+
 def _state_at(segment: object, local_s: float, location: str):
     positions: list[float] = []
     velocities: list[float] = []

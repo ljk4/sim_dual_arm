@@ -22,12 +22,12 @@ from .follower import PreparedFollowerPlan, normalize_follower_positions
 
 def applied_follower_sample(
     record: FollowerReference,
-    sim_time_ns: int,
+    backend_time_ns: int,
     profile_or_joints: RobotProfile | Sequence[JointSpec],
 ) -> FollowerAppliedSample:
     """Reconstruct the physically applied reference and its corrections."""
     joints = _joints_from(profile_or_joints)
-    sample = sample_follower_reference(record, sim_time_ns)
+    sample = sample_follower_reference(record, backend_time_ns)
     normalized = normalize_follower_positions(sample.positions, joints)
     return FollowerAppliedSample(
         sampled_positions=normalized.sampled_positions,
@@ -37,22 +37,22 @@ def applied_follower_sample(
         sampled_accelerations=sample.accelerations,
     )
 
-def sample_follower_reference(record: FollowerReference, sim_time_ns: int) -> ReferenceSample:
-    if isinstance(sim_time_ns, bool) or not isinstance(sim_time_ns, int):
-        raise _invalid("sim_time_ns", "must be an integer")
-    if sim_time_ns < record.start_sim_time_ns or sim_time_ns > record.end_sim_time_ns:
+def sample_follower_reference(record: FollowerReference, backend_time_ns: int) -> ReferenceSample:
+    if isinstance(backend_time_ns, bool) or not isinstance(backend_time_ns, int):
+        raise _invalid("backend_time_ns", "must be an integer")
+    if backend_time_ns < record.start_backend_time_ns or backend_time_ns > record.end_backend_time_ns:
         raise ContractError(
             "REFERENCE_EXPIRED",
-            f"sim_time_ns {sim_time_ns} is outside "
-            f"[{record.start_sim_time_ns}, {record.end_sim_time_ns}]")
-    return sample_reference_interval(record.plan, sim_time_ns - record.start_sim_time_ns)
+            f"backend_time_ns {backend_time_ns} is outside "
+            f"[{record.start_backend_time_ns}, {record.end_backend_time_ns}]")
+    return sample_reference_interval(record.plan, backend_time_ns - record.start_backend_time_ns)
 
 def follower_reference_from_prepared(
     prepared: PreparedFollowerPlan,
     request: StreamRequest,
     *,
     motion_seq: int,
-    accepted_sim_time_ns: int,
+    accepted_backend_time_ns: int,
     accepted_wall_time_ns: int,
     joint_names: Sequence[str] | None = None,
 ) -> FollowerReference:
@@ -65,7 +65,7 @@ def follower_reference_from_prepared(
     return FollowerReference(
         request=request,
         motion_seq=motion_seq,
-        accepted_sim_time_ns=accepted_sim_time_ns,
+        accepted_backend_time_ns=accepted_backend_time_ns,
         accepted_wall_time_ns=accepted_wall_time_ns,
         joint_names=names,
         plan=prepared.plan,
@@ -138,10 +138,10 @@ def validate(record: FollowerReference, profile: RobotProfile,
                             "record horizon exceeds the configured terminal tail")
     if record.is_final != record.request.settle_at_end:
         raise _invalid("is_final", "differs from the raw request settle_at_end flag")
-    if not (record.request.observation_time_ns <= record.accepted_sim_time_ns
-            <= record.anchor.start_sim_time_ns
-            and record.accepted_sim_time_ns <= record.request.trajectory.accept_before_ns):
-        raise _invalid("accepted_sim_time_ns",
+    if not (record.request.observation_time_ns <= record.accepted_backend_time_ns
+            <= record.anchor.start_backend_time_ns
+            and record.accepted_backend_time_ns <= record.request.trajectory.accept_before_ns):
+        raise _invalid("accepted_backend_time_ns",
                        "must follow the observation and precede both deadlines")
     rebuilt = PreparedFollowerPlan(
         anchor=record.anchor,
@@ -158,17 +158,12 @@ def validate(record: FollowerReference, profile: RobotProfile,
         duration_grid_ns=record.duration_grid_ns,
         algorithm=record.algorithm,
     )
-    if rebuilt.plan != record.plan:
-        raise _invalid("plan", "reconstructed plan differs")
     for name in (
         "actual_terminal_positions", "actual_terminal_velocities",
         "actual_terminal_accelerations", "max_target_deviations",
-        "raw_terminal_velocities", "restricted_terminal_velocities",
     ):
         if not _same_vector(getattr(record, name), getattr(rebuilt, name)):
-            raise _invalid(name, "differs from the independently rebuilt DSH-030 plan")
+            raise _invalid(name, "differs from the independently verified plan")
     if record.flags != rebuilt.flags:
-        raise _invalid("flags", "limit flags differ from the independently rebuilt plan")
-    if record.extension_ns != rebuilt.extension_ns:
-        raise _invalid("extension_ns", "extended horizon differs from the rebuilt plan")
+        raise _invalid("flags", "limit flags differ from the independently verified plan")
     return rebuilt

@@ -1,11 +1,4 @@
-"""Pure, bounded label extraction for the continuous follower stream.
-
-A label is the actually applied reference at ``observation_time + 50 ms`` for a
-real 20 Hz frame.  The raw 60-point prediction belongs to the executed chunk,
-not to the frame that happened to request it.  Pending frames, not-yet-started
-blocks, canceled/retired blocks and BRAKE-replaced intervals never become
-labels.
-"""
+"""Pure, bounded label extraction for the continuous follower stream."""
 
 from __future__ import annotations
 
@@ -16,7 +9,6 @@ from robot_trajectory.follower_reference import applied_follower_sample
 
 LABEL_LEAD_NS = 50_000_000
 EXPECTED_OBSERVATION_PERIOD_NS = 50_000_000
-# 30 s at 20 Hz is 600 frames; leave bounded room for start-up/shutdown frames.
 DEFAULT_MAX_LABELS = 700
 MAX_LABELS_HARD = 4096
 MAX_RAW_POINTS = 60
@@ -25,12 +17,14 @@ MAX_RAW_POINTS = 60
 @dataclass(frozen=True, slots=True)
 class ObservationFact:
     observation_id: int
-    sim_time_ns: int
+    backend_time_ns: int
     state_seq: int
     measured_positions: tuple[float, ...]
     measured_velocities: tuple[float, ...]
     frame_seqs: tuple[int, ...]
     source: str = "exact_capture"
+    phase: str | None = None
+    gate_state: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,26 +33,26 @@ class AppliedBlock:
 
     chunk_seq: int
     command_id: str
-    start_sim_time_ns: int
-    end_sim_time_ns: int
-    started_sim_time_ns: int | None
-    retired_sim_time_ns: int | None
-    canceled_sim_time_ns: int | None
+    start_backend_time_ns: int
+    end_backend_time_ns: int
+    started_backend_time_ns: int | None
+    retired_backend_time_ns: int | None
+    canceled_backend_time_ns: int | None
     reference: object
 
     def effective_end_ns(self) -> int:
-        ends = [self.end_sim_time_ns]
-        if self.retired_sim_time_ns is not None:
-            ends.append(self.retired_sim_time_ns)
-        if self.canceled_sim_time_ns is not None:
-            ends.append(self.canceled_sim_time_ns)
+        ends = [self.end_backend_time_ns]
+        if self.retired_backend_time_ns is not None:
+            ends.append(self.retired_backend_time_ns)
+        if self.canceled_backend_time_ns is not None:
+            ends.append(self.canceled_backend_time_ns)
         return min(ends)
 
 
 @dataclass(frozen=True, slots=True)
 class BrakeInterval:
-    start_sim_time_ns: int
-    end_sim_time_ns: int
+    start_backend_time_ns: int
+    end_backend_time_ns: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,9 +73,9 @@ def _ordered_observations(
             "LABEL_EXPORT_LIMIT",
             f"{len(observations)} exact frames exceed the configured {max_labels} bound",
         )
-    ordered = sorted(observations, key=lambda item: item.sim_time_ns)
+    ordered = sorted(observations, key=lambda item: item.backend_time_ns)
     for left, right in zip(ordered, ordered[1:], strict=False):
-        if right.sim_time_ns <= left.sim_time_ns:
+        if right.backend_time_ns <= left.backend_time_ns:
             raise ContractError("LABEL_EXPORT_ORDER", "observations are not strictly increasing")
     return ordered
 
@@ -94,18 +88,18 @@ def _label_row(
     applied: object,
     period_ns: int,
 ) -> dict[str, object]:
-    return {
+    row: dict[str, object] = {
         "observation_id": observation.observation_id,
         "state_seq": observation.state_seq,
         "capture_source": observation.source,
-        "observation_sim_time_ns": observation.sim_time_ns,
-        "label_sim_time_ns": label_time,
+        "observation_backend_time_ns": observation.backend_time_ns,
+        "label_backend_time_ns": label_time,
         "observation_period_ns": period_ns,
         "chunk_seq": block.chunk_seq,
         "command_id": block.command_id,
-        "reference_start_sim_time_ns": block.start_sim_time_ns,
-        "started_sim_time_ns": block.started_sim_time_ns,
-        "block_end_sim_time_ns": block.effective_end_ns(),
+        "reference_start_backend_time_ns": block.start_backend_time_ns,
+        "started_backend_time_ns": block.started_backend_time_ns,
+        "block_end_backend_time_ns": block.effective_end_ns(),
         "applied_positions": list(applied.applied_positions),
         "sampled_positions": list(applied.sampled_positions),
         "applied_velocities": list(applied.sampled_velocities),
@@ -116,6 +110,11 @@ def _label_row(
         "raw_source_observation_id": prediction.source_observation_id,
         "raw_source_observation_time_ns": prediction.source_observation_time_ns,
     }
+    if observation.phase is not None:
+        row["phase"] = observation.phase
+    if observation.gate_state is not None:
+        row["gate_state"] = observation.gate_state
+    return row
 
 
 def build_labels(
@@ -143,18 +142,18 @@ def build_labels(
         "unknown": 0,
     }
     for index, observation in enumerate(ordered):
-        label_time = observation.sim_time_ns + lead_ns
+        label_time = observation.backend_time_ns + lead_ns
         block = _block_at(blocks, label_time)
         if block is None:
             rejected["no_started_block"] += 1
             continue
-        if block.started_sim_time_ns is None or label_time < block.started_sim_time_ns:
+        if block.started_backend_time_ns is None or label_time < block.started_backend_time_ns:
             rejected["not_executed_interval"] += 1
             continue
         if label_time > block.effective_end_ns():
             rejected["not_executed_interval"] += 1
             continue
-        if _braked(brakes, observation.sim_time_ns, label_time):
+        if _braked(brakes, observation.backend_time_ns, label_time):
             rejected["brake_replaced"] += 1
             continue
         prediction = raw_by_chunk.get(block.chunk_seq)
@@ -169,7 +168,7 @@ def build_labels(
         if index + 1 >= len(ordered):
             rejected["non_uniform_observation_period"] += 1
             continue
-        period_ns = ordered[index + 1].sim_time_ns - observation.sim_time_ns
+        period_ns = ordered[index + 1].backend_time_ns - observation.backend_time_ns
         if period_ns != expected_period_ns:
             rejected["non_uniform_observation_period"] += 1
             continue
@@ -189,22 +188,23 @@ def build_labels(
     return rows, summary
 
 
-def _block_at(blocks: list[AppliedBlock], sim_time_ns: int) -> AppliedBlock | None:
+def _block_at(blocks: list[AppliedBlock], backend_time_ns: int) -> AppliedBlock | None:
     candidates = [
         block
         for block in blocks
-        if block.start_sim_time_ns <= sim_time_ns <= block.effective_end_ns()
-        and block.started_sim_time_ns is not None
-        and sim_time_ns >= block.started_sim_time_ns
+        if block.start_backend_time_ns <= backend_time_ns <= block.effective_end_ns()
+        and block.started_backend_time_ns is not None
+        and backend_time_ns >= block.started_backend_time_ns
     ]
     if not candidates:
         return None
-    return max(candidates, key=lambda item: item.start_sim_time_ns)
+    return max(candidates, key=lambda item: item.start_backend_time_ns)
 
 
 def _braked(brakes: list[BrakeInterval], start_ns: int, end_ns: int) -> bool:
     return any(
-        brake.start_sim_time_ns <= end_ns and brake.end_sim_time_ns > start_ns for brake in brakes
+        brake.start_backend_time_ns <= end_ns and brake.end_backend_time_ns > start_ns
+        for brake in brakes
     )
 
 

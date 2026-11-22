@@ -22,6 +22,11 @@ from robot_trajectory.spline_math import validate_reference_inputs
 from robot_backend_sim.marvin_sim.handover.scene_config import MarvinSceneConfig
 from robot_backend_sim.common.config.motion_config import ControlConfig
 from robot_backend_sim.common.tasks.base import TaskChunk
+from robot_backend_sim.common.tasks.math import (
+    duration_from_limits,
+    scalar_acceleration,
+    trapezoid_progress,
+)
 from robot_backend_sim.marvin_sim.handover.gate import HandoverFeedback, HandoverGateFact
 from robot_backend_sim.marvin_sim.handover.plan import (
     HandoverLayout,
@@ -125,25 +130,6 @@ class HandoverPlan:
 
     def step_at(self, index: int) -> HandoverStep:
         return self.steps[min(max(index, 0), len(self.steps) - 1)]
-
-
-def _duration(
-    start: tuple[float, ...],
-    end: tuple[float, ...],
-    velocities: tuple[float, ...],
-    accelerations: tuple[float, ...],
-    *,
-    minimum_s: float,
-) -> float:
-    duration = float(minimum_s)
-    for index, (first, second) in enumerate(zip(start, end, strict=True)):
-        delta = abs(second - first)
-        if delta <= 0.0:
-            continue
-        by_velocity = 1.5 * delta / velocities[index]
-        by_acceleration = math.sqrt(6.0 * delta / accelerations[index])
-        duration = max(duration, by_velocity, by_acceleration)
-    return duration
 
 
 def _joint_limits(
@@ -323,7 +309,7 @@ def build_handover_plan(
     ) -> None:
         nonlocal start
         if duration <= 0.0:
-            duration = _duration(
+            duration = duration_from_limits(
                 start,
                 end,
                 velocity_limits,
@@ -451,62 +437,6 @@ def _teacher_gate(
     return plan.step_at(gate.step_index)
 
 
-def _trapezoid_progress(
-    elapsed_s: float, duration_s: float, acceleration: float
-) -> float:
-    """Acceleration-limited scalar progress shared by all joints.
-
-    The bounded follower plans an acceleration-limited trajectory (infinite
-    jerk).  Sampling the same shape keeps the selected window inside its
-    reference-deviation budget; a smoothstep is slower than the follower at the
-    start of a long move and was measured to exceed that budget.
-    """
-    if duration_s <= 0.0 or elapsed_s <= 0.0:
-        return 0.0
-    if elapsed_s >= duration_s:
-        return 1.0
-    if acceleration <= 0.0:
-        # A hold step has identical start and end positions.
-        return 1.0
-    product = acceleration * duration_s * duration_s
-    if product < 4.0:
-        raise _error(
-            "TEACHER_PLAN_INVALID",
-            f"step duration {duration_s:.3f} s is below the acceleration-limited minimum",
-        )
-    discriminant = acceleration * acceleration * duration_s * duration_s - 4.0 * acceleration
-    cruise = (
-        acceleration * duration_s - math.sqrt(max(0.0, discriminant))
-    ) / 2.0
-    if cruise <= 0.0:
-        return min(1.0, elapsed_s / duration_s)
-    accelerate_s = cruise / acceleration
-    accelerate_distance = 0.5 * acceleration * accelerate_s * accelerate_s
-    cruise_s = max(0.0, (1.0 - 2.0 * accelerate_distance) / cruise)
-    if elapsed_s < accelerate_s:
-        return 0.5 * acceleration * elapsed_s * elapsed_s
-    if elapsed_s < accelerate_s + cruise_s:
-        return accelerate_distance + cruise * (elapsed_s - accelerate_s)
-    return 1.0 - 0.5 * acceleration * (duration_s - elapsed_s) ** 2
-
-
-def _scalar_acceleration(
-    step: HandoverStep, accelerations: tuple[float, ...]
-) -> float:
-    """Scalar acceleration for this step's joint-linear path."""
-    acceleration = math.inf
-    for first, last, limit in zip(
-        step.start_positions, step.end_positions, accelerations, strict=True
-    ):
-        delta = abs(last - first)
-        if delta <= 0.0:
-            continue
-        acceleration = min(acceleration, limit / delta)
-    if not math.isfinite(acceleration) or acceleration <= 0.0:
-        return 0.0
-    return acceleration
-
-
 def _teacher_positions(
     step: HandoverStep,
     start_ns: int,
@@ -519,14 +449,16 @@ def _teacher_positions(
     phases: list[str] = []
     times: list[int] = []
     duration_ns = round(step.duration_s * 1e9)
-    acceleration = _scalar_acceleration(step, accelerations)
+    acceleration = scalar_acceleration(
+        step.start_positions, step.end_positions, accelerations
+    )
     for index in range(chunk_size):
         target_time_ns = observation_time_ns + (index + 1) * period_ns
         elapsed = target_time_ns - start_ns
         if step.final or duration_ns <= 0 or elapsed >= duration_ns:
             position = step.end_positions
         else:
-            progress = _trapezoid_progress(
+            progress = trapezoid_progress(
                 max(0.0, elapsed / 1e9), step.duration_s, acceleration
             )
             position = tuple(

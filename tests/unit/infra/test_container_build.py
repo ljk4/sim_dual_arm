@@ -1,0 +1,465 @@
+"""Deployment failure boundaries: SDK ownership/origin and image provenance."""
+
+import hashlib
+import importlib.util
+import sys
+from pathlib import Path
+from types import ModuleType
+
+import pytest
+import yaml
+
+ROOT = Path(__file__).resolve().parents[3]
+
+
+def _declaration(relative: str) -> dict:
+    return yaml.safe_load((ROOT / relative).read_text())
+
+
+def _load_tool(name: str):
+    path = ROOT / "shared/common/tools/scripts" / f"{name}.py"
+    specification = importlib.util.spec_from_file_location(f"dsh052_{name}", path)
+    assert specification is not None and specification.loader is not None
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
+
+
+check_dockerfiles = _load_tool("check_dockerfiles")
+policy_sdk = _load_tool("policy_sdk")
+
+
+def sdk_fixture(tmp_path):
+    project = tmp_path / "project"
+    proto = project / "shared/common/interfaces/policy/policy.proto"
+    proto.parent.mkdir(parents=True)
+    proto.write_text('syntax = "proto3";\n')
+    sdk = tmp_path / "sdk"
+    for relative in policy_sdk.REQUIRED_FILES:
+        path = sdk / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("")
+    (sdk / "source.sha256").write_text(hashlib.sha256(proto.read_bytes()).hexdigest())
+    return project, sdk
+
+
+def test_stale_sdk_rejected_before_import(tmp_path, monkeypatch):
+    project, sdk = sdk_fixture(tmp_path)
+    (sdk / "source.sha256").write_text("0" * 64)
+    monkeypatch.setattr(
+        policy_sdk.importlib, "import_module", lambda _: pytest.fail("imported stale SDK")
+    )
+    with pytest.raises(policy_sdk.SDKError, match="POLICY_SDK_STALE"):
+        policy_sdk.verify_sdk(project, sdk)
+
+
+def test_incomplete_sdk_rejected(tmp_path):
+    project, sdk = sdk_fixture(tmp_path)
+    (sdk / "dual_arm_policy/policy_pb2.py").unlink()
+    with pytest.raises(policy_sdk.SDKError, match="POLICY_SDK_INCOMPLETE"):
+        policy_sdk.verify_sdk(project, sdk)
+
+
+def test_installed_sdk_cannot_replace_mounted_sdk(tmp_path, monkeypatch):
+    project, sdk = sdk_fixture(tmp_path)
+    module = ModuleType(policy_sdk.MODULES[0])
+    module.__file__ = str(tmp_path / "installed/policy_pb2.py")
+    monkeypatch.setitem(sys.modules, policy_sdk.MODULES[0], module)
+    monkeypatch.syspath_prepend(str(sdk))
+    with pytest.raises(policy_sdk.SDKError, match="POLICY_SDK_FALLBACK"):
+        policy_sdk.verify_sdk(project, sdk)
+
+
+def test_unknown_output_is_preserved(tmp_path):
+    output = tmp_path / "unrelated"
+    output.mkdir()
+    important = output / "user-data.txt"
+    important.write_text("keep")
+    with pytest.raises(policy_sdk.SDKError, match="UNOWNED_OUTPUT"):
+        policy_sdk.prepare_output(tmp_path / "project", output)
+    assert important.read_text() == "keep"
+    assert sorted(path.name for path in output.iterdir()) == ["user-data.txt"]
+
+
+def test_symlink_output_not_adopted(tmp_path):
+    output = tmp_path / "output"
+    output.mkdir()
+    target = tmp_path / "user-file"
+    target.write_text("keep")
+    (output / "source.sha256").symlink_to(target)
+    with pytest.raises(policy_sdk.SDKError, match="symlink"):
+        policy_sdk.prepare_output(tmp_path / "project", output)
+    assert target.read_text() == "keep"
+
+
+def test_sim_dockerfile_uses_single_hash_lock_without_extra_tool_installations():
+    text = (ROOT / "simulation/mujoco/docker/Dockerfile").read_text()
+    assert "requirements-dev" not in text
+    assert "sim-packages" not in text
+    assert "ros-jazzy-rosbag2" not in text
+    assert "requirements.lock" in text
+    assert "sim-requirements.lock" not in text
+    assert "sim-tools-requirements.txt" not in text
+    assert "ruckig-requirements.lock" not in text
+    assert "python3-colcon-common-extensions" not in text
+    assert "pytest" not in text
+    assert "ruff" not in text
+    assert "setuptools" not in text
+    assert "RUFF_CACHE_DIR" not in text
+    assert "image_metadata" not in text
+    assert "build-tools" not in text
+    assert "versions.json" not in text
+    assert "FASTRTPS_DEFAULT_PROFILES_FILE" not in text
+
+
+def test_sim_dockerfile_installs_dependencies_from_one_hash_lock():
+    text = (ROOT / "simulation/mujoco/docker/Dockerfile").read_text()
+    from_lines = [line for line in text.splitlines() if line.startswith("FROM ")]
+    assert len(from_lines) == 1
+    copy_lines = [line for line in text.splitlines() if line.startswith("COPY ")]
+    assert copy_lines == ["COPY requirements.lock /opt/dependencies/requirements.lock"]
+    assert " AS " not in text
+    assert "COPY --from" not in text
+    assert "pip wheel" not in text
+    assert "build-essential" not in text
+    assert "python3-dev" not in text
+    assert "provenance" not in text
+    assert "ruckig" not in text
+    assert sum(line.startswith("RUN pip install ") for line in text.splitlines()) == 1
+    assert (
+        "pip install --no-cache-dir --require-hashes "
+        "-r /opt/dependencies/requirements.lock" in text
+    )
+    assert "/opt/sim" not in text
+
+
+@pytest.mark.parametrize(
+    "instruction",
+    [
+        "RUN python - <<'PY'\nprint('hidden')\nPY\n",
+        'RUN python -c "print(1)"\n',
+        "COPY simulation /workspace/simulation\n",
+        'COPY ["learning", "/workspace/learning"]\n',
+        "COPY simulation/mujoco/scripts/run.sh /opt/run.sh\n",
+        'COPY . /workspace\n',
+        "FROM ${DEV_ROS_IMAGE} AS runtime\n",
+        'ENTRYPOINT ["bash", "/workspace/simulation/mujoco/scripts/run.sh"]\n',
+        'ENV PATH="/opt/venv/bin:${PATH}" PYTHONPATH=/workspace/src\n',
+        'WORKDIR /workspace\n',
+        'RUN if test -f /tmp/input; then do_work; fi\n',
+    ],
+)
+def test_dockerfile_rejects_embedded_programs_and_application_copy(instruction):
+    assert check_dockerfiles.check_text(instruction)
+
+
+def test_dockerfile_allows_dependency_files_and_pinned_wheel_artifacts():
+    instructions = """COPY requirements.lock \\
+     wheels/dependency.whl /opt/dependencies/
+RUN pip install --no-cache-dir --require-hashes -r /opt/dependencies/requirements.lock
+"""
+    assert check_dockerfiles.check_text(instructions) == []
+
+
+def test_repository_dockerfile_and_compose_boundaries_pass():
+    import subprocess
+
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "shared/common/tools/scripts/check_dockerfiles.py")],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Dockerfile/Compose boundaries passed" in result.stdout
+
+
+def test_compose_checker_rejects_task_startup_healthcheck_and_socket():
+    document = {
+        "services": {
+            "runtime": {
+                "image": "sim-dual-arm/runtime:current",
+                "build": {
+                    "context": ".",
+                    "dockerfile": "Dockerfile",
+                    "target": "test",
+                },
+                "command": ["python3", "-m", "dual_arm_runtime.runtime_node"],
+                "healthcheck": {"test": ["CMD", "true"]},
+                "entrypoint": ["bash", "/workspace/runtime/ros2/scripts/run.sh"],
+                "environment": {
+                    "PROJECT_CONTAINER": "1",
+                    "ROS_DOMAIN_ID": "42",
+                },
+                "volumes": [
+                    {"type": "bind", "source": ".", "target": "/workspace", "read_only": True},
+                    {"type": "bind", "source": "build", "target": "/build"},
+                    {"type": "bind", "source": "var", "target": "/data"},
+                    {
+                        "type": "bind",
+                        "source": "build/ros-dev",
+                        "target": "/opt/ros-dev",
+                        "read_only": True,
+                    },
+                    {
+                        "type": "bind",
+                        "source": "build/sdk",
+                        "target": "/opt/policy-sdk",
+                        "read_only": True,
+                    },
+                    {
+                        "type": "bind",
+                        "source": "/var/run/docker.sock",
+                        "target": "/var/run/docker.sock",
+                    },
+                ],
+            }
+        }
+    }
+    issues = check_dockerfiles.check_compose_document(document, name="test")
+    joined = "\n".join(issues)
+    assert "idle CMD" in joined
+    assert "healthcheck" in joined
+    assert "Docker socket" in joined
+    assert "must not select a build target" in joined
+
+
+def test_learning_compose_must_not_mount_ros_or_host_venv():
+    document = {
+        "services": {
+            "learning": {
+                "image": "sim-dual-arm/learning:current",
+                "build": {
+                    "context": ".",
+                    "dockerfile": "Dockerfile",
+                },
+                "command": ["idle"],
+                "entrypoint": ["bash", "/workspace/learning/lerobot/scripts/run.sh"],
+                "environment": {
+                    "PROJECT_CONTAINER": "1",
+                    "ROS_DOMAIN_ID": "42",
+                    "LEARNING_VENV": "/opt/host-learning-venv",
+                },
+                "volumes": [
+                    {"type": "bind", "source": ".", "target": "/workspace", "read_only": True},
+                    {"type": "bind", "source": "build", "target": "/build"},
+                    {"type": "bind", "source": "var", "target": "/data"},
+                    {
+                        "type": "bind",
+                        "source": "build/ros-dev",
+                        "target": "/opt/ros-dev",
+                        "read_only": True,
+                    },
+                    {
+                        "type": "bind",
+                        "source": "build/sdk",
+                        "target": "/opt/policy-sdk",
+                        "read_only": True,
+                    },
+                    {
+                        "type": "bind",
+                        "source": "/host/venv",
+                        "target": "/opt/host-learning-venv",
+                        "read_only": True,
+                    },
+                ],
+            }
+        }
+    }
+    issues = check_dockerfiles.check_compose_document(
+        document,
+        name="test",
+        requirements=_declaration("learning/lerobot/docker/deployment.yaml"),
+    )
+    assert any("undeclared mount /opt/ros-dev" in item for item in issues)
+    assert any("must move ROS_DOMAIN_ID" in item for item in issues)
+    assert any("must not define LEARNING_VENV" in item for item in issues)
+    assert any("must not mount a host virtualenv" in item for item in issues)
+
+
+def test_compose_checker_rejects_variable_binds_and_requires_declared_mounts():
+    document = {
+        "services": {
+            "runtime": {
+                "image": "sim-dual-arm/runtime:current",
+                "build": {
+                    "context": ".",
+                    "dockerfile": "Dockerfile",
+                },
+                "command": ["idle"],
+                "entrypoint": ["bash", "/app/scripts/run.sh"],
+                "environment": {
+                    "PROJECT_CONTAINER": "1",
+                    "ROS_DOMAIN_ID": "42",
+                },
+                "gpus": "all",
+                "networks": ["ros", "learning"],
+                "volumes": [
+                    {
+                        "type": "bind",
+                        "source": "${PROJECT_ROOT}",
+                        "target": "/app",
+                        "read_only": True,
+                    },
+                    {
+                        "type": "bind",
+                        "source": "/sdk/ros",
+                        "target": "/opt/ros-dev",
+                        "read_only": True,
+                    },
+                    {
+                        "type": "bind",
+                        "source": "/sdk/policy",
+                        "target": "/opt/policy-sdk",
+                        "read_only": True,
+                    },
+                ],
+            }
+        },
+        "networks": {
+            "ros": {},
+            "learning": {},
+        },
+    }
+    joined = "\n".join(
+        check_dockerfiles.check_compose_document(
+            document,
+            name="test",
+            requirements=_declaration("runtime/ros2/docker/deployment.yaml"),
+        )
+    )
+    assert "direct path" in joined
+    assert "/build writable" in joined
+    assert "/data writable" in joined
+    assert "must not request GPUs" in joined
+
+
+def test_compose_checker_rejects_old_environment_entrypoint():
+    document = {
+        "services": {
+            "runtime": {
+                "image": "sim-dual-arm/runtime:current",
+                "build": {
+                    "context": ".",
+                    "dockerfile": "Dockerfile",
+                },
+                "command": ["idle"],
+                "entrypoint": [
+                    "bash",
+                    "/workspace/shared/common/tools/docker/entrypoints/environment.sh",
+                ],
+                "environment": {
+                    "PROJECT_CONTAINER": "1",
+                    "ROS_DOMAIN_ID": "42",
+                },
+                "volumes": [
+                    {"type": "bind", "source": "/repo", "target": "/workspace", "read_only": True},
+                    {"type": "bind", "source": "/build", "target": "/build"},
+                    {"type": "bind", "source": "/data", "target": "/data"},
+                    {
+                        "type": "bind",
+                        "source": "/sdk/ros",
+                        "target": "/opt/ros-dev",
+                        "read_only": True,
+                    },
+                    {
+                        "type": "bind",
+                        "source": "/sdk/policy",
+                        "target": "/opt/policy-sdk",
+                        "read_only": True,
+                    },
+                ],
+            }
+        }
+    }
+    issues = check_dockerfiles.check_compose_document(document, name="test")
+    assert any("inherit the image's idle CMD" in item for item in issues)
+
+
+def test_compose_checker_requires_simulation_scoped_mounts_init_and_dds():
+    document = yaml.safe_load(
+        (ROOT / "simulation/mujoco/docker/docker-compose.yml").read_text()
+    )
+    declaration = _declaration("simulation/mujoco/docker/deployment.yaml")
+    issues = check_dockerfiles.check_compose_document(
+        document, name="test", requirements=declaration
+    )
+    assert issues == []
+    service = document["services"]["simulation"]
+    service["entrypoint"] = ["bash", "/app/scripts/run.sh"]
+    issues = check_dockerfiles.check_compose_document(
+        document, name="test", requirements=declaration
+    )
+    assert any("inherit the image's idle CMD" in item for item in issues)
+    service.pop("entrypoint")
+    service["command"] = ["backend"]
+    issues = check_dockerfiles.check_compose_document(
+        document, name="test", requirements=declaration
+    )
+    assert any("inherit the image's idle CMD" in item for item in issues)
+    service.pop("command")
+    service.pop("gpus")
+    issues = check_dockerfiles.check_compose_document(
+        document, name="test", requirements=declaration
+    )
+    assert any("runtime: nvidia and gpus: all" in item for item in issues)
+    service["gpus"] = "all"
+    service["runtime"] = "runc"
+    issues = check_dockerfiles.check_compose_document(
+        document, name="test", requirements=declaration
+    )
+    assert any("runtime: nvidia and gpus: all" in item for item in issues)
+    service["runtime"] = "nvidia"
+    service["init"] = False
+    issues = check_dockerfiles.check_compose_document(
+        document, name="test", requirements=declaration
+    )
+    assert any("init: true" in item for item in issues)
+    service["init"] = True
+    service["volumes"].remove("../../../build/ros-dev:/opt/ros-dev:ro")
+    issues = check_dockerfiles.check_compose_document(
+        document, name="test", requirements=declaration
+    )
+    assert any(
+        "must mount /opt/ros-dev read-only as declared" in item for item in issues
+    )
+    service["volumes"].append("../../../build/ros-dev:/opt/ros-dev:ro")
+    service["volumes"].append("../../../third_party:/third_party:ro")
+    issues = check_dockerfiles.check_compose_document(
+        document, name="test", requirements=declaration
+    )
+    assert any("undeclared mount /third_party" in item for item in issues)
+
+
+def test_declaration_allows_cpu_simulation_without_gpu():
+    document = yaml.safe_load(
+        (ROOT / "simulation/mujoco/docker/docker-compose.yml").read_text()
+    )
+    service = document["services"]["simulation"]
+    service.pop("gpus")
+    service.pop("runtime")
+    declaration = _declaration("simulation/mujoco/docker/deployment.yaml")
+    declaration["gpu"] = False
+    assert (
+        check_dockerfiles.check_compose_document(
+            document, name="test", requirements=declaration
+        )
+        == []
+    )
+
+
+def test_compose_checker_rejects_local_context_with_root_style_dockerfile():
+    document = {
+        "services": {
+            "simulation": {
+                "image": "sim-dual-arm/simulation:current",
+                "build": {
+                    "context": ".",
+                    "dockerfile": "simulation/mujoco/docker/Dockerfile",
+                },
+            }
+        }
+    }
+    issues = check_dockerfiles.check_compose_document(document, name="test")
+    assert any("build must use the local Dockerfile" in item for item in issues)

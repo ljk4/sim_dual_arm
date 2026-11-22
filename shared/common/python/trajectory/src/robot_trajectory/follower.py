@@ -178,8 +178,8 @@ class PreparedFollowerPlan(StrictContractModel):
             "must match the follower joint order",
         )
         _require(
-            self.window.handoff_time_ns == self.anchor.start_sim_time_ns,
-            "anchor.start_sim_time_ns",
+            self.window.handoff_time_ns == self.anchor.start_backend_time_ns,
+            "anchor.start_backend_time_ns",
             "must equal window.handoff_time_ns",
         )
         _require(
@@ -354,18 +354,18 @@ class PreparedFollowerPlan(StrictContractModel):
     joint_names = property(lambda self: self.plan.joint_names)
     joint_count = property(lambda self: self.plan.joint_count)
     duration_ns = property(lambda self: self.plan.duration_ns)
-    start_sim_time_ns = property(lambda self: self.anchor.start_sim_time_ns)
-    end_sim_time_ns = property(
-        lambda self: self.anchor.start_sim_time_ns + self.plan.duration_ns)
+    start_backend_time_ns = property(lambda self: self.anchor.start_backend_time_ns)
+    end_backend_time_ns = property(
+        lambda self: self.anchor.start_backend_time_ns + self.plan.duration_ns)
 
-    def sample_at(self, sim_time_ns: int) -> ReferenceSample:
-        if isinstance(sim_time_ns, bool) or not isinstance(sim_time_ns, int):
-            raise _invalid("sim_time_ns", "must be an integer")
-        if sim_time_ns < self.start_sim_time_ns or sim_time_ns > self.end_sim_time_ns:
+    def sample_at(self, backend_time_ns: int) -> ReferenceSample:
+        if isinstance(backend_time_ns, bool) or not isinstance(backend_time_ns, int):
+            raise _invalid("backend_time_ns", "must be an integer")
+        if backend_time_ns < self.start_backend_time_ns or backend_time_ns > self.end_backend_time_ns:
             raise ContractError("REFERENCE_EXPIRED",
-                                f"sim_time_ns {sim_time_ns} is outside "
-                                f"[{self.start_sim_time_ns}, {self.end_sim_time_ns}]")
-        return sample_reference_interval(self.plan, sim_time_ns - self.start_sim_time_ns)
+                                f"backend_time_ns {backend_time_ns} is outside "
+                                f"[{self.start_backend_time_ns}, {self.end_backend_time_ns}]")
+        return sample_reference_interval(self.plan, backend_time_ns - self.start_backend_time_ns)
 
     def to_document(self) -> dict[str, object]:
         document = self.model_dump(mode="json")

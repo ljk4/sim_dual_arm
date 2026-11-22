@@ -23,7 +23,12 @@ from robot_contracts.trajectory.spline import (
     ReferencePlan,
     ReferenceSample,
 )
-from robot_trajectory.spline_math import check_continuous_limits, compute_reference_extremes
+from robot_trajectory.spline_math import (
+    check_c1_continuity,
+    check_continuous_limits,
+    compute_reference_extremes,
+    evaluate_cubic_segment,
+)
 
 from robot_backend_sim.common.config.motion_config import ControlConfig
 
@@ -185,12 +190,6 @@ def _check_initial_limits(
     check_continuous_limits(extremes, joints, accelerations)
 
 
-def _quadratic_end(c0: float, c1: float, c2: float, duration_s: float) -> tuple[float, float]:
-    end_position = ((c2 * duration_s) + c1) * duration_s + c0
-    end_velocity = 2.0 * c2 * duration_s + c1
-    return end_position, end_velocity
-
-
 def _ceiling_ns(seconds: float, location: str) -> int:
     if not math.isfinite(seconds) or seconds < 0.0:
         raise _invalid(f"{location}: braking duration is not finite")
@@ -269,6 +268,7 @@ def _build_segments(
     velocities,
     stop_times,
     boundaries,
+    joint_names: Sequence[str],
 ) -> tuple[list[CubicSegment], list[float], list[float]]:
     segments: list[CubicSegment] = []
     current_positions = list(positions)
@@ -287,27 +287,33 @@ def _build_segments(
             c0, c1, c2 = _segment_coefficients(
                 current_positions[index], velocities[index], start_ns, stop_times[index]
             )
-            end_position, end_velocity = _quadratic_end(c0, c1, c2, duration_s)
-            if not (math.isfinite(end_position) and math.isfinite(end_velocity)):
-                raise _invalid("braking segment endpoint is not finite")
             c0_values.append(c0)
             c1_values.append(c1)
             c2_values.append(c2)
-            current_positions[index] = end_position
-            current_velocities[index] = end_velocity
-        start_state = (tuple(c0_values), tuple(c1_values))
         if previous_end is not None:
-            _check_boundary(previous_end, start_state, start_ns)
-        previous_end = (tuple(current_positions), tuple(current_velocities))
-        segments.append(
-            CubicSegment(
-                duration_ns=duration_ns,
-                c0=tuple(c0_values),
-                c1=tuple(c1_values),
-                c2=tuple(c2_values),
-                c3=(0.0,) * count,
+            _check_boundary(
+                previous_end,
+                (tuple(c0_values), tuple(c1_values)),
+                start_ns,
+                joint_names,
             )
+        segment = CubicSegment(
+            duration_ns=duration_ns,
+            c0=tuple(c0_values),
+            c1=tuple(c1_values),
+            c2=tuple(c2_values),
+            c3=(0.0,) * count,
         )
+        try:
+            end_positions, end_velocities, _ = evaluate_cubic_segment(
+                segment, duration_s, f"braking[{start_ns}ns]"
+            )
+        except ContractError as error:
+            raise _invalid(error.detail or str(error)) from error
+        current_positions = list(end_positions)
+        current_velocities = list(end_velocities)
+        previous_end = (end_positions, end_velocities)
+        segments.append(segment)
         start_ns = end_ns
     return segments, current_positions, current_velocities
 
@@ -337,7 +343,7 @@ def plan_braking(
         _validate_hold_plan(plan, joint_items, accelerations)
         return plan
     segments, current_positions, current_velocities = _build_segments(
-        count, positions, velocities, stop_times, boundaries
+        count, positions, velocities, stop_times, boundaries, names
     )
     for index, velocity in enumerate(current_velocities):
         if abs(velocity) > _CONTINUITY_ATOL:
@@ -351,13 +357,19 @@ def _check_boundary(
     previous_end: tuple[tuple[float, ...], tuple[float, ...]],
     start_state: tuple[tuple[float, ...], tuple[float, ...]],
     boundary_ns: int,
+    joint_names: Sequence[str],
 ) -> None:
-    for index, (left, right) in enumerate(zip(previous_end[0], start_state[0], strict=True)):
-        if not math.isclose(left, right, rel_tol=0.0, abs_tol=_CONTINUITY_ATOL):
-            raise _invalid(f"position discontinuity at {boundary_ns}ns, joint {index}")
-    for index, (left, right) in enumerate(zip(previous_end[1], start_state[1], strict=True)):
-        if not math.isclose(left, right, rel_tol=0.0, abs_tol=_CONTINUITY_ATOL):
-            raise _invalid(f"velocity discontinuity at {boundary_ns}ns, joint {index}")
+    try:
+        check_c1_continuity(
+            previous_end[0],
+            previous_end[1],
+            start_state[0],
+            start_state[1],
+            location=f"braking boundary {boundary_ns}ns",
+            joint_names=joint_names,
+        )
+    except ContractError as error:
+        raise _invalid(error.detail or str(error)) from error
 
 
 def _validate_hold_plan(
@@ -385,9 +397,12 @@ def _validate_merged_plan(
     extremes = compute_reference_extremes(reference)
     check_continuous_limits(extremes, joints, accelerations)
     last = plan.segments[-1]
-    duration_s = last.duration_s
-    for index, (c0, c1, c2) in enumerate(zip(last.c0, last.c1, last.c2, strict=True)):
-        end_position, end_velocity = _quadratic_end(c0, c1, c2, duration_s)
+    end_positions, end_velocities, _ = evaluate_cubic_segment(
+        last, last.duration_s, "braking.end"
+    )
+    for index, (end_position, end_velocity) in enumerate(
+        zip(end_positions, end_velocities, strict=True)
+    ):
         if not math.isclose(
             end_position, plan.hold_positions[index], rel_tol=0.0, abs_tol=_CONTINUITY_ATOL
         ):

@@ -12,7 +12,6 @@ process or writes a file.
 
 from __future__ import annotations
 
-import hashlib
 import os
 import re
 from collections.abc import Mapping
@@ -24,6 +23,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BeforeValidator, Field
 
+from .io import sha256_file
 from .models import ContractError
 from .profiles import (
     load_document,
@@ -31,6 +31,7 @@ from .profiles import (
     semantic_hash,
     validate_bindings,
 )
+from .project_paths import resolve_shared_root
 from .validation import (
     NonEmptyStr,
     StrictContractModel,
@@ -40,14 +41,18 @@ from .validation import (
 __all__ = [
     "BindingError",
     "BindingStage",
+    "ROBOT_REFERENCE_FIELDS",
     "ResolvedBinding",
     "ResolvedBundle",
     "ResolvedReference",
     "ScenarioBinding",
     "load_binding",
     "resolve_binding_path",
+    "resolve_scenario_binding",
     "stage_requirements",
 ]
+
+ROBOT_REFERENCE_FIELDS = ("profile", "schemas", "scene", "control", "stream", "follower", "task")
 
 PathList = Annotated[tuple[NonEmptyStr, ...], BeforeValidator(as_tuple)]
 # The template directory is a documentation scenario, so its id may start
@@ -240,7 +245,7 @@ class ResolvedBundle:
             "kind": None if self.path is None else "directory",
             "exists": self.path is not None and self.path.is_dir(),
             "digest": None,
-            "validated_by": "learning.verify_bundle",
+            "validated_by": "learning.training.bundle",
         }
 
 
@@ -342,14 +347,6 @@ def _coerce_stage(stage: BindingStage | str) -> BindingStage:
         raise BindingError(
             "BINDING_STAGE", f"{stage!r}: unknown stage; expected {choices}"
         ) from error
-
-
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _resolved(path: Path) -> Path:
@@ -481,7 +478,7 @@ def _resolve_model_reference(
 def _reference(
     field: str, declared: str, path: Path, kind: ReferenceKind
 ) -> ResolvedReference:
-    digest = _sha256_file(path) if kind == "file" else None
+    digest = sha256_file(path) if kind == "file" else None
     return ResolvedReference(field, declared, path, kind, sha256=digest)
 
 
@@ -531,7 +528,7 @@ def _load_profile_documents(
             ) from error
         references[field] = ResolvedReference(
             field, declared, path, "file",
-            sha256=_sha256_file(path), semantic_sha256=semantic_digest,
+            sha256=sha256_file(path), semantic_sha256=semantic_digest,
         )
     return references
 
@@ -642,7 +639,7 @@ def _load(
     return ResolvedBinding(
         root=binding_dir,
         path=resolved_source,
-        sha256=_sha256_file(resolved_source),
+        sha256=sha256_file(resolved_source),
         binding=binding,
         source_roots=source_roots,
         artifact_roots=artifact_roots,
@@ -701,3 +698,37 @@ def load_binding(
     declared_override = bundle if bundle is not None else model
     override = None if declared_override is None else _resolved(Path(declared_override))
     return _load(Path(path), schema_root=schema_root, bundle=override, stack=())
+
+
+def resolve_scenario_binding(
+    *,
+    robot: str | None = None,
+    task: str | None = None,
+    scenario: str | None = None,
+    stage: BindingStage | str | None = None,
+    shared_root: Path | str | None = None,
+    project_root: Path | None = None,
+    model: Path | str | None = None,
+    bundle: Path | str | None = None,
+) -> ResolvedBinding:
+    """Resolve ``(robot, task)`` (or ``'<robot>/<task>'``), load and optionally validate stage."""
+    if scenario is not None:
+        if robot is not None or task is not None:
+            raise BindingError("BINDING_REFERENCE", "scenario cannot be combined with robot/task")
+        robot, separator, task = scenario.partition("/")
+        if not separator or not robot or not task or "/" in task:
+            raise BindingError("BINDING_REFERENCE", "scenario must be '<robot>/<task>'")
+    if not robot or not task:
+        raise BindingError("BINDING_REFERENCE", "robot and task are required")
+    explicit_shared = None if shared_root is None else Path(shared_root)
+    root = resolve_shared_root(explicit=explicit_shared, project_root=project_root)
+    binding_path = resolve_binding_path(root, robot, task)
+    if not binding_path.is_file():
+        raise BindingError(
+            "BINDING_REFERENCE",
+            f"scenario {robot}/{task} has no binding file: {binding_path}",
+        )
+    resolved = load_binding(binding_path, shared_root=root, model=model, bundle=bundle)
+    if stage is not None:
+        resolved.validate_stage(stage)
+    return resolved

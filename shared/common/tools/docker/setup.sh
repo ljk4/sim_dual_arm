@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Sole common container helper.  Source it from run.sh, SDK/test scripts or an
+# Sole common container helper.  Source it from business, SDK/test scripts or an
 # interactive shell; it rejects host execution, then sets PATH/PYTHONPATH/ROS
 # only.  It never executes a command, validates an SDK, imports project modules
 # or starts a task.  Sourcing it again in `docker compose exec` gives the same
@@ -14,10 +14,9 @@ error: this command must run inside a project container.
 Start and enter the relevant service from its docker/ directory, for example:
   docker compose up -d
   docker compose exec simulation bash
-Then run the mounted script inside the container:
-  scripts/run.sh <command> ...
-For a one-shot business command, use:
-  docker compose exec simulation scripts/run.sh <command> ...
+For a one-shot business command, use the container's dedicated scripts under
+  scripts/, for example:
+  ./env.sh exec simulation scripts/backend.sh ...
 EOF
   exit 2
 fi

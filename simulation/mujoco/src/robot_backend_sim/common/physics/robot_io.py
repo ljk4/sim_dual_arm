@@ -24,11 +24,9 @@ from robot_contracts.models import ContractError, JointSpec, RobotProfile
 from robot_contracts.profiles import semantic_hash
 
 from robot_backend_sim.common.config.camera_config import CameraConfigError, camera_declared_description
-from robot_backend_sim.common.config.motion_config import CONTROL_JOINT_NAMES
 from robot_backend_sim.common.physics.scene_container import CompiledScene
 
 __all__ = [
-    "PUBLIC_JOINT_NAMES",
     "Measurement",
     "RobotIO",
     "check_owner_thread",
@@ -40,8 +38,6 @@ __all__ = [
     "validate_targets",
 ]
 
-SIDES = ("left", "right")
-PUBLIC_JOINT_NAMES = CONTROL_JOINT_NAMES
 _MAX_TIME_NS = 2**63 - 1
 _MAX_TIME_S = _MAX_TIME_NS / 1e9
 
@@ -125,21 +121,23 @@ def close(left: float, right: float) -> bool:
 
 
 def gripper_indices(joint_names: Sequence[str]) -> dict[str, int]:
-    """Public indices of the two grippers, resolved by name, never adjacency."""
+    """Named gripper indices derived in joint order from ``*_gripper_width`` entries."""
     result: dict[str, int] = {}
-    for side in SIDES:
-        expected = f"{side}_gripper_width"
-        matches = [index for index, name in enumerate(joint_names) if name == expected]
-        if len(matches) != 1:
-            raise ContractError(
-                "PROFILE_MISMATCH", f"joint order must contain exactly one {expected!r}"
-            )
-        result[side] = matches[0]
+    for index, name in enumerate(joint_names):
+        if name.endswith("_gripper_width"):
+            side = name[: -len("_gripper_width")]
+            if not side or side in result:
+                raise ContractError(
+                    "PROFILE_MISMATCH", f"invalid duplicate or unnamed gripper joint {name!r}"
+                )
+            result[side] = index
+    if not result:
+        raise ContractError("PROFILE_MISMATCH", "joint order defines no *_gripper_width joint")
     return result
 
 
 def validate_profile_contract(
-    profile: RobotProfile, expected_names: Sequence[str] = PUBLIC_JOINT_NAMES
+    profile: RobotProfile, expected_names: Sequence[str]
 ) -> tuple[JointSpec, ...]:
     """Check public order, units, limits and velocity bounds once per binding."""
     if not isinstance(profile, RobotProfile):

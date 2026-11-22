@@ -46,7 +46,7 @@ runtime/ros2/scripts/record.sh --robot marvin_sim --task stack \
 
 `--target-total N` 根据已有台账计算差额，只补足到累计 N 条合格数据；已达到目标时直接返回成功且不启动新的仿真 worker。中断后可原样重跑。它与表示本次新增数量的 `--count` 互斥，formal 目标不得超过 campaign 配置的合格上限。调度器取得运行锁后还会重新检查差额，防止 backend 启动期间台账进度发生变化。
 
-`record_parallel.sh` / `dual_arm_runtime.offline.record_parallel` 只在宿主机编排 Docker，宿主机仅需 Python 3 标准库和 Docker Compose。后台的 `record_workers.py` 从方案的 simulation Teacher 配方生成隔离配置，`record_pool.py` 在 runtime 容器内统一预留预算、分配种子和调度录制。每个 worker 的 MuJoCo 场景、ROS domain、命名空间、配置与日志均独立；原有手动 backend 无需启动。runtime 镜像不增加 MuJoCo 依赖，也不挂载 Docker socket。
+`record_parallel.sh`（宿主机包 [`shared/common/tools/host/record_parallel.py`](../../../shared/common/tools/README.md)）只在宿主机使用 Python 标准库与 Docker Compose 编排隔离容器。`record_workers.py` 从方案的 simulation Teacher 配方生成 worker 清单（向仿真端传入 `--namespace`、`--no-visualization`、`--realtime-speed` 等 CLI 参数并等待 `ready.json` 就绪），`record_pool.py` 在 runtime 容器内统一预留预算、分配种子并调度录制；每个 worker 的 MuJoCo 场景、ROS domain、命名空间、配置与日志均独立。runtime 镜像不依赖 MuJoCo，也不挂载 Docker socket。
 
 自动并发数按可用 CPU/内存/显存估计，最多 4 路；手动 `--workers` 支持 1～16，实际数量还受本次目标条数限制。`--realtime-speed` 默认 1.0，保持原有仿真速度；提高并发不改变物理步长、20 Hz 录制频率和准入规则。各路设置 BLAS/OMP 线程数为 1，避免线程过量竞争。
 

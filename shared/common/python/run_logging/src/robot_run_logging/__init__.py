@@ -4,7 +4,22 @@ The package owns its files and writer thread. It does not touch ROS, runtime
 state, MCAP recording, or the global logging configuration.
 """
 
-from .events import EventContext, LogFailure, LogSettings, Scalar
+from .events import (
+    IDENTIFIER_PATTERN,
+    EventContext,
+    LogFailure,
+    LogSettings,
+    Scalar,
+    is_valid_identifier,
+)
 from .writer import EventLogger
 
-__all__ = ["EventContext", "EventLogger", "LogFailure", "LogSettings", "Scalar"]
+__all__ = [
+    "IDENTIFIER_PATTERN",
+    "EventContext",
+    "EventLogger",
+    "LogFailure",
+    "LogSettings",
+    "Scalar",
+    "is_valid_identifier",
+]

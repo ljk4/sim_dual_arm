@@ -379,6 +379,22 @@ def _add_sites(spec: mujoco.MjSpec, mesh_dir: Path) -> None:
             )
 
 
+def _apply_marvin_appearance(spec: mujoco.MjSpec) -> None:
+    """Apply matte white body and matte black gripper/wrist-end appearance."""
+    white = [0.92, 0.92, 0.92, 1.0]
+    black = [0.12, 0.12, 0.12, 1.0]
+    white_bodies = {"ZJ_Robot_link"} | {f"Arm_{prefix}{i}_Link" for _, prefix in SIDES for i in range(1, 8)}
+    black_bodies = {f"Arm_{prefix}{i}_Link" for _, prefix in SIDES for i in range(8, 12)}
+    for body_name in white_bodies:
+        body = spec.body(body_name)
+        for geom in body.geoms:
+            geom.rgba = white
+    for body_name in black_bodies:
+        body = spec.body(body_name)
+        for geom in body.geoms:
+            geom.rgba = black
+
+
 def _add_self_exclusions(spec: mujoco.MjSpec) -> None:
     """Exclude only the pair whose source convex hulls overlap structurally."""
     for _, prefix in SIDES:
@@ -400,6 +416,7 @@ def add_marvin_robot(spec: mujoco.MjSpec, config: MarvinRobotConfig, urdf_path: 
     mesh_dir = _prepare_meshes(child, urdf_path)
     semantics = read_urdf_semantics(urdf_path)
     _replace_oversized_stand(child, mesh_dir)
+    _apply_marvin_appearance(child)
     _configure_finger_couplings(child)
     for body in child.bodies:
         if body.name.startswith("Arm_"):

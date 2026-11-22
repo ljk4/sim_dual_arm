@@ -8,25 +8,25 @@ run seed and realtime speed before strict :class:`BackendConfig` validation.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from robot_contracts.binding import (
+    ROBOT_REFERENCE_FIELDS,
     BindingError,
     ResolvedBinding,
     load_binding,
     resolve_binding_path,
 )
+from robot_contracts.io import read_yaml_unique_mapping
 from robot_contracts.models import ContractError
-from robot_contracts.validation import UniqueKeyError, read_unique_yaml
+from robot_contracts.project_paths import resolve_shared_root as _contracts_shared_root
 
 ROLE_RECIPES = {
     "teacher": ("simulation_teacher", "collection"),
     "policy": ("simulation_policy", "inference"),
 }
-ROBOT_REFERENCE_FIELDS = ("profile", "schemas", "scene", "control", "stream", "follower", "task")
 
 
 class ScenarioError(ValueError):
@@ -48,16 +48,7 @@ class ScenarioBackend:
 
 
 def resolve_shared_root(explicit: Path | None) -> Path:
-    if explicit is not None:
-        return Path(explicit)
-    environment = os.environ.get("SHARED_ROOT")
-    if environment:
-        return Path(environment)
-    here = Path(__file__).resolve()
-    for candidate in (here.parents[6] / "shared", here.parents[5] / "shared", Path("/shared")):
-        if candidate.is_dir():
-            return candidate
-    return Path("/shared")
+    return _contracts_shared_root(explicit=explicit)
 
 
 def _binding_path(shared_root: Path, robot: str, task: str) -> Path:
@@ -71,13 +62,7 @@ def _binding_path(shared_root: Path, robot: str, task: str) -> Path:
 
 
 def _load_recipe(path: Path) -> dict[str, Any]:
-    try:
-        document = read_unique_yaml(path)
-    except (UniqueKeyError, OSError) as error:
-        raise ScenarioError(f"cannot read backend recipe {path}: {error}") from error
-    if not isinstance(document, dict):
-        raise ScenarioError(f"backend recipe must be one YAML object: {path}")
-    return document
+    return read_yaml_unique_mapping(path, label="backend recipe", error_cls=ScenarioError)
 
 
 def _select(

@@ -1,7 +1,5 @@
 # Stream request mode.  Only the bounded-follower stream entries
-# (STREAM_FIRST/STREAM_NEXT) are served; MOTION is retained as the historical
-# wire value so a stale request is rejected explicitly instead of mis-decoded.
-uint8 MOTION=1
+# (STREAM_FIRST/STREAM_NEXT) are served.
 uint8 STREAM_FIRST=2
 uint8 STREAM_NEXT=3
 uint8 kind

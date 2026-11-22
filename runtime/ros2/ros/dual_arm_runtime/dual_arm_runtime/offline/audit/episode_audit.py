@@ -1,11 +1,4 @@
-"""Streaming MCAP audit for a continuous bounded-follower policy episode.
-
-The bounded reader keeps only sequence/stamp maps, per-command event and
-feedback summaries and per-camera references.  Camera payloads are validated
-and discarded, never collected into an episode-sized image cache.  This module
-is the only recording auditor: the legacy strict-motion audit was deleted with
-the single-shot control path.
-"""
+"""Streaming MCAP audit for a continuous bounded-follower policy episode."""
 
 from __future__ import annotations
 
@@ -125,7 +118,6 @@ class _Audit(StreamAudit):
             "reference_duplicates": self.reference_duplicates,
             "feedback_commands": len(self.terminals),
             "completed_commands": completed,
-            "configured_motions": self.motion_count,
             "max_joint_motion": motion,
             "skipped_context_messages": self.skipped,
         }
@@ -181,7 +173,7 @@ class _Audit(StreamAudit):
             raise record_error(f"overall events continue after terminal: {command_id}")
         if "STARTED" in phases and phases.index("STARTED") != 1:
             raise record_error(f"overall STARTED is out of order: {command_id}")
-        if overall[0].sim_time_ns != reference.accepted_sim_time_ns:
+        if overall[0].backend_time_ns != reference.accepted_backend_time_ns:
             raise record_error("overall ACCEPTED time differs from the accepted reference")
         terminal = self.terminals[command_id]
         terminal_event = overall[-1]
@@ -190,11 +182,11 @@ class _Audit(StreamAudit):
         if terminal.has_started:
             if "STARTED" not in phases:
                 raise record_error("feedback started without an overall STARTED event")
-            if overall[1].sim_time_ns != terminal.started_sim_time_ns:
+            if overall[1].backend_time_ns != terminal.started_backend_time_ns:
                 raise record_error("overall STARTED time differs from feedback")
         elif "STARTED" in phases:
             raise record_error("overall STARTED event without started feedback")
-        if terminal_event.sim_time_ns != terminal.finished_sim_time_ns:
+        if terminal_event.backend_time_ns != terminal.finished_backend_time_ns:
             raise record_error("overall terminal event time differs from feedback")
 
     def _check_chunk_events(
@@ -223,7 +215,7 @@ class _Audit(StreamAudit):
                 raise record_error(f"chunk STARTED is out of order: {chunk_seq}")
             if len(phases) > 3:
                 raise record_error(f"chunk events continue after terminal: {chunk_seq}")
-            if events[0].sim_time_ns != by_key[key].accepted_sim_time_ns:
+            if events[0].backend_time_ns != by_key[key].accepted_backend_time_ns:
                 raise record_error("chunk ACCEPTED time differs from its reference")
             if self.terminals[command_id].phase == "COMPLETED" and phases[-1] != "RETIRED":
                 raise record_error("completed stream has an unretired chunk")
@@ -233,7 +225,7 @@ class _Audit(StreamAudit):
             history = self.events.get(command_id, [])
             if not history:
                 raise record_error(f"accepted reference lacks control events: {command_id}")
-            first = min(by_key.values(), key=lambda record: record.accepted_sim_time_ns)
+            first = min(by_key.values(), key=lambda record: record.accepted_backend_time_ns)
             self._check_overall_events(command_id, first, history)
             self._check_chunk_events(command_id, by_key, history)
         for command_id in self.commands:
@@ -250,8 +242,6 @@ class _Audit(StreamAudit):
                 continue
             for execution in history:
                 if execution.reference_kind not in {"TRAJECTORY", "CHUNK"}:
-                    # BRAKE/HOLD are real applied references, but they must never
-                    # be reconstructed from the original predicted plan.
                     continue
                 if not execution.has_started:
                     raise record_error("trajectory feedback has no actual started time")
@@ -274,8 +264,6 @@ class _Audit(StreamAudit):
                     accelerations, execution.reference_accelerations, 1e-9
                 ):
                     raise record_error("feedback reference accelerations differ from the plan")
-                expected_elapsed = execution.reference_application_sim_time_ns - origin
+                expected_elapsed = execution.reference_application_backend_time_ns - origin
                 if execution.reference_elapsed_ns != expected_elapsed:
                     raise record_error("feedback elapsed is not the actual application time")
-
-

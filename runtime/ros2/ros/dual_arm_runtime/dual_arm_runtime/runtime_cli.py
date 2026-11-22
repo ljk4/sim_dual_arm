@@ -16,7 +16,7 @@ from rclpy.executors import SingleThreadedExecutor
 from rclpy.signals import SignalHandlerOptions
 from robot_run_logging import EventContext
 
-from dual_arm_runtime.artifact_paths import recordings_root, runs_root
+from robot_contracts.project_paths import recordings_root, runs_root
 from dual_arm_runtime.run_logging import (
     check_health,
     emit_best_effort,

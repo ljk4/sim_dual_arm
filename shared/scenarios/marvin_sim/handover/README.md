@@ -16,24 +16,24 @@ Marvin 固定根双臂方案：左手抓取物块、空中交接给右手、再�
 | `configs/simulation/backend/backend_marvin_policy.yaml` | Policy 推理后端（`task_mode: inference`），只运行同一物理评价 |
 | `configs/simulation/scene/marvin_handover_task.yaml` | 阶段门禁、终态评价、180 s 执行预算、Teacher 时钟与容量 |
 | `configs/simulation/scene/marvin_handover_task_inference.yaml` | 完整任务推理评价：Teacher 关闭、180 s 仿真 / 420 s 墙钟、同一门禁与成功判定 |
-| `configs/simulation/planning/handover_paths.yaml` | 任务目标、抓持点、接近/退避位、协调抬升、执行时长与诊断阈值 |
+| `configs/simulation/scene/handover_paths.yaml` | 任务目标、抓持点、接近/退避位、协调抬升、执行时长与诊断阈值 |
 | `configs/simulation/checks/handover_right_grasp_miss_task.yaml` | 右手未接稳负向诊断：右闭爪命令宽于物块，其他参数相同 |
 | `configs/runtime/teacher_collect.yaml` | runtime Teacher 采集配方（180 s 任务预算、能力标识） |
 | `configs/runtime/policy_eval.yaml` | runtime Policy 执行配方（180 s 任务预算、1 s 停止余量、420 s 墙钟） |
 | `configs/learning/act_dataset.yaml` | 正式数据转换，50 条合格局，随机抽取 10% 作为验证集 |
 | `configs/learning/act_training.yaml` | ACT full 5000 步、训练日志与模型路径 |
 | `configs/learning/policy.yaml` | ACT Policy 服务；首轮关闭时间融合，按实测为 `left_joint7` 与两夹爪配置逐轴修正额度 |
-| `configs/runtime/experiments/handover_campaign.yaml` | 正式采集预算（50 条 / 最多 100 次尝试）、种子、台账、阶段质量规则、导出标签上限与独立路径 |
-| `extensions/ros/marvin_handover_api_msgs/` | 60×16 交接 Teacher IDL、能力标识与包构建文件 |
-| `profiles/control/marvin_control.yaml` | 16 维控制轴、实测跟踪容差、停止与接触参数 |
+| `configs/runtime/handover_campaign.yaml` | 正式采集预算（50 条 / 最多 100 次尝试）、种子、台账、阶段质量规则、导出标签上限与独立路径 |
+| `../extensions/ros/marvin_teacher_api_msgs/` | `marvin_sim` 共享 60×16 Teacher IDL、能力标识与包构建文件 |
+| `../profiles/control/marvin_control.yaml` | 16 维控制轴、实测跟踪容差、停止与接触参数 |
 | `profiles/control/marvin_stream.yaml` | 连续块流的提前量、观测年龄与超时 |
-| `profiles/control/marvin_follower.yaml` | Teacher 有界跟随窗口、参考偏差预算与终端尾长 |
-| `profiles/control/marvin_follower_inference.yaml` | ACT 推理窗口与逐轴参考偏差上限，独立于关节硬限位 |
-| `profiles/robots/marvin_handover/` | Robot Profile 和三路相机标定文件。Profile 摘要根据场景声明计算。 |
-| `profiles/observations/marvin_rgb_joint.json` | 三路 RGB + 16 维机器人状态 |
-| `profiles/actions/marvin_joint_position.json` | 16 维关节位置动作 |
+| `../profiles/control/marvin_follower.yaml` | Teacher 有界跟随窗口、参考偏差预算与终端尾长 |
+| `../profiles/control/marvin_follower_inference.yaml` | ACT 推理窗口与逐轴参考偏差上限，独立于关节硬限位 |
+| `profiles/robot/` | Robot Profile（`profile.json`）和三路相机标定文件。Profile 摘要根据场景声明计算。 |
+| `../profiles/observations/marvin_rgb_joint.json` | 三路 RGB + 16 维机器人状态 |
+| `../profiles/actions/marvin_joint_position.json` | 16 维关节位置动作 |
 
-Marvin 的原始 URDF/STL 位于仿真端 [`assets/marvin/`](../../../../simulation/mujoco/assets/marvin/README.md)。堆叠方案复用本目录的控制、跟随、观测与动作档案。
+Marvin 的原始 URDF/STL 位于仿真端 [`assets/marvin/`](../../../../simulation/mujoco/assets/marvin/README.md)。堆叠与交接方案共用 `../profiles/` 下的公共控制、跟随、观测与动作档案。
 
 ## 选择方式
 
@@ -48,7 +48,7 @@ task:
 
 仿真端根据 `robot.assembly` 定位模型，根据 `task.environment` 选择任务环境。binding 的 `recipes.dataset`、`recipes.training`、`recipes.policy_service`、`recipes.runtime_policy` 与 `recipes.simulation_policy` 指向本方案正式配方。
 
-本方案接口包为 `robot_api_msgs`、`sim_api_msgs` 与 `marvin_handover_api_msgs`，已包含在全量 SDK 构建中；一次 `build-ros-sdk` 即服务全部方案，切换方案无需重建：
+本方案接口包为 `robot_api_msgs`、`sim_api_msgs` 与 `marvin_teacher_api_msgs`（能力标识 `marvin_teacher_api_msgs.teacher_chunk`），已包含在全量 SDK 构建中；一次 `scripts/build_sdk.sh` 即服务全部方案：
 
 ```bash
 # runtime 容器
@@ -70,9 +70,9 @@ scripts/build_sdk.sh
 在 `simulation` 容器内：
 
 ```bash
-python3 -m robot_backend_sim.tools.check_marvin_scene \
+python3 -m robot_backend_sim.marvin_sim.checks.check_marvin_scene \
   --scene-config /shared/scenarios/marvin_sim/handover/configs/simulation/scene/marvin_handover.yaml \
-  --profile /shared/scenarios/marvin_sim/handover/profiles/robots/marvin_handover/profile.json \
+  --profile /shared/scenarios/marvin_sim/handover/profiles/robot/profile.json \
   --schemas /shared/common/interfaces/schemas \
   --report-root /data/marvin_sim/handover/debug/marvin \
   --run-id marvin-p01a

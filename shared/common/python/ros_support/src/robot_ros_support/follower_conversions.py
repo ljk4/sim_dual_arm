@@ -75,7 +75,7 @@ def follower_reference_message(value: FollowerReference) -> FollowerReferenceMes
     return FollowerReferenceMessage(
         request=stream_command_message(value.request),
         motion_seq=value.motion_seq,
-        accepted_sim_time_ns=value.accepted_sim_time_ns,
+        accepted_backend_time_ns=value.accepted_backend_time_ns,
         accepted_wall_time_ns=value.accepted_wall_time_ns,
         joint_names=list(value.joint_names),
         anchor=anchor_message(value.anchor),
@@ -114,10 +114,6 @@ def follower_reference_from_message(value: object) -> FollowerReference:
     if not value.has_duration_grid and value.duration_grid_ns != 0:
         raise _invalid("has_duration_grid is false but duration_grid_ns is nonzero")
     request = stream_command_from_message(value.request)
-    if request.anchor is None or request.window is None:
-        raise _invalid("request lacks an anchor/window")
-    if tuple(value.joint_names) != tuple(request.trajectory.joint_names):
-        raise _invalid("joint_names differ from the raw request")
     anchor = anchor_from_message(value.anchor)
     window = ActionWindow(
         observation_id=value.observation_id,
@@ -128,15 +124,11 @@ def follower_reference_from_message(value: object) -> FollowerReference:
     )
     if tuple(value.selected_indices) != window.selected_indices:
         raise _invalid("selected_indices differ from the recomputed raw window")
-    if request.window != window:
-        raise _invalid("window fields differ from the raw request")
-    if request.anchor != anchor:
-        raise _invalid("anchor fields differ from the raw request")
     plan = reference_segments_from_messages(value.segments, value.joint_names)
     reference = FollowerReference(
         request=request,
         motion_seq=value.motion_seq,
-        accepted_sim_time_ns=value.accepted_sim_time_ns,
+        accepted_backend_time_ns=value.accepted_backend_time_ns,
         accepted_wall_time_ns=value.accepted_wall_time_ns,
         joint_names=tuple(value.joint_names),
         plan=plan,

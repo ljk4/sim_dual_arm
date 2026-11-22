@@ -3,12 +3,12 @@
 # plan is constructed and GetTeacherChunk is rejected.
 robot:
   namespace: /robot
-  profile: ../../../shared/scenarios/marvin_sim/stack/profiles/robots/marvin_stack/profile.json
+  profile: ../../../shared/scenarios/marvin_sim/stack/profiles/robot/profile.json
   schemas: ../../../shared/common/interfaces/schemas
   scene: ../../../shared/scenarios/marvin_sim/stack/configs/simulation/scene/marvin_stack.yaml
-  control: ../../../shared/scenarios/marvin_sim/handover/profiles/control/marvin_control.yaml
+  control: ../../../shared/scenarios/marvin_sim/profiles/control/marvin_control.yaml
   stream: ../../../shared/scenarios/marvin_sim/stack/profiles/control/marvin_stream.yaml
-  follower: ../../../shared/scenarios/marvin_sim/handover/profiles/control/marvin_follower.yaml
+  follower: ../../../shared/scenarios/marvin_sim/profiles/control/marvin_follower.yaml
   task: ../../../shared/scenarios/marvin_sim/stack/configs/simulation/scene/marvin_stack_task.yaml
   task_type: stack
   # Optional read-only segmentation counts on the same render snapshot.

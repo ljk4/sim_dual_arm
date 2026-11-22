@@ -63,12 +63,6 @@ def _error(location: str, message: str) -> ContractError:
     return ContractError("SCHEMA_MISMATCH", f"{location}: {message}")
 
 
-class MotionSpec(StrictMappingModel):
-    name: NonEmptyStr
-    duration_ns: Annotated[PositiveInt, Field(le=3_000_000_000)]
-    positions: _VECTOR
-
-
 class ObservationConfig(StrictMappingModel):
     """Observation timing and buffering.
 
@@ -176,7 +170,6 @@ class RuntimeRecipe(StrictMappingModel):
     reset: ResetConfig = ResetConfig()
     observation: ObservationConfig
     control: ControlConfig
-    motions: Annotated[tuple[MotionSpec, ...], BeforeValidator(as_tuple), Field(max_length=64)] = ()
     action_source: Annotated[str, Field(pattern=r"^(policy|teacher)$")]
     # Explicit capability identifier for a scenario Teacher wire extension.
     # It is required for teacher mode and absent for policy runs.
@@ -207,8 +200,6 @@ class RuntimeRecipe(StrictMappingModel):
     def _recipe(self) -> RuntimeRecipe:
         if self.renew_interval_ns * 2 >= self.lease_duration_ns:
             raise contract_error("renew_interval_ns", "must be less than half of lease_duration_ns")
-        if self.motions:
-            raise contract_error("motions", "must be empty; the streaming runtime has no motions")
         if self.control.terminal_timeout_s <= self.command_timeout_s:
             raise contract_error("control.terminal_timeout_s", "must exceed command_timeout_s")
         if self.action_source == "policy" and self.policy is None:

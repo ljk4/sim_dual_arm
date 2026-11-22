@@ -2,9 +2,9 @@
 # 模型身份由 --scenario/--bundle 在启动时从真实 bundle 读取，此处不写摘要。
 
 model:
-  robot_profile_path: ../../profiles/robots/marvin_handover/profile.json
-  observation_schema_path: ../../profiles/observations/marvin_rgb_joint.json
-  action_schema_path: ../../profiles/actions/marvin_joint_position.json
+  robot_profile_path: ../../profiles/robot/profile.json
+  observation_schema_path: ../../../profiles/observations/marvin_rgb_joint.json
+  action_schema_path: ../../../profiles/actions/marvin_joint_position.json
   device: cuda
   # Diagnostic admission is granted only through the explicit
   # test-only entry; the recipe keeps the strict formal default.

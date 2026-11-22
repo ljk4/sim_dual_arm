@@ -88,12 +88,15 @@
          - "127.0.0.1:50051:50051"
    ```
 
-3. **构建、启动容器并生成 Policy SDK**：
+3. **构建、准备 Policy SDK 并启动容器**：
+   `learning` 容器以只读方式将宿主机 `build/generated/policy-sdk/` 挂载至 `/opt/policy-sdk`。可在宿主机先生成 Policy SDK，再启动容器：
 
    ```bash
    ./env.sh build learning
+   docker compose -f learning/lerobot/docker/docker-compose.yml run --rm --no-deps \
+     -v "$PWD/build:/build" learning \
+     python3 /shared/common/tools/scripts/generate_policy_sdk.py --output /build/generated/policy-sdk
    ./env.sh up learning
-   ./env.sh exec learning python3 /shared/common/tools/scripts/generate_policy_sdk.py --output /build/generated/policy-sdk
    ```
 
 4. **在容器内运行转换、训练与策略服务**：
@@ -150,7 +153,7 @@
 ## 目录结构
 
 - [`src/dual_arm_learning/`](src/dual_arm_learning/README.md)：`dual_arm_learning` 核心 Python 包。
-- [`configs/`](configs/README.md)：容器环境配置 `container.env` 与测试替身配置。
+- [`configs/`](configs/README.md)：容器环境配置 `container.env`。
 - [`docker/`](docker/README.md)：`Dockerfile`、`docker-compose.yml` 与源码声明。
 - [`scripts/`](scripts/README.md)：容器内单职责入口脚本（`convert.sh`、`train.sh`、`server_policy.sh`、`test.sh`）。
 

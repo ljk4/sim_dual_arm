@@ -294,14 +294,14 @@ def test_three_follower_blocks_over_real_ros_services(tmp_path):
         first_record = follower_reference_from_message(first.reference)
         assert first_record.chunk_seq == 1 and not first_record.is_final
         first_digest = first_record.reference_digest
-        first_sim = first_record.accepted_sim_time_ns
+        first_sim = first_record.accepted_backend_time_ns
         first_wall = first_record.accepted_wall_time_ns
 
         retry = _submit(stack, first_request)
         assert retry.accepted, retry.reason
         retry_record = follower_reference_from_message(retry.reference)
         assert retry_record.reference_digest == first_digest
-        assert retry_record.accepted_sim_time_ns == first_sim
+        assert retry_record.accepted_backend_time_ns == first_sim
         assert retry_record.accepted_wall_time_ns == first_wall
 
         changed_curve = _submission(first_request)
@@ -347,7 +347,7 @@ def test_three_follower_blocks_over_real_ros_services(tmp_path):
         assert second_anchor.predecessor_seq == 1
         second_observation = _query(
             stack, context, "command-follower-ros"
-        ).execution.measurement_sim_time_ns
+        ).execution.measurement_backend_time_ns
         second_request = _request(
             context,
             lease,
@@ -365,7 +365,7 @@ def test_three_follower_blocks_over_real_ros_services(tmp_path):
         assert second_retry.accepted, second_retry.reason
         second_retry_record = follower_reference_from_message(second_retry.reference)
         assert second_retry_record.reference_digest == second_record.reference_digest
-        assert second_retry_record.accepted_sim_time_ns == second_record.accepted_sim_time_ns
+        assert second_retry_record.accepted_backend_time_ns == second_record.accepted_backend_time_ns
         assert second_retry_record.accepted_wall_time_ns == second_record.accepted_wall_time_ns
 
         stack.wait_for(
@@ -379,7 +379,7 @@ def test_three_follower_blocks_over_real_ros_services(tmp_path):
         assert third_anchor.predecessor_seq == 2
         third_observation = _query(
             stack, context, "command-follower-ros"
-        ).execution.measurement_sim_time_ns
+        ).execution.measurement_backend_time_ns
         third_request = _request(
             context,
             lease,
@@ -397,7 +397,7 @@ def test_three_follower_blocks_over_real_ros_services(tmp_path):
         assert third_retry.accepted, third_retry.reason
         third_retry_record = follower_reference_from_message(third_retry.reference)
         assert third_retry_record.reference_digest == third_record.reference_digest
-        assert third_retry_record.accepted_sim_time_ns == third_record.accepted_sim_time_ns
+        assert third_retry_record.accepted_backend_time_ns == third_record.accepted_backend_time_ns
         assert third_retry_record.accepted_wall_time_ns == third_record.accepted_wall_time_ns
 
         terminal = stack.wait_for(

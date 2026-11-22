@@ -5,7 +5,6 @@ from __future__ import annotations
 import math
 
 from robot_contracts.models import ContractError
-from robot_contracts.stream_request import REQUEST_MOTION
 from robot_contracts.trajectory.follower_reference import (
     FollowerReference,
     FollowerValidationLimits,
@@ -66,8 +65,6 @@ class _FollowerAudit(_Audit):
         request = self.commands.get(command_id)
         if request is None:
             raise record_error(f"follower reference precedes its command: {command_id}")
-        if request.kind == REQUEST_MOTION:
-            raise record_error("MOTION command cannot carry a follower reference")
         anchor = record.request.anchor
         if anchor is None:
             raise record_error("follower reference has no anchor")
@@ -97,14 +94,14 @@ class _FollowerAudit(_Audit):
         self,
         record: object,
         execution: object,
-        actual_started_sim_ns: int | None,
+        actual_started_backend_ns: int | None,
     ) -> tuple[tuple[float, ...], tuple[float, ...], tuple[float, ...], int]:
-        del actual_started_sim_ns
+        del actual_started_backend_ns
         if not isinstance(record, FollowerReference):
             raise record_error("follower sample record has the wrong type")
         if execution.reference_kind != "CHUNK":  # type: ignore[attr-defined]
             raise record_error("follower applied sample is not a chunk reference")
-        application = execution.reference_application_sim_time_ns  # type: ignore[attr-defined]
+        application = execution.reference_application_backend_time_ns  # type: ignore[attr-defined]
         try:
             raw = sample_follower_reference(record, application)
             applied = applied_follower_sample(record, application, self._profile())
@@ -129,7 +126,7 @@ class _FollowerAudit(_Audit):
             applied.applied_positions,
             applied.sampled_velocities,
             applied.sampled_accelerations,
-            record.start_sim_time_ns,
+            record.start_backend_time_ns,
         )
 
     def finish(self) -> dict:
@@ -167,7 +164,6 @@ class _FollowerAudit(_Audit):
                 if record.is_final and not expected_final:
                     raise record_error("a follower chunk other than the last is final")
                 if expected_final and not record.is_final:
-                    # A legal abort can leave a non-final last accepted block.
                     if algorithm_completed(result):
                         raise record_error("completed follower stream lacks a final block")
                 raw_points += len(targets)

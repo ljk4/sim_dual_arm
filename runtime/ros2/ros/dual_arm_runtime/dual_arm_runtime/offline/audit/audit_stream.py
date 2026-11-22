@@ -9,7 +9,7 @@ from collections import Counter
 from robot_contracts.execution_feedback import ControlEvent, ExecutionFeedback
 from robot_contracts.models import ContractError, RunContext
 from robot_contracts.profiles import normalize_cameras
-from robot_contracts.stream_request import REQUEST_MOTION, StreamRequest
+from robot_contracts.stream_request import StreamRequest
 from robot_contracts.trajectory.follower_reference import FollowerReference
 
 from dual_arm_runtime.offline.audit.audit_common import (
@@ -38,8 +38,6 @@ class StreamAudit:
             "control_events",
             "follower_reference",
             "bounded_target_follower",
-            # Recordings made with the fixed two-gripper/two-finger container
-            # are not audited as if they used the bounded named set.
             "execution_feedback.gripper_set",
         }
     )
@@ -81,9 +79,8 @@ class StreamAudit:
         reset = recipe.get("reset") or {}
         self.simulation_capabilities = simulation_capabilities(
             reset_enabled=bool(configuration.get("reset_used", reset.get("enabled"))),
-            task_enabled=action_source == "teacher" or (
-                isinstance(stream, dict) and stream.get("termination_mode") == "task"
-            ),
+            task_enabled=action_source == "teacher"
+            or (isinstance(stream, dict) and stream.get("termination_mode") == "task"),
             teacher_api=recipe.get("teacher_api") if action_source == "teacher" else None,
         )
         self.required_capabilities = self.required_capabilities.union(
@@ -92,10 +89,6 @@ class StreamAudit:
         )
         _positive_int(observation.get("max_age_ns"), "max_age_ns")
         _positive_number(observation.get("wall_arrival_timeout_s"), "wall_arrival_timeout_s")
-        motions = recipe.get("motions")
-        if not isinstance(motions, list):
-            raise record_error("runtime recipe has no motion list")
-        self.motion_count = len(motions)
         control = recipe.get("control_constraints")
         if not isinstance(control, dict):
             raise record_error("runtime recipe has no control constraints")
@@ -174,6 +167,9 @@ class StreamAudit:
             raise record_error("recorded backend joint order differs")
         if tuple(message.camera_names) != self.camera_names:
             raise record_error("recorded backend camera order differs")
+        control_grid_ns = int(getattr(message, "control_grid_ns", 2_000_000))
+        if control_grid_ns <= 0:
+            raise record_error("recorded backend control_grid_ns is invalid")
         missing = self.required_capabilities - set(message.capabilities)
         if missing:
             raise record_error("recorded backend lacks required capabilities")
@@ -256,8 +252,6 @@ class StreamAudit:
         request = message
         if not self.context_value(request.trajectory.context):
             return
-        if request.kind == REQUEST_MOTION:
-            raise record_error("MOTION command is not part of a follower recording")
         anchor = request.anchor
         if anchor is None:
             raise record_error("follower command has no stream anchor")

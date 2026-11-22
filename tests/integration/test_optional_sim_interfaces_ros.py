@@ -23,7 +23,7 @@ from pathlib import Path
 from types import SimpleNamespace
 class RejectSim(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname.split(".")[0] in {"sim_api_msgs", "marvin_stack_api_msgs"}:
+        if fullname.split(".")[0] in {"sim_api_msgs", "marvin_teacher_api_msgs"}:
             raise AssertionError("optional interface loaded: " + fullname)
 sys.meta_path.insert(0, RejectSim())
 from dual_arm_runtime.robot_control_client import RobotControlClient
@@ -40,7 +40,7 @@ RobotControlClient(node, configuration.recipe, configuration.profile, (1.0,) * 1
 assert len(created) == 7
 assert all(not name.endswith("reset_simulation") for name in created)
 assert "sim_api_msgs" not in sys.modules
-assert "marvin_stack_api_msgs" not in sys.modules
+assert "marvin_teacher_api_msgs" not in sys.modules
 '''
     environment = {**os.environ, "PYTHONPATH": ":".join(str(ROOT / path) for path in (
         "shared/common/python/contracts/src",

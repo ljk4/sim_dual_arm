@@ -2,6 +2,7 @@ robot_api_msgs/RunContext context
 string backend_kind
 bool ready
 bool test_only
+uint64 control_grid_ns
 string[] joint_names
 string[] joint_units
 string[] camera_names

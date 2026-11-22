@@ -8,7 +8,7 @@ from typing import Annotated
 from pydantic import BeforeValidator, Field, model_validator
 from robot_contracts.action_chunks import MAX_TARGET_COUNT
 from robot_contracts.models import ContractError
-from robot_contracts.trajectory.constants import MAX_HORIZON_NS
+from robot_contracts.trajectory.constants import MAX_HORIZON_NS, MAX_JOINTS
 from robot_contracts.validation import (
     NonEmptyStr,
     PositiveFloat,
@@ -21,16 +21,12 @@ from robot_contracts.validation import (
     validate_config_model,
 )
 
-from robot_backend_sim.common.config.motion_config import CONTROL_JOINT_NAMES
-
 __all__ = [
     "FollowerConfigError",
     "FollowerConfig",
     "load_follower_config",
     "parse_follower_config",
 ]
-
-_JOINT_COUNT = len(CONTROL_JOINT_NAMES)
 
 
 FollowerConfigError = StrictMappingError
@@ -39,18 +35,25 @@ FollowerConfigError = StrictMappingError
 class FollowerConfig(StrictMappingModel):
     """Validated bounded-follower selection, tail and deviation parameters."""
 
-
-    joint_names: Annotated[tuple[NonEmptyStr, ...], BeforeValidator(as_tuple),
-                           Field(min_length=_JOINT_COUNT, max_length=_JOINT_COUNT)]
+    joint_names: Annotated[
+        tuple[NonEmptyStr, ...],
+        BeforeValidator(as_tuple),
+        Field(min_length=1, max_length=MAX_JOINTS),
+    ]
     target_count: Annotated[int, Field(strict=True, ge=2, le=MAX_TARGET_COUNT)]
-    max_target_deviations: Annotated[tuple[PositiveFloat, ...], BeforeValidator(as_tuple),
-                                     Field(min_length=_JOINT_COUNT, max_length=_JOINT_COUNT)]
+    max_target_deviations: Annotated[
+        tuple[PositiveFloat, ...],
+        BeforeValidator(as_tuple),
+        Field(min_length=1, max_length=MAX_JOINTS),
+    ]
     max_terminal_tail_duration_s: PositiveFloat
 
     @model_validator(mode="after")
     def _shape(self) -> FollowerConfig:
         if len(set(self.joint_names)) != len(self.joint_names):
             raise contract_error("joint_names", "must be unique")
+        if len(self.max_target_deviations) != len(self.joint_names):
+            raise contract_error("max_target_deviations", "must match joint_names length")
         if not 1 <= round(self.max_terminal_tail_duration_s * 1_000_000_000) <= MAX_HORIZON_NS:
             raise contract_error("max_terminal_tail_duration_s",
                                  f"must convert to 1..{MAX_HORIZON_NS} ns")

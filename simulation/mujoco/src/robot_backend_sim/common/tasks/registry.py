@@ -11,8 +11,13 @@ SUPPORTED_TASK_TYPES = supported_task_types()
 
 
 def create_task_plugin(
-    task_type: str, *, task_path: object, task_mode: str | None, scene_config: object
+    assembly: str,
+    task_type: str,
+    *,
+    task_path: object,
+    task_mode: str | None,
+    scene_config: object,
 ) -> SimTaskPlugin:
     """Create one plugin without hardcoding any robot or task module in common/."""
-    entry = get_task_plugin(task_type)
+    entry = get_task_plugin(assembly, task_type)
     return entry.create(task_path, task_mode=task_mode, scene_config=scene_config)

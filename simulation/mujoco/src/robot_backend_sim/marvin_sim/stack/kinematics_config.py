@@ -21,8 +21,15 @@ from robot_contracts.validation import (
     validate_config_model,
 )
 
-from robot_backend_sim.common.config.camera_config import CAMERA_NAMES
-from robot_backend_sim.marvin_sim.robot_config import Seven
+from robot_backend_sim.common.tasks.config import (
+    ClearanceSettings as ClearanceConfig,
+    IKSettingsBase,
+)
+from robot_backend_sim.marvin_sim.robot_config import (
+    MARVIN_ARM_JOINT_RANGES,
+    MARVIN_CAMERA_NAMES as CAMERA_NAMES,
+    Seven,
+)
 from robot_backend_sim.marvin_sim.stack.scene_config import MarvinStackSceneConfig
 
 __all__ = [
@@ -41,16 +48,6 @@ __all__ = [
 
 KinematicsConfigError = StrictMappingError
 
-MARVIN_ARM_JOINT_RANGES = (
-    (-3.106686, 3.106686),
-    (-2.094395, 2.094395),
-    (-3.106686, 3.106686),
-    (-2.530727, 1.047198),
-    (-3.106686, 3.106686),
-    (-1.047198, 1.047198),
-    (-1.570796, 1.570796),
-)
-
 STACK_KEY_POSES = (
     "pregrasp",
     "grasp",
@@ -68,17 +65,7 @@ def _camera_objects(camera: str) -> tuple[str, ...]:
     return ("source", "target")
 
 
-class IKConfig(StrictMappingModel):
-    dt_s: Annotated[PositiveFloat, Field(gt=1e-4, le=0.05)]
-    max_iterations: Annotated[PositiveInt, Field(le=5000)]
-    position_tolerance_m: Annotated[PositiveFloat, Field(gt=1e-6, le=0.05)]
-    orientation_tolerance_rad: Annotated[PositiveFloat, Field(gt=1e-6, le=0.5)]
-    posture_cost: Annotated[StrictFloat, Field(ge=0.0, le=1.0)]
-    position_cost: Annotated[PositiveFloat, Field(gt=0.0, le=100.0)]
-    orientation_cost: Annotated[PositiveFloat, Field(gt=0.0, le=100.0)]
-    lm_damping: Annotated[StrictFloat, Field(ge=0.0, le=1.0)]
-    limit_margin_rad: Annotated[StrictFloat, Field(ge=0.0, le=0.2)] = 0.05
-    solver: Literal["daqp"]
+class IKConfig(IKSettingsBase):
     initial_right_joint_positions: Seven
 
     @model_validator(mode="after")
@@ -93,22 +80,6 @@ class IKConfig(StrictMappingModel):
                     f"initial_right_joint_positions[{index - 1}]",
                     f"must stay within [{lower + margin:.4f}, {upper - margin:.4f}]",
                 )
-        return self
-
-
-class ClearanceConfig(StrictMappingModel):
-    minimum_clearance_m: Annotated[PositiveFloat, Field(gt=1e-5, le=0.05)]
-    collision_detection_distance_m: Annotated[PositiveFloat, Field(le=0.2)]
-    sample_step_rad: Annotated[PositiveFloat, Field(gt=1e-5, le=0.05)]
-    max_samples_per_segment: Annotated[PositiveInt, Field(ge=2, le=5000)]
-
-    @model_validator(mode="after")
-    def _clearance(self) -> ClearanceConfig:
-        if self.collision_detection_distance_m < self.minimum_clearance_m:
-            raise contract_error(
-                "collision_detection_distance_m",
-                "must be at least minimum_clearance_m",
-            )
         return self
 
 

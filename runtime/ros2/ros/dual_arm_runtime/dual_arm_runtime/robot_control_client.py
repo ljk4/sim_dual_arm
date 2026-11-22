@@ -341,7 +341,9 @@ class RobotControlClient:
 
     # ---- Bounded follower ---------------------------------------------------------
 
-    def get_anchor(self, context: RunContext, start_sim_time_ns: int | None = None) -> ChunkAnchor:
+    def get_anchor(
+        self, context: RunContext, start_backend_time_ns: int | None = None
+    ) -> ChunkAnchor:
         """Ask the backend for its fixed absolute hand-off anchor.
 
         With no explicit start the backend applies the accepted stream initial
@@ -356,8 +358,10 @@ class RobotControlClient:
                 GetStreamAnchor.Request(
                     context=context_message(context),
                     lease_id=self.lease_id,
-                    has_start=start_sim_time_ns is not None,
-                    start_sim_time_ns=0 if start_sim_time_ns is None else start_sim_time_ns,
+                    has_start=start_backend_time_ns is not None,
+                    start_backend_time_ns=(
+                        0 if start_backend_time_ns is None else start_backend_time_ns
+                    ),
                 ),
             ),
         )
@@ -493,7 +497,7 @@ class RobotControlClient:
             or chunk.command_seq != trajectory.command_seq
             or chunk.observation_id != trajectory.observation_id
             or chunk.chunk_seq != reference.chunk_seq
-            or chunk.accepted_sim_time_ns != reference.accepted_sim_time_ns
+            or chunk.accepted_backend_time_ns != reference.accepted_backend_time_ns
             or chunk.accepted_wall_time_ns != reference.accepted_wall_time_ns
         ):
             raise ContractError(
@@ -510,7 +514,7 @@ class RobotControlClient:
                 "chunk_seq": reference.chunk_seq,
                 "reference_digest": reference.reference_digest,
                 "phase": execution.phase,
-                "accepted_sim_time_ns": reference.accepted_sim_time_ns,
+                "accepted_backend_time_ns": reference.accepted_backend_time_ns,
                 "accepted_wall_time_ns": reference.accepted_wall_time_ns,
             },
         )

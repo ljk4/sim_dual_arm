@@ -66,8 +66,8 @@ class JointSpec(StrictContractModel):
 
 class CameraSpec(StrictContractModel):
     name: NonEmptyStr
-    width: Annotated[PositiveInt, Field(le=640)]
-    height: Annotated[PositiveInt, Field(le=480)]
+    width: Annotated[PositiveInt, Field(le=4096)]
+    height: Annotated[PositiveInt, Field(le=4096)]
     frame_id: NonEmptyStr
     calibration_digest: CameraDigest
 

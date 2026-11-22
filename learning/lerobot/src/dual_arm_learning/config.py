@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import copy
-import hashlib
 import json
 import re
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import AliasPath, BeforeValidator, Field, model_validator
+from robot_contracts.io import sha256_file
 from robot_contracts.project_paths import project_path
 from robot_contracts.validation import (
     NonEmptyStr,
@@ -20,13 +20,14 @@ from robot_contracts.validation import (
     PositiveInt,
     SafeIdStr,
     StrictFloat,
+    StrictMappingError as ConfigError,
     StrictMappingModel,
+    UniqueKeyError,
     as_tuple,
     contract_error,
+    read_unique_yaml,
     validate_config_model,
 )
-
-from .config_yaml import ConfigError, load_yaml
 
 __all__ = [
     "CheckpointSpec",
@@ -39,6 +40,7 @@ __all__ = [
     "TrainingConfig",
     "load_dataset_config",
     "load_training_config",
+    "load_yaml_mapping",
     "parse_dataset_config",
     "parse_training_config",
 ]
@@ -46,6 +48,20 @@ __all__ = [
 PNG_SHA = re.compile(r"^[0-9a-f]{64}$")
 OptionalSha = Annotated[str, Field(strict=True, pattern=r"^(?:[0-9a-f]{64})?$")]
 PINNED_REVISION = "7e241bd630a3719a56157a497ce5d08f244784f1"
+
+
+def load_yaml_mapping(path: str | Path) -> dict[str, Any]:
+    source = Path(path)
+    try:
+        document = read_unique_yaml(source)
+    except UniqueKeyError as error:
+        raise ConfigError(error.source, error.field, error.message) from error
+    if not isinstance(document, dict):
+        raise ConfigError(str(source), "<root>", "must be an object")
+    for key in document:
+        if not isinstance(key, str):
+            raise ConfigError(str(source), "<root>", "keys must be strings")
+    return document
 
 
 def episodes_before(value: object) -> object:
@@ -65,8 +81,8 @@ Episodes = Annotated[
     tuple[Annotated[int, Field(strict=True, ge=0, le=9999)], ...] | None,
     BeforeValidator(episodes_before),
 ]
-Names3 = Annotated[
-    tuple[NonEmptyStr, ...], BeforeValidator(as_tuple), Field(min_length=3, max_length=3)
+CameraNames = Annotated[
+    tuple[NonEmptyStr, ...], BeforeValidator(as_tuple), Field(min_length=1)
 ]
 
 
@@ -146,13 +162,13 @@ class DatasetConfig(StrictMappingModel):
     """Conversion contract and feature source for one learning data root."""
 
     project_root: Path = Path(".")
-    fps: Annotated[int, Field(strict=True, ge=20, le=20)]
-    chunk_size: Annotated[int, Field(strict=True, ge=60, le=60)]
-    action_lead_ns: Annotated[int, Field(strict=True, ge=50_000_000, le=50_000_000)]
-    state_dim: Annotated[int, Field(strict=True, ge=16, le=16)]
-    camera_names: Names3
-    camera_width: Annotated[int, Field(strict=True, ge=320, le=320)]
-    camera_height: Annotated[int, Field(strict=True, ge=240, le=240)]
+    fps: Annotated[int, Field(strict=True, ge=1, le=1000)]
+    chunk_size: Annotated[int, Field(strict=True, ge=1, le=4096)]
+    action_lead_ns: Annotated[int, Field(strict=True, ge=1, le=10_000_000_000)]
+    state_dim: Annotated[int, Field(strict=True, ge=1, le=256)]
+    camera_names: CameraNames
+    camera_width: Annotated[int, Field(strict=True, ge=1, le=4096)]
+    camera_height: Annotated[int, Field(strict=True, ge=1, le=4096)]
     task_text: NonEmptyStr
     profile_path: Path = Field(validation_alias="profile")
     select_path: Path = Field(validation_alias="select")
@@ -219,9 +235,7 @@ class DatasetConfig(StrictMappingModel):
             vcodec=self.rgb_vcodec, g=self.rgb_g, crf=self.rgb_crf, preset=self.rgb_preset
         )
     )
-    profile_sha256 = property(
-        lambda self: hashlib.sha256(self.profile_path.read_bytes()).hexdigest()
-    )
+    profile_sha256 = property(lambda self: sha256_file(self.profile_path))
 
     def feature_spec(self) -> dict[str, dict[str, object]]:
         return feature_spec(self)
@@ -297,7 +311,7 @@ class TrainingConfig(StrictMappingModel):
 
     @property
     def sha256(self) -> str:
-        return hashlib.sha256(self.source.read_bytes()).hexdigest()
+        return sha256_file(self.source)
 
     def to_document(self) -> dict[str, object]:
         return self.model_dump(mode="json")
@@ -331,8 +345,8 @@ def dataset_before(data: object) -> object:
 
 
 def dataset_after(config: DatasetConfig) -> None:
-    if config.camera_names != ("global", "left_wrist", "right_wrist"):
-        raise contract_error("camera_names", "must be global/left_wrist/right_wrist")
+    if len(set(config.camera_names)) != len(config.camera_names):
+        raise contract_error("camera_names", "must be unique")
     if config.lerobot_source_revision != PINNED_REVISION:
         raise contract_error("lerobot.source_revision", "must be the pinned revision")
     if config.lerobot_source_archive_sha256:
@@ -436,9 +450,8 @@ def feature_spec(config) -> dict[str, dict[str, object]]:
         "observation.state": {"dtype": "float32", "shape": (config.state_dim,)},
         "observation.velocity": {"dtype": "float32", "shape": (config.state_dim,)},
         "action": {"dtype": "float32", "shape": (config.state_dim,)},
-        "raw_action_chunk": {"dtype": "float32", "shape": (config.chunk_size, config.state_dim)},
-        "observation.sim_time_ns": {"dtype": "int64", "shape": (1,)},
-        "action.sim_time_ns": {"dtype": "int64", "shape": (1,)},
+        "observation.backend_time_ns": {"dtype": "int64", "shape": (1,)},
+        "action.backend_time_ns": {"dtype": "int64", "shape": (1,)},
         "source.episode_index": {"dtype": "int64", "shape": (1,)},
         "source.seed": {"dtype": "int64", "shape": (1,)},
     }
@@ -463,7 +476,7 @@ def load_dataset_config(
     path: str | Path,
     project_root: str | Path,
 ) -> DatasetConfig:
-    return parse_dataset_config(load_yaml(path), project_root)
+    return parse_dataset_config(load_yaml_mapping(path), project_root)
 
 
 def _dataset_config_path(document: dict) -> object:
@@ -480,7 +493,7 @@ def parse_training_config(
     if not isinstance(document, dict):
         raise ConfigError(str(source), "<root>", "must be a mapping")
     dataset = parse_dataset_config(
-        load_yaml(project_path(_dataset_config_path(document), root)), root
+        load_yaml_mapping(project_path(_dataset_config_path(document), root)), root
     )
     value = copy.deepcopy(document)
     value.update({"project_root": root, "source": Path(source), "dataset": dataset})
@@ -491,4 +504,4 @@ def load_training_config(
     path: str | Path,
     project_root: str | Path,
 ) -> TrainingConfig:
-    return parse_training_config(load_yaml(path), project_root=project_root, source=path)
+    return parse_training_config(load_yaml_mapping(path), project_root=project_root, source=path)

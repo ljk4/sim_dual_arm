@@ -1,0 +1,515 @@
+"""Run isolated parallel policy episodes against prepared simulation backends."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import threading
+import time
+import traceback
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+ROOT = Path(os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[7])
+
+
+@dataclass(frozen=True)
+class ClassificationStage:
+    """One ordered failure stage: label plus the condition names it requires."""
+
+    name: str
+    label: str
+    conditions: tuple[str, ...] = ()
+    succeeded: bool = False
+
+
+@dataclass(frozen=True)
+class ClassificationConfig:
+    """Per-scenario failure taxonomy, loaded from a recipe-owned YAML."""
+
+    stages: tuple[ClassificationStage, ...]
+    dropped_prefix: str
+    dropped_label: str
+
+    @property
+    def stage_names(self) -> tuple[str, ...]:
+        return tuple(stage.name for stage in self.stages)
+
+    def label(self, name: str) -> str:
+        for stage in self.stages:
+            if stage.name == name:
+                return stage.label
+        return name
+
+
+GENERIC_CLASSIFICATION = ClassificationConfig(
+    stages=(ClassificationStage(name="result", label="结果", succeeded=True),),
+    dropped_prefix="DROPPED",
+    dropped_label="搬运/放置（掉落）",
+)
+
+
+def load_classification(path: Path) -> ClassificationConfig:
+    """Load a scenario-owned evaluation taxonomy (plain dataclasses, no Pydantic)."""
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(document, dict):
+        raise ValueError(f"classification config is not a mapping: {path}")
+    raw_stages = document.get("stages")
+    if not isinstance(raw_stages, list) or not raw_stages:
+        raise ValueError(f"classification config has no stages: {path}")
+    stages = tuple(
+        ClassificationStage(
+            name=str(stage.get("name")),
+            label=str(stage.get("label", stage.get("name"))),
+            conditions=tuple(str(c) for c in stage.get("conditions", []) or []),
+            succeeded=bool(stage.get("succeeded", False)),
+        )
+        for stage in raw_stages
+        if isinstance(stage, dict)
+    )
+    if not any(stage.succeeded for stage in stages):
+        raise ValueError(f"classification config has no succeeded stage: {path}")
+    return ClassificationConfig(
+        stages=stages,
+        dropped_prefix=str(document.get("dropped_prefix", "DROPPED")),
+        dropped_label=str(document.get("dropped_label", "搬运/放置（掉落）")),
+    )
+
+
+def _conditions(task: dict[str, Any]) -> dict[str, bool]:
+    metrics = task.get("metrics")
+    result: dict[str, bool] = {}
+    if isinstance(metrics, dict):
+        for item in metrics.get("conditions", []):
+            if isinstance(item, dict) and isinstance(item.get("name"), str):
+                result[item["name"]] = bool(item.get("passed"))
+    return result
+
+
+def _stage_state(
+    task: dict[str, Any], config: ClassificationConfig
+) -> tuple[str, str, dict[str, bool]]:
+    """Return (failure_stage, failure_reason, reached_milestones)."""
+    reason = str(task.get("failure_reason") or task.get("reason") or "")
+    condition_stages = [stage for stage in config.stages if stage.conditions]
+    if not task.get("state") and not reason:
+        return (
+            "执行异常",
+            "未产出有效的 task_result.json",
+            {stage.name: False for stage in condition_stages},
+        )
+    conditions = _conditions(task)
+    reached = {
+        stage.name: not any(
+            conditions.get(name) is False
+            for name in stage.conditions
+            if name in conditions
+        )
+        for stage in condition_stages
+    }
+    if task.get("state") == "SUCCEEDED":
+        return "", reason, {stage.name: True for stage in config.stages}
+    if config.dropped_prefix and reason.startswith(config.dropped_prefix):
+        return config.dropped_label, reason, reached
+    for stage in condition_stages:
+        if not reached[stage.name]:
+            return stage.label, reason, reached
+    terminal = next((stage for stage in config.stages if stage.succeeded), None)
+    return terminal.label if terminal else "", reason, reached
+
+
+def _classification(
+    recordings: Path, run_id: str, exit_code: int, config: ClassificationConfig
+) -> dict[str, Any]:
+    episode_dir = recordings / run_id
+    task: dict[str, Any] = {}
+    manifest: dict[str, Any] = {}
+    try:
+        task = json.loads((episode_dir / "task_result.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        task = {}
+    try:
+        manifest = json.loads((episode_dir / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        manifest = {}
+    task_section = task.get("task") if isinstance(task.get("task"), dict) else {}
+    recording = manifest.get("recording") if isinstance(manifest.get("recording"), dict) else {}
+    runtime = manifest.get("runtime") if isinstance(manifest.get("runtime"), dict) else {}
+    succeeded = bool(
+        exit_code == 0
+        and task_section.get("state") == "SUCCEEDED"
+        and isinstance(runtime, dict)
+        and runtime.get("outcome") in {"stopped", "completed"}
+        and recording.get("complete") is True
+    )
+    failure_stage, failure_reason, reached = _stage_state(task_section, config)
+    return {
+        "succeeded": succeeded,
+        "failure_stage": "" if succeeded else failure_stage,
+        "failure_reason": "" if succeeded else failure_reason,
+        "milestones": reached,
+        "task_outcome": task_section.get("state") or "",
+        "runtime_outcome": str(runtime.get("outcome") or ""),
+        "recording_complete": bool(recording.get("complete")),
+        "record_directory": str(episode_dir),
+    }
+
+
+def _format_duration(seconds: float | None) -> str:
+    if seconds is None:
+        return "--:--:--"
+    total = max(0, round(seconds))
+    minutes, secs = divmod(total, 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+class InferencePool:
+    def __init__(
+        self,
+        args: argparse.Namespace,
+        workers: list[dict[str, Any]],
+        classification: ClassificationConfig,
+    ) -> None:
+        self.args = args
+        self.workers = workers
+        self.classification = classification
+        self.recordings = args.recordings
+        self.runs_root = args.runs_root
+        self.lock = threading.Lock()
+        self.worker_failures = {worker["id"]: 0 for worker in workers}
+        self.episodes: list[dict[str, Any]] = []
+        self.stopped = threading.Event()
+        self.next_index = 0
+        self.active = 0
+        self.started = time.monotonic()
+
+    @property
+    def succeeded(self) -> int:
+        return sum(1 for item in self.episodes if item["succeeded"])
+
+    @property
+    def failed(self) -> int:
+        return len(self.episodes) - self.succeeded
+
+    @property
+    def max_failures(self) -> int:
+        return max(self.worker_failures.values(), default=0)
+
+    def _is_tty(self) -> bool:
+        return sys.stdout.isatty() or os.environ.get("RECORD_PROGRESS_TTY") == "1"
+
+    def _render_progress(self, *, force: bool = False) -> None:
+        if not self._is_tty() and not force:
+            return
+        with self.lock:
+            done = len(self.episodes)
+            active = self.active
+            succeeded = self.succeeded
+            failures = self.max_failures
+        total = max(1, self.args.count)
+        fraction = min(1.0, done / total)
+        filled = int(20 * fraction)
+        bar = "█" * filled + "░" * (20 - filled)
+        elapsed_s = time.monotonic() - self.started
+        if done >= self.args.count:
+            eta_s: float | None = 0.0
+        elif done > 0:
+            eta_s = elapsed_s * (self.args.count - done) / done
+        else:
+            eta_s = None
+        limit = self.args.max_consecutive_failures or "-"
+        line = (
+            f"并行推理 [{bar}] {done}/{self.args.count} | 在途 {active} "
+            f"| 成功 {succeeded} | 最大连败 {failures}/{limit} "
+            f"| 用时 {_format_duration(elapsed_s)} | 剩余 {_format_duration(eta_s)}"
+        )
+        if self._is_tty():
+            sys.stdout.write(f"\r\033[K{line}")
+            sys.stdout.flush()
+        else:
+            print(line, flush=True)
+
+    def _take_index(self) -> int | None:
+        with self.lock:
+            if self.stopped.is_set() or self.next_index >= self.args.count:
+                return None
+            index = self.next_index
+            self.next_index += 1
+            return index
+
+    def _episode_command(
+        self, worker: dict[str, Any], run_id: str, seed: int
+    ) -> list[str]:
+        return [
+            sys.executable,
+            "-m",
+            "dual_arm_runtime.runtime_node",
+            "--project-root",
+            str(ROOT),
+            "--config",
+            str(worker["runtime_config"]),
+            "--once",
+            "--run-id",
+            run_id,
+            "--episode-id",
+            run_id,
+            "--reset-seed",
+            str(seed),
+            *(
+                ["--policy-endpoint", self.args.policy_endpoint]
+                if self.args.policy_endpoint is not None
+                else []
+            ),
+            "--output",
+            str(self.recordings),
+            "--runs-output",
+            str(self.runs_root),
+        ]
+
+    def _run_episode(self, worker: dict[str, Any], index: int) -> None:
+        seed = self.args.seed_start + index
+        run_id = f"{self.args.batch_id}-{worker['id']}-ep{index:04d}"
+        environment = dict(os.environ)
+        environment.update(
+            ROS_DOMAIN_ID=str(worker["domain_id"]),
+            OMP_NUM_THREADS="1",
+            OPENBLAS_NUM_THREADS="1",
+            MKL_NUM_THREADS="1",
+            DISPLAY="",
+            WAYLAND_DISPLAY="",
+        )
+        console = self.args.console_root / f"{run_id}.log"
+        console.parent.mkdir(parents=True, exist_ok=True)
+        started = time.monotonic()
+        with console.open("w", encoding="utf-8") as stream:
+            result = subprocess.run(
+                self._episode_command(worker, run_id, seed),
+                cwd=ROOT,
+                env=environment,
+                stdout=stream,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+        wall_s = time.monotonic() - started
+        classified = _classification(
+            self.recordings, run_id, result.returncode, self.classification
+        )
+        record = {
+            "index": index,
+            "worker": worker["id"],
+            "domain_id": worker["domain_id"],
+            "seed": seed,
+            "run_id": run_id,
+            "exit_code": result.returncode,
+            "wall_s": round(wall_s, 3),
+            "console_log": str(console),
+            **classified,
+        }
+        with self.lock:
+            self.episodes.append(record)
+            if record["succeeded"]:
+                self.worker_failures[worker["id"]] = 0
+            else:
+                self.worker_failures[worker["id"]] += 1
+            if (
+                self.args.max_consecutive_failures is not None
+                and self.worker_failures[worker["id"]]
+                >= self.args.max_consecutive_failures
+            ):
+                self.stopped.set()
+            completed = len(self.episodes)
+        verdict = (
+            "成功"
+            if record["succeeded"]
+            else f"失败 · {record['failure_stage']} · {record['failure_reason']}"
+        )
+        line = (
+            f"[{completed}/{self.args.count}] {worker['id']} seed {seed} "
+            f"{verdict} | {_format_duration(wall_s)} | {run_id}"
+        )
+        if self._is_tty():
+            if not record["succeeded"]:
+                sys.stdout.write(f"\r\033[2K{line}\n")
+                sys.stdout.flush()
+            self._render_progress()
+        else:
+            print(line, flush=True)
+
+    def _worker_loop(self, worker: dict[str, Any]) -> None:
+        while True:
+            index = self._take_index()
+            if index is None:
+                return
+            with self.lock:
+                self.active += 1
+            try:
+                self._run_episode(worker, index)
+            except Exception as error:  # noqa: BLE001 - one worker must not kill the batch
+                with self.lock:
+                    self.worker_failures[worker["id"]] += 1
+                    self.episodes.append(
+                        {
+                            "index": index,
+                            "worker": worker["id"],
+                            "seed": self.args.seed_start + index,
+                            "succeeded": False,
+                            "failure_stage": "执行异常",
+                            "failure_reason": f"{type(error).__name__}: {error}",
+                            "traceback": traceback.format_exc(),
+                        }
+                    )
+                    if (
+                        self.args.max_consecutive_failures is not None
+                        and self.worker_failures[worker["id"]]
+                        >= self.args.max_consecutive_failures
+                    ):
+                        self.stopped.set()
+                print(
+                    f"{worker['id']} 执行异常：{type(error).__name__}: {error}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            finally:
+                with self.lock:
+                    self.active -= 1
+                self._render_progress()
+
+    def run(self) -> int:
+        threads = [
+            threading.Thread(target=self._worker_loop, args=(worker,), daemon=True)
+            for worker in self.workers
+        ]
+        for thread in threads:
+            thread.start()
+        try:
+            last_render = 0.0
+            for thread in threads:
+                while thread.is_alive():
+                    thread.join(timeout=0.2)
+                    if self._is_tty() and time.monotonic() - last_render >= 0.5:
+                        self._render_progress()
+                        last_render = time.monotonic()
+        except KeyboardInterrupt:
+            self.stopped.set()
+            for thread in threads:
+                thread.join(timeout=5)
+            raise
+        return 0 if self.failed == 0 else 1
+
+    def summary(self) -> dict[str, Any]:
+        elapsed = round(time.monotonic() - self.started, 3)
+        attempted = len(self.episodes)
+        succeeded = self.succeeded
+        stages: dict[str, dict[str, int]] = {}
+        for name in self.classification.stage_names:
+            reached = sum(
+                1 for item in self.episodes if item.get("milestones", {}).get(name)
+            )
+            stages[name] = {"reached": reached, "total": attempted}
+        failures: dict[str, dict[str, Any]] = {}
+        for item in self.episodes:
+            if item["succeeded"]:
+                continue
+            key = item.get("failure_stage") or "未分类"
+            bucket = failures.setdefault(
+                key, {"count": 0, "reasons": {}, "seeds": []}
+            )
+            bucket["count"] += 1
+            reason = item.get("failure_reason") or "无原因"
+            bucket["reasons"][reason] = bucket["reasons"].get(reason, 0) + 1
+            bucket["seeds"].append(item["seed"])
+        return {
+            "batch_id": self.args.batch_id,
+            "requested": self.args.count,
+            "attempted": attempted,
+            "succeeded": succeeded,
+            "failed": self.failed,
+            "success_rate_percent": round(succeeded / attempted * 100.0, 2)
+            if attempted
+            else 0.0,
+            "workers": len(self.workers),
+            "seed_start": self.args.seed_start,
+            "elapsed_s": elapsed,
+            "stopped_early": self.stopped.is_set(),
+            "stages": stages,
+            "failure_groups": failures,
+            "episodes": self.episodes,
+        }
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--manifest", type=Path, required=True)
+    parser.add_argument("--recordings", type=Path, required=True)
+    parser.add_argument("--runs-root", type=Path, required=True)
+    parser.add_argument("--console-root", type=Path, required=True)
+    parser.add_argument("--report", type=Path, required=True)
+    parser.add_argument("--batch-id", required=True)
+    parser.add_argument("--count", type=int, required=True)
+    parser.add_argument("--seed-start", type=int, required=True)
+    parser.add_argument("--policy-endpoint", metavar="HOST:PORT")
+    parser.add_argument("--max-consecutive-failures", type=int, default=None)
+    args = parser.parse_args(argv)
+    document = json.loads(args.manifest.read_text(encoding="utf-8"))
+    workers = document.get("workers")
+    if not isinstance(workers, list) or not workers:
+        print("inference: worker manifest has no workers", file=sys.stderr)
+        return 2
+    selection = document.get("selection") or {}
+    recipes = selection.get("recipes") or {}
+    evaluation = recipes.get("evaluation")
+    if isinstance(evaluation, dict) and evaluation.get("path"):
+        classification = load_classification(Path(evaluation["path"]))
+    else:
+        classification = GENERIC_CLASSIFICATION
+    args.recordings.mkdir(parents=True, exist_ok=True)
+    args.runs_root.mkdir(parents=True, exist_ok=True)
+    args.console_root.mkdir(parents=True, exist_ok=True)
+    pool = InferencePool(args, workers, classification)
+    print(
+        f"并行推理开始：{len(workers)} 个 worker | 共 {args.count} 局 | "
+        f"起始 seed {args.seed_start}",
+        flush=True,
+    )
+    code = pool.run()
+    summary = pool.summary()
+    args.report.parent.mkdir(parents=True, exist_ok=True)
+    args.report.write_text(
+        json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    print("=== 并行推理结果 ===", flush=True)
+    print(
+        f"完成 {summary['attempted']}/{summary['requested']} 局 | "
+        f"成功 {summary['succeeded']} | 失败 {summary['failed']} | "
+        f"成功率 {summary['success_rate_percent']:.2f}% | "
+        f"用时 {_format_duration(summary['elapsed_s'])}",
+        flush=True,
+    )
+    for name in classification.stage_names:
+        stage = summary["stages"][name]
+        rate = stage["reached"] / stage["total"] * 100.0 if stage["total"] else 0.0
+        print(
+            f"  {classification.label(name)} 达成 {stage['reached']}/{stage['total']} "
+            f"({rate:.0f}%)",
+            flush=True,
+        )
+    if summary["failure_groups"]:
+        print("失败分布:", flush=True)
+        for stage, group in summary["failure_groups"].items():
+            reasons = "; ".join(
+                f"{reason} ×{count}" for reason, count in group["reasons"].items()
+            )
+            print(f"  {stage}: {group['count']} 次（{reasons}）", flush=True)
+    print(f"报告: {args.report}", flush=True)
+    return code
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

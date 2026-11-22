@@ -7,7 +7,7 @@ source "${PROJECT_SETUP:-${SHARED_ROOT:-$APP_ROOT/../../shared}/common/tools/doc
 
 ROOT="${PROJECT_ROOT:-$APP_ROOT}"
 DATA_ROOT="${DATA_ROOT:-/data}"
-POLICY_SDK="${POLICY_SDK_ROOT:-/build/generated/policy-sdk}"
+POLICY_SDK="${POLICY_SDK_ROOT:-/opt/policy-sdk}"
 ACT_LOG_DIRECTORY="${ACT_LOG_DIRECTORY:-}"
 
 has_help=false
@@ -33,7 +33,7 @@ done
 if [[ "$has_help" != "true" ]]; then
   python3 "${SHARED_ROOT:-$ROOT/shared}/common/tools/scripts/policy_sdk.py" check \
     --project-root "$ROOT" \
-    --sdk-root "$POLICY_SDK" 1>&2 >/dev/null
+    --sdk-root "$POLICY_SDK" >/dev/null
 fi
 
 run_id="${ACT_RUN_ID:-policy_$(date +%Y%m%d_%H%M%S)}"
@@ -54,7 +54,7 @@ if [[ -z "$log_directory" ]]; then
   log_directory="$service_root/$run_id"
 fi
 
-exec python3 -m dual_arm_learning.policy_service_cli \
+exec python3 -m dual_arm_learning.serving.cli \
   --log-directory "$log_directory" \
   --run-id "$run_id" \
   "$@"

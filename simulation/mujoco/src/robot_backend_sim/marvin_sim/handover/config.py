@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import BeforeValidator, Field, model_validator
+from pydantic import Field, model_validator
 from robot_contracts.validation import (
     PositiveFloat,
     PositiveInt,
@@ -18,10 +18,15 @@ from robot_contracts.validation import (
     StrictMappingError,
     StrictMappingModel,
     UniqueKeyError,
-    as_tuple,
     contract_error,
     read_unique_yaml,
     validate_config_model,
+)
+
+from robot_backend_sim.common.tasks.config import (
+    ClearanceSettings,
+    IKSettingsBase,
+    Vec3,
 )
 
 __all__ = [
@@ -42,41 +47,11 @@ __all__ = [
 
 HandoverPlanConfigError = StrictMappingError
 
-Vec3 = Annotated[
-    tuple[StrictFloat, StrictFloat, StrictFloat],
-    BeforeValidator(as_tuple),
-]
 
-
-class IKSettings(StrictMappingModel):
-    dt_s: Annotated[PositiveFloat, Field(gt=1e-4, le=0.05)]
-    max_iterations: Annotated[PositiveInt, Field(le=5000)]
-    position_tolerance_m: Annotated[PositiveFloat, Field(gt=1e-6, le=0.05)]
-    orientation_tolerance_rad: Annotated[PositiveFloat, Field(gt=1e-6, le=0.5)]
-    posture_cost: Annotated[StrictFloat, Field(ge=0.0, le=1.0)]
-    position_cost: Annotated[PositiveFloat, Field(gt=0.0, le=100.0)]
-    orientation_cost: Annotated[PositiveFloat, Field(gt=0.0, le=100.0)]
-    lm_damping: Annotated[StrictFloat, Field(ge=0.0, le=1.0)]
+class IKSettings(IKSettingsBase):
     # Interior margin (rad) reserved by the IK configuration limit on every
     # solved arm hinge, so no target can land on a hard joint limit.
     limit_margin_rad: Annotated[StrictFloat, Field(ge=0.0, le=0.2)]
-    solver: Literal["daqp"]
-
-
-class ClearanceSettings(StrictMappingModel):
-    minimum_clearance_m: Annotated[PositiveFloat, Field(gt=1e-5, le=0.05)]
-    collision_detection_distance_m: Annotated[PositiveFloat, Field(le=0.2)]
-    sample_step_rad: Annotated[PositiveFloat, Field(gt=1e-5, le=0.05)]
-    max_samples_per_segment: Annotated[PositiveInt, Field(ge=2, le=5000)]
-
-    @model_validator(mode="after")
-    def _relations(self) -> ClearanceSettings:
-        if self.collision_detection_distance_m < self.minimum_clearance_m:
-            raise contract_error(
-                "collision_detection_distance_m",
-                "must be at least minimum_clearance_m",
-            )
-        return self
 
 
 class GraspSide(StrictMappingModel):

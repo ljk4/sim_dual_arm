@@ -7,9 +7,9 @@ source "${PROJECT_SETUP:-${SHARED_ROOT:-$APP_ROOT/../../shared}/common/tools/doc
 
 if [[ "${1:-}" == "status" ]]; then
   shift
-  exec python3 -m dual_arm_runtime.offline.record status \
+  exec python3 -m dual_arm_runtime.offline.collection.record status \
     --project-root "${PROJECT_ROOT:-$APP_ROOT}" "$@"
 fi
 
-exec python3 -m dual_arm_runtime.offline.record \
+exec python3 -m dual_arm_runtime.offline.collection.record \
   --project-root "${PROJECT_ROOT:-$APP_ROOT}" "$@"

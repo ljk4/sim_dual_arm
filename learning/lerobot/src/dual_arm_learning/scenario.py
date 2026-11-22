@@ -1,13 +1,4 @@
-"""Robot/task binding selection for the learning entry points.
-
-This module is the only place where learning resolves ``--robot``/``--task``.
-A scenario is the ``(robot, task)`` pair that owns
-``<shared-root>/scenarios/<robot>/<task>/binding.yaml``.  It uses the public
-:mod:`robot_contracts.binding` loader, so path resolution, schema checks and
-stage requirements stay identical to the simulation and runtime side.  It
-never imports ROS, MuJoCo, Torch or a scenario implementation, never loads
-model weights and never writes a file.
-"""
+"""Robot/task binding selection for the learning entry points."""
 
 from __future__ import annotations
 
@@ -25,7 +16,10 @@ from robot_contracts.binding import (
     resolve_binding_path,
 )
 from robot_contracts.models import ContractError
-from robot_contracts.project_paths import project_path
+from robot_contracts.project_paths import (
+    project_path,
+    resolve_shared_root as _resolve_shared_root,
+)
 
 SUPPORTED_IMPLEMENTATION = "lerobot"
 SUPPORTED_ADAPTER = "act"
@@ -101,15 +95,7 @@ class LearningScenario:
 
 def resolve_shared_root(explicit: Path | None, project_root: Path) -> Path:
     """Use the explicit root, then ``SHARED_ROOT``, then the project layout."""
-    if explicit is not None:
-        return Path(explicit)
-    environment = os.environ.get("SHARED_ROOT")
-    if environment:
-        return Path(environment)
-    candidate = Path(project_root) / "shared"
-    if candidate.is_dir():
-        return candidate
-    return Path("/shared")
+    return _resolve_shared_root(explicit, project_root=project_root)
 
 
 def artifact_paths(robot: str, task: str, project_root: Path) -> dict[str, Path]:
@@ -148,14 +134,7 @@ def select_scenario(
     shared_root: Path | None = None,
     model: Path | None = None,
 ) -> LearningScenario:
-    """Load one binding, verify this end supports it and select a recipe.
-
-    ``stage`` controls the binding requirements: conversion/training use
-    ``learning`` (no model needed), inference preparation and serving use
-    ``inference`` (a real model source is mandatory).  ``model`` is an explicit
-    model override; it is resolved by the binding loader against the declared
-    roots and recorded as the effective source.
-    """
+    """Load one binding, verify this end supports it and select a recipe."""
     root = resolve_shared_root(shared_root, project_root)
     try:
         binding_path = resolve_binding_path(root, robot, task)

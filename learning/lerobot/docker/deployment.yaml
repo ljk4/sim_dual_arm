@@ -5,10 +5,10 @@ source:
   mount: /app
   scope: implementation
 mounts:
-  /build: writable
+  /opt/policy-sdk: read-only
   /data: writable
   /etc/bash.bashrc: read-only
   /third_party: read-only
 networks: [learning]
 gpu: true
-commands: [test]
+commands: [convert, train, server_policy, test]

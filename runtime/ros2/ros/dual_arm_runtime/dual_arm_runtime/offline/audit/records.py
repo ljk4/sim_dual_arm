@@ -1,7 +1,12 @@
 """Decoded immutable recording facts used by the audit rules."""
+
+from __future__ import annotations
+
 from dataclasses import dataclass
 
 from robot_contracts.models import RunContext
+
+from dual_arm_runtime.simulation.task_result import TaskFact
 
 
 @dataclass(frozen=True, slots=True)
@@ -12,6 +17,8 @@ class BackendInfo:
     joint_names: tuple[str, ...]
     camera_names: tuple[str, ...]
     capabilities: tuple[str, ...]
+    control_grid_ns: int = 2_000_000
+
 
 @dataclass(frozen=True, slots=True)
 class State:
@@ -22,6 +29,7 @@ class State:
     joint_names: tuple[str, ...]
     positions: tuple[float, ...]
     velocities: tuple[float, ...]
+
 
 @dataclass(frozen=True, slots=True)
 class CameraFrame:
@@ -39,6 +47,7 @@ class CameraFrame:
     info_frame_id: str
     calibration_digest: str
 
+
 @dataclass(frozen=True, slots=True)
 class Observation:
     context: RunContext
@@ -49,14 +58,10 @@ class Observation:
     reference_time_ns: int
 
 
-@dataclass(frozen=True, slots=True)
-class TaskFact:
-    phase: str
-    failure_reason: str
-    task_type: str
-    task_epoch: int
-    state_seq: int
-    sample_time_ns: int
-    task_config_digest: str
-    plan_digest: str
-    metrics: dict
+__all__ = [
+    "BackendInfo",
+    "CameraFrame",
+    "Observation",
+    "State",
+    "TaskFact",
+]

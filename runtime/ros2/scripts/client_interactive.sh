@@ -158,10 +158,6 @@ if [[ -n "$seed" && ! "$seed" =~ ^[0-9]+$ ]]; then
   printf 'interactive: --seed must be a non-negative integer\n' >&2
   exit 2
 fi
-if [[ -e "$output_root/$run_id" ]]; then
-  printf 'interactive: output already exists: %s\n' "$output_root/$run_id" >&2
-  exit 2
-fi
 printf '配置: %s\n' "$display"
 if [[ -n "$policy_endpoint" ]]; then
   printf '策略服务: %s\n' "$policy_endpoint"
@@ -187,7 +183,7 @@ python3 "${SHARED_ROOT:-$ROOT/shared}/common/tools/scripts/dev_workspace.py" che
   --build-root "$ROS_SDK" 1>/dev/null
 python3 "${SHARED_ROOT:-$ROOT/shared}/common/tools/scripts/policy_sdk.py" check \
   --project-root "$ROOT" \
-  --sdk-root "$POLICY_SDK" 1>&2 >/dev/null
+  --sdk-root "$POLICY_SDK" >/dev/null 2>&1
 
 seed_args=()
 if [[ -n "$seed" ]]; then

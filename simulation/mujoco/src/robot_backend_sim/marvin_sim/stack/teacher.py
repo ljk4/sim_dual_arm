@@ -16,6 +16,12 @@ from robot_backend_sim.common.config.motion_config import ControlConfig
 from robot_backend_sim.common.kinematics.common import extract_object_pose
 from robot_backend_sim.common.kinematics.kinematics_clearance import CollisionPairSet
 from robot_backend_sim.common.tasks.base import TaskChunk
+from robot_backend_sim.common.tasks.math import (
+    duration_from_limits,
+    quaternion_wxyz_to_matrix,
+    scalar_acceleration,
+    trapezoid_progress,
+)
 from robot_backend_sim.marvin_sim.kinematics import (
     BlockEnvelope,
     CarriedBlock,
@@ -109,25 +115,6 @@ class StackPlan:
         return self.segments[min(max(index, 0), len(self.segments) - 1)]
 
 
-def _duration(
-    start: tuple[float, ...],
-    end: tuple[float, ...],
-    velocities: tuple[float, ...],
-    accelerations: tuple[float, ...],
-    *,
-    minimum_s: float,
-) -> float:
-    duration = float(minimum_s)
-    for index, (first, second) in enumerate(zip(start, end, strict=True)):
-        delta = abs(second - first)
-        if delta <= 0.0:
-            continue
-        by_velocity = 1.5 * delta / velocities[index]
-        by_acceleration = math.sqrt(6.0 * delta / accelerations[index])
-        duration = max(duration, by_velocity, by_acceleration)
-    return duration
-
-
 def _joint_limits(
     profile: RobotProfile, control: ControlConfig, teacher: Any
 ) -> tuple[tuple[float, ...], tuple[float, ...]]:
@@ -180,17 +167,6 @@ def _drop_finger_source_pairs(
         exclusions=dict(base_pairs.exclusions),
         total_physical_pairs=base_pairs.total_physical_pairs,
         explicit_pair_count=base_pairs.explicit_pair_count,
-    )
-
-
-def _quat_to_rot_tuple(
-    quat_wxyz: tuple[float, float, float, float]
-) -> tuple[tuple[float, float, float], ...]:
-    w, x, y, z = quat_wxyz
-    return (
-        (1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - z * w), 2.0 * (x * z + y * w)),
-        (2.0 * (x * y + z * w), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - x * w)),
-        (2.0 * (x * z - y * w), 2.0 * (y * z + x * w), 1.0 - 2.0 * (x * x + y * y)),
     )
 
 
@@ -304,7 +280,7 @@ def build_teacher_plan(
     source_quat = tuple(
         float(value) for value in snapshot.qpos[source_addr + 3 : source_addr + 7]
     )
-    source_rot = _quat_to_rot_tuple(source_quat)
+    source_rot = quaternion_wxyz_to_matrix(source_quat)
     rel_pose = relative_block_pose(
         grasp_pos, grasp_rot, source_pose.center, source_rot
     )
@@ -463,7 +439,7 @@ def build_teacher_plan(
         if is_final:
             duration_s = float(max(min_s, task_config.success.stable_duration_s))
         else:
-            duration_s = _duration(
+            duration_s = duration_from_limits(
                 cur, end, velocity_limits, acceleration_limits, minimum_s=min_s
             )
         segments.append(
@@ -521,53 +497,6 @@ def build_teacher_plan(
     )
 
 
-def _trapezoid_progress(
-    elapsed_s: float, duration_s: float, acceleration: float
-) -> float:
-    if duration_s <= 0.0 or elapsed_s <= 0.0:
-        return 0.0
-    if elapsed_s >= duration_s:
-        return 1.0
-    if acceleration <= 0.0:
-        return 1.0
-    product = acceleration * duration_s * duration_s
-    if product < 4.0:
-        raise _error(
-            "TEACHER_PLAN_INVALID",
-            f"step duration {duration_s:.3f} s is below the acceleration-limited minimum",
-        )
-    discriminant = acceleration * acceleration * duration_s * duration_s - 4.0 * acceleration
-    cruise = (
-        acceleration * duration_s - math.sqrt(max(0.0, discriminant))
-    ) / 2.0
-    if cruise <= 0.0:
-        return min(1.0, elapsed_s / duration_s)
-    accelerate_s = cruise / acceleration
-    accelerate_distance = 0.5 * acceleration * accelerate_s * accelerate_s
-    cruise_s = max(0.0, (1.0 - 2.0 * accelerate_distance) / cruise)
-    if elapsed_s < accelerate_s:
-        return 0.5 * acceleration * elapsed_s * elapsed_s
-    if elapsed_s < accelerate_s + cruise_s:
-        return accelerate_distance + cruise * (elapsed_s - accelerate_s)
-    return 1.0 - 0.5 * acceleration * (duration_s - elapsed_s) ** 2
-
-
-def _scalar_acceleration(
-    segment: StackPlanSegment, accelerations: tuple[float, ...]
-) -> float:
-    acceleration = math.inf
-    for first, last, limit in zip(
-        segment.start_positions, segment.end_positions, accelerations, strict=True
-    ):
-        delta = abs(last - first)
-        if delta <= 0.0:
-            continue
-        acceleration = min(acceleration, limit / delta)
-    if not math.isfinite(acceleration) or acceleration <= 0.0:
-        return 0.0
-    return acceleration
-
-
 def sample_teacher_chunk(
     plan: StackPlan,
     *,
@@ -606,7 +535,9 @@ def sample_teacher_chunk(
         else int(start_sim_time_ns)
     )
     duration_ns = round(segment.duration_s * 1e9)
-    acceleration = _scalar_acceleration(segment, plan.accelerations)
+    acceleration = scalar_acceleration(
+        segment.start_positions, segment.end_positions, plan.accelerations
+    )
 
     positions: list[tuple[float, ...]] = []
     phases: list[str] = []
@@ -617,7 +548,7 @@ def sample_teacher_chunk(
         if segment.final or duration_ns <= 0 or elapsed >= duration_ns:
             position = segment.end_positions
         else:
-            progress = _trapezoid_progress(
+            progress = trapezoid_progress(
                 max(0.0, elapsed / 1e9), segment.duration_s, acceleration
             )
             position = tuple(

@@ -563,7 +563,7 @@ class ControlSession:
         if config is None:
             return False
         now = self._current_sim_ns()
-        if now > prepared.start_sim_time_ns - config.min_lead_ns:
+        if now > prepared.start_backend_time_ns - config.min_lead_ns:
             return True
         observed = prepared.window.observation_time_ns
         if observed > now:

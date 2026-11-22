@@ -191,9 +191,10 @@ def full_selection(shared_root: Path) -> PackageSelection:
             packages.append(
                 package_source(directory, shared, role, expected_name=directory.name)
             )
-    for directory in sorted(shared.glob("scenarios/*/*/extensions/ros/*")):
-        if (directory / "package.xml").is_file():
-            packages.append(package_source(directory, shared, "extension"))
+    for pattern in ("scenarios/*/extensions/ros/*", "scenarios/*/*/extensions/ros/*"):
+        for directory in sorted(shared.glob(pattern)):
+            if (directory / "package.xml").is_file():
+                packages.append(package_source(directory, shared, "extension"))
     selection_packages = _deduplicate(packages)
     check_dependency_closure(selection_packages, shared)
     return PackageSelection(shared, selection_packages, "full")
@@ -216,9 +217,10 @@ def _workspace_package_directory(name: str, shared_root: Path) -> Path | None:
     common = Path(shared_root) / COMMON_ROS_ROUTE / name
     if common.is_dir():
         return common
-    for candidate in sorted(Path(shared_root).glob(f"scenarios/*/*/extensions/ros/{name}")):
-        if candidate.is_dir():
-            return candidate
+    for pattern in (f"scenarios/*/extensions/ros/{name}", f"scenarios/*/*/extensions/ros/{name}"):
+        for candidate in sorted(Path(shared_root).glob(pattern)):
+            if candidate.is_dir():
+                return candidate
     return None
 
 

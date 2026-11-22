@@ -129,7 +129,7 @@ def follower_reference(
     packet: PreparedControlCommand,
     *,
     motion_seq: int,
-    accepted_sim_time_ns: int,
+    accepted_backend_time_ns: int,
     accepted_wall_time_ns: int,
 ) -> FollowerReference:
     """Build the canonical record for one explicitly supplied acceptance fact."""
@@ -139,7 +139,7 @@ def follower_reference(
         prepared,
         request,
         motion_seq=seq,
-        accepted_sim_time_ns=accepted_sim_time_ns,
+        accepted_backend_time_ns=accepted_backend_time_ns,
         accepted_wall_time_ns=accepted_wall_time_ns,
     )
 
@@ -167,7 +167,7 @@ def follower_reference_from_status(
         prepared,
         request,
         motion_seq=status.motion_seq,
-        accepted_sim_time_ns=status.accepted_sim_ns,
+        accepted_backend_time_ns=status.accepted_sim_ns,
         accepted_wall_time_ns=status.accepted_wall_ns,
     )
 
@@ -200,6 +200,6 @@ def follower_reference_from_chunk_status(
         prepared,
         request,
         motion_seq=_check_motion_seq(motion_seq),
-        accepted_sim_time_ns=chunk.accepted_sim_ns,
+        accepted_backend_time_ns=chunk.accepted_sim_ns,
         accepted_wall_time_ns=chunk.accepted_wall_ns,
     )

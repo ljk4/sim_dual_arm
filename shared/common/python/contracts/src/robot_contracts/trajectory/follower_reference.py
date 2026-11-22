@@ -87,7 +87,7 @@ class FollowerReference(StrictContractModel):
 
     request: StreamRequest
     motion_seq: Annotated[PositiveInt, Field(le=_UINT64_MAX)]
-    accepted_sim_time_ns: Annotated[int, Field(strict=True, ge=0, le=_INT64_MAX)]
+    accepted_backend_time_ns: Annotated[int, Field(strict=True, ge=0, le=_INT64_MAX)]
     accepted_wall_time_ns: Annotated[int, Field(strict=True, ge=0, le=_INT64_MAX)]
     joint_names: Annotated[tuple[NonEmptyStr, ...], BeforeValidator(as_tuple),
                            Field(min_length=1, max_length=MAX_JOINTS)]
@@ -135,14 +135,14 @@ class FollowerReference(StrictContractModel):
             raise contract_error("window.observation_id", "must equal request observation_id")
         if self.window.target_count != request.target_count:
             raise contract_error("window.target_count", "must equal request target_count")
-        if self.window.handoff_time_ns != self.anchor.start_sim_time_ns:
+        if self.window.handoff_time_ns != self.anchor.start_backend_time_ns:
             raise contract_error("window.handoff_time_ns", "must equal anchor start time")
         if self.is_final != request.settle_at_end:
             raise contract_error("is_final", "must equal request settle_at_end")
-        if not (request.observation_time_ns <= self.accepted_sim_time_ns
-                <= self.anchor.start_sim_time_ns
-                and self.accepted_sim_time_ns <= request.trajectory.accept_before_ns):
-            raise contract_error("accepted_sim_time_ns",
+        if not (request.observation_time_ns <= self.accepted_backend_time_ns
+                <= self.anchor.start_backend_time_ns
+                and self.accepted_backend_time_ns <= request.trajectory.accept_before_ns):
+            raise contract_error("accepted_backend_time_ns",
                                  "must follow the observation and precede both deadlines")
         for name in ("max_accelerations", "max_target_deviation_limits",
                      "raw_terminal_velocities", "restricted_terminal_velocities",
@@ -201,9 +201,9 @@ class FollowerReference(StrictContractModel):
 
     duration_ns = property(lambda self: self.plan.duration_ns)
 
-    start_sim_time_ns = property(lambda self: self.anchor.start_sim_time_ns)
+    start_backend_time_ns = property(lambda self: self.anchor.start_backend_time_ns)
 
-    end_sim_time_ns = property(lambda self: self.start_sim_time_ns + self.plan.duration_ns)
+    end_backend_time_ns = property(lambda self: self.start_backend_time_ns + self.plan.duration_ns)
 
     extension_ns = property(lambda self: max(0, self.plan.duration_ns - self.requested_window_ns))
 

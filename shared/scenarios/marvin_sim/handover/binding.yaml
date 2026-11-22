@@ -24,16 +24,16 @@ learning:
   adapter: act
 
 profiles:
-  robot: profiles/robots/marvin_handover/profile.json
-  observation: profiles/observations/marvin_rgb_joint.json
-  action: profiles/actions/marvin_joint_position.json
+  robot: profiles/robot/profile.json
+  observation: ../profiles/observations/marvin_rgb_joint.json
+  action: ../profiles/actions/marvin_joint_position.json
 
 recipes:
   simulation_teacher: configs/simulation/backend/backend_marvin_teacher.yaml
   simulation_policy: configs/simulation/backend/backend_marvin_policy.yaml
   runtime_teacher: configs/runtime/teacher_collect.yaml
   runtime_policy: configs/runtime/policy_eval.yaml
-  campaign: configs/runtime/experiments/handover_campaign.yaml
+  campaign: configs/runtime/handover_campaign.yaml
   dataset: configs/learning/act_dataset.yaml
   training: configs/learning/act_training.yaml
   policy_service: configs/learning/policy.yaml
@@ -46,16 +46,16 @@ interfaces:
     - robot_api_msgs
     - sim_api_msgs
   extension_ros:
-    - extensions/ros/marvin_handover_api_msgs
+    - ../extensions/ros/marvin_teacher_api_msgs
   # Explicit Teacher wire capability.  The extension package advertises the
   # same identifier; a backend advertising a different task's Teacher is
   # rejected by the episode capability check.
-  teacher_api: marvin_handover_api_msgs.teacher_chunk
+  teacher_api: marvin_teacher_api_msgs.teacher_chunk
   policy_api: bimanual.policy
 
 # No model bundle is declared; a verified bundle is supplied at runtime.
 source_roots:
-  - ../../..
+  - ..
 artifact_roots:
   - /data
 

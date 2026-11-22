@@ -27,13 +27,11 @@ from robot_contracts.validation import (
 
 __all__ = [
     "CAMERA_FIELDS",
-    "CAMERA_NAMES",
     "CameraConfig",
     "CameraConfigError",
     "camera_declared_description",
 ]
 
-CAMERA_NAMES = ("global", "left_wrist", "right_wrist")
 CAMERA_FIELDS = ("name", "parent", "position", "quaternion_wxyz", "fovy", "width", "height")
 CameraConfigError = StrictMappingError
 
@@ -74,8 +72,6 @@ class CameraConfig(StrictMappingModel):
 
     @model_validator(mode="after")
     def _camera(self) -> CameraConfig:
-        if self.name not in CAMERA_NAMES:
-            raise contract_error("name", f"must be one of {CAMERA_NAMES}")
         norm = math.sqrt(sum(component * component for component in self.quaternion_wxyz))
         if not math.isfinite(norm) or norm < 1e-9:
             raise contract_error("quaternion_wxyz", "must be a non-zero finite quaternion")

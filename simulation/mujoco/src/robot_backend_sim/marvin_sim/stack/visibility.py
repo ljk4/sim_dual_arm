@@ -18,8 +18,8 @@ from robot_contracts.validation import (
     validate_config_model,
 )
 
-from robot_backend_sim.common.config.camera_config import CAMERA_NAMES
 from robot_backend_sim.common.render.visibility import count_visible_pixels
+from robot_backend_sim.marvin_sim.robot_config import MARVIN_CAMERA_NAMES as CAMERA_NAMES
 from robot_backend_sim.marvin_sim.stack.scene_config import MarvinStackSceneConfig
 
 __all__ = [

@@ -74,12 +74,12 @@
           "width": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 640
+            "maximum": 4096
           },
           "height": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 480
+            "maximum": 4096
           },
           "frame_id": {
             "type": "string",

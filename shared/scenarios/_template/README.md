@@ -40,8 +40,8 @@ shared/scenarios/<robot>/<task>/
 - binding 内的所有路径相对 binding 文件所在目录解析，与调用者 cwd 无关。
 - `source_roots` 必须相对 binding 目录；`profiles.*`、`recipes.*`、
   `interfaces.extension_ros[*]` 必须位于 binding 目录或某个 `source_root` 之内。
-  例如 Marvin Stack 通过 `source_roots: ["../../.."]` 声明 `shared/`，
-  并用 `../handover/profiles/actions/marvin_joint_position.json` 复用 Marvin 的动作档案。
+  例如 `marvin_sim/stack` 与 `marvin_sim/handover` 通过 `source_roots: [".."]` 声明机器人根目录，
+  并用 `../profiles/actions/marvin_joint_position.json` 等路径平级复用 `marvin_sim/profiles/` 下的公共档案，同时以 `profiles/robot/profile.json` 引用各自任务下的 Robot Profile。
 - `artifact_roots` 可写绝对路径，容器数据根为 `/data`。学习端校验显式模型路径位于
   binding 目录、source root 或 artifact root 内。
 - `profiles.*`、`recipes.*` 必须是文件，`interfaces.extension_ros[*]` 必须是目录。

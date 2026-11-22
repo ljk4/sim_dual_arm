@@ -1,9 +1,9 @@
 # Marvin stack ACT Policy execution & recording configuration.
-robot_profile: ../../profiles/robots/marvin_stack/profile.json
-observation_schema: ../../../handover/profiles/observations/marvin_rgb_joint.json
-action_schema: ../../../handover/profiles/actions/marvin_joint_position.json
-control_constraints: ../../../handover/profiles/control/marvin_control.yaml
-follower_config: ../../../handover/profiles/control/marvin_follower_inference.yaml
+robot_profile: ../../profiles/robot/profile.json
+observation_schema: ../../../profiles/observations/marvin_rgb_joint.json
+action_schema: ../../../profiles/actions/marvin_joint_position.json
+control_constraints: ../../../profiles/control/marvin_control.yaml
+follower_config: ../../../profiles/control/marvin_follower_inference.yaml
 robot_namespace: /robot
 
 action_source: policy
@@ -58,8 +58,6 @@ policy:
   termination_mode: task
   task_stop_margin_s: 1.0
   task_sim_budget_ns: 90000000000
-
-motions: []
 
 logging:
   queue_capacity: 256

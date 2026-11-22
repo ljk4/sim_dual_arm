@@ -1,16 +1,34 @@
 from pathlib import Path
+import sys
 
 import pytest
-from robot_contracts.models import RunContext
-from robot_contracts.profiles import load_profile
 
 ROOT = Path(__file__).resolve().parents[2]
+for source in (
+    ROOT / "shared/common/python/contracts/src",
+    ROOT / "shared/common/python/trajectory/src",
+    ROOT / "shared/common/python/run_logging/src",
+    ROOT / "shared/common/python/ros_support/src",
+    ROOT / "shared/common/tools",
+    ROOT / "runtime/ros2/ros/dual_arm_runtime",
+    ROOT / "learning/lerobot/src",
+    ROOT / "simulation/mujoco/src",
+    ROOT / "tests/fakes/policy",
+    ROOT / "tests/unit/fixtures",
+    ROOT / "tests/unit/shared",
+    ROOT / "tests/unit/runtime",
+):
+    if str(source) not in sys.path:
+        sys.path.insert(0, str(source))
+
+from robot_contracts.models import RunContext  # noqa: E402
+from robot_contracts.profiles import load_profile  # noqa: E402
 
 
 @pytest.fixture
 def profile():
     return load_profile(
-        ROOT / "shared/scenarios/marvin_sim/stack/profiles/robots/marvin_stack/profile.json",
+        ROOT / "shared/scenarios/marvin_sim/stack/profiles/robot/profile.json",
         ROOT / "shared/common/interfaces/schemas",
     )
 

@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 from typing import Any
 
 from jsonschema import Draft202012Validator
 
+from .io import canonical_sha256
 from .models import CameraSpec, ContractError, RobotProfile
 from .validation import UniqueKeyError, read_unique_yaml
 
@@ -47,8 +47,7 @@ def load_document(path: Path) -> dict[str, Any]:
 
 
 def semantic_hash(document: dict[str, Any]) -> str:
-    payload = json.dumps(document, sort_keys=True, separators=(",", ":"), allow_nan=False)
-    return hashlib.sha256(payload.encode()).hexdigest()
+    return canonical_sha256(document)
 
 
 def profile_schema_path(schema_root: Path) -> Path:

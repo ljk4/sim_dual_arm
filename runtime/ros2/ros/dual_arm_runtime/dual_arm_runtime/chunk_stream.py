@@ -32,7 +32,6 @@ from robot_trajectory.transition_retiming import (
     retime_action_window,
 )
 
-from dual_arm_runtime.follower_limits import follower_limits  # noqa: F401 - re-export
 from dual_arm_runtime.observation import ExactObservation
 from dual_arm_runtime.policy_client import (
     PolicyClient,
@@ -291,7 +290,7 @@ class ContinuousStreamRunner:
         else:
             observation = self._wait_successor_observation(anchor)
             self._check_stop()
-            if observation.stamp_ns >= anchor.start_sim_time_ns:  # type: ignore[attr-defined]
+            if observation.stamp_ns >= anchor.start_backend_time_ns:  # type: ignore[attr-defined]
                 raise ContractError(
                     "STREAM_LATE_PREDICTION",
                     "successor observation is not before its fixed hand-off",
@@ -304,7 +303,7 @@ class ContinuousStreamRunner:
                 observation,
                 chunk_index,
                 request_id,
-                handoff_time_ns=int(anchor.start_sim_time_ns),  # type: ignore[attr-defined]
+                handoff_time_ns=int(anchor.start_backend_time_ns),  # type: ignore[attr-defined]
             )
         except TaskTerminal as terminal:
             self.task_end = (terminal.runtime_reason, terminal.task_reason, terminal.state)
@@ -318,7 +317,7 @@ class ContinuousStreamRunner:
         prefetch_lead_ns = int(getattr(self.source, "prefetch_lead_ns", 0))
         period_ns = int(getattr(self.source, "action_period_ns", 50_000_000))
         target_obs_ns = (
-            int(anchor.start_sim_time_ns) - prefetch_lead_ns  # type: ignore[attr-defined]
+            int(anchor.start_backend_time_ns) - prefetch_lead_ns  # type: ignore[attr-defined]
             if prefetch_lead_ns > 0
             else 0
         )
@@ -369,7 +368,7 @@ class ContinuousStreamRunner:
                     observation,
                     chunk_index,
                     request_id,
-                    handoff_time_ns=int(anchor.start_sim_time_ns),  # type: ignore[attr-defined]
+                    handoff_time_ns=int(anchor.start_backend_time_ns),  # type: ignore[attr-defined]
                 )
             except TaskTerminal as terminal:
                 self.task_end = (terminal.runtime_reason, terminal.task_reason, terminal.state)
@@ -424,7 +423,7 @@ class ContinuousStreamRunner:
                 "source": self._kind(),
                 "phase": prediction.phase or None,
                 "gate_state": prediction.gate_state or None,
-                "accepted_sim_time_ns": result.reference.accepted_sim_time_ns,
+                "accepted_backend_time_ns": result.reference.accepted_backend_time_ns,
                 "accepted_wall_time_ns": result.reference.accepted_wall_time_ns,
                 "reference_digest": result.reference.reference_digest,
                 "chunk_digest": prediction.chunk_digest or None,
@@ -454,7 +453,7 @@ class ContinuousStreamRunner:
         window = ActionWindow(
             observation.observation_id,
             observation.stamp_ns,
-            int(anchor.start_sim_time_ns),  # type: ignore[attr-defined]
+            int(anchor.start_backend_time_ns),  # type: ignore[attr-defined]
             targets,
             self.source.target_count,
         )
@@ -541,7 +540,7 @@ class ContinuousStreamRunner:
                 + source.task_sim_budget_ns
                 - round(source.task_stop_margin_s * 1e9)
             )
-        return int(anchor.start_sim_time_ns) + source.total_sim_deadline_ns  # type: ignore[attr-defined]
+        return int(anchor.start_backend_time_ns) + source.total_sim_deadline_ns  # type: ignore[attr-defined]
 
     def _check_task_end(self) -> None:
         runtime, task, state = self.source.task_terminal()
@@ -579,7 +578,7 @@ class ContinuousStreamRunner:
     def _first_anchor_checks(self, anchor: object, observation: ExactObservation) -> None:
         if int(anchor.predecessor_seq) != 0:  # type: ignore[attr-defined]
             raise ContractError("STREAM_ANCHOR_MISMATCH", "first anchor predecessor is not zero")
-        lead = int(anchor.start_sim_time_ns) - observation.stamp_ns  # type: ignore[attr-defined]
+        lead = int(anchor.start_backend_time_ns) - observation.stamp_ns  # type: ignore[attr-defined]
         if lead <= 0:
             raise ContractError("STREAM_ANCHOR_MISMATCH", "first hand-off is not in the future")
         if lead > self.source.initial_lead_ns + 500_000_000:
@@ -956,7 +955,7 @@ class PolicyStreamRunner(ContinuousStreamRunner):
             return observation, prediction
 
         self._ensure_async_producer()
-        handoff_ns = int(anchor.start_sim_time_ns)  # type: ignore[attr-defined]
+        handoff_ns = int(anchor.start_backend_time_ns)  # type: ignore[attr-defined]
         prefetch_lead_ns = int(self.policy.prefetch_lead_ns)
         target_obs_ns = handoff_ns - prefetch_lead_ns if prefetch_lead_ns > 0 else 0
         fallback_margin_ns = (
@@ -1129,7 +1128,7 @@ class PolicyStreamRunner(ContinuousStreamRunner):
                     "observation_id": observation.observation_id,
                     "source_observation_id": entry.observation_id,
                     "source_stamp_ns": entry.stamp_ns,
-                    "handoff_sim_time_ns": int(anchor.start_sim_time_ns),  # type: ignore[attr-defined]
+                    "handoff_backend_time_ns": int(anchor.start_backend_time_ns),  # type: ignore[attr-defined]
                 },
             )
             return ActionWindow(
@@ -1266,5 +1265,4 @@ __all__ = [
     "StreamIO",
     "TargetSource",
     "TaskMonitor",
-    "follower_limits",
 ]

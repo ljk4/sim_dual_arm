@@ -7,4 +7,4 @@ bool is_chunk
 uint64 chunk_seq
 string phase
 string reason
-int64 sim_time_ns
+int64 backend_time_ns

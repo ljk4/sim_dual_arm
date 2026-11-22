@@ -1,10 +1,10 @@
 """One-shot human client for the runtime's public episode services.
 
-It is invoked inside the running runtime environment through
-``runtime/ros2/scripts/run.sh control``.  It only uses the public ROS services
-and the final episode manifest; control, episode and recording business stays
-in the runtime.  ROS session, service calls and manifest validation live in
-:mod:`control_cli_support`.
+It is invoked inside the running runtime environment via
+``python3 -m dual_arm_runtime.control_cli``.  It only uses the public ROS
+services and the final episode manifest; control, episode and recording
+business stays in the runtime.  ROS session, service calls and manifest
+validation live in :mod:`control_cli_support`.
 """
 
 from __future__ import annotations

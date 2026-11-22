@@ -5,6 +5,7 @@
 ## 目录结构
 
 - **[`docker/`](docker/README.md)**：跨端共享的 Fast DDS 配置（`fastdds.xml`）与唯一可 `source` 的容器环境初始化脚本（`setup.sh`）。
+- **`host/`**：宿主机 Docker 容器池公共编排原语（`docker_pool.py`）与并行采集/批量评估入口实现（`record_parallel.py`、`inference_parallel.py`），仅使用 Python 标准库，由仓库根目录 `./record_parallel.sh` 与 `./inference_parallel.sh` 调用。
 - **[`scripts/`](scripts/README.md)**：容器内 ROS 2 SDK / Policy SDK 构建脚本、工作空间摘要校验器、统一 `pytest` 入口与 Dockerfile/Compose 边界合规检查器。
 - **[`scenario.py`](scenario.py)**：只读方案 binding 工具，提供 `validate`（结构、引用、Profile/observation/action 一致性及阶段条件）与 `show`（有效绑定 JSON）。不导入 ROS/MuJoCo/PyTorch、不启动进程、不写台账或种子。
 

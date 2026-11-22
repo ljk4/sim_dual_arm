@@ -53,7 +53,7 @@ resolve_env() {
 cmd_up() {
   local env_name="${1:-}"
   resolve_env "$env_name"
-  mkdir -p "$ROOT_DIR/build" "$ROOT_DIR/var"
+  mkdir -p "$ROOT_DIR/build/ros-dev" "$ROOT_DIR/build/generated/policy-sdk" "$ROOT_DIR/var"
   docker compose -f "$COMPOSE_FILE" up -d --no-build --pull never "$SERVICE"
 }
 

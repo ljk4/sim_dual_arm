@@ -1,0 +1,500 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Episode export documents (labels.json and quality.json)",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/labelsDocument"
+    },
+    {
+      "$ref": "#/$defs/qualityDocument"
+    }
+  ],
+  "$defs": {
+    "outcomeRecord": {
+      "type": "object",
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome"
+      ],
+      "additionalProperties": true
+    },
+    "rgbFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "frame_seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "observation_id": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "observation_backend_time_ns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "png_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "rgb_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "path",
+        "frame_seq",
+        "observation_id",
+        "observation_backend_time_ns",
+        "png_sha256",
+        "rgb_sha256"
+      ]
+    },
+    "labelRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "observation_id": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "state_seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "capture_source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "observation_backend_time_ns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "label_backend_time_ns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "observation_period_ns": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "chunk_seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "command_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reference_start_backend_time_ns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "started_backend_time_ns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "block_end_backend_time_ns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "applied_positions": {
+          "$ref": "#/$defs/numberVector"
+        },
+        "sampled_positions": {
+          "$ref": "#/$defs/numberVector"
+        },
+        "applied_velocities": {
+          "$ref": "#/$defs/numberVector"
+        },
+        "measured_positions": {
+          "$ref": "#/$defs/numberVector"
+        },
+        "measured_velocities": {
+          "$ref": "#/$defs/numberVector"
+        },
+        "frame_seqs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "raw_chunk_seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "raw_source_observation_id": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "raw_source_observation_time_ns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "phase": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "gate_state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rgb": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/rgbFrame"
+          }
+        }
+      },
+      "required": [
+        "observation_id",
+        "state_seq",
+        "capture_source",
+        "observation_backend_time_ns",
+        "label_backend_time_ns",
+        "observation_period_ns",
+        "chunk_seq",
+        "command_id",
+        "reference_start_backend_time_ns",
+        "started_backend_time_ns",
+        "block_end_backend_time_ns",
+        "applied_positions",
+        "sampled_positions",
+        "applied_velocities",
+        "measured_positions",
+        "measured_velocities",
+        "frame_seqs",
+        "raw_chunk_seq",
+        "raw_source_observation_id",
+        "raw_source_observation_time_ns",
+        "rgb"
+      ]
+    },
+    "numberVector": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "number"
+      }
+    },
+    "labelsDocument": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "episode_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "robot_profile_hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "seed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "camera_order": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "action_source": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "task": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/outcomeRecord"
+            }
+          ]
+        },
+        "runtime": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/outcomeRecord"
+            }
+          ]
+        },
+        "recording": {
+          "type": "object",
+          "properties": {
+            "complete": {
+              "type": "boolean"
+            },
+            "failure_reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "complete"
+          ],
+          "additionalProperties": false
+        },
+        "summary": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "observations": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "labels": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "rejected": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "lead_ns": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "expected_period_ns": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "max_labels": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "phase_observations": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          "required": [
+            "observations",
+            "labels",
+            "rejected"
+          ]
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/labelRow"
+          }
+        }
+      },
+      "required": [
+        "episode_id",
+        "robot_profile_hash",
+        "seed",
+        "camera_order",
+        "action_source",
+        "task",
+        "runtime",
+        "recording",
+        "summary",
+        "labels"
+      ]
+    },
+    "ruleSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "camera": {
+          "type": "string",
+          "minLength": 1
+        },
+        "object": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "required",
+            "record_only"
+          ]
+        },
+        "phase": {
+          "type": "string",
+          "minLength": 1
+        },
+        "samples": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "qualified_samples": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "qualified_ratio": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "max_blackout_s": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "min_pixels": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "required_pixels": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "camera",
+        "object",
+        "mode",
+        "phase",
+        "samples",
+        "qualified_samples",
+        "qualified_ratio",
+        "max_blackout_s",
+        "min_pixels",
+        "required_pixels"
+      ]
+    },
+    "phaseSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "present": {
+          "type": "boolean"
+        },
+        "start_backend_time_ns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "end_backend_time_ns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ruleSummary"
+          }
+        }
+      },
+      "required": [
+        "present",
+        "rules"
+      ]
+    },
+    "qualityDocument": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "qualified": {
+          "type": "boolean"
+        },
+        "phase_based": {
+          "type": "boolean"
+        },
+        "visibility_qualified": {
+          "type": "boolean"
+        },
+        "trajectory_qualified": {
+          "type": "boolean"
+        },
+        "action_source": {
+          "type": "string"
+        },
+        "failure_reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "max_blackout_s": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "min_qualified_ratio": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "configured_phases": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required_phases": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "phases": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/phaseSummary"
+          }
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ruleSummary"
+          }
+        },
+        "samples": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "required": [
+        "qualified",
+        "phase_based",
+        "failure_reasons",
+        "max_blackout_s",
+        "min_qualified_ratio",
+        "configured_phases",
+        "required_phases",
+        "phases",
+        "rules"
+      ]
+    }
+  }
+}

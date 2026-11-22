@@ -7,6 +7,7 @@ import time
 from typing import Any
 
 from robot_contracts.models import ContractError
+from robot_contracts.stream_request import REQUEST_KINDS
 from robot_contracts.task_state import TaskState
 from robot_contracts.trajectory.follower_reference import (
     FollowerReference as FollowerReferenceRecord,
@@ -186,7 +187,7 @@ class ServiceAdapter:
     async def submit_follower(self, request: object, response: object) -> object:
         try:
             record = stream_command_from_message(request.request)  # type: ignore[attr-defined]
-            if record.kind not in (2, 3):
+            if record.kind not in REQUEST_KINDS:
                 raise ContractError(
                     "INVALID_FOLLOWER_REQUEST",
                     "SubmitFollower accepts only STREAM_FIRST or STREAM_NEXT",
@@ -216,7 +217,7 @@ class ServiceAdapter:
             self._worker.get_anchor(
                 context_from_message(request.context),  # type: ignore[attr-defined]
                 request.lease_id,  # type: ignore[attr-defined]
-                int(request.start_sim_time_ns) if request.has_start else None,  # type: ignore[attr-defined]
+                int(request.start_backend_time_ns) if request.has_start else None,  # type: ignore[attr-defined]
             )
         )
         response.anchor = anchor_message(anchor)  # type: ignore[attr-defined]

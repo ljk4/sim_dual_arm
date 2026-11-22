@@ -3,7 +3,7 @@
 # 目标位姿、抓持点和候选路径仍由 planning_config 指向的 P02B 配方提供；
 # 本文件只补充任务阶段门禁、终态评价、执行预算和 Teacher 时钟。
 # 接触力、持物稳定与相对位姿容差复用 P02B 实测的 diagnostics 数值。
-planning_config: ../planning/handover_paths.yaml
+planning_config: ../scene/handover_paths.yaml
 
 success:
   # 物块八个顶点全部位于箱内、箱底支撑、双手均无接触并持续稳定。

@@ -1,7 +1,8 @@
-"""Check the MuJoCo, mink and EGL environment with the Marvin stack scene.
+"""Check the MuJoCo, mink and EGL environment without binding to any scenario.
 
-Report installed dependencies and their import sources, step the scene, solve
-a known QP through DAQP and render a 320x240 RGB preview with EGL.
+Report installed dependencies and their import sources, compile and step a
+self-contained synthetic scene (or an optional ``--scene-config`` scene), solve a
+known QP through DAQP and render a 320x240 RGB preview with EGL.
 """
 
 from __future__ import annotations
@@ -22,12 +23,6 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
-
-from robot_backend_sim.common.physics import assets
-
-if TYPE_CHECKING:
-    from robot_backend_sim.marvin_sim.stack.scene import MarvinStackScene
 
 COMPONENT = "sim_probe"
 PREVIEW_WIDTH = 320
@@ -74,6 +69,7 @@ class ProbeFailure(RuntimeError):
 class ProbeArguments:
     report_root: Path
     run_id: str
+    scene_config: Path | None = None
 
 
 @dataclass
@@ -117,6 +113,12 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="fresh report run identity (default: probe-<UTC>-<pid>)",
     )
+    parser.add_argument(
+        "--scene-config",
+        type=Path,
+        default=None,
+        help="optional scenario scene YAML to probe instead of the synthetic built-in scene",
+    )
     return parser
 
 
@@ -130,6 +132,7 @@ def parse_arguments(argv: list[str] | None = None) -> ProbeArguments:
     return ProbeArguments(
         report_root=_validate_report_root(parsed.report_root),
         run_id=_validate_run_id(run_id),
+        scene_config=None if parsed.scene_config is None else parsed.scene_config.resolve(),
     )
 
 
@@ -208,33 +211,109 @@ def _model_stats(model: object) -> dict[str, int]:
     }
 
 
-def _check_model() -> tuple[dict[str, object], MarvinStackScene]:
+class _SyntheticScene:
+    def __init__(self, model: object, data: object) -> None:
+        self.model = model
+        self.data = data
+
+    def reset(self, seed: int = 0) -> None:
+        import mujoco
+
+        del seed
+        mujoco.mj_resetData(self.model, self.data)
+        mujoco.mj_forward(self.model, self.data)
+
+
+def _build_synthetic_probe_scene() -> _SyntheticScene:
+    import mujoco
+
+    spec = mujoco.MjSpec()
+    spec.modelname = "env_probe"
+    spec.option.timestep = 0.002
+    tex = spec.add_texture(
+        name="floor_tex",
+        type=mujoco.mjtTexture.mjTEXTURE_2D,
+        builtin=mujoco.mjtBuiltin.mjBUILTIN_CHECKER,
+        rgb1=[0.85, 0.85, 0.85],
+        rgb2=[0.25, 0.25, 0.25],
+        width=64,
+        height=64,
+    )
+    mat = spec.add_material(name="floor_mat", texrepeat=[4, 4])
+    mat.textures[mujoco.mjtTextureRole.mjTEXROLE_RGB] = tex.name
+    spec.worldbody.add_light(pos=[1.2, -1.2, 2.5], dir=[-0.4, 0.4, -1.0], diffuse=[1.0, 1.0, 1.0])
+    spec.worldbody.add_geom(
+        name="floor",
+        type=mujoco.mjtGeom.mjGEOM_PLANE,
+        size=[2.0, 2.0, 0.1],
+        material="floor_mat",
+    )
+    spec.worldbody.add_geom(
+        name="pedestal",
+        type=mujoco.mjtGeom.mjGEOM_BOX,
+        pos=[0.0, 0.0, 0.12],
+        size=[0.18, 0.18, 0.12],
+        rgba=[0.18, 0.42, 0.78, 1.0],
+    )
+    body = spec.worldbody.add_body(name="probe_orb", pos=[0.0, 0.0, 0.34])
+    joint = body.add_joint(name="probe_slide", type=mujoco.mjtJoint.mjJNT_SLIDE, axis=[0, 0, 1])
+    body.add_geom(
+        name="probe_orb_geom",
+        type=mujoco.mjtGeom.mjGEOM_SPHERE,
+        size=[0.1],
+        rgba=[0.9, 0.35, 0.12, 1.0],
+    )
+    spec.add_actuator(name="probe_motor", target=joint.name, trntype=mujoco.mjtTrn.mjTRN_JOINT)
+    spec.worldbody.add_camera(
+        name="probe_cam",
+        pos=[0.95, -0.95, 0.75],
+        xyaxes=[0.707, 0.707, 0.0, -0.35, 0.35, 0.869],
+    )
+    model = spec.compile()
+    data = mujoco.MjData(model)
+    return _SyntheticScene(model, data)
+
+
+def _check_model(scene_config_path: Path | None = None) -> tuple[dict[str, object], object]:
     import mujoco
     import numpy as np
 
-    from robot_backend_sim.marvin_sim.stack.scene import build_marvin_stack_scene
-    from robot_backend_sim.marvin_sim.stack.scene_config import load_marvin_stack_scene_config
+    if scene_config_path is None:
+        try:
+            scene = _build_synthetic_probe_scene()
+            model, data = scene.model, scene.data
+        except Exception as error:
+            raise ProbeFailure(
+                "model_load_failed",
+                f"{type(error).__name__}: {error}",
+            ) from error
+        stats = _model_stats(model)
+        if stats["nq"] < 1 or stats["nv"] < 1 or stats["nu"] < 1:
+            raise ProbeFailure("model_dimensions_implausible", f"model stats are too small: {stats}")
+        scene_label = "synthetic:env_probe"
+        model_ref = None
+    else:
+        from robot_backend_sim.common.config.scene_loader import load_scene_config_for
+        from robot_backend_sim.common.physics.robot_adapters import build_scene_for, scene_assembly
 
-    scene_cfg = Path(os.environ.get("SHARED_ROOT", "/shared")) / (
-        "scenarios/marvin_sim/stack/configs/simulation/scene/marvin_stack.yaml"
-    )
-    urdf_path = assets.robot_model_path("marvin")
-    for path in (scene_cfg, urdf_path):
-        if not path.is_file():
-            raise ProbeFailure("model_missing", f"model file is missing: {path}")
-    try:
-        scene = build_marvin_stack_scene(load_marvin_stack_scene_config(scene_cfg))
-        model, data = scene.model, scene.data
-    except Exception as error:
-        raise ProbeFailure(
-            "model_load_failed",
-            f"{type(error).__name__}: {error}",
-        ) from error
-    stats = _model_stats(model)
-    if stats["nq"] < 14 or stats["nv"] < 14 or stats["nu"] < 16:
-        raise ProbeFailure("model_dimensions_implausible", f"model stats are too small: {stats}")
-    if stats["nq"] > 64 or stats["nv"] > 64 or stats["nu"] > 32:
-        raise ProbeFailure("model_dimensions_implausible", f"model stats are too large: {stats}")
+        if not scene_config_path.is_file():
+            raise ProbeFailure("model_missing", f"scene config is missing: {scene_config_path}")
+        try:
+            scene_config = load_scene_config_for(scene_config_path)
+            scene = build_scene_for(scene_config)
+            model, data = scene.model, scene.data
+            assembly = scene_assembly(scene_config)
+            model_ref = str(getattr(scene_config, "urdf_path", assembly))
+        except Exception as error:
+            raise ProbeFailure(
+                "model_load_failed",
+                f"{type(error).__name__}: {error}",
+            ) from error
+        stats = _model_stats(model)
+        if stats["nq"] < 1 or stats["nv"] < 1:
+            raise ProbeFailure("model_dimensions_implausible", f"model stats are too small: {stats}")
+        scene_label = str(scene_config_path)
+
     scene.reset(0)
     for _ in range(MODEL_STEPS):
         mujoco.mj_step(model, data)
@@ -245,9 +324,10 @@ def _check_model() -> tuple[dict[str, object], MarvinStackScene]:
     }
     if not all(finite.values()):
         raise ProbeFailure("model_state_not_finite", f"non-finite MuJoCo state: {finite}")
-    model_info = {
-        "scene_config": str(scene_cfg),
-        "urdf": str(urdf_path),
+    model_info: dict[str, object] = {
+        "scene_config": scene_label,
+        "urdf": model_ref,
+        "synthetic": scene_config_path is None,
         "stats": stats,
         "steps": MODEL_STEPS,
         "finite": finite,
@@ -307,7 +387,7 @@ def _gl_string(name: int) -> str | None:
     return str(value)
 
 
-def _prepare_render(scene: MarvinStackScene):
+def _prepare_render(scene: object):
     if os.environ.get("MUJOCO_GL") != "egl":
         raise ProbeFailure("egl_not_selected", "MUJOCO_GL must be 'egl'")
     if os.environ.get("PYOPENGL_PLATFORM") != "egl":
@@ -399,7 +479,7 @@ def _save_preview(run_dir: Path, frame, info) -> None:
 
     artifacts = run_dir / "artifacts"
     artifacts.mkdir(exist_ok=False)
-    png_path = artifacts / "marvin_preview.png"
+    png_path = artifacts / "preview.png"
     Image.fromarray(frame, mode="RGB").save(png_path, format="PNG")
     body = png_path.read_bytes()
     info.update(
@@ -429,7 +509,7 @@ def _close_renderer(renderer, failure, info):
     return failure
 
 
-def _render_preview(run_dir: Path, scene: MarvinStackScene) -> dict[str, object]:
+def _render_preview(run_dir: Path, scene: object) -> dict[str, object]:
     info: dict[str, object] = {}
     renderer = None
     failure: ProbeFailure | None = None
@@ -509,7 +589,14 @@ def _report_template(arguments: ProbeArguments) -> dict[str, object]:
             "PYOPENGL_PLATFORM": os.environ.get("PYOPENGL_PLATFORM"),
         },
         "assets": None,
-        "source": {"model_directory": str(assets.robot_model_path("marvin").parent)},
+        "source": (
+            {"sim_package_root": str(Path(__file__).resolve().parents[1])}
+            if arguments.scene_config is None
+            else {
+                "sim_package_root": str(Path(__file__).resolve().parents[1]),
+                "scene_config": str(arguments.scene_config),
+            }
+        ),
         "model": None,
         "qp": None,
         "render": None,
@@ -557,14 +644,18 @@ def _run_probe_checks(arguments, run_dir: Path, report: dict, logger) -> None:
             "count": len(dependencies["packages"]),
         },
     )
-    model_info, scene = _check_model()
+    model_info, scene = _check_model(arguments.scene_config)
     report["model"] = model_info
-    report["assets"] = {"model_directory": str(assets.robot_model_path("marvin").parent)}
+    report["assets"] = (
+        None
+        if model_info.get("urdf") is None
+        else {"model_directory": str(Path(str(model_info["urdf"])).parent)}
+    )
     stats = model_info["stats"]
     _emit(
         logger,
         "model_checked",
-        "Marvin stack scene compiled and stepped",
+        "simulation scene compiled and stepped",
         {
             "nq": int(stats["nq"]),
             "nv": int(stats["nv"]),

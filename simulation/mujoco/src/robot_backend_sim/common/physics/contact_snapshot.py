@@ -29,8 +29,6 @@ __all__ = [
     "build_contact_snapshot",
 ]
 
-_SIDES = ("left", "right")
-
 
 @dataclass(frozen=True, slots=True)
 class ObjectMotion:
@@ -188,10 +186,9 @@ def build_contact_snapshot(
 
     finger_bodies: dict[int, tuple[str, int, str]] = {}
     finger_names: dict[tuple[str, int], str] = {}
-    for side in _SIDES:
-        specs = geometry.finger_bodies.get(side)
-        if specs is None or len(specs) != 2:
-            raise ContractError("MODEL_MISMATCH", f"{side} must bind exactly two fingers")
+    for side, specs in geometry.finger_bodies.items():
+        if not specs:
+            raise ContractError("MODEL_MISMATCH", f"{side} must bind at least one finger")
         for finger_index, (body_name, _joint_name) in enumerate(specs, start=1):
             try:
                 finger_bodies[int(model.body(body_name).id)] = (side, finger_index, body_name)
@@ -291,10 +288,8 @@ def build_contact_snapshot(
         for (object_name, body_name), total in sorted(support_body_totals.items())
     )
     grippers: list[GripperPose] = []
-    for side in _SIDES:
-        chain = next((item for item in geometry.chains if item.side == side), None)
-        if chain is None:
-            raise ContractError("MODEL_MISMATCH", f"robot geometry has no {side} chain")
+    for chain in geometry.chains:
+        side = chain.side
         position, quaternion = _tcp_pose(model, data, chain.tcp_site)
         grippers.append(
             GripperPose(

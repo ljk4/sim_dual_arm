@@ -9,19 +9,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from robot_backend_sim.common.tasks.gate import TaskGateFact
+
 __all__ = ["HandoverFeedback", "HandoverGateFact"]
 
-
-@dataclass(frozen=True, slots=True)
-class HandoverGateFact:
-    step_index: int
-    step: str
-    phase: str
-    status: str
-    active_start_sim_time_ns: int
-    phase_wait_s: float
-    stable_elapsed_s: float
-    failure: str
+HandoverGateFact = TaskGateFact
 
 
 @dataclass(frozen=True, slots=True)

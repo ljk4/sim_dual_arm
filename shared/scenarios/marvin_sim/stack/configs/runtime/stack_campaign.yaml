@@ -1,0 +1,100 @@
+# Marvin stack campaign collection budget, seeds and export quality thresholds.
+diagnostic: false
+
+budget:
+  pilot_seed_first: 1000
+  pilot_seed_last: 1009
+  pilot_max_attempts: 3
+  pilot_act_reserved_attempts: 0
+  pilot_teacher_seed_last: 1002
+  pilot_label_replay_max: 0
+
+  formal_seed_first: 2000
+  formal_seed_last: 2099
+  formal_max_attempts: 100
+  formal_target_qualified: 50
+
+  test_seed_first: 6000
+  test_seed_last: 6019
+  test_max_attempts: 20
+  evaluation_max_attempts: 20
+
+  max_raw_bytes: 64424509440
+  reserve_bytes: 2147483648
+  estimated_attempt_bytes: 536870912
+  min_free_bytes: 5368709120
+
+paths:
+  attempts_root: var/marvin_sim/stack/datasets/raw
+  ledger: var/marvin_sim/stack/logs/collection/attempts.jsonl
+  lock: var/marvin_sim/stack/logs/collection/.ledger.lock
+  run_lock: var/marvin_sim/stack/logs/collection/.run.lock
+  formal_select: var/marvin_sim/stack/datasets/raw/formal-select.json
+  required_paths:
+    - shared/scenarios/marvin_sim/stack/configs/runtime/teacher_collect.yaml
+    - shared/scenarios/marvin_sim/stack/configs/simulation/backend/backend_stack_teacher.yaml
+    - shared/scenarios/marvin_sim/stack/configs/simulation/scene/marvin_stack.yaml
+    - shared/scenarios/marvin_sim/stack/configs/simulation/scene/marvin_stack_task.yaml
+    - shared/scenarios/marvin_sim/stack/configs/simulation/checks/kinematics_check.yaml
+    - shared/scenarios/marvin_sim/extensions/ros/marvin_teacher_api_msgs/srv/GetTeacherChunk.srv
+    - shared/scenarios/marvin_sim/extensions/ros/marvin_teacher_api_msgs/msg/TeacherCapability.msg
+    - shared/scenarios/marvin_sim/stack/profiles/robot/profile.json
+    - shared/scenarios/marvin_sim/profiles/observations/marvin_rgb_joint.json
+    - shared/scenarios/marvin_sim/profiles/actions/marvin_joint_position.json
+    - shared/scenarios/marvin_sim/profiles/control/marvin_control.yaml
+    - shared/scenarios/marvin_sim/profiles/control/marvin_follower.yaml
+    - runtime/ros2/docker/docker-compose.yml
+  sdk_marker: build/ros-dev/contracts.json
+
+launch:
+  command: []
+  cleanup_command: []
+  timeout_s: 600.0
+  stop_grace_s: 45.0
+
+quality:
+  sidecar: export/quality.json
+  max_blackout_s: 0.35
+  min_qualified_ratio: 0.85
+  phases: &stack_phases
+    [pregrasp, grasp, close, lift, transport, lower, open, retreat, stable]
+  required_phases: [close, lift, lower, open]
+  rules:
+    - camera: global
+      object: source
+      phases: *stack_phases
+      mode: required
+      min_pixels: 32
+    - camera: global
+      object: target
+      phases: *stack_phases
+      mode: required
+      min_pixels: 64
+    - camera: right_wrist
+      object: source
+      phases: [pregrasp, grasp, close, lift, transport, lower, open]
+      mode: required
+      min_pixels: 64
+    - camera: right_wrist
+      object: source
+      phases: [retreat, stable]
+      mode: record_only
+      min_pixels: 16
+    - camera: right_wrist
+      object: target
+      phases: [transport, lower]
+      mode: required
+      min_pixels: 32
+    - camera: right_wrist
+      object: target
+      phases: [pregrasp, grasp, close, lift, open, retreat, stable]
+      mode: record_only
+      min_pixels: 16
+    - camera: global
+      object: table
+      phases: *stack_phases
+      mode: record_only
+      min_pixels: 4096
+
+export:
+  max_labels: 1400

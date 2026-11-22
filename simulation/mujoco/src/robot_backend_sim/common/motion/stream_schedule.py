@@ -133,7 +133,7 @@ def boundary_rejection(
         return "STALE_STREAM", False
     if successor.anchor.predecessor_seq != active.seq:
         return "INVALID_CHUNK_ORDER", False
-    if successor.start_sim_time_ns != active.end_sim_time_ns:
+    if successor.start_backend_time_ns != active.end_backend_time_ns:
         return "INVALID_CHUNK_START", False
     if successor.anchor.robot_profile_hash != profile_digest:
         return "PROFILE_MISMATCH", False
@@ -150,12 +150,12 @@ def boundary_rejection(
     for left, right in zip(successor.anchor.reference.velocities, end.velocities, strict=True):
         if not _matches(left, right):
             return "INVALID_CHUNK_BOUNDARY", False
-    if not grid_aligned(successor.end_sim_time_ns, step_ns):
+    if not grid_aligned(successor.end_backend_time_ns, step_ns):
         return "INVALID_CHUNK_GRID", False
     observation = observation_rejection(successor.window, now_sim_ns, max_observation_age_ns)
     if observation is not None:
         return observation, True
-    if now_sim_ns > successor.start_sim_time_ns - min_lead_ns:
+    if now_sim_ns > successor.start_backend_time_ns - min_lead_ns:
         return "CHUNK_LATE", True
     return None, False
 
@@ -191,8 +191,8 @@ class StreamSchedule:
             stream_id=self.stream_id,
             chunk_seq=chunk.seq,
             observation_id=chunk.window.observation_id,
-            planned_start_sim_ns=chunk.start_sim_time_ns,
-            planned_end_sim_ns=chunk.end_sim_time_ns,
+            planned_start_sim_ns=chunk.start_backend_time_ns,
+            planned_end_sim_ns=chunk.end_backend_time_ns,
             sim_time_ns=int(sim_time_ns),
             phase=phase,
             reason=reason,

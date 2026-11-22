@@ -10,4 +10,4 @@ mounts:
   /etc/bash.bashrc: read-only
 networks: [ros, learning]
 gpu: false
-commands: [test]
+commands: [build_sdk, record, client_interactive, client_policy, test]

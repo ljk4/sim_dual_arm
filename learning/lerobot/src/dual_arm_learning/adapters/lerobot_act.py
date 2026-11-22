@@ -9,7 +9,7 @@ from typing import Any
 
 import numpy as np
 
-from ..policy_types import PolicyError
+from ..serving.types import PolicyError
 from .base import PolicyModelAdapter
 
 
@@ -51,7 +51,10 @@ class ActModelAdapter(PolicyModelAdapter):
         self.camera_width, self.camera_height = camera_width, camera_height
         state = np.asarray(initial_positions, dtype=np.float32)
         if state.shape != (action_dim,) or not np.isfinite(state).all():
-            raise PolicyError("PROVIDER_MISMATCH", "profile initial state is not 16 finite joints")
+            raise PolicyError(
+                "PROVIDER_MISMATCH",
+                f"profile initial state is not {action_dim} finite joints",
+            )
         self.initial_state = state
         self.load_seconds = float(load_seconds)
         self.warmup_seconds = 0.0
@@ -65,15 +68,11 @@ class ActModelAdapter(PolicyModelAdapter):
     def predict_raw_chunk(
         self, rgb_images: dict[str, np.ndarray], joint_positions: np.ndarray
     ) -> np.ndarray:
-        from ..bundle import predict_action_chunk
+        from ..training.bundle import predict_action_chunk
 
-        hwc = {
-            name: np.ascontiguousarray(image.transpose(1, 2, 0))
-            for name, image in rgb_images.items()
-        }
         observation = {
             "observation.state": np.asarray(joint_positions, dtype=np.float32),
-            "images": hwc,
+            "images": rgb_images,
         }
         import torch
 
@@ -137,7 +136,7 @@ def load_act_adapter(config: Any, *, device: str | None = None) -> ActModelAdapt
             raise PolicyError("PROVIDER_MISMATCH", f"requested {device} but CUDA is unavailable")
         torch.cuda.reset_peak_memory_stats()
     started = time.monotonic()
-    from ..bundle import load_model
+    from ..training.bundle import load_model
 
     handle = load_model(config.model_path, device=device)
     profile = json.loads(Path(config.robot_profile_path).read_text(encoding="utf-8"))

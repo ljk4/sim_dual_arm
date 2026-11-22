@@ -16,9 +16,46 @@ from robot_contracts.validation import (
 from robot_backend_sim.common.config.camera_config import Vec3
 
 __all__ = [
+    "MARVIN_ARM_JOINT_RANGES",
+    "MARVIN_CAMERA_NAMES",
+    "MARVIN_CONTROL_JOINT_NAMES",
+    "MARVIN_TEACHER_CAPABILITY",
     "MarvinRobotConfig",
     "Seven",
 ]
+
+MARVIN_TEACHER_CAPABILITY = "marvin_teacher_api_msgs.teacher_chunk"
+
+MARVIN_CONTROL_JOINT_NAMES = (
+    "left_joint1",
+    "left_joint2",
+    "left_joint3",
+    "left_joint4",
+    "left_joint5",
+    "left_joint6",
+    "left_joint7",
+    "left_gripper_width",
+    "right_joint1",
+    "right_joint2",
+    "right_joint3",
+    "right_joint4",
+    "right_joint5",
+    "right_joint6",
+    "right_joint7",
+    "right_gripper_width",
+)
+
+MARVIN_CAMERA_NAMES = ("global", "left_wrist", "right_wrist")
+
+MARVIN_ARM_JOINT_RANGES = (
+    (-3.106686, 3.106686),
+    (-2.094395, 2.094395),
+    (-3.106686, 3.106686),
+    (-2.530727, 1.047198),
+    (-3.106686, 3.106686),
+    (-1.047198, 1.047198),
+    (-1.570796, 1.570796),
+)
 
 Seven = Annotated[
     tuple[StrictFloat, ...], BeforeValidator(as_tuple), Field(min_length=7, max_length=7)

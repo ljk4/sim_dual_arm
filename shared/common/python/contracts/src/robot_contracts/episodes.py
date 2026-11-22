@@ -73,3 +73,13 @@ class TaskResult(StrictContractModel):
 def manifest_schema_path(schema_root: Path) -> Path:
     """Return the episode manifest schema in the shared schema directory."""
     return schema_root / "episode_manifest.schema.json"
+
+
+def formal_select_schema_path(schema_root: Path) -> Path:
+    """Return the formal selection manifest schema in the shared schema directory."""
+    return schema_root / "formal_select.schema.json"
+
+
+def episode_export_schema_path(schema_root: Path) -> Path:
+    """Return the episode export (labels/quality) schema in the shared schema directory."""
+    return schema_root / "episode_export.schema.json"

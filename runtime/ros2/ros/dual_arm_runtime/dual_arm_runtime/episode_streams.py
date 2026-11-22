@@ -7,15 +7,18 @@ from robot_contracts.models import ContractError, RunContext
 from robot_run_logging import EventContext
 
 from dual_arm_runtime.episode_runner_io import EpisodeLifecycle
-from dual_arm_runtime.offline.audit.task_result import task_result_for_runtime
-from dual_arm_runtime.offline.mcap_reader import task_fact_from_message
 from dual_arm_runtime.runtime_errors import FirstFollowerRejected
+from dual_arm_runtime.simulation.task_result import (
+    task_fact_from_message,
+    task_result_for_runtime,
+)
 
 
 def run_policy(
     runner: EpisodeLifecycle, episode_id: str, actual_context: RunContext, task_id: str
 ) -> None:
-    from dual_arm_runtime.chunk_stream import PolicyStreamRunner, follower_limits
+    from dual_arm_runtime.chunk_stream import PolicyStreamRunner
+    from dual_arm_runtime.follower_limits import follower_limits
     from dual_arm_runtime.policy_client import PolicyClient
 
     policy = runner.configuration.recipe.policy
@@ -111,7 +114,7 @@ def _close_policy_client(
 def run_teacher(
     runner: EpisodeLifecycle, episode_id: str, actual_context: RunContext, task_id: str
 ) -> None:
-    from dual_arm_runtime.chunk_stream import follower_limits
+    from dual_arm_runtime.follower_limits import follower_limits
     from dual_arm_runtime.simulation.teacher_source import TeacherStreamRunner, TeacherTargetSource
 
     teacher = runner.configuration.recipe.teacher

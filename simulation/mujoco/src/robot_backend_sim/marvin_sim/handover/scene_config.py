@@ -27,12 +27,14 @@ from robot_contracts.validation import (
 )
 
 from robot_backend_sim.common.config.camera_config import (
-    CAMERA_NAMES,
     CameraConfig,
     Vec3,
 )
 from robot_backend_sim.common.physics.assets import robot_model_path
-from robot_backend_sim.marvin_sim.robot_config import MarvinRobotConfig
+from robot_backend_sim.marvin_sim.robot_config import (
+    MARVIN_CAMERA_NAMES as CAMERA_NAMES,
+    MarvinRobotConfig,
+)
 from robot_backend_sim.marvin_sim.scene_base import (
     CAMERA_PARENTS,
     CameraMountConfig,

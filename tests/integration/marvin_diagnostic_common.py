@@ -84,8 +84,8 @@ RECIPE = Path(
 )
 EVIDENCE_DIR = Path(os.environ.get("P02B_EVIDENCE_DIR", "/data/marvin_sim/handover/debug/p02b"))
 SCENE_PATH = SCENARIO / "configs/simulation/scene/marvin_handover.yaml"
-PLANNING_PATH = SCENARIO / "configs/simulation/planning/handover_paths.yaml"
-PROFILE_PATH = SCENARIO / "profiles/robots/marvin_handover/profile.json"
+PLANNING_PATH = SCENARIO / "configs/simulation/scene/handover_paths.yaml"
+PROFILE_PATH = SCENARIO / "profiles/robot/profile.json"
 SCHEMAS = ROOT / "shared/common/interfaces/schemas"
 PROFILE = load_profile(PROFILE_PATH, SCHEMAS)
 _PLANNING = load_handover_plan_config(PLANNING_PATH)
@@ -368,7 +368,7 @@ class Driver:
                 context=context_message(self.context),
                 lease_id=self.lease,
                 has_start=False,
-                start_sim_time_ns=0,
+                start_backend_time_ns=0,
             ),
         )
         assert response.success, response.reason
@@ -390,7 +390,7 @@ class Driver:
         anchor = self.anchor()
         hold = tuple(float(value) for value in anchor.reference.positions)
         observed = self.stack.latest_sim_ns()
-        lead_ns = int(anchor.start_sim_time_ns) - observed
+        lead_ns = int(anchor.start_backend_time_ns) - observed
         assert lead_ns > POINT_NS, (
             f"anchor lead {lead_ns} ns leaves no selectable window after the observation"
         )
@@ -489,7 +489,7 @@ class Driver:
         reference = follower_reference_from_message(response.reference)
         assert isinstance(reference, FollowerReference)
         record["reference"] = {
-            "accepted_sim_time_ns": reference.accepted_sim_time_ns,
+            "accepted_backend_time_ns": reference.accepted_backend_time_ns,
             "curve_duration_ns": reference.curve_duration_ns,
         }
         terminal = self._wait_terminal(command_id, states_before)

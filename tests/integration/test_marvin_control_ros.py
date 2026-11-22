@@ -77,9 +77,9 @@ RECIPE = Path(
     )
 )
 EVIDENCE_DIR = Path(
-    os.environ.get("P02A_EVIDENCE_DIR", "/data/marvin_sim/handover/diagnostics/p02a")
+    os.environ.get("P02A_EVIDENCE_DIR", "/data/marvin_sim/handover/debug/p02a")
 )
-PROFILE_PATH = SCENARIO / "profiles/robots/marvin_handover/profile.json"
+PROFILE_PATH = SCENARIO / "profiles/robot/profile.json"
 SCHEMAS = ROOT / "shared/common/interfaces/schemas"
 PROFILE = load_profile(PROFILE_PATH, SCHEMAS)
 _BACKEND = load_backend_config(RECIPE)
@@ -344,7 +344,7 @@ class Driver:
                 context=context_message(self.context),
                 lease_id=self.lease,
                 has_start=False,
-                start_sim_time_ns=0,
+                start_backend_time_ns=0,
             ),
         )
         assert response.success, response.reason
@@ -365,7 +365,7 @@ class Driver:
         anchor = self.anchor()
         hold = tuple(float(value) for value in anchor.reference.positions)
         observed = self.stack.latest_sim_ns()
-        lead_ns = int(anchor.start_sim_time_ns) - observed
+        lead_ns = int(anchor.start_backend_time_ns) - observed
         assert lead_ns > 0, (
             f"anchor lead {lead_ns} ns leaves no selectable window after the observation"
         )
@@ -571,7 +571,9 @@ def test_marvin_robot_api_execution(tmp_path):
         left_positions = _positions(left_state)
         for index in range(1, 8):
             assert left_positions[f"left_joint{index}"] == pytest.approx(0.05, abs=0.01)
-            assert left_positions[f"right_joint{index}"] == pytest.approx(0.0, abs=0.01)
+            assert left_positions[f"right_joint{index}"] == pytest.approx(
+                reference[f"right_joint{index}"], abs=0.01
+            )
         assert left["terminal"]["phase"] == "COMPLETED"
 
         # 2. Both arms move together.

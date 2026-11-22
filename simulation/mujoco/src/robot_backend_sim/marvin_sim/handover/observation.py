@@ -15,6 +15,10 @@ from typing import Any
 from robot_contracts.models import ContractError
 
 from robot_backend_sim.common.physics.contact_snapshot import build_contact_snapshot
+from robot_backend_sim.common.tasks.math import (
+    contact_normal_force,
+    quaternion_wxyz_to_matrix as quaternion_matrix,
+)
 from robot_backend_sim.marvin_sim.assembly import MarvinBinding
 from robot_backend_sim.marvin_sim.handover.environment import BOX_BOTTOM_GEOM
 from robot_backend_sim.marvin_sim.assembly import gripper_opening
@@ -232,15 +236,6 @@ def _opening(scene: Any, side: str) -> float:
     )
 
 
-def _normal_force(model: Any, data: Any, contact_index: int) -> float:
-    import mujoco
-    import numpy as np
-
-    value = np.zeros(6, dtype=float)
-    mujoco.mj_contactForce(model, data, contact_index, value)
-    return abs(float(value[0]))
-
-
 def _forbidden_robot_contacts(
     scene: Any, binding: HandoverBinding
 ) -> tuple[float, float]:
@@ -254,11 +249,11 @@ def _forbidden_robot_contacts(
         body1 = body_of_geom[int(contact.geom1)]
         body2 = body_of_geom[int(contact.geom2)]
         if body1 in binding.robot_body_ids and body2 in binding.robot_body_ids:
-            robot_robot = max(robot_robot, _normal_force(model, data, index))
+            robot_robot = max(robot_robot, contact_normal_force(model, data, index))
         elif (body1 == binding.box_body_id and body2 in binding.robot_body_ids) or (
             body2 == binding.box_body_id and body1 in binding.robot_body_ids
         ):
-            robot_box = max(robot_box, _normal_force(model, data, index))
+            robot_box = max(robot_box, contact_normal_force(model, data, index))
     return robot_robot, robot_box
 
 
@@ -339,17 +334,6 @@ def capture_handover_observation(
         robot_robot_force_n=robot_robot,
         robot_box_force_n=robot_box,
         _initial_center=binding.block_initial_center,
-    )
-
-
-def quaternion_matrix(quaternion: tuple[float, float, float, float]) -> tuple[
-    tuple[float, float, float], tuple[float, float, float], tuple[float, float, float]
-]:
-    w, x, y, z = quaternion
-    return (
-        (1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - z * w), 2.0 * (x * z + y * w)),
-        (2.0 * (x * y + z * w), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - x * w)),
-        (2.0 * (x * z - y * w), 2.0 * (y * z + x * w), 1.0 - 2.0 * (x * x + y * y)),
     )
 
 

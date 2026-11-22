@@ -5,7 +5,7 @@
 # producer algorithm and acceptance times are copied verbatim.
 robot_api_msgs/StreamCommand request
 uint64 motion_seq
-int64 accepted_sim_time_ns
+int64 accepted_backend_time_ns
 int64 accepted_wall_time_ns
 string[] joint_names
 # Original observation/hand-off window and selected source indices.

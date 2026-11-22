@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-import yaml
 from robot_contracts.binding import ResolvedBinding
+from robot_contracts.io import read_yaml_unique_mapping
 
 
 def configure_simulation_scenario(
@@ -55,20 +55,18 @@ def _check_teacher_budget(document: dict[str, Any], resolved: ResolvedBinding) -
             "scenario declares no simulation_teacher recipe for teacher selection"
         )
     backend_path = reference.path
-    try:
-        backend = yaml.safe_load(backend_path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError) as error:
-        raise ValueError(f"cannot read simulation teacher recipe: {error}") from error
+    backend = read_yaml_unique_mapping(
+        backend_path, label="simulation teacher recipe", error_cls=ValueError
+    )
     robot = backend.get("robot") if isinstance(backend, dict) else None
     if not isinstance(robot, dict) or not isinstance(robot.get("task"), str):
         raise ValueError(f"simulation teacher recipe has no robot.task ({backend_path})")
     task_path = (backend_path.parent / robot["task"]).resolve()
     if not task_path.is_file():
         raise ValueError(f"simulation task recipe is missing: {task_path}")
-    try:
-        task = yaml.safe_load(task_path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError) as error:
-        raise ValueError(f"cannot read simulation task recipe: {error}") from error
+    task = read_yaml_unique_mapping(
+        task_path, label="simulation task recipe", error_cls=ValueError
+    )
     success = task.get("success") if isinstance(task, dict) else None
     task_teacher = task.get("teacher") if isinstance(task, dict) else None
     if not isinstance(success, dict) or "max_task_sim_duration_s" not in success:

@@ -2,7 +2,7 @@
 # its close command stays wider than the 60 mm block, so the right fingers never
 # contact or support it.  Used only to verify that the left hand keeps holding
 # and the task fails at the dual-hold gate.
-planning_config: ../planning/handover_paths.yaml
+planning_config: ../scene/handover_paths.yaml
 
 success:
   stable_duration_s: 1.0

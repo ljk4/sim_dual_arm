@@ -16,7 +16,7 @@ from robot_contracts.models import ContractError
 from robot_contracts.trajectory.spline import ReferenceSample
 from robot_trajectory.follower import PreparedFollowerPlan
 
-from robot_backend_sim.common.config.motion_config import CONTROL_JOINT_NAMES, ControlConfig
+from robot_backend_sim.common.config.motion_config import ControlConfig
 from robot_backend_sim.common.config.stream_config import StreamConfig
 from robot_backend_sim.common.motion.motion_types import BoundarySelection, Phase
 from robot_backend_sim.common.motion.stream_schedule import (
@@ -109,8 +109,6 @@ def validate_controller_inputs(
     io.require_scene(scene)
     if tuple(io.joint_names) != config.joint_names:
         raise invalid("PROFILE_MISMATCH", "robot I/O joint order differs from the control config")
-    if tuple(io.joint_names) != CONTROL_JOINT_NAMES:
-        raise invalid("PROFILE_MISMATCH", "robot I/O joint order is not the public 16-joint order")
     if tuple(io.profile.joint_names) != config.joint_names:
         raise invalid(
             "PROFILE_MISMATCH", "robot profile joint order differs from the control config"
@@ -133,7 +131,7 @@ def validate_controller_inputs(
         raise invalid("INVALID_STREAM_CONFIG", "min_lead_s must be at least one physics step")
     default = io.profile.initial_positions
     hold = default if initial_reference is None else initial_reference
-    hold_positions = finite_vector(hold, "initial_reference", len(CONTROL_JOINT_NAMES))
+    hold_positions = finite_vector(hold, "initial_reference", len(config.joint_names))
     for index, (position, joint) in enumerate(
         zip(hold_positions, io.profile.joints, strict=True)
     ):
@@ -154,19 +152,21 @@ def compute_idle_chunk_anchor(
     now_sim_ns: int,
     stream_config: StreamConfig,
     step_ns: int,
-    start_sim_time_ns: int | None,
+    start_backend_time_ns: int | None,
 ) -> ChunkAnchor:
     """Preview the next motion's first chunk from the current zero-velocity hold."""
-    if start_sim_time_ns is None:
+    if start_backend_time_ns is None:
         start_ns = next_grid_time(now_sim_ns, stream_config.initial_lead_ns, step_ns)
     else:
-        if isinstance(start_sim_time_ns, bool) or not isinstance(start_sim_time_ns, Integral):
-            raise invalid("INVALID_CHUNK_START", "start_sim_time_ns must be an integer")
-        start_ns = int(start_sim_time_ns)
+        if isinstance(start_backend_time_ns, bool) or not isinstance(
+            start_backend_time_ns, Integral
+        ):
+            raise invalid("INVALID_CHUNK_START", "start_backend_time_ns must be an integer")
+        start_ns = int(start_backend_time_ns)
         if start_ns < now_sim_ns:
-            raise invalid("INVALID_CHUNK_START", "start_sim_time_ns is in the past")
+            raise invalid("INVALID_CHUNK_START", "start_backend_time_ns is in the past")
         if not grid_aligned(start_ns, step_ns):
-            raise invalid("INVALID_CHUNK_START", "start_sim_time_ns is not on the physics grid")
+            raise invalid("INVALID_CHUNK_START", "start_backend_time_ns is not on the physics grid")
     return ChunkAnchor(
         f"{instance_id}:motion-{motion_seq + 1}",
         0,
@@ -179,7 +179,7 @@ def compute_idle_chunk_anchor(
 def compute_active_chunk_anchor(
     schedule: StreamSchedule,
     phase: Phase,
-    start_sim_time_ns: int | None,
+    start_backend_time_ns: int | None,
     profile_digest: str,
 ) -> ChunkAnchor:
     """Return the one successor anchor for a non-final active chunk."""
@@ -190,11 +190,13 @@ def compute_active_chunk_anchor(
     if schedule.pending is not None:
         raise invalid("STREAM_PENDING_EXISTS", "one successor is already pending")
     active = schedule.active
-    end_ns = active.end_sim_time_ns
-    if start_sim_time_ns is not None:
-        if isinstance(start_sim_time_ns, bool) or not isinstance(start_sim_time_ns, Integral):
-            raise invalid("INVALID_CHUNK_START", "start_sim_time_ns must be an integer")
-        if int(start_sim_time_ns) != end_ns:
+    end_ns = active.end_backend_time_ns
+    if start_backend_time_ns is not None:
+        if isinstance(start_backend_time_ns, bool) or not isinstance(
+            start_backend_time_ns, Integral
+        ):
+            raise invalid("INVALID_CHUNK_START", "start_backend_time_ns must be an integer")
+        if int(start_backend_time_ns) != end_ns:
             raise invalid(
                 "INVALID_CHUNK_START", "explicit start does not equal the fixed active chunk end"
             )
@@ -242,9 +244,9 @@ def validate_first_chunk(
         raise invalid("PROFILE_MISMATCH", "chunk joints differ from the current profile")
     if tuple(first.max_accelerations) != tuple(max_accelerations):
         raise invalid("PROFILE_MISMATCH", "chunk accelerations differ from the current config")
-    if not grid_aligned(first.start_sim_time_ns, step_ns):
+    if not grid_aligned(first.start_backend_time_ns, step_ns):
         raise invalid("INVALID_CHUNK_START", "chunk start is not on the physics grid")
-    if not grid_aligned(first.end_sim_time_ns, step_ns):
+    if not grid_aligned(first.end_backend_time_ns, step_ns):
         raise invalid("INVALID_CHUNK_GRID", "chunk end is not on the physics grid")
     if first.duration_grid_ns != step_ns:
         raise invalid(
@@ -255,14 +257,14 @@ def validate_first_chunk(
         raise invalid(
             "INVALID_CHUNK_GRID", "follower plan duration is not a multiple of the physics step"
         )
-    if first.start_sim_time_ns < now_sim_ns:
+    if first.start_backend_time_ns < now_sim_ns:
         raise invalid("INVALID_CHUNK_START", "chunk start is in the past")
     observation = observation_rejection(
         first.window, now_sim_ns, stream_config.max_observation_age_ns
     )
     if observation is not None:
         raise invalid(observation, "first chunk observation is not admissible")
-    if now_sim_ns > first.start_sim_time_ns - stream_config.min_lead_ns:
+    if now_sim_ns > first.start_backend_time_ns - stream_config.min_lead_ns:
         raise invalid("CHUNK_LATE", "first chunk missed the admission lead deadline")
     for index, (initial, hold) in enumerate(
         zip(first.anchor.reference.positions, hold_positions, strict=True)
@@ -321,13 +323,13 @@ def select_stream_reference(
         assert final_positions is not None
         return StreamReference(
             zero_sample(final_positions),
-            application_sim_ns - active.start_sim_time_ns,
+            application_sim_ns - active.start_backend_time_ns,
             "HOLD",
             active.seq,
         )
-    if application_sim_ns > active.end_sim_time_ns:
+    if application_sim_ns > active.end_backend_time_ns:
         return StreamReference(None, 0, "BRAKE", active.seq)
-    if application_sim_ns == active.end_sim_time_ns:
+    if application_sim_ns == active.end_backend_time_ns:
         boundary = boundary_selection(schedule, active, application_sim_ns)
         return StreamReference(
             boundary.reference,
@@ -336,11 +338,11 @@ def select_stream_reference(
             boundary.chunk_seq,
             boundary,
         )
-    if application_sim_ns < active.start_sim_time_ns:
+    if application_sim_ns < active.start_backend_time_ns:
         return StreamReference(zero_sample(hold_positions), 0, "HOLD", active.seq)
     return StreamReference(
         active.sample_at(application_sim_ns),
-        application_sim_ns - active.start_sim_time_ns,
+        application_sim_ns - active.start_backend_time_ns,
         "CHUNK",
         active.seq,
     )

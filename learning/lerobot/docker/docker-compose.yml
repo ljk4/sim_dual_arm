@@ -20,7 +20,7 @@ services:
     volumes:
       - ../:/app:ro
       - ../../../shared:/shared:ro
-      - ../../../build:/build
+      - ../../../build/generated/policy-sdk:/opt/policy-sdk:ro
       - ../../../var:/data
       - ../../../third_party:/third_party:ro
       - ../../../shared/common/tools/docker/container_bashrc.sh:/etc/bash.bashrc:ro

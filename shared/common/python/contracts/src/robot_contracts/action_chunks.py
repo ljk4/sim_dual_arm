@@ -126,7 +126,7 @@ class ChunkAnchor(StrictContractModel):
     _error_reason: ClassVar[str] = "INVALID_CHUNK_ANCHOR"
     stream_id: Annotated[NonEmptyStr, Field(max_length=MAX_STREAM_ID_LENGTH)]
     predecessor_seq: Annotated[int, Field(strict=True, ge=0, le=UINT64_MAX - 1)]
-    start_sim_time_ns: Annotated[int, Field(strict=True, ge=0, le=INT64_MAX)]
+    start_backend_time_ns: Annotated[int, Field(strict=True, ge=0, le=INT64_MAX)]
     reference: ReferenceSample
     robot_profile_hash: NonEmptyStr
 

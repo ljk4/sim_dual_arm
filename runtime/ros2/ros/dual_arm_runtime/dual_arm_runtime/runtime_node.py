@@ -47,7 +47,7 @@ from robot_ros_support.stream_conversions import (
     stream_command_message,
 )
 
-from dual_arm_runtime.chunk_stream import follower_limits
+from dual_arm_runtime.follower_limits import follower_limits
 from dual_arm_runtime.episode_runner import EpisodeRunner
 from dual_arm_runtime.observation import ExactCaptureBuffer, ExactObservation
 from dual_arm_runtime.robot_control_client import RobotControlClient
@@ -292,6 +292,14 @@ class RuntimeNode(Node):
             raise ContractError("SCHEMA_MISMATCH", "backend joints")
         if tuple(info.camera_names) != self.config.profile.camera_names:
             raise ContractError("SCHEMA_MISMATCH", "backend cameras")
+        control_grid_ns = int(getattr(info, "control_grid_ns", 0) or 0)
+        if control_grid_ns <= 0:
+            raise ContractError("SCHEMA_MISMATCH", "backend control_grid_ns")
+        if (
+            self._follower_limits is not None
+            and control_grid_ns != self._follower_limits.duration_grid_ns
+        ):
+            raise ContractError("SCHEMA_MISMATCH", "backend control_grid_ns")
         context = context_from_message(info.context).model_copy(
             update={"episode_id": episode_id, "control_epoch": 1}
         )
@@ -328,6 +336,7 @@ class RuntimeNode(Node):
             backend_kind=info.backend_kind,
             ready=info.ready,
             test_only=info.test_only,
+            control_grid_ns=int(getattr(info, "control_grid_ns", 2_000_000) or 2_000_000),
             joint_names=list(info.joint_names),
             joint_units=list(info.joint_units),
             camera_names=list(info.camera_names),
@@ -414,7 +423,7 @@ class RuntimeNode(Node):
         self._episode.record(
             f"{self._root}/follower_references",
             follower_reference_message(reference),
-            reference.accepted_sim_time_ns,
+            reference.accepted_backend_time_ns,
         )
 
     def record_execution(self, execution: ExecutionFeedback) -> None:
@@ -440,7 +449,7 @@ class RuntimeNode(Node):
             self._episode.record(
                 f"{self._root}/execution_feedback",
                 execution_feedback_message(execution),
-                execution.measurement_sim_time_ns,
+                execution.measurement_backend_time_ns,
             )
             self._execution_signature[execution.command_id] = signature
             self._latest_execution[execution.command_id] = execution

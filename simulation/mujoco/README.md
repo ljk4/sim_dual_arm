@@ -10,7 +10,7 @@
 | [`assets/`](assets/README.md) | 机器人模型与网格资源（`marvin/`） |
 | [`configs/`](configs/README.md) | 仿真端环境变量 `container.env` |
 | [`docker/`](docker/README.md) | `Dockerfile`、`docker-compose.yml` 与依赖清单 |
-| [`scripts/`](scripts/README.md) | 容器内单职责脚本：`backend.sh`、`viewer.sh`、`test.sh` |
+| [`scripts/`](scripts/README.md) | 容器内单职责脚本：`backend.sh`（及薄封装 `teacher_backend.sh`、`inference_backend.sh`）、`viewer.sh`、`test.sh` |
 
 ## 快速使用
 

@@ -122,7 +122,7 @@ class MotionRuntime:
         self._check_thread()
         return self._terminal_snapshot
 
-    def chunk_anchor(self, start_sim_time_ns: int | None = None) -> ChunkAnchor:
+    def chunk_anchor(self, start_backend_time_ns: int | None = None) -> ChunkAnchor:
         """Return an immutable preview/successor hand-off anchor."""
         self._check_thread()
         return resolve_chunk_anchor(
@@ -130,7 +130,7 @@ class MotionRuntime:
             instance_id=self._instance_id, motion_seq=self._motion_seq,
             hold_positions=self._hold_positions, profile_digest=self._io.profile.digest,
             now_sim_ns=sim_time_ns(self._scene.data), step_ns=self._step_ns,
-            start_sim_time_ns=start_sim_time_ns,
+            start_backend_time_ns=start_backend_time_ns,
         )
 
     def start_stream(self, first: PreparedFollowerPlan, wall_time_ns: int) -> MotionSnapshot:
@@ -294,7 +294,7 @@ class MotionRuntime:
         schedule = self._schedule
         assert schedule is not None and schedule.active is not None
         first = schedule.active
-        at_start = application_sim_ns == first.start_sim_time_ns
+        at_start = application_sim_ns == first.start_backend_time_ns
         reference = first.sample_at(application_sim_ns) if at_start else zero_sample(
             self._hold_positions
         )
@@ -306,7 +306,7 @@ class MotionRuntime:
             self._event("STARTED", first, application_sim_ns)
             if first.settle_at_end:
                 self._remember_final_chunk(first)
-        elif application_sim_ns > first.start_sim_time_ns:
+        elif application_sim_ns > first.start_backend_time_ns:
             self._begin_stop(
                 wall, FailedReason.STREAM_START_MISSED.value,
                 FailedReason.STREAM_START_MISSED.value,
@@ -383,7 +383,7 @@ class MotionRuntime:
             chunk.plan, chunk.plan.duration_ns
         ).positions
         self._stream_final_targets = tuple(chunk.window.targets[-1].positions)
-        self._stream_final_end_ns = chunk.end_sim_time_ns
+        self._stream_final_end_ns = chunk.end_backend_time_ns
 
     def poll(self, wall_time_ns: int) -> MotionSnapshot:
         """Return state and apply wall-clock deadline transitions without stepping."""

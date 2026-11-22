@@ -1,16 +1,16 @@
 # 通过方案专用 Teacher 能力采集 Marvin 交接示教；档案路径相对本文件。
-robot_profile: ../../profiles/robots/marvin_handover/profile.json
-observation_schema: ../../profiles/observations/marvin_rgb_joint.json
-action_schema: ../../profiles/actions/marvin_joint_position.json
-control_constraints: ../../profiles/control/marvin_control.yaml
-follower_config: ../../profiles/control/marvin_follower.yaml
+robot_profile: ../../profiles/robot/profile.json
+observation_schema: ../../../profiles/observations/marvin_rgb_joint.json
+action_schema: ../../../profiles/actions/marvin_joint_position.json
+control_constraints: ../../../profiles/control/marvin_control.yaml
+follower_config: ../../../profiles/control/marvin_follower.yaml
 robot_namespace: /robot
 
 action_source: teacher
 
-# The handover Teacher lives in marvin_handover_api_msgs, not sim_api_msgs.
+# Shared Marvin Teacher chunk interface (task phase semantics defined by handover).
 # Runtime resolves its client adapter from this capability identifier.
-teacher_api: marvin_handover_api_msgs.teacher_chunk
+teacher_api: marvin_teacher_api_msgs.teacher_chunk
 
 lease_duration_ns: 2000000000
 renew_interval_ns: 500000000
@@ -52,8 +52,6 @@ teacher:
   task_stop_margin_s: 1.0
   task_sim_budget_ns: 180000000000
   task_id: marvin-handover
-
-motions: []
 
 logging:
   queue_capacity: 256

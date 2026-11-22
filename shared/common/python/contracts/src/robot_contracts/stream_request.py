@@ -32,12 +32,10 @@ from .validation import (
     contract_error,
 )
 
-REQUEST_MOTION = 1
 REQUEST_STREAM_FIRST = 2
 REQUEST_STREAM_NEXT = 3
-REQUEST_KINDS = (REQUEST_MOTION, REQUEST_STREAM_FIRST, REQUEST_STREAM_NEXT)
+REQUEST_KINDS = (REQUEST_STREAM_FIRST, REQUEST_STREAM_NEXT)
 REQUEST_KIND_NAMES = {
-    REQUEST_MOTION: "MOTION",
     REQUEST_STREAM_FIRST: "STREAM_FIRST",
     REQUEST_STREAM_NEXT: "STREAM_NEXT",
 }
@@ -101,18 +99,6 @@ class StreamRequest(StrictContractModel):
             ):
                 raise contract_error("final_velocities",
                                      "must be zero when settle_at_end is true")
-        if self.kind == REQUEST_MOTION:
-            if self.anchor is not None:
-                raise contract_error("anchor", "MOTION must not carry a ChunkAnchor")
-            if self.observation_time_ns != 0:
-                raise contract_error("observation_time_ns", "MOTION must use zero")
-            if self.target_count != 0:
-                raise contract_error("target_count", "MOTION must use zero")
-            if self.settle_at_end is not True:
-                raise contract_error("settle_at_end", "MOTION must settle at the end")
-            if self.final_velocities is not None:
-                raise contract_error("final_velocities", "MOTION uses zero boundaries")
-            return self
         if self.anchor is None:
             raise contract_error("anchor", "stream modes require a ChunkAnchor")
         if self.anchor.robot_profile_hash != self.trajectory.context.robot_profile_hash:
@@ -129,7 +115,7 @@ class StreamRequest(StrictContractModel):
             raise contract_error("target_count", "must be in 2..MAX_TARGET_COUNT")
         if self.target_count > len(self.trajectory.targets):
             raise contract_error("target_count", "must not exceed the source target count")
-        if self.observation_time_ns > self.anchor.start_sim_time_ns:
+        if self.observation_time_ns > self.anchor.start_backend_time_ns:
             raise contract_error("observation_time_ns", "must not follow the hand-off")
         if self.observation_time_ns + self.trajectory.targets[-1].time_ns > INT64_MAX:
             raise contract_error("observation_time_ns", "plus target time exceeds int64")
@@ -151,15 +137,13 @@ class StreamRequest(StrictContractModel):
         return REQUEST_KIND_NAMES[self.kind]
 
     @property
-    def window(self) -> ActionWindow | None:
-        """Return the recomputed stream window; MOTION has none."""
-        if self.kind == REQUEST_MOTION:
-            return None
+    def window(self) -> ActionWindow:
+        """Return the recomputed stream window."""
         assert self.anchor is not None
         return ActionWindow(
             self.trajectory.observation_id,
             self.observation_time_ns,
-            self.anchor.start_sim_time_ns,
+            self.anchor.start_backend_time_ns,
             self.trajectory.targets,
             self.target_count,
         )
@@ -174,6 +158,6 @@ def plan_from_segments(
 
 
 __all__ = [
-    "REQUEST_KINDS", "REQUEST_KIND_NAMES", "REQUEST_MOTION", "REQUEST_STREAM_FIRST",
+    "REQUEST_KINDS", "REQUEST_KIND_NAMES", "REQUEST_STREAM_FIRST",
     "REQUEST_STREAM_NEXT", "StreamRequest", "Trajectory", "plan_from_segments",
 ]

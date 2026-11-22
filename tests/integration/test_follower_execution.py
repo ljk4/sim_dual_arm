@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[2]
 for source in (
     ROOT / "simulation/mujoco/src",
     ROOT / "shared/common/python/contracts/src",
-    ROOT / "tests/unit",
+    ROOT / "tests/unit/fixtures",
 ):
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
@@ -196,7 +196,7 @@ def make_packet(
     window = ActionWindow(
         observation_id,
         0,
-        anchor.start_sim_time_ns,
+        anchor.start_backend_time_ns,
         source,
         follower.target_count,
     )
@@ -854,7 +854,7 @@ def test_wrong_context_lease_expiry_reset_and_new_stream_mode(
     wrong_window = ActionWindow(
         1,
         0,
-        wrong_anchor.start_sim_time_ns,
+        wrong_anchor.start_backend_time_ns,
         source,
         follower_config.target_count,
     )
@@ -999,7 +999,7 @@ def test_raw_out_of_bounds_and_excess_deviation_are_rejected(
     window_bad = ActionWindow(
         1,
         0,
-        anchor.start_sim_time_ns,
+        anchor.start_backend_time_ns,
         tuple(source_bad),
         follower_config.target_count,
     )
@@ -1023,7 +1023,7 @@ def test_raw_out_of_bounds_and_excess_deviation_are_rejected(
     window_fast = ActionWindow(
         1,
         0,
-        anchor.start_sim_time_ns,
+        anchor.start_backend_time_ns,
         tuple(fast),
         follower_config.target_count,
     )
@@ -1081,7 +1081,7 @@ def test_follower_final_contact_keeps_raw_closing_target_and_real_opening(
     window = ActionWindow(
         1,
         0,
-        anchor.start_sim_time_ns,
+        anchor.start_backend_time_ns,
         source,
         follower_config.target_count,
     )

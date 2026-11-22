@@ -10,7 +10,7 @@ camera_height: 240
 task_text: >-
   Pick up the red source cube with the right arm and stack it onto the blue
   target cube.
-profile: shared/scenarios/marvin_sim/stack/profiles/robots/marvin_stack/profile.json
+profile: shared/scenarios/marvin_sim/stack/profiles/robot/profile.json
 select: var/marvin_sim/stack/datasets/raw/formal-select.json
 output_root: var/marvin_sim/stack/datasets/lerobot
 cache_root: var/marvin_sim/stack/debug/learning-cache

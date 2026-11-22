@@ -23,7 +23,7 @@ from robot_backend_sim.marvin_sim.stack import plan as stack_plan  # noqa: E402
 from robot_backend_sim.marvin_sim.stack.kinematics_config import load_kinematics_config  # noqa: E402
 from robot_backend_sim.marvin_sim.stack.scene import build_marvin_stack_scene  # noqa: E402
 from robot_backend_sim.marvin_sim.stack.scene_config import load_marvin_stack_scene_config  # noqa: E402
-from robot_backend_sim.tools import check_kinematics, check_kinematics_report  # noqa: E402
+from robot_backend_sim.marvin_sim.stack.checks import check_kinematics, check_kinematics_report  # noqa: E402
 
 CONFIG_PATH = SCENARIO / "configs/simulation/scene/marvin_stack.yaml"
 CHECK_PATH = SCENARIO / "configs/simulation/checks/scene_check.yaml"

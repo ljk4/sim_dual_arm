@@ -6,7 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from dual_arm_learning.policy_server import serve_forever
+from dual_arm_learning.serving.server import serve_forever
 from fake_provider import FakeProvider, load_fake_config
 
 

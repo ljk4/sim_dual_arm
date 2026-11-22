@@ -58,6 +58,7 @@ from std_msgs.msg import Float64MultiArray, Header
 from robot_backend_sim.common.config.backend_config import BackendConfig
 from robot_backend_sim.common.config.scene_loader import SceneConfigLike
 from robot_backend_sim.common.control.control_state import ControlStatus
+from robot_backend_sim.common.physics.robot_io import gripper_indices
 from robot_backend_sim.common.render.render_worker import RenderedCapture, RendererFactory
 from robot_backend_sim.common.ros.node_services import ServiceAdapter
 from robot_backend_sim.common.ros.ros_bridge import RosFutureBridge
@@ -299,6 +300,7 @@ class BackendNode(Node):
                 joint_units=[joint.unit for joint in self.profile.joints],
                 camera_names=list(self.profile.camera_names),
                 capabilities=list(self._capabilities()),
+                control_grid_ns=self._worker.control_grid_ns,
             )
         )
 
@@ -345,7 +347,8 @@ class BackendNode(Node):
             self._publish_feedback(status)
         for event in self._worker.control_events():
             try:
-                self._events_pub.publish(control_event_message(control_event(event)))
+                record = control_event(event)
+                self._events_pub.publish(control_event_message(record))
                 self._emit(
                     "backend.control",
                     message=event.phase,
@@ -354,7 +357,7 @@ class BackendNode(Node):
                         episode_id=event.context.episode_id or None,
                         command_id=event.command_id,
                         clock_epoch=event.context.clock_epoch,
-                        sim_time_ns=event.sim_time_ns,
+                        sim_time_ns=record.backend_time_ns,
                     ),
                     fields={
                         "command_id": event.command_id,
@@ -542,12 +545,12 @@ class BackendNode(Node):
             episode_id=feedback.context.episode_id,
             command_id=feedback.command_id,
             clock_epoch=feedback.context.clock_epoch,
-            sim_time_ns=feedback.measurement_sim_time_ns,
+            sim_time_ns=feedback.measurement_backend_time_ns,
         )
         if active != self._unload_active:
             self._unload_active = active
             fields = {}
-            for side, index in (("left", 7), ("right", 15)):
+            for side, index in gripper_indices(self.profile.joint_names).items():
                 contact = next(item for item in status.snapshot.contacts if item.side == side)
                 fields[f"{side}_object"] = contact.candidate_object
                 fields[f"{side}_reference_m"] = feedback.reference_positions[index]

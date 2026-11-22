@@ -13,6 +13,6 @@
 ./env.sh enter learning
 ```
 
-> 启动 `scripts/server_policy.sh` 前，须先在 `runtime` 容器运行过 `scripts/build_sdk.sh` 生成 `/build/generated/policy-sdk`。
+> 启动 `scripts/server_policy.sh` 前，须先生成宿主机 `build/generated/policy-sdk/`（通常在 `runtime` 容器运行 `scripts/build_sdk.sh`），该目录以只读方式挂载为容器内 `/opt/policy-sdk`。
 
 运行测试见[测试执行方式](../../../tests/README.md#执行方式)。

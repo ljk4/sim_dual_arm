@@ -21,7 +21,13 @@ from robot_contracts.validation import (
     validate_config_model,
 )
 
-from robot_backend_sim.common.config.camera_config import Vec3
+from robot_backend_sim.common.tasks.config import (
+    HARD_MAX_CHUNKS,
+    SHA256_PATTERN,
+    BaseCapacityConfig,
+    Vec3,
+    validate_task_capacity,
+)
 from robot_backend_sim.marvin_sim.stack.scene_config import MarvinStackSceneConfig
 
 __all__ = [
@@ -49,9 +55,7 @@ BEHAVIOUR_PHASES = (
     "retreat",
     "stable",
 )
-HARD_MAX_CHUNKS = 4096
 StackTaskConfigError = StrictMappingError
-_SHA256 = r"^[0-9a-f]{64}$"
 _MIN_GRIPPER_OPEN_M = 0.0814
 _MIN_GRIPPER_CLOSED_M = 0.0014
 
@@ -167,7 +171,7 @@ class TeacherConfig(StrictMappingModel):
         return self
 
 
-class CapacityConfig(StrictMappingModel):
+class CapacityConfig(BaseCapacityConfig):
     expected_chunks: Annotated[PositiveInt, Field(ge=120, le=HARD_MAX_CHUNKS)]
     expected_references: Annotated[PositiveInt, Field(ge=120, le=HARD_MAX_CHUNKS)]
     expected_events: Annotated[PositiveInt, Field(ge=360, le=4 * HARD_MAX_CHUNKS)]
@@ -180,7 +184,7 @@ class CapacityConfig(StrictMappingModel):
 class StackTaskConfig(StrictMappingModel):
     source: Path = Path("")
     planning_config: Path = Path("")
-    config_digest: Annotated[str, Field(pattern=_SHA256)] = "0" * 64
+    config_digest: Annotated[str, Field(pattern=SHA256_PATTERN)] = "0" * 64
     objects: ObjectsConfig
     success: SuccessConfig
     gates: GatesConfig
@@ -230,24 +234,9 @@ class StackTaskConfig(StrictMappingModel):
                 "teacher.close_gripper_opening_m",
                 "must be narrower than source width so fingers pinch cleanly",
             )
-        checks = (
-            (capacity.max_episode_chunks >= capacity.expected_chunks,
-             "capacity.max_episode_chunks", "must cover expected_chunks"),
-            (capacity.expected_references <= capacity.max_episode_chunks,
-             "capacity.expected_references", "must not exceed max_episode_chunks"),
-            (capacity.expected_events >= 3 * capacity.expected_chunks,
-             "capacity.expected_events", "must cover three events per chunk"),
-            (capacity.rpc_cache_entries >= capacity.max_teacher_requests,
-             "capacity.rpc_cache_entries", "must cover max_teacher_requests"),
-            (capacity.backend_chunk_history >= capacity.max_episode_chunks,
-             "capacity.backend_chunk_history", "must cover max_episode_chunks"),
-            (capacity.max_teacher_requests >= capacity.max_episode_chunks,
-             "capacity.max_teacher_requests", "must cover max_episode_chunks"),
-            (math.isfinite(teacher.max_plan_duration_s), "teacher", "must be finite"),
-        )
-        for ok, field, message in checks:
-            if not ok:
-                raise contract_error(field, message)
+        validate_task_capacity(capacity)
+        if not math.isfinite(teacher.max_plan_duration_s):
+            raise contract_error("teacher", "must be finite")
         return self
 
     @property

@@ -17,7 +17,7 @@ from robot_contracts.project_paths import project_path
 from .config import ConfigError, load_dataset_config, load_training_config
 from .console_progress import OperatorConsole
 from .dataset import ExportError, convert
-from .sample_filter import FilterError
+from .dataset.sample_filter import FilterError
 from .scenario import (
     ScenarioSelectionError,
     artifact_paths,

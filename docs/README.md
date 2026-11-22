@@ -13,6 +13,6 @@
 ## 阅读建议
 
 1. 首次使用或运行闭环：阅读根目录 [README.md](../README.md)。
-2. 了解公共协议、方案绑定与四端实现的归属：阅读 [shared/README.md](../shared/README.md)。
+2. 了解各端职责分工、通信协作契约、公共协议及待解耦边界：阅读 [跨端架构分工与解耦审查](features/跨端架构分工与解耦审查.md) 与 [shared/README.md](../shared/README.md)。
 3. 参与开发或修改配置：阅读仓库 [AGENTS.md](../AGENTS.md) 及相关目录的 `README.md`。
 4. 排查推理执行问题或查阅历史决策：参阅 [experiments/](experiments/README.md) 与 [history/](history/README.md)。

@@ -11,6 +11,7 @@ ROS; it is not a substitute for the real EGL acceptance run.
 
 from __future__ import annotations
 
+import json
 import os
 import signal
 import subprocess
@@ -63,7 +64,7 @@ from robot_backend_sim.common.ros.ros_bridge import RosFutureBridge  # noqa: E40
 from robot_backend_sim.common.runtime.worker import Worker  # noqa: E402
 
 CONFIG = SCENARIO / "configs/simulation/backend/backend.yaml"
-PROFILE_PATH = PROFILES / "robots/marvin_stack/profile.json"
+PROFILE_PATH = PROFILES / "robot/profile.json"
 SCHEMAS = ROOT / "shared/common/interfaces/schemas"
 
 
@@ -278,6 +279,10 @@ def test_node_sigterm_is_clean(tmp_path):
     try:
         stack.wait_ready()
         assert "execution_feedback.gripper_set" in stack.info.capabilities
+        assert stack.info.control_grid_ns == 2_000_000
+        ready_path = stack.run_root / stack.run_id / "ready.json"
+        stack.wait_for(lambda: ready_path.is_file(), timeout=5.0)
+        assert json.loads(ready_path.read_text(encoding="utf-8"))["ready"] is True
     finally:
         code = stack.close(signal_number=signal.SIGTERM)
     assert code == 0
