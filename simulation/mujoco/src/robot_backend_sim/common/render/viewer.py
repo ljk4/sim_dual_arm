@@ -12,27 +12,23 @@ import argparse
 import os
 import sys
 import time
-from pathlib import Path
 
 import mujoco
 import mujoco.viewer
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
-from robot_contracts.project_paths import project_path
 from std_msgs.msg import Float64MultiArray
 
-from robot_backend_sim.common.config.backend_config import (
-    load_backend_config,
-    load_backend_document,
-)
+from robot_backend_sim.common.config.backend_config import load_backend_document
 from robot_backend_sim.common.config.scenario_config import (
     ScenarioError,
-    resolve_scenario_backend,
+    resolve_scenario_viewer,
 )
 from robot_backend_sim.common.config.scene_loader import load_scene_config_for
 from robot_backend_sim.common.physics.robot_adapters import build_scene_for
 
+_POLL_HZ = 60.0
 _STATE_SIGNATURE = mujoco.mjtState.mjSTATE_FULLPHYSICS
 _VIEWER_QOS = QoSProfile(
     depth=1,
@@ -43,48 +39,21 @@ _VIEWER_QOS = QoSProfile(
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", type=Path, help="direct backend recipe path")
     parser.add_argument(
-        "--robot", help="robot id under <shared-root>/scenarios/<robot>/<task>/"
+        "--robot",
+        required=True,
+        help="robot id under shared/scenarios/<robot>/<task>/",
     )
     parser.add_argument(
-        "--task", help="task id under <shared-root>/scenarios/<robot>/<task>/"
+        "--task",
+        required=True,
+        help="task id under shared/scenarios/<robot>/<task>/",
     )
-    parser.add_argument("--role", choices=("teacher", "policy"), default="teacher")
-    parser.add_argument("--shared-root", type=Path)
-    parser.add_argument(
-        "--state-topic",
-        default="",
-        help="defaults to <robot namespace>/visualization/mujoco_state",
-    )
-    parser.add_argument("--poll-hz", type=float, default=60.0)
     return parser
 
 
-def _project_root() -> Path:
-    root = os.environ.get("PROJECT_ROOT")
-    return Path(root) if root else Path(__file__).resolve().parents[6]
-
-
-def _resolve_config_path(config: Path) -> Path:
-    if config.is_absolute() or config.is_file():
-        return config.resolve()
-    return project_path(config, _project_root()).resolve()
-
-
-def _load_backend(args: argparse.Namespace):
-    if args.config is not None:
-        if args.robot is not None or args.task is not None:
-            raise ScenarioError("--config cannot be combined with --robot/--task")
-        if args.role != "teacher" or args.shared_root is not None:
-            raise ScenarioError("--role/--shared-root require --robot/--task")
-        return load_backend_config(_resolve_config_path(args.config))
-    resolved = resolve_scenario_backend(
-        robot=args.robot,
-        task=args.task,
-        role=args.role,
-        shared_root=args.shared_root,
-    )
+def _load_backend(robot: str, task: str):
+    resolved = resolve_scenario_viewer(robot=robot, task=task)
     return load_backend_document(resolved.document, resolved.source)
 
 
@@ -117,12 +86,9 @@ def _apply_state(model: mujoco.MjModel, data: mujoco.MjData, values: object) -> 
 
 def main() -> int:
     args = _parser().parse_args()
-    if not 1.0 <= args.poll_hz <= 240.0:
-        print("viewer: --poll-hz must be within [1, 240]", file=sys.stderr)
-        return 2
 
     try:
-        backend = _load_backend(args)
+        backend = _load_backend(args.robot, args.task)
     except (ScenarioError, OSError, ValueError) as error:
         print(f"viewer: {error}", file=sys.stderr)
         return 2
@@ -133,7 +99,7 @@ def main() -> int:
     scene = build_scene_for(scene_config)
     model = scene.model
     data = scene.data
-    topic = args.state_topic or f"{backend.namespace.rstrip('/')}/visualization/mujoco_state"
+    topic = f"{backend.namespace.rstrip('/')}/visualization/mujoco_state"
 
     rclpy.init(args=[])
     node = Node("mujoco_live_viewer")
@@ -159,7 +125,7 @@ def main() -> int:
         viewer.cam.distance = max(1.0, float(model.stat.extent) * 1.5)
         viewer.cam.azimuth = 135.0
         viewer.cam.elevation = -20.0
-        period_s = 1.0 / args.poll_hz
+        period_s = 1.0 / _POLL_HZ
         next_sync = time.monotonic()
         while viewer.is_running():
             rclpy.spin_once(node, timeout_sec=0.0)

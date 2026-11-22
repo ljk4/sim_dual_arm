@@ -88,7 +88,7 @@ python3 /shared/common/tools/scenario.py validate \
 # simulation 容器（工作目录 /app）
 scripts/backend.sh --robot <robot> --task <task> --role teacher \
   --seed 0 --run-id teacher-backend
-scripts/viewer.sh --robot <robot> --task <task> --role teacher
+scripts/viewer.sh --robot <robot> --task <task>
 scripts/backend.sh --robot <robot> --task <task> --role policy \
   --seed 0 --run-id policy-backend
 

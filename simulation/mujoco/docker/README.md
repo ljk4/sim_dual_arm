@@ -21,7 +21,7 @@ scripts/backend.sh --robot marvin_sim --task stack --role teacher --seed 0 --run
 仿真后端默认无窗口离屏渲染。如需查看实时画面，在宿主机执行：
 
 ```bash
-./env.sh viewer --robot marvin_sim --task stack --role teacher
+./env.sh viewer --robot marvin_sim --task stack
 ```
 
 > 若遇到 X11 权限报错，先在宿主机执行 `xhost +SI:localuser:$(id -un)`。

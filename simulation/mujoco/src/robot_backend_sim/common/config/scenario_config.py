@@ -65,18 +65,24 @@ def _load_recipe(path: Path) -> dict[str, Any]:
     return read_yaml_unique_mapping(path, label="backend recipe", error_cls=ScenarioError)
 
 
+def _load_scenario_binding(
+    robot: str, task: str, shared_root: Path | None
+) -> tuple[Path, ResolvedBinding]:
+    root = resolve_shared_root(shared_root)
+    binding_path = _binding_path(root, robot, task)
+    try:
+        return root, load_binding(binding_path, shared_root=root)
+    except (BindingError, ContractError, OSError) as error:
+        raise ScenarioError(str(error)) from error
+
+
 def _select(
     *, robot: str, task: str, role: str, shared_root: Path | None
 ) -> tuple[dict[str, Any], Path, dict[str, Any], ResolvedBinding]:
     if role not in ROLE_RECIPES:
         raise ScenarioError("role must be 'teacher' or 'policy'")
     recipe_field, stage = ROLE_RECIPES[role]
-    root = resolve_shared_root(shared_root)
-    binding_path = _binding_path(root, robot, task)
-    try:
-        resolved = load_binding(binding_path, shared_root=root)
-    except (BindingError, ContractError, OSError) as error:
-        raise ScenarioError(str(error)) from error
+    _root, resolved = _load_scenario_binding(robot, task, shared_root)
     if getattr(resolved.binding.recipes, recipe_field) is None:
         raise ScenarioError(
             f"scenario {robot}/{task} declares no recipes.{recipe_field}"
@@ -92,6 +98,15 @@ def _select(
         "recipe": reference.record(),
     }
     return _load_recipe(reference.path), reference.path.parent, selection, resolved
+
+
+def resolve_scenario_viewer(*, robot: str, task: str) -> ScenarioBackend:
+    """Resolve the first declared simulation recipe for the live viewer."""
+    _root, resolved = _load_scenario_binding(robot, task, None)
+    for role, (recipe_field, _) in ROLE_RECIPES.items():
+        if getattr(resolved.binding.recipes, recipe_field) is not None:
+            return resolve_scenario_backend(robot=robot, task=task, role=role)
+    raise ScenarioError(f"scenario {robot}/{task} declares no simulation recipe")
 
 
 def resolve_scenario_backend(
