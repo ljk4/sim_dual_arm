@@ -33,7 +33,6 @@ service:
   open_deadline_s: 5.0
   close_deadline_s: 5.0
   test_only: false
-  stateful: true
   task_id: marvin-handover
   task_text: >-
     Pick up the block with the left arm, hand it to the right arm, and place it

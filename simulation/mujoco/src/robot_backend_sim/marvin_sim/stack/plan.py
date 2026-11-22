@@ -15,6 +15,11 @@ from robot_backend_sim.common.kinematics.kinematics_clearance import (
     KinematicsError,
     measure_clearance,
 )
+from robot_backend_sim.common.tasks.math import (
+    matrix_as_tuple as _as_tuple,
+    rotation_from_axes as _rotation_from_axes,
+    rotation_z as _rotation_z,
+)
 from robot_backend_sim.marvin_sim.kinematics import (
     BlockEnvelope,
     CarriedBlock,
@@ -105,33 +110,6 @@ class PathResult:
         if self.object_minimum.distance_m < self.robot_minimum.distance_m:
             return self.object_minimum
         return self.robot_minimum
-
-
-def _rotation_z(radians_value: float) -> np.ndarray:
-    cosine, sine = math.cos(radians_value), math.sin(radians_value)
-    return np.array(
-        [[cosine, -sine, 0.0], [sine, cosine, 0.0], [0.0, 0.0, 1.0]],
-        dtype=np.float64,
-    )
-
-
-def _rotation_from_axes(
-    approach: tuple[float, float, float], closing: tuple[float, float, float]
-) -> np.ndarray:
-    """Build Arm_R_tcp rotation matrix where local -Y approaches and +Z closes."""
-    first = np.asarray(approach, dtype=np.float64)
-    first /= np.linalg.norm(first)
-    second = np.asarray(closing, dtype=np.float64)
-    second -= first * float(np.dot(first, second))
-    second /= np.linalg.norm(second)
-    local_y = -first
-    local_z = second
-    local_x = np.cross(local_y, local_z)
-    return np.column_stack([local_x, local_y, local_z])
-
-
-def _as_tuple(matrix: np.ndarray) -> tuple[tuple[float, float, float], ...]:
-    return tuple(tuple(float(value) for value in row) for row in matrix)
 
 
 def _stack_rotation(yaw_rad: float, tilt_deg: float, yaw_offset_deg: float) -> np.ndarray:

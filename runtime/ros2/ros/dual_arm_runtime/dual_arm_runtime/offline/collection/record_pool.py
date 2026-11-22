@@ -166,7 +166,6 @@ class RecordingPool:
             run_args,
             self.output,
             attempt_run_id,
-            self.args.project_root,
         )
         self.attempted += 1
         with self.ledger.locked():

@@ -243,17 +243,6 @@ class ServiceAdapter:
         return response
 
     @_service
-    async def contact_snapshot(self, request: object, response: object) -> object:
-        context = context_from_message(request.context)  # type: ignore[attr-defined]
-        snapshot = await self._node._await(self._worker.contact_snapshot())
-        from robot_backend_sim.common.ros.contact_conv import contact_snapshot_message
-
-        response.snapshot = contact_snapshot_message(snapshot, context)  # type: ignore[attr-defined]
-        response.success = True  # type: ignore[attr-defined]
-        response.reason = ""  # type: ignore[attr-defined]
-        return response
-
-    @_service
     async def reset(self, request: object, response: object) -> object:
         new_context = await self._node._await(
             self._worker.reset(

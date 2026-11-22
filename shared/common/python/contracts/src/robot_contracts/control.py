@@ -15,9 +15,7 @@ from .models import ContractError, RunContext
 from .validation import NonEmptyStr, PositiveInt, StrictContractModel
 
 __all__ = [
-    "GENERATION_FIELDS",
     "INT64_MAX",
-    "LEASE_CONTEXT_FIELDS",
     "MAX_ID_LENGTH",
     "MAX_LEASE_DURATION_NS",
     "MIN_LEASE_DURATION_NS",
@@ -37,14 +35,13 @@ UINT64_MAX = 2**64 - 1
 MAX_ID_LENGTH = 128
 MIN_LEASE_DURATION_NS = 100_000_000
 MAX_LEASE_DURATION_NS = 10_000_000_000
-GENERATION_FIELDS = (
+_GENERATION_FIELDS = (
     "robot_id",
     "robot_profile_hash",
     "backend_instance_id",
     "time_domain_id",
     "clock_epoch",
 )
-LEASE_CONTEXT_FIELDS = GENERATION_FIELDS + ("episode_id", "control_epoch")
 
 
 def _invalid(reason: str, detail: str) -> ContractError:
@@ -72,7 +69,7 @@ def check_generation(context: object, expected: object) -> None:
     """Compare exactly the five fields that define one robot generation."""
     if not isinstance(context, RunContext) or not isinstance(expected, RunContext):
         raise _invalid("STALE_CONTEXT", "RunContext")
-    for name in GENERATION_FIELDS:
+    for name in _GENERATION_FIELDS:
         if getattr(context, name) != getattr(expected, name):
             raise _invalid("STALE_CONTEXT", name)
 

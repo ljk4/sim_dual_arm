@@ -145,8 +145,9 @@ def select_scenario(
             f"scenario {robot}/{task} has no binding file: {binding_path}"
         )
     stage_value = BindingStage(stage)
+    del model
     try:
-        resolved = load_binding(binding_path, shared_root=root, model=model)
+        resolved = load_binding(binding_path, shared_root=root)
     except (BindingError, ContractError, OSError) as error:
         raise ScenarioSelectionError(str(error)) from error
 

@@ -13,7 +13,6 @@ from .validation import UniqueKeyError, read_unique_yaml
 
 __all__ = [
     "canonical_sha256",
-    "read_json_object",
     "read_yaml_unique_mapping",
     "sha256_file",
     "write_json_atomic",
@@ -33,32 +32,6 @@ def canonical_sha256(document: object) -> str:
     """Return the canonical compact-JSON SHA-256 hex digest of an object."""
     payload = json.dumps(document, sort_keys=True, separators=(",", ":"), allow_nan=False)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-def read_json_object(
-    path: Path,
-    *,
-    error_cls: type[Exception] = ContractError,
-) -> dict[str, Any]:
-    """Read and validate a finite JSON object file."""
-    target = Path(path)
-
-    def _bad_constant(value: str) -> Any:
-        raise error_cls(f"{target}: non-finite JSON constant {value!r}")
-
-    try:
-        document = json.loads(target.read_text(encoding="utf-8"), parse_constant=_bad_constant)
-    except error_cls:
-        raise
-    except (OSError, json.JSONDecodeError) as error:
-        if error_cls is ContractError:
-            raise ContractError("SCHEMA_MISMATCH", f"{target}: cannot read JSON: {error}") from error
-        raise error_cls(f"{target}: cannot read JSON: {error}") from error
-    if not isinstance(document, dict):
-        if error_cls is ContractError:
-            raise ContractError("SCHEMA_MISMATCH", f"{target}: expected a JSON object")
-        raise error_cls(f"{target}: expected a JSON object")
-    return document
 
 
 def write_json_atomic(path: Path, document: object, *, indent: int | None = 2) -> None:

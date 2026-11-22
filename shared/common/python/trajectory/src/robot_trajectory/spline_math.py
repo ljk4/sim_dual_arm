@@ -11,7 +11,6 @@ from typing import Annotated, ClassVar, Self
 from pydantic import BeforeValidator, Field, model_validator
 from robot_contracts.models import ContractError, FloatVector, JointSpec, Target
 from robot_contracts.trajectory.constants import (
-    ACCELERATION_ATOL,
     LIMIT_ATOL,
     LIMIT_RTOL,
     MAX_HORIZON_NS,
@@ -155,6 +154,14 @@ def evaluate_cubic_segment(segment: object, local_s: float, location: str = "seg
     return _state_at(segment, local_s, location)
 
 
+def _check_vector_close(left: Sequence[float], right: Sequence[float], *, atol: float,
+                        location: str, quantity: str, joint_names: Sequence[str]) -> None:
+    for index, (a, b, name) in enumerate(zip(left, right, joint_names, strict=True)):
+        if not _is_close(a, b, atol=atol):
+            raise _invalid(f"{location}[{index}]",
+                           f"joint {name!r} {quantity} is discontinuous: {a!r} != {b!r}")
+
+
 def check_c1_continuity(
     left_positions: Sequence[float],
     left_velocities: Sequence[float],
@@ -275,70 +282,6 @@ def compute_reference_extremes(plan) -> ReferenceExtremes:
     return ReferenceExtremes(tuple(
         JointExtremes(plan.joint_names[index], minimum[index], maximum[index],
                       velocity[index], acceleration[index]) for index in range(count)))
-
-
-def _check_vector_close(left: Sequence[float], right: Sequence[float], *, atol: float,
-                        location: str, quantity: str, joint_names: Sequence[str]) -> None:
-    for index, (a, b, name) in enumerate(zip(left, right, joint_names, strict=True)):
-        if not _is_close(a, b, atol=atol):
-            raise _invalid(f"{location}[{index}]",
-                           f"joint {name!r} {quantity} is discontinuous: {a!r} != {b!r}")
-
-
-def verify_reference_plan(
-    plan, initial_positions: Sequence[float], targets: Sequence[Target],
-    joints: Sequence[JointSpec], max_accelerations: Sequence[float], *,
-    initial_velocities: Sequence[float] | None = None,
-    final_velocities: Sequence[float] | None = None,
-) -> ReferenceExtremes:
-    inputs = validate_reference_inputs(
-        initial_positions, targets, joints, max_accelerations,
-        initial_velocities=initial_velocities, final_velocities=final_velocities)
-    if plan.joint_names != inputs.joint_names:
-        raise _invalid("plan.joint_names", "must match the joint order")
-    if len(plan.segments) != len(inputs.target_times_ns):
-        raise _invalid("plan.segments", f"has {len(plan.segments)} segments for "
-                       f"{len(inputs.target_times_ns)} targets")
-    if plan.duration_ns != inputs.target_times_ns[-1]:
-        raise _invalid("plan.segments", f"horizon {plan.duration_ns}ns differs from last target")
-    previous_end = None
-    elapsed_ns = 0
-    for index, segment in enumerate(plan.segments):
-        location = f"segments[{index}]"
-        elapsed_ns += segment.duration_ns
-        if elapsed_ns != inputs.target_times_ns[index]:
-            raise _invalid(f"{location}.duration_ns",
-                           f"cumulative boundary {elapsed_ns}ns differs from target")
-        start = _state_at(segment, 0.0, location)
-        end = _state_at(segment, segment.duration_s, location)
-        expected_start = (inputs.initial_positions if index == 0
-                          else inputs.target_positions[index - 1])
-        for values, wanted, suffix in ((start[0], expected_start, "start"),
-                                       (end[0], inputs.target_positions[index], "end")):
-            _check_vector_close(values, wanted, atol=POSITION_ATOL,
-                                location=f"{location}.{suffix}_positions",
-                                quantity="position", joint_names=inputs.joint_names)
-        if index == 0:
-            _check_vector_close(start[1], inputs.initial_velocities, atol=VELOCITY_ATOL,
-                                location=f"{location}.start_velocities",
-                                quantity="velocity", joint_names=inputs.joint_names)
-        if index == len(plan.segments) - 1:
-            _check_vector_close(end[1], inputs.final_velocities, atol=VELOCITY_ATOL,
-                                location=f"{location}.end_velocities",
-                                quantity="velocity", joint_names=inputs.joint_names)
-        if previous_end is not None:
-            for quantity, atol, left, right in (
-                ("position", POSITION_ATOL, previous_end[0], start[0]),
-                ("velocity", VELOCITY_ATOL, previous_end[1], start[1]),
-                ("acceleration", ACCELERATION_ATOL, previous_end[2], start[2]),
-            ):
-                _check_vector_close(left, right, atol=atol,
-                                    location=f"{location}.start_{quantity}s",
-                                    quantity=quantity, joint_names=inputs.joint_names)
-        previous_end = end
-    extremes = compute_reference_extremes(plan)
-    check_continuous_limits(extremes, inputs.joints, inputs.max_accelerations)
-    return extremes
 
 
 def check_continuous_limits(extremes: ReferenceExtremes, joints: Sequence[JointSpec],

@@ -30,8 +30,6 @@ from dual_arm_runtime.offline.collection.campaign_execution import (
     attempt_log_directory,
     classify,
     discard_unqualified_attempt,
-    episode_manifest,
-    episode_task_result,
     handle_sigterm,
     reject_docker_command,
     run_command,
@@ -52,9 +50,6 @@ from dual_arm_runtime.offline.collection.campaign_ledger import (
 )
 from dual_arm_runtime.offline.collection.campaign_ledger import (
     check_environment as _check_environment,
-)
-from dual_arm_runtime.offline.collection.campaign_ledger import (
-    code_fingerprint as _code_fingerprint,
 )
 from dual_arm_runtime.offline.collection.campaign_ledger import (
     finished as _finished,
@@ -79,15 +74,12 @@ def _reserve(
     args: argparse.Namespace,
     output: Path,
     run_id: str,
-    project_root: Path,
 ) -> Attempt:
     with ledger.locked():
         records = ledger.records()
         seed, mode = _allocate(
             config, records, args.purpose, args.kind, args.mode, args.seed, output
         )
-        if args.kind == "label_replay" and args.mode != "teacher":
-            raise CampaignError("label replay is a teacher-mode replay")
         episode_id = _safe_component(
             args.episode_id or f"{args.purpose}-{seed:05d}-{run_id}", "episode_id"
         )
@@ -105,11 +97,6 @@ def _reserve(
             episode_id=episode_id,
             directory=directory,
             config=args.runtime_config,
-            code=_code_fingerprint(
-                project_root,
-                project_path(args.config, project_root),
-                project_path(args.runtime_config, project_root),
-            ),
             budget={
                 "max_raw_bytes": int(config["budget"]["max_raw_bytes"]),
                 "estimated_attempt_bytes": int(config["budget"]["estimated_attempt_bytes"]),
@@ -131,7 +118,6 @@ def _reserve(
                 "episode_id": attempt.episode_id,
                 "attempt_dir": str(directory),
                 "config": attempt.config,
-                "code": attempt.code,
                 "budget": attempt.budget,
                 "reserved_at_ns": attempt.reserved_at_ns,
             }
@@ -254,13 +240,11 @@ def command_run(args: argparse.Namespace) -> int:
             "no launch command: pass it after -- or configure launch.command; no seed was consumed"
         )
     reject_docker_command(command, "launch command")
-    if args.kind == "label_replay" and args.purpose != "pilot":
-        raise CampaignError("label replay is a pilot attempt, not formal/test")
     run_id = _safe_component(args.run_id or f"run-{_now_ns()}", "run_id")
     acquire_run_lock(run_lock)
     previous_sigterm = signal.signal(signal.SIGTERM, handle_sigterm)
     try:
-        attempt = _reserve(ledger, config, args, output, run_id, project_root)
+        attempt = _reserve(ledger, config, args, output, run_id)
         with ledger.locked():
             ledger.append(
                 {
@@ -397,82 +381,6 @@ def command_select(args: argparse.Namespace) -> int:
     return 0 if document["status"] == "SELECTED" else 1
 
 
-def command_backfill_terminal(args: argparse.Namespace) -> int:
-    """Append the real terminal summary an interrupted launch produced."""
-    project_root = args.project_root.resolve()
-    config = _load(project_path(args.config, project_root))
-    paths = config["paths"]
-    ledger = Ledger(
-        project_path(paths["ledger"], project_root), project_path(paths["lock"], project_root)
-    )
-    with ledger.locked():
-        records = ledger.records()
-        terminal = _finished(records)
-        reservation = next(
-            (
-                record
-                for record in _attempts(records)
-                if str(record.get("attempt_id")) == args.attempt_id
-            ),
-            None,
-        )
-        previous = terminal.get(args.attempt_id)
-        if reservation is None:
-            raise CampaignError(f"attempt is not reserved in the ledger: {args.attempt_id}")
-        if previous is None or previous.get("event") not in {"INTERRUPTED", "FAILED"}:
-            raise CampaignError(
-                f"terminal backfill needs an INTERRUPTED/FAILED attempt: {args.attempt_id}"
-            )
-        directory = Path(str(reservation["attempt_dir"]))
-        classification = classify(directory, str(config["quality"]["sidecar"]))
-        manifest = episode_manifest(directory)
-        if manifest is None or episode_task_result(directory) is None:
-            raise CampaignError(
-                f"attempt has no recorded episode manifest/task result: {directory}"
-            )
-        wall_s = float(previous.get("wall_s") or 0.0)
-        if wall_s <= 0.0:
-            ended = manifest.get("ended_at_ns")
-            reserved_at = reservation.get("reserved_at_ns")
-            if isinstance(ended, int) and isinstance(reserved_at, int) and ended > reserved_at:
-                wall_s = round((ended - reserved_at) / 1e9, 6)
-        if (
-            wall_s > 0.0
-            and previous.get("runtime_outcome")
-            and previous.get("task_outcome")
-            and previous.get("recording_complete") == classification["recording_complete"]
-        ):
-            raise CampaignError(f"terminal summary is already complete for {args.attempt_id}")
-        record = {
-            "event": previous["event"],
-            "attempt_id": args.attempt_id,
-            "seed": reservation.get("seed"),
-            "purpose": reservation.get("purpose"),
-            "kind": reservation.get("kind"),
-            "mode": reservation.get("mode"),
-            "exit_code": previous.get("exit_code"),
-            "wall_s": wall_s,
-            "failure": previous.get("failure", ""),
-            "raw_bytes": _measure(directory),
-            "attempt_dir": str(directory),
-            "finished_at_ns": previous.get("finished_at_ns", _now_ns()),
-            "recorded_at_ns": _now_ns(),
-            **classification,
-            "backfilled_from": [
-                str(path)
-                for path in (
-                    directory / "raw" / "manifest.json",
-                    directory / "raw" / "task_result.json",
-                )
-                if path.is_file()
-            ],
-            "backfill_reason": "terminal summary re-read from recorded episode artefacts",
-        }
-        ledger.append(record)
-    print(json.dumps(record, indent=2, sort_keys=True))
-    return 0
-
-
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     result.add_argument("--project-root", type=Path, default=Path.cwd())
@@ -508,11 +416,6 @@ def parser() -> argparse.ArgumentParser:
         help="atomically write the generated SELECTED manifest to this path",
     )
     select.set_defaults()
-    backfill = sub.add_parser(
-        "backfill-terminal",
-        help="append a real terminal summary for an interrupted/failed attempt",
-    )
-    backfill.add_argument("--attempt-id", required=True)
     return result
 
 
@@ -558,8 +461,6 @@ def main(argv: list[str] | None = None) -> int:
             return command_status(args)
         if args.action == "select":
             return command_select(args)
-        if args.action == "backfill-terminal":
-            return command_backfill_terminal(args)
         raise CampaignError(f"unknown command {args.action}")
     except CampaignError as error:
         print(json.dumps({"error": str(error)}), file=sys.stderr)

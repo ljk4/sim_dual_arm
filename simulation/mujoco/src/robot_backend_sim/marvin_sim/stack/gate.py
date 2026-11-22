@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from robot_backend_sim.common.tasks.gate import TaskGateFact
+from robot_backend_sim.common.tasks.base import TaskGateFact
 from robot_backend_sim.marvin_sim.stack.config import StackTaskConfig
 
 if TYPE_CHECKING:

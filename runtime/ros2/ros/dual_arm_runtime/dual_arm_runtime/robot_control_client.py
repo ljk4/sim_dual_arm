@@ -53,13 +53,47 @@ from robot_run_logging import EventContext, Scalar
 from robot_trajectory.follower_reference import validate as validate_follower_reference
 from robot_trajectory.trajectory_generation import generate_follower_plan
 
-from dual_arm_runtime.follower_submit import (
-    rejection_type,
-    validate_follower_request,
-)
 from dual_arm_runtime.run_logging import EventSink, check_health, emit_best_effort, emit_event
 from dual_arm_runtime.runtime_config import RuntimeRecipe
-from dual_arm_runtime.runtime_errors import FirstFollowerRejected
+
+
+class FirstFollowerRejected(ContractError):
+    """An explicit first negative ACK with no accepted execution to await."""
+
+
+def validate_follower_request(client: object, request: StreamRequest) -> tuple[object, str]:
+    if not isinstance(request, StreamRequest):
+        raise ContractError("INVALID_FOLLOWER_REQUEST", "request must be a StreamRequest")
+    if client._follower_limits is None:  # type: ignore[attr-defined]
+        raise ContractError("FOLLOWER_DISABLED", "follower limits are not configured")
+    check_health(client._log)  # type: ignore[attr-defined]
+    if client._stop_requested.is_set():  # type: ignore[attr-defined]
+        raise ContractError("EPISODE_STOPPED", "follower submit stopped")
+    context = request.trajectory.context
+    command_id = request.trajectory.command_id
+    if context != client.lease_context or request.trajectory.lease_id != client.lease_id:  # type: ignore[attr-defined]
+        raise ContractError("STALE_CONTEXT", "follower request does not own the current lease")
+    origin = client._stream_origins.get(command_id)  # type: ignore[attr-defined]
+    if request.kind == REQUEST_STREAM_FIRST:
+        if origin is not None and origin != request:
+            raise ContractError("COMMAND_ID_CONFLICT", "stream origin changed")
+        if origin is None and len(client._stream_origins) >= client._stream_origin_capacity:  # type: ignore[attr-defined]
+            raise ContractError(
+                "CONTROL_BUSY",
+                f"stream origin cache is full ({client._stream_origin_capacity})",  # type: ignore[attr-defined]
+            )
+        client._stream_origins.setdefault(command_id, request)  # type: ignore[attr-defined]
+    elif origin is None:
+        raise ContractError("STALE_STREAM", "successor has no local stream origin")
+    return context, command_id
+
+
+def rejection_type(response: object, attempt: int) -> type[Exception]:
+    return (
+        FirstFollowerRejected
+        if attempt == 1 and not response.has_execution  # type: ignore[attr-defined]
+        else ContractError
+    )
 
 _ServiceResponse = (
     AcquireControl.Response
@@ -512,7 +546,6 @@ class RobotControlClient:
                 "queried": queried,
                 "attempts": attempts,
                 "chunk_seq": reference.chunk_seq,
-                "reference_digest": reference.reference_digest,
                 "phase": execution.phase,
                 "accepted_backend_time_ns": reference.accepted_backend_time_ns,
                 "accepted_wall_time_ns": reference.accepted_wall_time_ns,

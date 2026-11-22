@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-import argparse
-import json
-import math
 import os
 from pathlib import Path
 from typing import Any
 
 import yaml
-from robot_contracts.io import sha256_file as _sha256
 from robot_contracts.project_paths import project_path
 
 from dual_arm_runtime.offline.collection.campaign_ledger import CampaignError
@@ -18,35 +14,14 @@ from dual_arm_runtime.offline.collection.collect_attempt import REFERENCES, chec
 from dual_arm_runtime.offline.collection.scenario_selection import select_collection
 from dual_arm_runtime.offline.parallel_common import (
     backend_config_for_simulation,
-    simulation_path,
+    parse_worker_prep_args,
+    recipe_records,
     validate_backend_references,
+    validate_worker_bounds,
+    write_worker_manifest,
 )
 
 ROOT = Path(os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[7])
-
-
-def _selection_recipes(
-    runtime_template: Path, backend_template: Path, selection: dict[str, Any] | None
-) -> dict[str, Any]:
-    if selection is not None:
-        return {
-            "runtime_teacher": selection["recipes"]["runtime_teacher"],
-            "simulation_teacher": selection["recipes"]["simulation_teacher"],
-        }
-    return {
-        "runtime_teacher": {
-            "field": "direct.runtime_teacher",
-            "declared": None,
-            "path": str(runtime_template),
-            "sha256": _sha256(runtime_template),
-        },
-        "simulation_teacher": {
-            "field": "direct.simulation_teacher",
-            "declared": None,
-            "path": str(backend_template),
-            "sha256": _sha256(backend_template),
-        },
-    }
 
 
 def _check_selection_paths(
@@ -74,10 +49,7 @@ def prepare_workers(
     speed: float,
     selection: dict[str, Any] | None = None,
 ) -> Path:
-    if not 1 <= workers <= 16 or not 0 <= domain_base <= 232 - workers + 1:
-        raise CampaignError("workers must be 1..16 and ROS domain IDs must stay in 0..232")
-    if not math.isfinite(speed) or not 0.1 < speed <= 100:
-        raise CampaignError("realtime speed must be finite and within (0.1, 100]")
+    validate_worker_bounds(workers, domain_base, speed)
     project, directory = project.resolve(), directory.resolve()
     if not directory.is_relative_to(project_path("var", project)):
         raise CampaignError("worker directory must be below the mounted project var directory")
@@ -101,109 +73,36 @@ def prepare_workers(
             runtime[name] = str((runtime_template.parent / runtime[name]).resolve())
     validate_backend_references(backend, backend_template, project)
     backend_config_sim = backend_config_for_simulation(backend_template, project)
-    recipes = _selection_recipes(runtime_template, backend_template, selection)
-    teacher_api = None if selection is None else selection["capabilities"]["teacher"]
-    directory.mkdir(parents=True, exist_ok=False)
-    entries = []
-    for index in range(workers):
-        domain_id = domain_base + index
-        worker_id = f"worker-{index + 1:02d}"
-        worker_dir = directory / worker_id
-        worker_dir.mkdir()
-        namespace = f"/record_{directory.name.replace('-', '_')[-40:]}_{index + 1}"
-        runtime["robot_namespace"] = namespace
-        runtime_path = worker_dir / "runtime.yaml"
-        runtime_path.write_text(yaml.safe_dump(runtime, sort_keys=False), encoding="utf-8")
-        entries.append(
-            {
-                "id": worker_id,
-                "domain_id": domain_id,
-                "namespace": namespace,
-                "run_id_prefix": f"{directory.name}-{worker_id}",
-                "output_root": str(worker_dir),
-                "runtime_config": str(runtime_path),
-                "backend_config": backend_config_sim,
-                "backend_log": str(worker_dir / "backend-runs/backend/log"),
-                "backend_ready": str(worker_dir / "backend-runs/backend/ready.json"),
-                "run_root": simulation_path(worker_dir / "backend-runs", project),
-                "binding": None
-                if selection is None
-                else {
-                    **selection.get("binding", {}),
-                    "robot": selection.get("robot"),
-                    "task": selection.get("task"),
-                    "scenario_id": selection.get("scenario_id"),
-                },
-                "recipes": recipes,
-                "teacher_api": teacher_api,
-                "overrides": {
-                    "domain_id": domain_id,
-                    "namespace": namespace,
-                    "realtime_speed": speed,
-                    "visualization_enabled": False,
-                    "render_quality_enabled": True,
-                    "task_mode": "teacher",
-                    "action_source": "teacher",
-                },
-            }
-        )
-    manifest_selection = selection or {
-        "mode": "direct",
-        "robot": None,
-        "task": None,
-        "scenario_id": None,
-        "binding": None,
-        "profiles": None,
-        "recipes": recipes,
-        "overrides": ["direct recipes supplied explicitly"],
-    }
-    manifest = directory / "workers.json"
-    manifest.write_text(
-        json.dumps(
-            {"selection": manifest_selection, "workers": entries},
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
+    recipes = recipe_records(
+        ("runtime_teacher", "simulation_teacher"), runtime_template, backend_template, selection
     )
-    return manifest
+    teacher_api = None if selection is None else selection["capabilities"]["teacher"]
+    return write_worker_manifest(
+        directory=directory,
+        project=project,
+        workers=workers,
+        domain_base=domain_base,
+        namespace_prefix="record",
+        runtime_document=runtime,
+        backend_config=backend_config_sim,
+        recipes=recipes,
+        selection=selection,
+        extra_entry=lambda: {"teacher_api": teacher_api},
+        overrides=lambda domain_id, namespace: {
+            "domain_id": domain_id,
+            "namespace": namespace,
+            "realtime_speed": speed,
+            "visualization_enabled": False,
+            "render_quality_enabled": True,
+            "task_mode": "teacher",
+            "action_source": "teacher",
+        },
+    )
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--directory", type=Path, required=True)
-    parser.add_argument("--workers", type=int, required=True)
-    parser.add_argument("--domain-base", type=int, required=True)
-    parser.add_argument("--realtime-speed", type=float, default=1.0)
-    parser.add_argument("--robot")
-    parser.add_argument("--task")
-    parser.add_argument("--shared-root", type=Path)
-    parser.add_argument("--binding-sha256")
-    parser.add_argument("--runtime-config", type=Path)
-    parser.add_argument("--backend-template", type=Path)
-    args = parser.parse_args()
-    if args.robot is not None:
-        if args.task is None:
-            parser.error("--robot requires --task")
-        if args.runtime_config is not None or args.backend_template is not None:
-            parser.error(
-                "--robot/--task cannot be combined with --runtime-config or --backend-template"
-            )
-    else:
-        if args.task is not None:
-            parser.error("--task requires --robot")
-        if args.shared_root is not None:
-            parser.error("--shared-root requires --robot/--task")
-        if args.binding_sha256 is not None:
-            parser.error("--binding-sha256 requires --robot/--task")
-        if args.runtime_config is None or args.backend_template is None:
-            parser.error("direct mode requires --runtime-config and --backend-template")
-    code = check_ros_sdk(
-        ROOT,
-        robot=args.robot,
-        task=args.task,
-        shared_root=args.shared_root,
-    )
+    parser, args = parse_worker_prep_args(__doc__ or "", default_speed=1.0)
+    code = check_ros_sdk(ROOT, robot=args.robot, task=args.task, shared_root=args.shared_root)
     if code:
         return code
     try:

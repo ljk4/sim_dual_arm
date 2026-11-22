@@ -2,21 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Any
 
 from robot_contracts.task_state import TaskState
 
 from robot_backend_sim.common.tasks.base import TaskChunk
 
-__all__ = ["fill_teacher_chunk_response", "phase_code", "task_state_message"]
-
-
-def phase_code(phase: str, phase_codes: Mapping[str, int], *, task_name: str = "task") -> int:
-    try:
-        return phase_codes[phase]
-    except KeyError as error:
-        raise ValueError(f"unknown {task_name} phase: {phase!r}") from error
+__all__ = ["fill_teacher_chunk_response", "task_state_message"]
 
 
 def fill_teacher_chunk_response(response: Any, chunk: TaskChunk) -> Any:

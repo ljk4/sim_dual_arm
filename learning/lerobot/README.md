@@ -152,10 +152,10 @@
 
 ## 目录结构
 
-- [`src/dual_arm_learning/`](src/dual_arm_learning/README.md)：`dual_arm_learning` 核心 Python 包。
-- [`configs/`](configs/README.md)：容器环境配置 `container.env`。
-- [`docker/`](docker/README.md)：`Dockerfile`、`docker-compose.yml` 与源码声明。
-- [`scripts/`](scripts/README.md)：容器内单职责入口脚本（`convert.sh`、`train.sh`、`server_policy.sh`、`test.sh`）。
+- `src/dual_arm_learning/`：`dual_arm_learning` 核心 Python 包。
+- `configs/`：容器环境配置 `container.env`。
+- `docker/`：`Dockerfile`、`docker-compose.yml` 与源码声明。
+- `scripts/`：容器内单职责入口脚本（`convert.sh`、`train.sh`、`server_policy.sh`、`test.sh`）。
 
 ## 常用脚本
 

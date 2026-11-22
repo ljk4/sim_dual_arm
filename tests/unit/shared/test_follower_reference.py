@@ -22,7 +22,6 @@ from robot_contracts.stream_request import REQUEST_STREAM_FIRST, StreamRequest, 
 from robot_contracts.trajectory.follower_reference import (
     FollowerReference,
     FollowerValidationLimits,
-    compute_follower_reference_digest,
 )
 from robot_contracts.trajectory.spline import CubicSegment, ReferencePlan, ReferenceSample
 from robot_trajectory.follower import PreparedFollowerPlan
@@ -171,9 +170,8 @@ def constraints() -> FollowerValidationLimits:
     )
 
 
-def test_record_is_independent_and_digest_covers_every_field():
+def test_record_is_independent_and_rebuilds_cleanly():
     record = reference()
-    assert record.reference_digest == compute_follower_reference_digest(record)
     assert record.algorithm == PRODUCER
     assert record.chunk_seq == 1 and record.mode == "STREAM_FIRST"
     assert record.extension_ns == 0
@@ -184,49 +182,7 @@ def test_record_is_independent_and_digest_covers_every_field():
     assert rebuilt.flags == record.flags
 
 
-@pytest.mark.parametrize(
-    ("field", "value"),
-    (
-        ("motion_seq", 2),
-        ("accepted_backend_time_ns", 1_000_000_001),
-        ("accepted_wall_time_ns", 2_000_000_001),
-        ("joint_names", ("joint2", "joint1")),
-        ("max_accelerations", (9.0, 10.0)),
-        ("max_target_deviation_limits", (0.14, 0.15)),
-        ("raw_terminal_velocities", (1.0, 0.0)),
-        ("restricted_terminal_velocities", (1.0, 0.0)),
-        ("actual_terminal_positions", (TARGET_POSITION - 1e-6, 0.0)),
-        ("actual_terminal_velocities", (1e-6, 0.0)),
-        ("actual_terminal_accelerations", (1e-6, 0.0)),
-        ("max_target_deviations", (0.0, 0.0)),
-        ("is_final", True),
-        ("requested_window_ns", 300_000_000),
-        ("curve_duration_ns", 160_000_000),
-        ("duration_grid_ns", 2_000_000),
-        ("velocity_limited", (True, False)),
-        ("acceleration_limited", (True, False)),
-        ("boundary_preserved", (False, True)),
-    ),
-)
-def test_any_protected_field_tamper_fails(field, value):
-    record = reference()
-    with pytest.raises(ContractError):
-        replace(record, **{field: value})
-
-
-def test_tampered_raw_source_tail_is_covered():
-    record = reference()
-    original = record.request.trajectory.targets
-    changed = (original[0], Target(original[1].time_ns, (0.031, 0.0)))
-    tampered_request = replace(
-        record.request,
-        trajectory=replace(record.request.trajectory, targets=changed),
-    )
-    with pytest.raises(ContractError):
-        replace(record, request=tampered_request)
-
-
-def test_digest_changes_with_acceptance_time_and_same_fact_is_stable():
+def test_acceptance_time_distinguishes_records():
     first = reference()
     repeated = follower_reference_from_prepared(
         prepared(),
@@ -236,7 +192,6 @@ def test_digest_changes_with_acceptance_time_and_same_fact_is_stable():
         accepted_wall_time_ns=2_000_000_000,
     )
     assert repeated == first
-    assert repeated.reference_digest == first.reference_digest
     later = follower_reference_from_prepared(
         prepared(),
         request(),
@@ -244,18 +199,11 @@ def test_digest_changes_with_acceptance_time_and_same_fact_is_stable():
         accepted_backend_time_ns=120_000_000,
         accepted_wall_time_ns=2_100_000_000,
     )
-    assert later.reference_digest != first.reference_digest
+    assert later != first
 
 
 def test_validate_rejects_stored_evidence_that_does_not_rebuild():
-    # Build a syntactically valid record whose digest really covers the wrong
-    # stored endpoint; the independent DSH-030 rebuild must still reject it.
-    repaired = replace(
-        reference(),
-        actual_terminal_positions=(0.0, 0.0),
-        reference_digest=None,
-    )
-    assert repaired.reference_digest == compute_follower_reference_digest(repaired)
+    repaired = replace(reference(), actual_terminal_positions=(0.0, 0.0))
     with pytest.raises(ContractError):
         validate(repaired, profile(), constraints())
 
@@ -280,12 +228,9 @@ def test_independent_actual_reference_reconstruction_and_corrections():
 
 def test_same_curve_accepts_different_producer_identity():
     first = reference()
-    second = replace(
-        first, algorithm="another-producer", reference_digest=None
-    )
+    second = replace(first, algorithm="another-producer")
     assert first.plan == second.plan
     assert second.algorithm == "another-producer"
-    assert second.reference_digest != first.reference_digest
     rebuilt_first = validate(first, profile(), constraints())
     rebuilt_second = validate(second, profile(), constraints())
     assert rebuilt_first.plan == rebuilt_second.plan
@@ -300,21 +245,21 @@ def test_producer_identity_must_be_a_non_empty_string():
     assert caught.value.reason == "INVALID_FOLLOWER_REFERENCE"
 
 
-def test_digest_payload_uses_curve_duration_field():
+def test_document_uses_curve_duration_field():
     record = reference()
     document = record.to_document()
     assert "curve_duration_ns" in document
     assert "ruckig_duration_ns" not in document
 
 
-def test_recomputed_digest_cannot_bypass_final_or_timing_intent():
+def test_invariants_reject_invalid_final_or_timing_intent():
     record = reference()
     with pytest.raises(ContractError):
-        replace(record, is_final=True, reference_digest=None)
+        replace(record, is_final=True)
     with pytest.raises(ContractError):
-        replace(record, accepted_backend_time_ns=300_000_000, reference_digest=None)
+        replace(record, accepted_backend_time_ns=300_000_000)
     with pytest.raises(ContractError):
-        replace(record, accepted_backend_time_ns=10_000_000_001, reference_digest=None)
+        replace(record, accepted_backend_time_ns=10_000_000_001)
 
 
 def test_zero_accepted_sim_time_is_a_real_value():
@@ -323,7 +268,6 @@ def test_zero_accepted_sim_time_is_a_real_value():
         record,
         accepted_backend_time_ns=0,
         accepted_wall_time_ns=0,
-        reference_digest=None,
     )
     assert zero.accepted_backend_time_ns == 0
     validate(zero, profile(), constraints())
@@ -396,6 +340,6 @@ def test_admission_deadline_may_precede_execution_start(deadline_ns):
         original,
         trajectory=replace(original.trajectory, accept_before_ns=deadline_ns),
     )
-    corrected = replace(record, request=source, reference_digest=None)
+    corrected = replace(record, request=source)
     assert corrected.accepted_backend_time_ns <= deadline_ns < corrected.start_backend_time_ns
     assert validate(corrected, profile(), constraints()).plan == corrected.plan

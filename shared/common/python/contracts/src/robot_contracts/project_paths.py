@@ -13,10 +13,8 @@ __all__ = [
     "DIRECT_SEGMENT",
     "SEGMENT_PATTERN",
     "container_data_root",
-    "datasets_root",
     "debug_root",
     "logs_root",
-    "models_root",
     "project_path",
     "recordings_root",
     "resolve_shared_root",
@@ -58,14 +56,6 @@ def container_data_root() -> Path:
 
 def scenario_root(base: Path, robot: str | None, task: str | None = None) -> Path:
     return Path(base) / scenario_segment(robot, task)
-
-
-def datasets_root(base: Path, robot: str | None, task: str | None = None) -> Path:
-    return scenario_root(base, robot, task) / "datasets"
-
-
-def models_root(base: Path, robot: str | None, task: str | None = None) -> Path:
-    return scenario_root(base, robot, task) / "models"
 
 
 def logs_root(base: Path, robot: str | None, task: str | None = None) -> Path:

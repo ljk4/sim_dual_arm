@@ -14,7 +14,7 @@ pytest.importorskip("rclpy")
 pytest.importorskip("robot_api_msgs")
 
 from dual_arm_runtime import robot_control_client as control_module  # noqa: E402
-from dual_arm_runtime.runtime_errors import FirstFollowerRejected  # noqa: E402
+from dual_arm_runtime.robot_control_client import FirstFollowerRejected  # noqa: E402
 from robot_api_msgs.srv import SubmitFollower  # noqa: E402
 from robot_ros_support.follower_conversions import (  # noqa: E402
     follower_reference_message,

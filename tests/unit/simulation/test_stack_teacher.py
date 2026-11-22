@@ -53,7 +53,7 @@ def fixture():
     )
     control = load_control_config(MARVIN_SHARED_PROFILES / "control/marvin_control.yaml")
     kinematics = load_kinematics_config(
-        SCENARIO / "configs/simulation/checks/kinematics_check.yaml", scene_config
+        SCENARIO / "configs/simulation/scene/stack_paths.yaml", scene_config
     )
     qpos = tuple(float(value) for value in scene.data.qpos)
     source_address = scene.indices.environment.object_free_joint_qpos["source"]

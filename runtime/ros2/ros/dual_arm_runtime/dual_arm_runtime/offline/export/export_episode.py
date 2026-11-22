@@ -17,7 +17,7 @@ _PROJECT = Path(os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().paren
 from robot_contracts.models import RobotProfile  # noqa: E402
 from robot_contracts.project_paths import project_path  # noqa: E402
 
-from dual_arm_runtime.offline.audit.label_export import (  # noqa: E402
+from dual_arm_runtime.offline.export.label_export import (  # noqa: E402
     AppliedBlock,
     BrakeInterval,
     ObservationFact,
@@ -541,7 +541,6 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="override the campaign export.max_labels bound",
     )
-    parser.add_argument("--no-previews", action="store_true", help="skip preview PNGs and GIFs")
     args = parser.parse_args(argv)
     from dual_arm_runtime.offline.collection.scenario_selection import campaign_config_path
 
@@ -596,14 +595,12 @@ def main(argv: list[str] | None = None) -> int:
         phases,
     )
     rgb_index = write_images(
-        episode / "recording",
+        metadata["frames"],
         out,
         camera_names,
         rows,
         frame_map,
-        summary["phase_observations"],
         _camera_sizes(configuration),
-        previews=not args.no_previews,
     )
     for index, row in enumerate(rows):
         row["rgb"] = rgb_index.get(index, {})

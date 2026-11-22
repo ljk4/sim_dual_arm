@@ -151,7 +151,7 @@ def test_preview_does_not_commit_but_commit_rejects_repeated_time():
 )
 def test_invalid_chunks_are_rejected(actions):
     with pytest.raises(ValueError):
-        TemporalEnsemble(0.0).preview(0, 1, actions)
+        TemporalEnsemble(0.0, action_dim=16).preview(0, 1, actions)
 
 
 @pytest.mark.parametrize("value", [True, "0.1", float("nan"), float("inf"), -0.1, 1.1])

@@ -7,6 +7,8 @@ from typing import Any
 from robot_contracts.binding import ResolvedBinding
 from robot_contracts.io import read_yaml_unique_mapping
 
+from dual_arm_runtime.simulation.options import check_teacher_budget
+
 
 def configure_simulation_scenario(
     document: dict[str, Any], resolved: ResolvedBinding, *, role: str
@@ -58,36 +60,4 @@ def _check_teacher_budget(document: dict[str, Any], resolved: ResolvedBinding) -
     backend = read_yaml_unique_mapping(
         backend_path, label="simulation teacher recipe", error_cls=ValueError
     )
-    robot = backend.get("robot") if isinstance(backend, dict) else None
-    if not isinstance(robot, dict) or not isinstance(robot.get("task"), str):
-        raise ValueError(f"simulation teacher recipe has no robot.task ({backend_path})")
-    task_path = (backend_path.parent / robot["task"]).resolve()
-    if not task_path.is_file():
-        raise ValueError(f"simulation task recipe is missing: {task_path}")
-    task = read_yaml_unique_mapping(
-        task_path, label="simulation task recipe", error_cls=ValueError
-    )
-    success = task.get("success") if isinstance(task, dict) else None
-    task_teacher = task.get("teacher") if isinstance(task, dict) else None
-    if not isinstance(success, dict) or "max_task_sim_duration_s" not in success:
-        return
-    if not isinstance(task_teacher, dict):
-        raise ValueError(f"simulation task recipe is incomplete: {task_path}")
-    try:
-        budget_ns = round(float(success["max_task_sim_duration_s"]) * 1e9)
-        chunk_size = int(task_teacher["chunk_size"])
-        period_ns = int(task_teacher["action_period_ns"])
-        runtime_budget_ns = int(teacher["task_sim_budget_ns"])
-    except (KeyError, TypeError, ValueError) as error:
-        raise ValueError(f"teacher budget fields are not numeric: {error}") from error
-    if runtime_budget_ns != budget_ns:
-        raise ValueError(
-            f"runtime teacher.task_sim_budget_ns {runtime_budget_ns} differs from "
-            f"simulation success.max_task_sim_duration_s ({budget_ns})"
-        )
-    if int(teacher.get("chunk_size", -1)) != chunk_size:
-        raise ValueError("runtime teacher.chunk_size differs from the simulation task")
-    if int(teacher.get("action_period_ns", -1)) != period_ns:
-        raise ValueError(
-            "runtime teacher.action_period_ns differs from the simulation task"
-        )
+    check_teacher_budget(document, backend, backend_path, error_cls=ValueError)

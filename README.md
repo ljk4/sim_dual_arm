@@ -66,7 +66,7 @@ var/<robot-id>/<task-id>/
 │       ├── model.safetensors                # 网络权重与归一化统计量，推理直接加载
 │       └── training_args.yaml               # 训练参数备忘，仅记录不消费
 ├── logs/
-│   ├── backend/<run-id>/                    # 后端就绪标记（ready.json）、快照（backend.yaml）、run.json 与事件日志
+│   ├── backend/<run-id>/                    # 后端就绪标记（ready.json）、快照（backend.yaml）、status.json 与事件日志
 │   ├── collection/
 │   │   ├── attempts.jsonl                   # 追加式采集台账：预算、种子、终态
 │   │   ├── attempts/<attempt>/              # 每次采集尝试的运行日志

@@ -60,7 +60,6 @@ class ActModelAdapter(PolicyModelAdapter):
         self.warmup_seconds = 0.0
         self.warmup_shape: tuple[int, ...] | None = None
         self.predictions = 0
-        self._log: Any = None
 
     def reset(self) -> None:
         """ACT chunks have no model-side history; a fresh call is already reset."""
@@ -115,7 +114,6 @@ class ActModelAdapter(PolicyModelAdapter):
         }
 
     def attach_logger(self, log: Any) -> None:
-        self._log = log
         scalar = {
             key: value
             for key, value in self.summary().items()

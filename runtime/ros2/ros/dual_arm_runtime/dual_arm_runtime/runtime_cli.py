@@ -22,7 +22,6 @@ from dual_arm_runtime.run_logging import (
     emit_best_effort,
     emit_event,
     initialize_run,
-    new_run_id,
     runtime_summary,
     validate_run_id,
 )
@@ -87,7 +86,7 @@ def _parse_arguments() -> tuple[argparse.Namespace, list[str]]:
     parser.add_argument(
         "--policy-endpoint", metavar="HOST:PORT", help="Policy Service gRPC address"
     )
-    parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument("--output", "--output-root", dest="output", type=Path, default=None)
     parser.add_argument(
         "--episode-dir",
         type=Path,
@@ -99,12 +98,19 @@ def _parse_arguments() -> tuple[argparse.Namespace, list[str]]:
     parser.add_argument("--runs-output", type=Path, default=None)
     parser.add_argument("--once", action="store_true")
     parser.add_argument(
+        "--confirm",
+        action="store_true",
+        help="prompt for interactive confirmation before resetting and starting",
+    )
+    parser.add_argument(
         "--hold-after-episode",
         action="store_true",
         help="with --once, keep the runtime alive after the episode until SIGINT/SIGTERM",
     )
     parser.add_argument(
         "--reset-seed",
+        "--seed",
+        dest="reset_seed",
         type=int,
         default=None,
         help="override the configured scene/reset seed for this runtime process",
@@ -592,21 +598,67 @@ def _print_configuration_summary(
     print(f"详细参数: {run_directory / 'resolved' / 'runtime.json'}", flush=True)
 
 
+def _unique_run_id(output_dir: Path, runs_output: Path, base: str) -> str:
+    candidate = base
+    if (output_dir / candidate).exists() or (runs_output / candidate).exists():
+        suffix = 2
+        while (output_dir / f"{base}_{suffix}").exists() or (
+            runs_output / f"{base}_{suffix}"
+        ).exists():
+            suffix += 1
+        candidate = f"{base}_{suffix}"
+    return candidate
+
+
+def _confirm_start(args: argparse.Namespace, run_id: str) -> None:
+    display = (
+        f"scenario:{args.robot}/{args.task}/{args.role}"
+        if args.robot is not None
+        else str(args.config)
+    )
+    print(f"配置: {display}", flush=True)
+    if args.policy_endpoint:
+        print(f"策略服务: {args.policy_endpoint}", flush=True)
+    print(f"run_id: {run_id}", flush=True)
+    print(
+        f"seed: {args.reset_seed if args.reset_seed is not None else '<runtime reset.seed>'}",
+        flush=True,
+    )
+    print("输入 y 复原环境并开始本次任务，其他键取消: ", end="", flush=True)
+    try:
+        answer = input().strip()
+    except EOFError as error:
+        raise SystemExit("interactive: no answer; canceled") from error
+    if answer not in {"y", "Y", "yes", "YES"}:
+        print("interactive: canceled", flush=True)
+        raise SystemExit(0)
+
+
 def main() -> None:
     args, ros_args = _parse_arguments()
     try:
-        run_id = new_run_id() if args.run_id is None else validate_run_id(args.run_id)
-        if args.episode_id:
-            validate_run_id(args.episode_id)
         if args.output is None:
             args.output = recordings_root(args.robot, args.task)
+        runs_output = (
+            args.runs_output
+            if args.runs_output is not None
+            else runs_root(args.robot, args.task)
+        )
+        if args.run_id is None:
+            prefix = "interactive" if args.confirm else (args.role or "policy")
+            run_id = _unique_run_id(
+                args.output, runs_output, f"{prefix}_{time.strftime('%Y%m%d_%H%M%S')}"
+            )
+        else:
+            run_id = validate_run_id(args.run_id)
+        if args.episode_id:
+            validate_run_id(args.episode_id)
+        elif args.once:
+            args.episode_id = run_id
     except ValueError as error:
         raise SystemExit(f"invalid run/episode id: {error}") from error
-    runs_output = (
-        args.runs_output
-        if args.runs_output is not None
-        else runs_root(args.robot, args.task)
-    )
+    if args.confirm:
+        _confirm_start(args, run_id)
     configuration = _load_configuration(args, run_id)
     try:
         session = initialize_run(

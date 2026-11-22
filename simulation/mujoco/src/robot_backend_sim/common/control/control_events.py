@@ -6,6 +6,12 @@ from robot_contracts.models import ContractError
 from robot_trajectory.follower import PreparedFollowerPlan
 
 from robot_backend_sim.common.control.control_state import (
+    COMMAND_ACCEPTED as _COMMAND_ACCEPTED,
+    COMMAND_CANCELED as _COMMAND_CANCELED,
+    COMMAND_COMPLETED as _COMMAND_COMPLETED,
+    COMMAND_FAILED as _COMMAND_FAILED,
+    COMMAND_STARTED as _COMMAND_STARTED,
+    COMMAND_STOPPING as _COMMAND_STOPPING,
     MAX_EVENT_SEQUENCE,
     ChunkHistory,
     ChunkRecord,
@@ -17,13 +23,6 @@ from robot_backend_sim.common.control.control_state import (
 from robot_backend_sim.common.motion.motion_types import MotionSnapshot, Phase
 
 __all__ = ["CommandJournal"]
-
-_COMMAND_ACCEPTED = "ACCEPTED"
-_COMMAND_STARTED = "STARTED"
-_COMMAND_STOPPING = "STOPPING"
-_COMMAND_COMPLETED = "COMPLETED"
-_COMMAND_CANCELED = "CANCELED"
-_COMMAND_FAILED = "FAILED"
 
 
 def _invalid(reason: str, detail: str) -> ContractError:
@@ -111,18 +110,8 @@ class CommandJournal:
                     chunk.started_sim_ns = control_event.sim_time_ns
                     chunk.started_wall_ns = wall
                     chunk.reason = control_event.reason
-                elif control_event.phase == "RETIRED":
-                    chunk.phase = "RETIRED"
-                    chunk.finished_sim_ns = control_event.sim_time_ns
-                    chunk.finished_wall_ns = wall
-                    chunk.reason = control_event.reason
-                elif control_event.phase == "CANCELED":
-                    chunk.phase = "CANCELED"
-                    chunk.finished_sim_ns = control_event.sim_time_ns
-                    chunk.finished_wall_ns = wall
-                    chunk.reason = control_event.reason
-                elif control_event.phase == "REJECTED":
-                    chunk.phase = "REJECTED"
+                elif control_event.phase in {"RETIRED", "CANCELED", "REJECTED"}:
+                    chunk.phase = control_event.phase
                     chunk.finished_sim_ns = control_event.sim_time_ns
                     chunk.finished_wall_ns = wall
                     chunk.reason = control_event.reason

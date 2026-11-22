@@ -53,7 +53,7 @@ def _write_startup_failure(
             "model": (
                 str(model_path)
                 if model_path is not None
-                else ("" if config is None else str(config.model_path))
+                else ("" if config is None or config.model_path is None else str(config.model_path))
             ),
             "profile": "" if config is None else str(config.robot_profile_path),
             "observation_schema": ("" if config is None else str(config.observation_schema_path)),
@@ -97,6 +97,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--log-directory", type=Path, default=None)
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--snapshot-name", default="resolved_contract.json")
+    parser.add_argument(
+        "--save-predictions",
+        action="store_true",
+        help="persist per-prediction .npz artifacts under <log-directory>/predictions",
+    )
     parser.add_argument("--debug", action="store_true")
     return parser
 
@@ -132,8 +137,7 @@ def _snapshot(
     if selection is not None:
         record["selection"] = selection.summary()
         record["model_source"] = {
-            "source": selection.resolved.bundle.source,
-            "declared": selection.resolved.bundle.declared,
+            "source": "cli" if overrides and "model_path" in overrides else "latest",
             "path": str(config.model_path),
             "model_digest": config.model_bundle_digest,
         }
@@ -159,7 +163,9 @@ def _serve(
         config,
         adapter,
         log_directory=args.log_directory,
-        prediction_directory=args.log_directory / "predictions",
+        prediction_directory=(
+            args.log_directory / "predictions" if getattr(args, "save_predictions", False) else None
+        ),
         prediction_max_bytes=config.logging.max_total_bytes,
         run_id=run_id,
         startup_fields=startup,
@@ -210,12 +216,15 @@ def _target(args: argparse.Namespace, parser: argparse.ArgumentParser) -> tuple[
     return args.robot, args.task
 
 
-def _default_log_directory(robot: str | None, task: str | None, run_id: str) -> Path:
-    if robot is None or task is None:
-        segment = "_direct"
-    else:
-        segment = f"{robot}/{task}"
-    return Path(os.environ.get("DATA_ROOT", "/data")) / segment / "logs" / "policy-service" / run_id
+def _default_log_directory(robot: str | None, task: str | None, run_id: str) -> tuple[str, Path]:
+    segment = "_direct" if robot is None or task is None else f"{robot}/{task}"
+    service_root = Path(os.environ.get("DATA_ROOT", "/data")) / segment / "logs" / "policy-service"
+    if not os.environ.get("ACT_RUN_ID") and (service_root / run_id).exists():
+        suffix = 2
+        while (service_root / f"{run_id}_{suffix}").exists():
+            suffix += 1
+        run_id = f"{run_id}_{suffix}"
+    return run_id, service_root / run_id
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -225,10 +234,15 @@ def main(argv: list[str] | None = None) -> int:
     target = _target(args, parser)
     if args.shared_root is not None and target is None:
         parser.error("--shared-root requires --robot/--task")
-    if not args.run_id:
-        args.run_id = _default_run_id()
+    args.run_id = args.run_id or os.environ.get("ACT_RUN_ID") or _default_run_id()
     if args.log_directory is None:
-        args.log_directory = _default_log_directory(*(target or (None, None)), args.run_id)
+        env_log_dir = os.environ.get("ACT_LOG_DIRECTORY")
+        if env_log_dir:
+            args.log_directory = Path(env_log_dir)
+        else:
+            args.run_id, args.log_directory = _default_log_directory(
+                *(target or (None, None)), args.run_id
+            )
     if target is not None and any(
         value is not None
         for value in (args.robot_profile, args.observation_schema, args.action_schema)

@@ -18,7 +18,6 @@ from robot_contracts.validation import (
     StrictMappingError,
     StrictMappingModel,
     UniqueKeyError,
-    contract_error,
     read_unique_yaml,
     validate_config_model,
 )

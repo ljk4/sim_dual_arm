@@ -40,9 +40,22 @@ __all__ = [
 ]
 
 MAX_EVENT_SEQUENCE = 2**63 - 1
-COMMAND_PHASES = frozenset({"ACCEPTED", "STARTED", "STOPPING", "COMPLETED", "CANCELED", "FAILED"})
-COMMAND_ACTIVE_PHASES = frozenset({"ACCEPTED", "STARTED", "STOPPING"})
-COMMAND_TERMINAL_PHASES = frozenset({"COMPLETED", "CANCELED", "FAILED"})
+COMMAND_ACCEPTED = "ACCEPTED"
+COMMAND_STARTED = "STARTED"
+COMMAND_STOPPING = "STOPPING"
+COMMAND_COMPLETED = "COMPLETED"
+COMMAND_CANCELED = "CANCELED"
+COMMAND_FAILED = "FAILED"
+COMMAND_PHASES = frozenset({
+    COMMAND_ACCEPTED,
+    COMMAND_STARTED,
+    COMMAND_STOPPING,
+    COMMAND_COMPLETED,
+    COMMAND_CANCELED,
+    COMMAND_FAILED,
+})
+COMMAND_ACTIVE_PHASES = frozenset({COMMAND_ACCEPTED, COMMAND_STARTED, COMMAND_STOPPING})
+COMMAND_TERMINAL_PHASES = frozenset({COMMAND_COMPLETED, COMMAND_CANCELED, COMMAND_FAILED})
 CHUNK_PHASES = frozenset({"ACCEPTED", "STARTED", "RETIRED", "CANCELED", "REJECTED"})
 CHUNK_TERMINAL_PHASES = frozenset({"RETIRED", "CANCELED", "REJECTED"})
 
@@ -72,12 +85,6 @@ def _fingerprint_payload(prepared: PreparedFollowerPlan) -> dict[str, object]:
     return payload
 
 
-def _kind_of(prepared: object) -> str:
-    if isinstance(prepared, PreparedFollowerPlan):
-        return "FOLLOWER"
-    raise _invalid("INVALID_PREPARED_COMMAND", "prepared must be a PreparedFollowerPlan")
-
-
 @dataclass(frozen=True, slots=True)
 class PreparedControlCommand:
     """One immutable command envelope paired with its precompiled plan."""
@@ -98,8 +105,8 @@ class PreparedControlCommand:
                     "INVALID_PREPARED_COMMAND",
                     "retained request identity differs from the compiled command",
                 )
-        if _kind_of(self.prepared) != "FOLLOWER":
-            raise _invalid("INVALID_PREPARED_COMMAND", "unsupported prepared kind")
+        if not isinstance(self.prepared, PreparedFollowerPlan):
+            raise _invalid("INVALID_PREPARED_COMMAND", "prepared must be a PreparedFollowerPlan")
         if self.prepared.anchor.robot_profile_hash != self.command.context.robot_profile_hash:
             raise _invalid(
                 "PROFILE_MISMATCH",
@@ -124,7 +131,7 @@ class PreparedControlCommand:
 
     @property
     def kind(self) -> str:
-        return _kind_of(self.prepared)
+        return "FOLLOWER"
 
 
 @dataclass(frozen=True, slots=True)

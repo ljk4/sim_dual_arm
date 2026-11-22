@@ -92,9 +92,9 @@ class RobotProfile(StrictContractModel):
         frames = [camera.frame_id for camera in self.cameras]
         if len(set(frames)) != len(frames):
             raise contract_error("cameras", "duplicate camera frame_id values")
-        for camera in self.cameras:
+        for index, camera in enumerate(self.cameras):
             if not _SAFE_CAMERA_NAME.fullmatch(camera.name):
-                raise contract_error(f"cameras.{camera.name}.name", "invalid ROS topic basename")
+                raise contract_error(f"cameras[{index}].name", "invalid ROS topic basename")
         return self
 
     joint_names = property(lambda self: tuple(joint.name for joint in self.joints))

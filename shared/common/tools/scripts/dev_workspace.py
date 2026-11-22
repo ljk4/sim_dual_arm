@@ -1,19 +1,10 @@
-"""Build and verify the host-mounted ROS contract workspace.
-
-The default build compiles every common and scenario-extension ROS interface
-package into a single install tree, so switching scenarios never needs a
-rebuild.  colcon's build, log and cache directories are created in a temporary
-directory that is removed when the build finishes; only ``install/`` and
-``contracts.json`` remain in the output root.  Consumers verify that marker, the
-recorded package set, per-package source digests and generated module origins
-before sourcing the install tree, so a changed IDL cannot silently keep old
-generated code.
-"""
+"""Build and verify the host-mounted ROS contract workspace."""
 
 from __future__ import annotations
 
 import argparse
 import fcntl
+import hashlib
 import json
 import os
 import shutil
@@ -22,294 +13,296 @@ import sys
 import tempfile
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 
-from sdk_marker import (
-    BUILD_COMMAND,  # noqa: F401 - re-exported for the existing tool/test API
-    MARKER_NAME,
-    print_status,
-    verify_workspace,
-    write_marker,
-)
-from sdk_packages import (
-    PackageSelection,
-    PackageSelectionError,
-    SdkCheckError,
-    SdkError,
-    binding_selection,
-    explicit_selection,
-    full_selection,
-    package_record,
-    package_set_sha256,
-    shared_root_path,
-    validate_build_root,
-)
-
 ROOT = Path(__file__).resolve().parents[4]
-DEFAULT_BUILD_ROOT = Path("build/ros-dev")
+MARKER_NAME = "contracts.json"
+BUILD_COMMAND = "scripts/build_sdk.sh inside the runtime container"
 ROS_LOG_DIRECTORY = "/tmp/ros-dev-logs"
 
 
-# Public aliases keep the existing tool API while the shared marker module owns
-# the exact exception types.
-DevWorkspaceError = SdkError
-ContractCheckError = SdkCheckError
+class DevWorkspaceError(RuntimeError):
+    """A ROS SDK build or contract verification failure."""
+
+
+class ContractCheckError(DevWorkspaceError):
+    """The generated contract workspace is missing, stale or incomplete."""
 
 
 class BuildBusyError(DevWorkspaceError):
     """Another builder already owns this output root."""
 
 
-def resolve_selection(
-    project_root: Path,
-    *,
-    shared_root: Path | None = None,
-    scenario: str | None = None,
-    robot: str | None = None,
-    task: str | None = None,
-    packages: list[str] | None = None,
-) -> PackageSelection:
-    shared = shared_root_path(project_root, shared_root)
-    if robot is not None or task is not None:
-        if robot is None or task is None:
-            raise DevWorkspaceError("--robot and --task must be given together")
-        if scenario is not None:
-            raise DevWorkspaceError("--scenario and --robot/--task are mutually exclusive")
-        scenario = f"{robot}/{task}"
-    if scenario is not None and packages:
-        raise DevWorkspaceError("--scenario and --package are mutually exclusive")
-    try:
-        if scenario is not None:
-            return binding_selection(shared, scenario)
-        if packages:
-            return explicit_selection(Path(project_root), shared, packages)
-        return full_selection(shared)
-    except PackageSelectionError as error:
-        raise DevWorkspaceError(str(error)) from error
+@dataclass(frozen=True)
+class PackageSource:
+    name: str
+    directory: Path
+    role: str
+    source: str
+
+
+def shared_root_path(project_root: Path, explicit: Path | None = None) -> Path:
+    if explicit is not None:
+        return Path(explicit).resolve()
+    env = os.environ.get("SHARED_ROOT")
+    return Path(env).resolve() if env else (Path(project_root).resolve() / "shared").resolve()
+
+
+def validate_build_root(project_root: Path, build_root: Path, shared_root: Path) -> Path:
+    project = Path(project_root).resolve()
+    root = Path(build_root)
+    if not root.is_absolute():
+        root = project / root
+    root = root.resolve()
+    home = Path.home().resolve()
+    shared = Path(shared_root).resolve()
+    if root == Path("/") or root == project or root in project.parents:
+        raise DevWorkspaceError(f"unsafe build root: {root}")
+    if root == home or root in home.parents:
+        raise DevWorkspaceError(f"unsafe build root inside home: {root}")
+    if root == shared or shared in root.parents:
+        raise DevWorkspaceError(f"build root must not be inside shared sources: {root}")
+    if root.exists() and not root.is_dir():
+        raise DevWorkspaceError(f"build root exists but is not a directory: {root}")
+    return root
+
+
+def discover_packages(shared_root: Path) -> tuple[PackageSource, ...]:
+    shared = Path(shared_root).resolve()
+    common = shared / "common/interfaces/ros"
+    if not (common / "robot_api_msgs/package.xml").is_file():
+        raise DevWorkspaceError(f"core package robot_api_msgs missing under {common}")
+    packages: list[PackageSource] = []
+    for directory in sorted(common.iterdir()):
+        if (directory / "package.xml").is_file():
+            role = "core" if directory.name == "robot_api_msgs" else "common"
+            packages.append(
+                PackageSource(
+                    directory.name, directory.resolve(), role,
+                    directory.resolve().relative_to(shared).as_posix(),
+                )
+            )
+    for pattern in ("scenarios/*/extensions/ros/*", "scenarios/*/*/extensions/ros/*"):
+        for directory in sorted(shared.glob(pattern)):
+            if (directory / "package.xml").is_file():
+                packages.append(
+                    PackageSource(
+                        directory.name, directory.resolve(), "extension",
+                        directory.resolve().relative_to(shared).as_posix(),
+                    )
+                )
+    seen: dict[str, Path] = {}
+    for pkg in packages:
+        if pkg.name in seen:
+            raise DevWorkspaceError(f"duplicate package {pkg.name!r}: {seen[pkg.name]} and {pkg.directory}")
+        seen[pkg.name] = pkg.directory
+    return tuple(packages)
+
+
+def _package_digest(directory: Path) -> tuple[str, int]:
+    root = directory.resolve()
+    digest = hashlib.sha256()
+    count = 0
+    for path in sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix()):
+        rel = path.relative_to(root).as_posix()
+        if path.is_symlink():
+            raise DevWorkspaceError(f"package source must not contain symlinks: {rel}")
+        if not path.is_file() or "__pycache__" in path.parts or path.suffix.lower() == ".md":
+            continue
+        body = path.read_bytes()
+        digest.update(f"file\0{rel}\0{len(body)}\0".encode("utf-8"))
+        digest.update(body)
+        count += 1
+    if not count:
+        raise DevWorkspaceError(f"package source directory has no digestible files: {root}")
+    return digest.hexdigest(), count
+
+
+def _package_records(packages: tuple[PackageSource, ...]) -> tuple[dict[str, dict[str, object]], str]:
+    records: dict[str, dict[str, object]] = {}
+    overall = hashlib.sha256()
+    for pkg in sorted(packages, key=lambda item: item.name):
+        digest, files = _package_digest(pkg.directory)
+        records[pkg.name] = {
+            "role": pkg.role,
+            "source": pkg.source,
+            "files": files,
+            "sha256": digest,
+        }
+        overall.update(f"{pkg.name}\0{pkg.source}\0{digest}\n".encode("utf-8"))
+    return records, overall.hexdigest()
 
 
 @contextmanager
 def build_lock(build_root: Path) -> Iterator[None]:
-    """Hold an exclusive non-blocking lock on the output root directory."""
     root = Path(build_root).resolve()
     root.mkdir(parents=True, exist_ok=True)
-    descriptor = os.open(root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    fd = os.open(root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
     try:
         try:
-            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
-            raise BuildBusyError(
-                f"another builder is already writing {root}; wait for it or use a "
-                "different --build-root"
-            ) from error
+            raise BuildBusyError(f"another builder is already writing {root}") from error
         yield
     finally:
-        os.close(descriptor)
-
-
-def _remove_known_output(path: Path) -> None:
-    if not path.exists() and not path.is_symlink():
-        return
-    if path.is_symlink() or path.is_file():
-        path.unlink()
-        return
-    shutil.rmtree(path)
+        os.close(fd)
 
 
 def _clean_outputs(root: Path) -> None:
-    # ``build``/``log``/``colcon-home``/``workspace.json`` are removed in case an
-    # older build left its intermediates in the output root.
     for name in ("build", "install", "log", "colcon-home", "workspace.json"):
-        _remove_known_output(root / name)
+        target = root / name
+        if target.is_symlink() or target.is_file():
+            target.unlink()
+        elif target.is_dir():
+            shutil.rmtree(target)
 
 
-def colcon_command(
-    project_root: Path,
-    build_root: Path,
-    selection: PackageSelection,
-    *,
-    build_base: Path,
-    log_base: Path,
-) -> list[str]:
-    """Use the existing interpreter-policy wrapper, never a host colcon binary."""
-    root = Path(build_root).resolve()
-    return [
-        sys.executable,
-        str(Path(__file__).resolve().with_name("ros_workspace.py")),
-        "--log-base",
-        str(log_base),
-        "build",
-        "--base-paths",
-        *(str(package.directory) for package in selection.packages),
-        "--build-base",
-        str(build_base),
-        "--install-base",
-        str(root / "install"),
-        "--event-handlers",
-        "console_direct+",
-    ]
-
-
-def run_colcon(project_root: Path, build_root: Path, selection: PackageSelection) -> int:
+def run_colcon(project_root: Path, build_root: Path, packages: tuple[PackageSource, ...]) -> int:
     project = Path(project_root).resolve()
     root = Path(build_root).resolve()
     with tempfile.TemporaryDirectory(prefix="sim-dual-arm-ros-") as scratch:
         scratch_path = Path(scratch)
-        build_base = scratch_path / "build"
-        log_base = scratch_path / "log"
         colcon_home = scratch_path / "colcon-home"
         colcon_home.mkdir()
-        environment = os.environ.copy()
-        environment["COLCON_HOME"] = str(colcon_home)
-        environment["ROS_LOG_DIR"] = ROS_LOG_DIRECTORY
-        environment["PYTHONUNBUFFERED"] = "1"
-        completed = subprocess.run(
-            colcon_command(project, root, selection, build_base=build_base, log_base=log_base),
-            cwd=project,
-            env=environment,
-            check=False,
+        env = os.environ.copy()
+        env["COLCON_HOME"] = str(colcon_home)
+        env["ROS_LOG_DIR"] = ROS_LOG_DIRECTORY
+        env["PYTHONUNBUFFERED"] = "1"
+        command = [
+            sys.executable,
+            "-c",
+            "from colcon_core.command import main; raise SystemExit(main())",
+            "--log-base", str(scratch_path / "log"),
+            "build",
+            "--base-paths", *(str(pkg.directory) for pkg in packages),
+            "--build-base", str(scratch_path / "build"),
+            "--install-base", str(root / "install"),
+            "--event-handlers", "console_direct+",
+        ]
+        return subprocess.run(command, cwd=project, env=env, check=False).returncode
+
+
+def _check_modules(install_root: Path, pkg: PackageSource) -> str:
+    candidates = [
+        p.resolve() for p in sorted(install_root.glob(f"{pkg.name}/lib/python*/site-packages/{pkg.name}"))
+        if p.is_dir()
+    ]
+    if len(candidates) != 1:
+        raise ContractCheckError(
+            f"expected one generated {pkg.name} module under {install_root}, found {len(candidates)}; "
+            f"rebuild with: {BUILD_COMMAND}"
         )
-        return completed.returncode
-
-
-def _selection_records(selection: PackageSelection) -> dict[str, dict[str, object]]:
-    return {package.name: package_record(package) for package in selection.packages}
+    mod = candidates[0]
+    if not (mod / "__init__.py").is_file():
+        raise ContractCheckError(f"generated module incomplete: {pkg.name}; rebuild with: {BUILD_COMMAND}")
+    for sub in ("msg", "srv", "action"):
+        if (pkg.directory / sub).is_dir() and not (mod / sub / "__init__.py").is_file():
+            raise ContractCheckError(
+                f"generated ROS module incomplete: {pkg.name}.{sub}; rebuild with: {BUILD_COMMAND}"
+            )
+    return mod.relative_to(install_root.parent).as_posix()
 
 
 def build_workspace(
     project_root: Path,
     build_root: Path,
     *,
-    selection: PackageSelection | None = None,
     shared_root: Path | None = None,
-    runner: Callable[[Path, Path, PackageSelection], int] | None = None,
+    runner: Callable[[Path, Path, tuple[PackageSource, ...]], int] | None = None,
 ) -> dict[str, object]:
-    """Build the selected package set and publish the marker after verification."""
     project = Path(project_root).resolve()
     shared = shared_root_path(project, shared_root)
-    chosen = selection or full_selection(shared)
+    packages = discover_packages(shared)
     root = validate_build_root(project, build_root, shared)
     marker_path = root / MARKER_NAME
     build = run_colcon if runner is None else runner
     with build_lock(root):
-        # Record the exact source snapshot this build consumes.
-        records = _selection_records(chosen)
+        records, set_digest = _package_records(packages)
         marker_path.unlink(missing_ok=True)
         _clean_outputs(root)
         try:
-            code = build(project, root, chosen)
+            code = build(project, root, packages)
             if code != 0:
                 raise DevWorkspaceError(f"colcon build failed with exit code {code}")
-            document = write_marker(root, chosen, records)
+            install_root = root / "install"
+            if not (install_root / "setup.bash").is_file():
+                raise DevWorkspaceError(f"generated ROS install setup missing: {install_root / 'setup.bash'}")
+            for pkg in packages:
+                records[pkg.name]["module_root"] = _check_modules(install_root, pkg)
+            document: dict[str, object] = {
+                "kind": "sim-dual-arm-ros-sdk",
+                "packages": records,
+                "package_set_sha256": set_digest,
+                "install": {"directory": "install", "setup": "install/setup.bash"},
+            }
+            temp = marker_path.with_name(f".{MARKER_NAME}.{os.getpid()}.tmp")
+            try:
+                temp.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+                os.replace(temp, marker_path)
+            finally:
+                temp.unlink(missing_ok=True)
             return document
         except BaseException:
             marker_path.unlink(missing_ok=True)
             raise
 
 
-def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    def common(subparser: argparse.ArgumentParser) -> None:
-        subparser.add_argument("--project-root", type=Path, default=ROOT)
-        subparser.add_argument("--shared-root", type=Path)
-        subparser.add_argument(
-            "--scenario", help="scenario as <robot>/<task> selecting its binding package set"
+def verify_workspace(
+    project_root: Path,
+    build_root: Path,
+    *,
+    shared_root: Path | None = None,
+) -> dict[str, object]:
+    project = Path(project_root).resolve()
+    shared = shared_root_path(project, shared_root)
+    root = validate_build_root(project, build_root, shared)
+    marker_path = root / MARKER_NAME
+    try:
+        document = json.loads(marker_path.read_text(encoding="utf-8"))
+    except FileNotFoundError as error:
+        raise ContractCheckError(f"contracts marker missing: {marker_path}; build with: {BUILD_COMMAND}") from error
+    except (OSError, json.JSONDecodeError) as error:
+        raise ContractCheckError(f"contracts marker unreadable: {marker_path}: {error}; rebuild with: {BUILD_COMMAND}") from error
+    if not isinstance(document, dict) or document.get("kind") != "sim-dual-arm-ros-sdk":
+        raise ContractCheckError(f"invalid contracts marker: {marker_path}; rebuild with: {BUILD_COMMAND}")
+    packages = discover_packages(shared)
+    _, current_digest = _package_records(packages)
+    if document.get("package_set_sha256") != current_digest:
+        raise ContractCheckError(
+            f"generated ROS contracts are stale (sources changed); rebuild with: {BUILD_COMMAND}"
         )
-        subparser.add_argument("--robot", help="robot id below <shared-root>/scenarios")
-        subparser.add_argument("--task", help="task id below <shared-root>/scenarios/<robot>")
-        subparser.add_argument(
-            "--package",
-            action="append",
-            default=[],
-            help="explicit common package name or extension directory (repeatable)",
-        )
-
-    digest = subparsers.add_parser("digest", help="print the selected package-set digest")
-    common(digest)
-
-    build = subparsers.add_parser("build", help="build the selected packages")
-    common(build)
-    build.add_argument("--build-root", type=Path, required=True)
-
-    check = subparsers.add_parser("check", help="verify marker, package set, digests, modules")
-    common(check)
-    check.add_argument("--build-root", type=Path, required=True)
-
-    status = subparsers.add_parser("status", help="verify and print generated module origins")
-    common(status)
-    status.add_argument("--build-root", type=Path, required=True)
-    return parser
-
-
-def _digest_record(selection: PackageSelection) -> dict[str, object]:
-    records = _selection_records(selection)
-    return {
-        "packages": records,
-        "package_set_sha256": package_set_sha256(records),
-    }
+    install_root = root / "install"
+    if not (install_root / "setup.bash").is_file():
+        raise ContractCheckError(f"generated ROS install setup missing; rebuild with: {BUILD_COMMAND}")
+    for pkg in packages:
+        _check_modules(install_root, pkg)
+    return document
 
 
 def main(argv: list[str] | None = None) -> int:
-    arguments = _parser().parse_args(argv)
-    project = Path(arguments.project_root).resolve()
+    parser = argparse.ArgumentParser(description=__doc__)
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    for name in ("build", "check"):
+        sub = subparsers.add_parser(name)
+        sub.add_argument("--project-root", type=Path, default=ROOT)
+        sub.add_argument("--shared-root", type=Path)
+        sub.add_argument("--build-root", type=Path, required=True)
+        # Accepted for caller compatibility; SDK always covers every package.
+        sub.add_argument("--scenario")
+        sub.add_argument("--robot")
+        sub.add_argument("--task")
+    args = parser.parse_args(argv)
     try:
-        explicit = (
-            arguments.scenario is not None
-            or arguments.robot is not None
-            or arguments.task is not None
-            or bool(arguments.package)
-        )
-        selection: PackageSelection | None
-        if arguments.command in {"check", "status"} and not explicit:
-            # A service-side check verifies whatever package set was recorded.
-            selection = None
-        elif arguments.command == "build" and not arguments.package:
-            # One build covers every scenario; --scenario is accepted on build
-            # for compatibility but never narrows the generated SDK.
-            selection = resolve_selection(project, shared_root=arguments.shared_root)
+        if args.command == "build":
+            document = build_workspace(args.project_root, args.build_root, shared_root=args.shared_root)
+            names = ", ".join(sorted(document["packages"]))  # type: ignore[arg-type]
+            print(f"built {len(document['packages'])} packages ({names}): {document['package_set_sha256']} -> {args.build_root.resolve()}")
         else:
-            selection = resolve_selection(
-                project,
-                shared_root=arguments.shared_root,
-                scenario=arguments.scenario,
-                robot=arguments.robot,
-                task=arguments.task,
-                packages=arguments.package,
-            )
-        shared = (
-            selection.shared_root
-            if selection is not None
-            else shared_root_path(project, arguments.shared_root)
-        )
-        if arguments.command == "digest":
-            assert selection is not None
-            print(json.dumps(_digest_record(selection), sort_keys=True))
-        elif arguments.command == "build":
-            assert selection is not None
-            document = build_workspace(
-                project, arguments.build_root, selection=selection, shared_root=shared
-            )
-            print(
-                f"built {len(selection.packages)} packages "
-                f"({', '.join(selection.names)}): {document['package_set_sha256']} -> "
-                f"{Path(arguments.build_root).resolve()}"
-            )
-        elif arguments.command == "check":
-            document = verify_workspace(
-                project, arguments.build_root, selection=selection, shared_root=shared
-            )
-            print(
-                f"contracts ok: {', '.join(sorted(document['packages']))} "
-                f"({document['package_set_sha256']})"
-            )
-        else:
-            document = verify_workspace(
-                project, arguments.build_root, selection=selection, shared_root=shared
-            )
-            print_status(document, arguments.build_root)
-    except (SdkError, PackageSelectionError, OSError) as error:
+            document = verify_workspace(args.project_root, args.build_root, shared_root=args.shared_root)
+            names = ", ".join(sorted(document["packages"]))  # type: ignore[arg-type]
+            print(f"contracts ok: {names} ({document['package_set_sha256']})")
+    except (DevWorkspaceError, OSError) as error:
         print(f"ERROR: {error}", file=sys.stderr, flush=True)
         return 1
     return 0

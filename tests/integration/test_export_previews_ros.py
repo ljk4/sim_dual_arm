@@ -1,4 +1,4 @@
-"""Disabling previews must preserve the recorded RGB and its hashes."""
+"""Exporting RGB frames preserves images and hashes."""
 
 import hashlib
 
@@ -15,8 +15,7 @@ from robot_api_msgs.msg import CameraFrame  # noqa: E402
 from sensor_msgs.msg import Image  # noqa: E402
 
 
-@pytest.mark.parametrize("previews", [False, True])
-def test_previews_are_optional_but_rgb_is_always_exported(tmp_path, previews):
+def test_rgb_is_exported_with_hashes(tmp_path):
     recording = tmp_path / "recording"
     raw = bytes([10, 20, 30, 40, 50, 60])
     message = CameraFrame(
@@ -36,11 +35,9 @@ def test_previews_are_optional_but_rgb_is_always_exported(tmp_path, previews):
     mapping = write_images(
         recording, out, ("global",),
         [{"observation_id": 1, "observation_backend_time_ns": 1}],
-        {1: (1,)}, {"stable": 1}, {"global": (2, 1)}, previews=previews,
+        {1: (1,)}, {"global": (2, 1)},
     )
     png = out / mapping[0]["global"]["path"]
     assert PillowImage.open(png).tobytes() == raw
     assert mapping[0]["global"]["rgb_sha256"] == hashlib.sha256(raw).hexdigest()
     assert mapping[0]["global"]["png_sha256"] == hashlib.sha256(png.read_bytes()).hexdigest()
-    assert (out / "video/global.gif").exists() is previews
-    assert (out / "preview/stable_global.png").exists() is previews

@@ -7,5 +7,5 @@ __all__ = [
     "export_media",
     "export_quality",
     "follower_definition",
-    "mcap_reader",
+    "label_export",
 ]

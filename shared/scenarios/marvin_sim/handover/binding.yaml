@@ -58,5 +58,3 @@ source_roots:
   - ..
 artifact_roots:
   - /data
-
-references: []

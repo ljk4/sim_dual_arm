@@ -16,17 +16,13 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from robot_contracts.models import ContractError, RobotProfile, RunContext, Target
-from robot_trajectory.spline_math import validate_reference_inputs
+from robot_contracts.models import ContractError, RobotProfile
 
 from robot_backend_sim.marvin_sim.handover.scene_config import MarvinSceneConfig
 from robot_backend_sim.common.config.motion_config import ControlConfig
-from robot_backend_sim.common.tasks.base import TaskChunk
-from robot_backend_sim.common.tasks.math import (
-    duration_from_limits,
-    scalar_acceleration,
-    trapezoid_progress,
-)
+from robot_backend_sim.common.tasks.base import TaskChunk, TeacherPrepareSnapshot
+from robot_backend_sim.common.tasks.math import duration_from_limits
+from robot_backend_sim.common.tasks.plugin_base import sample_step_chunk, teacher_joint_limits
 from robot_backend_sim.marvin_sim.handover.gate import HandoverFeedback, HandoverGateFact
 from robot_backend_sim.marvin_sim.handover.plan import (
     HandoverLayout,
@@ -34,6 +30,7 @@ from robot_backend_sim.marvin_sim.handover.plan import (
     plan_handover,
 )
 from robot_backend_sim.marvin_sim.handover.task_config import BEHAVIOUR_PHASES, HandoverTaskConfig
+from robot_backend_sim.marvin_sim.robot_config import public_dual_arm_positions
 
 __all__ = [
     "FrozenHandoverScene",
@@ -54,17 +51,7 @@ def _error(reason: str, message: str) -> TeacherError:
     return TeacherError(reason, message)
 
 
-@dataclass(frozen=True, slots=True)
-class HandoverSnapshot:
-    """Immutable truth captured at prepare; never a live MjData reference."""
-
-    context: RunContext
-    task_epoch: int
-    sim_time_ns: int
-    capture_seq: int
-    qpos: tuple[float, ...]
-    seed: int
-    controller_command_id: str
+HandoverSnapshot = TeacherPrepareSnapshot
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,7 +97,7 @@ class HandoverStep:
 
 @dataclass(frozen=True, slots=True)
 class HandoverPlan:
-    context: RunContext
+    context: Any
     task_epoch: int
     config_digest: str
     plan_digest: str
@@ -130,34 +117,6 @@ class HandoverPlan:
 
     def step_at(self, index: int) -> HandoverStep:
         return self.steps[min(max(index, 0), len(self.steps) - 1)]
-
-
-def _joint_limits(
-    profile: RobotProfile, control: ControlConfig, teacher: Any
-) -> tuple[tuple[float, ...], tuple[float, ...]]:
-    velocities = [
-        float(joint.max_velocity) * teacher.max_joint_velocity_fraction
-        for joint in profile.joints
-    ]
-    accelerations = [
-        float(value) * teacher.max_joint_acceleration_fraction
-        for value in control.max_accelerations
-    ]
-    for index in (7, 15):
-        velocities[index] = teacher.gripper_velocity_m_s
-        accelerations[index] = teacher.gripper_acceleration_m_s2
-    return tuple(velocities), tuple(accelerations)
-
-
-def _public_positions(
-    qpos: tuple[float, ...],
-    robot: Any,
-    left_opening: float,
-    right_opening: float,
-) -> tuple[float, ...]:
-    left = tuple(float(qpos[address]) for address in robot.arm_joint_qpos["left"])
-    right = tuple(float(qpos[address]) for address in robot.arm_joint_qpos["right"])
-    return (*left, float(left_opening), *right, float(right_opening))
 
 
 def _plan_digest(
@@ -287,14 +246,22 @@ def build_handover_plan(
     open_total = float(scene_config.robot.gripper_open_total)
     left_close = float(teacher.left_close_opening_m)
     right_close = float(teacher.right_close_opening_m)
-    velocity_limits, acceleration_limits = _joint_limits(profile, control_config, teacher)
+    velocity_limits, acceleration_limits = teacher_joint_limits(profile, control_config, teacher)
     minimum_s = float(teacher.phase_min_duration_s)
 
-    start = _public_positions(snapshot.qpos, robot, open_total, open_total)
+    start = public_dual_arm_positions(
+        snapshot.qpos, robot.arm_joint_qpos["left"], robot.arm_joint_qpos["right"], open_total, open_total
+    )
     steps: list[HandoverStep] = []
 
     def public(name: str, left_open: float, right_open: float) -> tuple[float, ...]:
-        return _public_positions(targets[name].qpos, robot, left_open, right_open)
+        return public_dual_arm_positions(
+            targets[name].qpos,
+            robot.arm_joint_qpos["left"],
+            robot.arm_joint_qpos["right"],
+            left_open,
+            right_open,
+        )
 
     def add(
         name: str,
@@ -412,88 +379,6 @@ def build_handover_plan(
     )
 
 
-def _teacher_gate(
-    plan: HandoverPlan,
-    gate: HandoverGateFact,
-    feedback: HandoverFeedback,
-    capture_seq: int,
-    observation_time_ns: int,
-    chunk_size: int,
-    period_ns: int,
-) -> HandoverStep:
-    if chunk_size != 60 or period_ns != 50_000_000:
-        raise _error("INVALID_TEACHER_CLOCK", "teacher chunks are exactly 60 points at 50 ms")
-    if feedback.capture_seq != capture_seq or feedback.sim_time_ns != observation_time_ns:
-        raise _error(
-            "TEACHER_FEEDBACK_MISMATCH",
-            "feedback does not belong to the retained capture/observation",
-        )
-    if gate.failure or gate.status == "FAILED":
-        raise _error("TEACHER_GATE_FAILED", gate.failure or "task gate failed")
-    if gate.step_index >= len(plan.steps):
-        raise _error("TEACHER_PLAN_COMPLETE", "all gated steps have passed")
-    if gate.active_start_sim_time_ns < 0:
-        raise _error("TEACHER_NOT_STARTED", "no measured step start exists")
-    return plan.step_at(gate.step_index)
-
-
-def _teacher_positions(
-    step: HandoverStep,
-    start_ns: int,
-    observation_time_ns: int,
-    chunk_size: int,
-    period_ns: int,
-    accelerations: tuple[float, ...],
-) -> tuple[tuple[tuple[float, ...], ...], tuple[str, ...], tuple[int, ...]]:
-    positions: list[tuple[float, ...]] = []
-    phases: list[str] = []
-    times: list[int] = []
-    duration_ns = round(step.duration_s * 1e9)
-    acceleration = scalar_acceleration(
-        step.start_positions, step.end_positions, accelerations
-    )
-    for index in range(chunk_size):
-        target_time_ns = observation_time_ns + (index + 1) * period_ns
-        elapsed = target_time_ns - start_ns
-        if step.final or duration_ns <= 0 or elapsed >= duration_ns:
-            position = step.end_positions
-        else:
-            progress = trapezoid_progress(
-                max(0.0, elapsed / 1e9), step.duration_s, acceleration
-            )
-            position = tuple(
-                first + (last - first) * progress
-                for first, last in zip(
-                    step.start_positions, step.end_positions, strict=True
-                )
-            )
-        positions.append(position)
-        phases.append(step.phase)
-        times.append((index + 1) * period_ns)
-    return tuple(positions), tuple(phases), tuple(times)
-
-
-def _chunk_digest(
-    plan: HandoverPlan,
-    step: HandoverStep,
-    capture_seq: int,
-    observation_time_ns: int,
-    positions: tuple[tuple[float, ...], ...],
-    gate: HandoverGateFact,
-) -> str:
-    payload = {
-        "plan_digest": plan.plan_digest,
-        "step": step.name,
-        "capture_seq": capture_seq,
-        "observation_time_ns": observation_time_ns,
-        "positions": positions,
-        "phase": step.phase,
-        "gate": gate.status,
-    }
-    text = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
-    return hashlib.sha256(text.encode()).hexdigest()
-
-
 def sample_handover_chunk(
     plan: HandoverPlan,
     *,
@@ -509,55 +394,21 @@ def sample_handover_chunk(
     control_config: ControlConfig,
     start_sim_time_ns: int,
 ) -> TaskChunk:
-    """Sample only the currently gated step and hold its end pose.
-
-    ``start_sim_time_ns`` is the scheduled hand-off at which the first chunk of
-    this step begins moving.  Aligning the target clock with the hand-off keeps
-    the reference continuous with the state the follower inherits.
-    """
-    step = _teacher_gate(
-        plan, gate, feedback, capture_seq, observation_time_ns, chunk_size, period_ns
-    )
-    positions, phases, times = _teacher_positions(
-        step,
-        start_sim_time_ns,
-        observation_time_ns,
-        chunk_size,
-        period_ns,
-        plan.accelerations,
-    )
-    if not all(math.isfinite(value) for position in positions for value in position):
-        raise _error("INVALID_TEACHER_TARGET", "teacher produced a non-finite target")
-    targets = tuple(
-        Target(time_ns, position) for time_ns, position in zip(times, positions, strict=True)
-    )
-    validate_reference_inputs(
-        positions[0],
-        targets,
-        profile.joints,
-        control_config.max_accelerations,
-    )
-    digest = _chunk_digest(plan, step, capture_seq, observation_time_ns, positions, gate)
-    duration_ns = round(step.duration_s * 1e9)
-    wait_s = max(0.0, (observation_time_ns - start_sim_time_ns - duration_ns) / 1e9)
-    return TaskChunk(
+    """Sample only the currently gated step and hold its end pose."""
+    return sample_step_chunk(
+        plan,
+        steps=plan.steps,
+        behaviour_phases=BEHAVIOUR_PHASES,
+        gate=gate,
+        feedback=feedback,
         request_id=request_id,
         task_epoch=task_epoch,
         capture_seq=capture_seq,
         observation_time_ns=observation_time_ns,
-        source_time_ns=feedback.sim_time_ns,
-        robot_profile_hash=plan.context.robot_profile_hash,
-        plan_digest=plan.plan_digest,
-        chunk_digest=digest,
-        phase=step.phase,
-        phases=phases,
-        phase_codes=tuple(BEHAVIOUR_PHASES.index(phase) for phase in phases),
-        time_from_observation_ns=times,
-        positions=positions,
-        ik_max_position_error_m=plan.ik_max_position_error_m,
-        ik_max_orientation_error_rad=plan.ik_max_orientation_error_rad,
-        gate_state=gate.status,
-        gate_failure=gate.failure,
-        phase_start_sim_time_ns=start_sim_time_ns,
-        phase_wait_s=wait_s,
+        chunk_size=chunk_size,
+        period_ns=period_ns,
+        profile=profile,
+        control_config=control_config,
+        start_sim_time_ns=int(start_sim_time_ns),
+        error_cls=TeacherError,
     )

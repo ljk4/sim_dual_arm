@@ -103,7 +103,6 @@ def follower_reference_message(value: FollowerReference) -> FollowerReferenceMes
         acceleration_limited=list(value.acceleration_limited),
         boundary_preserved=list(value.boundary_preserved),
         algorithm=value.algorithm,
-        reference_digest=value.reference_digest or "",
     )
 
 
@@ -152,7 +151,6 @@ def follower_reference_from_message(value: object) -> FollowerReference:
         acceleration_limited=tuple(value.acceleration_limited),
         boundary_preserved=tuple(value.boundary_preserved),
         algorithm=value.algorithm,
-        reference_digest=value.reference_digest or None,
     )
     if value.extension_ns != reference.extension_ns:
         raise _invalid("extension_ns differs from the retained durations")

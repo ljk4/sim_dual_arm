@@ -11,7 +11,6 @@ import uuid
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 from google.protobuf.message import Message
 from robot_contracts.io import canonical_sha256 as semantic_hash
@@ -37,6 +36,22 @@ def _bad(reason: str, detail: str = "") -> PolicyError:
 
 def _payload_digest(message: Message) -> str:
     return hashlib.sha256(message.SerializeToString(deterministic=True)).hexdigest()
+
+
+def _predict_fingerprint(request: object) -> str:
+    observation = request.observation  # type: ignore[attr-defined]
+    payload = {
+        "session_id": str(request.session_id),  # type: ignore[attr-defined]
+        "request_id": str(request.request_id),  # type: ignore[attr-defined]
+        "observation_id": int(observation.observation_id),
+        "reference_robot_time_ns": int(observation.reference_robot_time_ns),
+        "state_seq": int(observation.joints.state_seq),
+        "frames": [
+            (str(camera.camera_name), int(camera.frame_seq), int(camera.captured_at_robot_time_ns))
+            for camera in observation.cameras
+        ],
+    }
+    return semantic_hash(payload)
 
 
 def _finite(value: object, location: str) -> float:
@@ -343,7 +358,7 @@ class PolicyService:
             if context != session.context:
                 raise _bad("STALE_CONTEXT", "predict context differs from the open session")
             observation = self._validate_observation(session, request.observation)  # type: ignore[attr-defined]
-            digest = _payload_digest(request)  # type: ignore[arg-type]
+            digest = _predict_fingerprint(request)
             cached = session.request_cache.get(request_id)
             if cached is not None:
                 previous_digest, reply = cached

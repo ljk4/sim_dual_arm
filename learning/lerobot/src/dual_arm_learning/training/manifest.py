@@ -7,8 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from ..config import TrainingConfig
-from ..dataset.common import canonical_hash, file_sha256, tree_hashes
-from ..dataset.sample_filter import SampleFilterMask, build_filter_mask, load_filter_mask
+from ..dataset.common import canonical_hash, file_sha256
+from ..dataset.sample_filter import SampleFilterMask, build_filter_mask
 from .support import DatasetAudit, TrainingError
 
 
@@ -158,82 +158,33 @@ def _verify_split_metadata(
         )
     if not (split_root / "meta/stats.json").is_file():
         raise TrainingError(f"{split_name} meta/stats.json is missing")
-    if not config.verify_hashes:
-        return
-    declared = split.get("files")
-    if not isinstance(declared, dict) or not declared:
-        raise TrainingError(f"{split_name} manifest has no file hash inventory")
-    actual = tree_hashes(split_root)
-    if actual == declared:
-        return
-    missing = sorted(set(declared) - set(actual))
-    extra = sorted(set(actual) - set(declared))
-    changed = sorted(
-        name for name in set(actual) & set(declared) if actual[name] != declared[name]
-    )
-    raise TrainingError(
-        f"{split_name} dataset file hash mismatch: missing={missing[:4]} "
-        f"extra={extra[:4]} changed={changed[:4]}"
-    )
 
 
-def _verify_episode_facts(
-    config: TrainingConfig,
-    split_name: str,
-    episode: dict[str, Any],
-    fact_records: list[dict[str, Any]],
-) -> None:
+def _verify_episode_facts(split_name: str, episode: dict[str, Any]) -> None:
     facts = episode.get("source_facts")
     if not isinstance(facts, dict):
         raise TrainingError(f"{split_name} episode has no source task/runtime facts")
-    stored_facts_hash = facts.get("facts_sha256")
-    payload = {key: value for key, value in facts.items() if key != "facts_sha256"}
-    if stored_facts_hash != canonical_hash(payload):
-        raise TrainingError(f"{split_name} source facts hash mismatch")
     if (
-        payload.get("task", {}).get("outcome") != "succeeded"
-        or payload.get("task", {}).get("reason") != "TASK_SUCCEEDED"
+        facts.get("task", {}).get("outcome") != "succeeded"
+        or facts.get("task", {}).get("reason") != "TASK_SUCCEEDED"
     ):
         raise TrainingError(f"{split_name} source task did not succeed")
     if (
-        payload.get("runtime", {}).get("outcome") not in {"stopped", "completed"}
-        or payload.get("runtime", {}).get("reason") != "TASK_SUCCEEDED"
+        facts.get("runtime", {}).get("outcome") not in {"stopped", "completed"}
+        or facts.get("runtime", {}).get("reason") != "TASK_SUCCEEDED"
     ):
         raise TrainingError(f"{split_name} source runtime did not stop successfully")
-    if payload.get("recording", {}).get("complete") is not True:
+    if facts.get("recording", {}).get("complete") is not True:
         raise TrainingError(f"{split_name} source recording is incomplete")
-    if payload.get("quality_qualified") is not True:
+    if facts.get("quality_qualified") is not True:
         raise TrainingError(f"{split_name} source quality is not qualified")
-    fact_records.append(
-        {
-            "attempt_id": episode.get("attempt_id"),
-            "seed": episode.get("seed"),
-            "facts": payload,
-        }
-    )
-    if not config.verify_hashes:
-        return
-    files = episode.get("source_files")
-    if not isinstance(files, dict):
-        raise TrainingError(f"{split_name} episode has no source file hashes")
-    for _name, record in files.items():
-        if not isinstance(record, dict) or "path" not in record or "sha256" not in record:
-            raise TrainingError(f"{split_name} source hash record is malformed")
-        source = Path(str(record["path"]))
-        if not source.is_file() or file_sha256(source) != record["sha256"]:
-            raise TrainingError(f"{split_name} source export hash mismatch: {source}")
 
 
-def _verify_split_episodes(
-    config: TrainingConfig,
-    split_name: str,
-    split: dict[str, Any],
-    fact_records: list[dict[str, Any]],
-) -> None:
+def _verify_split_episodes(split_name: str, split: dict[str, Any]) -> None:
     for episode in split.get("episodes", []):
         if not isinstance(episode, dict):
             raise TrainingError(f"{split_name} episode entry is not an object")
-        _verify_episode_facts(config, split_name, episode, fact_records)
+        _verify_episode_facts(split_name, episode)
 
 
 def _verify_full_lengths(
@@ -260,7 +211,6 @@ def _audit(
     train_indices: list[int],
     validation_indices: list[int],
     manifest_path: Path,
-    config: TrainingConfig,
     synthetic: bool,
 ) -> DatasetAudit:
     return DatasetAudit(
@@ -273,11 +223,6 @@ def _audit(
         train_frames=int(training.get("frame_count", 0)),
         validation_frames=int(validation.get("frame_count", 0)),
         manifest_sha256=file_sha256(manifest_path),
-        verified_files=(
-            len(training.get("files", {})) + len(validation.get("files", {}))
-            if config.verify_hashes
-            else 0
-        ),
         synthetic=synthetic,
     )
 
@@ -288,18 +233,15 @@ def verify_dataset_manifest(
     allow_synthetic: bool = False,
     require_full: bool | None = None,
 ) -> DatasetAudit:
-    """Verify the recorded dataset split and every declared hash."""
+    """Verify the recorded dataset split and source facts."""
     manifest_path, manifest, synthetic = _load_manifest(config, allow_synthetic, require_full)
     training, validation, train_indices, validation_indices = _manifest_splits(config, manifest)
     _verify_profile(config, manifest)
     _verify_processors(manifest)
     root = config.data_root
-    fact_records: list[dict[str, Any]] = []
     for split_name, split in (("training", training), ("validation", validation)):
         _verify_split_metadata(config, root, split_name, split)
-        _verify_split_episodes(config, split_name, split, fact_records)
-    if manifest.get("source_facts_sha256") != canonical_hash(fact_records):
-        raise TrainingError("dataset manifest source task/runtime facts hash mismatch")
+        _verify_split_episodes(split_name, split)
     _verify_full_lengths(config, require_full, training, validation)
     return _audit(
         root=root,
@@ -308,7 +250,6 @@ def verify_dataset_manifest(
         train_indices=train_indices,
         validation_indices=validation_indices,
         manifest_path=manifest_path,
-        config=config,
         synthetic=synthetic,
     )
 
@@ -317,14 +258,10 @@ def sample_filter(config: TrainingConfig, audit: DatasetAudit) -> SampleFilterMa
     """Return the full-mode anchor mask, computing it in memory from the rule YAML."""
     if config.sample_filter is None or config.mode != "full":
         return None
-    suffix = config.sample_filter.suffix.lower()
-    if suffix == ".json":
-        mask = load_filter_mask(config.sample_filter)
-    elif suffix in {".yaml", ".yml"}:
-        mask = build_filter_mask(rule_path=config.sample_filter, dataset_root=config.data_root)
-    else:
-        raise TrainingError("data.sample_filter must be a rule YAML or a mask JSON")
-    if mask.document["dataset"]["manifest"]["sha256"] != audit.manifest_sha256:
+    if config.sample_filter.suffix.lower() not in {".yaml", ".yml"}:
+        raise TrainingError("data.sample_filter must be a rule YAML")
+    mask = build_filter_mask(rule_path=config.sample_filter, dataset_root=config.data_root)
+    if mask.manifest_sha256 != audit.manifest_sha256:
         raise TrainingError("sample filter was generated from a different dataset manifest")
     if mask.source_frames != audit.train_frames:
         raise TrainingError("sample filter source frame count differs from the training split")

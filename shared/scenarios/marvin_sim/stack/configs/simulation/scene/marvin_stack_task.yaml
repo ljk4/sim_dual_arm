@@ -1,5 +1,5 @@
 # Marvin stack task evaluation, gate thresholds and Teacher configuration.
-planning_config: ../checks/kinematics_check.yaml
+planning_config: stack_paths.yaml
 
 objects:
   source_half_extents_m: [0.02, 0.02, 0.02]

@@ -17,7 +17,7 @@ from robot_backend_sim.common.config.backend_config import (  # noqa: E402
     load_backend_config,
 )
 
-CONFIG_PATH = ROOT / "shared/scenarios/marvin_sim/stack/configs/simulation/backend/backend.yaml"
+CONFIG_PATH = ROOT / "shared/scenarios/marvin_sim/stack/configs/simulation/backend/backend_stack_teacher.yaml"
 DEFAULT_DOCUMENT = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
 
 
@@ -30,6 +30,7 @@ def write_document(tmp_path: Path, document: dict) -> Path:
     (directory / "marvin_control.yaml").write_text("control: x\n", encoding="utf-8")
     (directory / "marvin_stream.yaml").write_text("stream: x\n", encoding="utf-8")
     (directory / "marvin_follower.yaml").write_text("follower: x\n", encoding="utf-8")
+    (directory / "marvin_stack_task.yaml").write_text("task: x\n", encoding="utf-8")
     profile = directory / "profile.json"
     profile.write_text("{}\n", encoding="utf-8")
     schemas = directory / "schemas"
@@ -47,6 +48,7 @@ def document_with_paths() -> dict:
             "control": "marvin_control.yaml",
             "stream": "marvin_stream.yaml",
             "follower": "marvin_follower.yaml",
+            "task": "marvin_stack_task.yaml",
         }
     )
     return document

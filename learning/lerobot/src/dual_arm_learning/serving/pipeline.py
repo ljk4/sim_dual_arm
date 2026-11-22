@@ -63,10 +63,6 @@ class ChunkedPolicyPipeline:
     ) -> None:
         if adapter.action_dim != len(config.action_joint_names):
             raise ValueError("adapter action_dim differs from the configured action joints")
-        if (config.max_prediction_corrections or config.temporal_ensemble_coeff is not None) and (
-            prediction_directory is None
-        ):
-            raise ValueError("prediction admission requires prediction artifacts")
         self.adapter, self.config = adapter, config
         self.prediction_directory = prediction_directory
         self.prediction_max_bytes = prediction_max_bytes

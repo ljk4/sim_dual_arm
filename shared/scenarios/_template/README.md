@@ -55,7 +55,7 @@ shared/scenarios/<robot>/<task>/
 ## 权威配置与模型引用
 
 - 档案唯一权威来源是本方案 `profiles/` 或通过 `source_roots` 显式引用的既有档案；
-  结构约束见 [`shared/common/interfaces/schemas/`](../../common/interfaces/schemas/README.md)。
+  结构约束位于 `shared/common/interfaces/schemas/`。
   binding 加载时会校验 robot/observation/action 三者的绑定关系。
 - 配方由所属端维护。binding 只记录选中文件的路径；同一方案需要用两组数值时，在
   所属端新增第二个配方文件，并在 binding 的不同角色字段中分别引用。可用字段只有
@@ -68,18 +68,6 @@ shared/scenarios/<robot>/<task>/
   学习端校验 `model.safetensors` 内的模型和档案身份，运行端通过 gRPC 调用策略服务。
 
 ## 校验与运行
-
-用只读入口校验方案结构与阶段配置，再按需要启动对应服务。
-
-```bash
-# 宿主机或挂载 /shared 的容器内
-python3 /shared/common/tools/scenario.py show \
-  --binding /shared/scenarios/<robot>/<task>/binding.yaml
-python3 /shared/common/tools/scenario.py validate \
-  --binding /shared/scenarios/<robot>/<task>/binding.yaml --stage collection
-python3 /shared/common/tools/scenario.py validate \
-  --binding /shared/scenarios/<robot>/<task>/binding.yaml --stage inference
-```
 
 三端入口在内存中展开 binding 选定的配方。`--robot/--task` 与 `--config`
 分别选择方案和直接配方。常用运行参数使用各命令帮助中的专用选项，其余参数在相应配方中修改。
@@ -119,7 +107,7 @@ scripts/server_policy.sh --robot <robot> --task <task> \
 | checkpoint | 用 `--model` 指定新的模型目录 | 观测、动作或分块契约变化时同步适配器、处理器与档案 |
 | 学习算法 | 已有第二个适配器实现时，切换 `learning.adapter` 及 `recipes.dataset`/`training`/`policy_service` 的配方引用 | 在 learning 实现适配器、配置与 bundle 校验，再在 binding 选择；当前只有 `act`，换成其他算法属于新增实现 |
 | 机器人 | 改 `profiles.robot`/`observation`/`action` 及 control、stream、follower、scene、task 配方引用；摘要按新档案计算，配方与模型绑定须匹配新档案 | 新几何/关节/相机需要在 simulation 补模型、场景与执行映射，硬件驱动归对应端 |
-| 仿真后端 | 改 `backend.implementation` 与 simulation 配方；当前只有 `mujoco` | 在 simulation 实现后端和部署要求（`docker/deployment.yaml`），再在 binding 选择 |
+| 仿真后端 | 改 `backend.implementation` 与 simulation 配方；当前只有 `mujoco` | 在 simulation 实现后端，再在 binding 选择 |
 | 任务 | 改 `backend.task_type`、task 配方，以及 runtime 的 `teacher_api`/扩展引用 | 任务逻辑在所属端实现；方案专用接口放 `extensions/` |
 | 仿真切真机 | 结构上可把 `backend.kind` 改为 `hardware` 并省略 simulation 配方 | hardware 端需要真实驱动、设备配置与能力适配；当前没有已验证驱动，runtime 采集仍拒绝非 simulation 后端 |
 | 新观测/动作能力 | 在现有协议内用已支持的字段组合出新档案 | 在 `shared/common/interfaces` 演进公共协议，并在生产/消费两端实现；binding 单独改路径不够 |

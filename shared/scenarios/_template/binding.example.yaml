@@ -58,9 +58,5 @@ interfaces:
   # teacher_api: REPLACE_ME.teacher_chunk
   # policy_api: bimanual.policy
 
-# 复用其他方案的档案或配方时声明相对根，例如 ["../../.."] 指向 shared/；
-# 不使用 references 做继承，references 只加载并记录独立依赖，不会合并字段。
 source_roots: []
 artifact_roots: []
-
-references: []

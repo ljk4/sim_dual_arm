@@ -12,14 +12,12 @@ from dual_arm_learning.dataset.sample_filter import (
     FilterError,
     build_filter_manifest,
     build_filter_mask,
-    load_filter_mask,
     load_filter_rule,
 )
 from dual_arm_learning.training import TrainingError
 from dual_arm_learning.training.manifest import sample_filter
 from dual_arm_learning.training.support import loader as training_loader
 from model_helpers import replace
-from robot_contracts.io import canonical_sha256 as canonical_hash, sha256_file as file_sha256
 
 pa = pytest.importorskip("pyarrow")
 pq = pytest.importorskip("pyarrow.parquet")
@@ -129,18 +127,11 @@ def _write_split(
         )
     table = pa.table({key: pa.array(value) for key, value in columns.items()})
     pq.write_table(table, parquet_path)
-    relative = parquet_path.relative_to(split_root).as_posix()
     split = {
         "root": name,
         "episode_count": len(specs),
         "frame_count": len(columns["index"]),
         "episodes": manifest_episodes,
-        "files": {
-            relative: {
-                "sha256": file_sha256(parquet_path),
-                "bytes": parquet_path.stat().st_size,
-            }
-        },
     }
     return split, manifest_episodes
 
@@ -176,19 +167,6 @@ def _build(
     dataset_root = _make_source(root, training=training, validation=validation)
     document = build_filter_manifest(rule_path=RULE, dataset_root=dataset_root)
     return document, dataset_root
-
-
-def _refresh_parquet_hash(root: Path, split_name: str) -> None:
-    manifest_path = root / "manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    split = manifest["splits"][split_name]
-    relative = next(iter(split["files"]))
-    parquet_path = root / split["root"] / relative
-    split["files"][relative] = {
-        "sha256": file_sha256(parquet_path),
-        "bytes": parquet_path.stat().st_size,
-    }
-    _write_json(manifest_path, manifest)
 
 
 def test_real_filter_rule_loads():
@@ -249,7 +227,6 @@ def test_short_static_pause_is_preserved_completely(tmp_path):
     spec["applied"][:, 8] = positions
     document, _ = _build(tmp_path / "data", training=[spec])
     assert document["training"]["excluded_frames"] == 0
-    assert document["training"]["episodes"][0]["static_runs"]["long"] == 0
 
 
 def test_long_static_run_keeps_edges_and_every_fifth_wait_anchor(tmp_path):
@@ -262,7 +239,6 @@ def test_long_static_run_keeps_edges_and_every_fifth_wait_anchor(tmp_path):
     assert set(episode["kept_indices"]) == expected
     assert episode["kept_count"] == 128
     assert episode["excluded_count"] == 472
-    assert episode["excluded_reasons"] == {"redundant_static_anchor": 472}
     assert episode["fallback"] is None
 
 
@@ -298,9 +274,6 @@ def test_non_wait_physical_holds_are_preserved_while_wait_for_feedback_is_thinne
     assert excluded <= set(range(126, 175))
     assert excluded
     assert document["training"]["excluded_frames"] == len(excluded)
-    assert document["training"]["gate_counts"]["source"]["WAITING_FOR_FEEDBACK"] == 60
-    assert document["training"]["gate_counts"]["source"].get("unknown", 0) == 0
-    assert document["training"]["phase_counts"]["source"]["mystery"] == 60
 
 
 def test_gate_transition_protects_boundary_frames_and_only_thins_wait_interior(tmp_path):
@@ -334,7 +307,7 @@ def test_rule_without_only_gate_states_thins_any_long_static_run(tmp_path):
     custom_rule.write_text(yaml.safe_dump(rule_doc), encoding="utf-8")
     dataset_root = _make_source(tmp_path / "data", training=[_spec(400)])
     document = build_filter_manifest(rule_path=custom_rule, dataset_root=dataset_root)
-    assert document["rule"]["resolved"]["only_gate_states"] is None
+    assert document["rule"]["only_gate_states"] is None
     assert document["training"]["excluded_frames"] > 0
 
 
@@ -344,35 +317,21 @@ def test_validation_split_is_never_filtered(tmp_path):
         training=[_spec(600, gates=["WAITING_FOR_FEEDBACK"] * 600)],
     )
     mask = build_filter_mask(rule_path=RULE, dataset_root=dataset_root)
-    assert document["validation"]["filtered"] is False
-    assert document["validation"]["excluded_frames"] == 0
-    assert document["validation"]["kept_frames"] == document["validation"]["source_frames"]
     assert document["training"]["excluded_frames"] > 0
-    assert document["validation"]["kept_frames"] == 20
+    assert document["validation"]["source_frames"] == 20
     assert len(mask.eligible_indices) == document["training"]["eligible_frames"]
     assert max(mask.eligible_indices) < document["training"]["source_frames"]
     assert mask.source == RULE.resolve()
 
 
-def test_source_manifest_hash_and_duplicate_index_are_rejected(tmp_path):
-    bad_manifest = tmp_path / "bad-manifest"
-    root = _make_source(bad_manifest)
-    manifest_path = root / "manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    relative = next(iter(manifest["splits"]["training"]["files"]))
-    manifest["splits"]["training"]["files"][relative]["sha256"] = "0" * 64
-    _write_json(manifest_path, manifest)
-    with pytest.raises(FilterError, match="hash"):
-        build_filter_manifest(rule_path=RULE, dataset_root=root)
-
+def test_duplicate_and_out_of_range_indices_are_rejected(tmp_path):
     duplicate = tmp_path / "duplicate-index"
     root = _make_source(duplicate)
     parquet_path = root / "train/data/chunk-000/file-000.parquet"
     rows = pq.read_table(parquet_path).to_pydict()
     rows["index"][1] = rows["index"][0]
     pq.write_table(pa.table({key: pa.array(value) for key, value in rows.items()}), parquet_path)
-    _refresh_parquet_hash(root, "training")
-    with pytest.raises(FilterError, match="duplicate"):
+    with pytest.raises(FilterError, match="invalid original index"):
         build_filter_manifest(rule_path=RULE, dataset_root=root)
 
     out_of_range = tmp_path / "out-of-range"
@@ -381,36 +340,12 @@ def test_source_manifest_hash_and_duplicate_index_are_rejected(tmp_path):
     rows = pq.read_table(parquet_path).to_pydict()
     rows["index"][0] = len(rows["index"])
     pq.write_table(pa.table({key: pa.array(value) for key, value in rows.items()}), parquet_path)
-    _refresh_parquet_hash(root, "training")
-    with pytest.raises(FilterError, match="out of range"):
+    with pytest.raises(FilterError, match="invalid original index"):
         build_filter_manifest(rule_path=RULE, dataset_root=root)
-
-
-def test_mask_digest_and_index_structure_are_rejected(tmp_path):
-    document, _ = _build(tmp_path / "data")
-    document["training"]["episodes"][0]["kept_indices"][-1] = 999_999
-    payload = {
-        key: value
-        for key, value in document.items()
-        if key not in {"filter_digest", "created_wall_time_ns"}
-    }
-    document["filter_digest"] = canonical_hash(payload)
-    mask_path = tmp_path / "tampered.json"
-    _write_json(mask_path, document)
-    with pytest.raises(FilterError, match="partition"):
-        load_filter_mask(mask_path)
-
-    clean, _ = _build(tmp_path / "clean")
-    clean["filter_digest"] = "0" * 64
-    clean_path = tmp_path / "clean.json"
-    _write_json(clean_path, clean)
-    with pytest.raises(FilterError, match="digest"):
-        load_filter_mask(clean_path)
 
 
 def test_future_action_chunks_keep_their_original_interval_and_validation_is_unfiltered():
     torch = pytest.importorskip("torch")
-    from dual_arm_learning import training
 
     class _Dataset:
         def __len__(self):
@@ -450,18 +385,8 @@ def test_sample_filter_is_configured_for_full_mode_only(tmp_path):
     unsupported = config.model_copy(
         update={"mode": "full", "sample_filter": tmp_path / "filter.txt"}
     )
-    with pytest.raises(TrainingError, match="rule YAML or a mask JSON"):
+    with pytest.raises(TrainingError, match="must be a rule YAML"):
         sample_filter(unsupported, None)
-
-
-def test_mask_json_can_be_loaded_directly(tmp_path):
-    document, _ = _build(tmp_path / "data")
-    path = tmp_path / "mask.json"
-    _write_json(path, document)
-    mask = load_filter_mask(path, verify_source=False)
-    assert mask.source == path.resolve()
-    assert len(mask.eligible_indices) == document["training"]["eligible_frames"]
-    assert mask.source_sha256 == file_sha256(path)
 
 
 def test_multi_shard_parquet_and_missing_gate_metadata_raises_filter_error(tmp_path):
@@ -477,17 +402,6 @@ def test_multi_shard_parquet_and_missing_gate_metadata_raises_filter_error(tmp_p
     pq.write_table(full_table.slice(300, 300), second_parquet)
     manifest_path = root / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["splits"]["training"]["files"] = {
-        "data/chunk-000/file-000.parquet": {
-            "sha256": file_sha256(first_parquet),
-            "bytes": first_parquet.stat().st_size,
-        },
-        "data/chunk-000/file-001.parquet": {
-            "sha256": file_sha256(second_parquet),
-            "bytes": second_parquet.stat().st_size,
-        },
-    }
-    _write_json(manifest_path, manifest)
     document = build_filter_manifest(rule_path=RULE, dataset_root=root)
     assert document["training"]["source_frames"] == 600
     assert document["training"]["excluded_frames"] > 0

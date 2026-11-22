@@ -4,30 +4,28 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import time
 from dataclasses import dataclass
 from typing import Any
 
-from robot_contracts.models import ContractError, RobotProfile, RunContext, Target
-from robot_trajectory.spline_math import validate_reference_inputs
+from robot_contracts.models import ContractError, RobotProfile
 
 from robot_backend_sim.common.config.motion_config import ControlConfig
 from robot_backend_sim.common.kinematics.common import extract_object_pose
 from robot_backend_sim.common.kinematics.kinematics_clearance import CollisionPairSet
-from robot_backend_sim.common.tasks.base import TaskChunk
+from robot_backend_sim.common.tasks.base import TaskChunk, TeacherPrepareSnapshot
 from robot_backend_sim.common.tasks.math import (
     duration_from_limits,
     quaternion_wxyz_to_matrix,
-    scalar_acceleration,
-    trapezoid_progress,
 )
+from robot_backend_sim.common.tasks.plugin_base import sample_step_chunk, teacher_joint_limits
 from robot_backend_sim.marvin_sim.kinematics import (
     BlockEnvelope,
     CarriedBlock,
     relative_block_pose,
     tcp_matrix,
 )
+from robot_backend_sim.marvin_sim.robot_config import public_dual_arm_positions
 from robot_backend_sim.marvin_sim.scene_base import marvin_robot_geometry
 from robot_backend_sim.marvin_sim.stack.config import BEHAVIOUR_PHASES, StackTaskConfig
 from robot_backend_sim.marvin_sim.stack.gate import StackGateFact, TeacherFeedback
@@ -62,17 +60,7 @@ def _error(reason: str, message: str) -> TeacherError:
     return TeacherError(reason, message)
 
 
-@dataclass(frozen=True, slots=True)
-class TeacherSnapshot:
-    """Immutable snapshot captured at prepare; never holds a live MjData reference."""
-
-    context: RunContext
-    task_epoch: int
-    sim_time_ns: int
-    qpos: tuple[float, ...]
-    capture_seq: int = 0
-    seed: int = 0
-    controller_command_id: str = ""
+TeacherSnapshot = TeacherPrepareSnapshot
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,7 +77,7 @@ class StackPlanSegment:
 
 @dataclass(frozen=True, slots=True)
 class StackPlan:
-    context: RunContext
+    context: Any
     task_epoch: int
     config_digest: str
     plan_digest: str
@@ -113,35 +101,6 @@ class StackPlan:
 
     def step_at(self, index: int) -> StackPlanSegment:
         return self.segments[min(max(index, 0), len(self.segments) - 1)]
-
-
-def _joint_limits(
-    profile: RobotProfile, control: ControlConfig, teacher: Any
-) -> tuple[tuple[float, ...], tuple[float, ...]]:
-    velocities = [
-        float(joint.max_velocity) * teacher.max_joint_velocity_fraction
-        for joint in profile.joints
-    ]
-    accelerations = [
-        float(value) * teacher.max_joint_acceleration_fraction
-        for value in control.max_accelerations
-    ]
-    for index in (7, 15):
-        velocities[index] = teacher.gripper_velocity_m_s
-        accelerations[index] = teacher.gripper_acceleration_m_s2
-    return tuple(velocities), tuple(accelerations)
-
-
-def _public_positions(
-    qpos: tuple[float, ...],
-    arm_qpos_left: tuple[int, ...],
-    arm_qpos_right: tuple[int, ...],
-    left_opening: float,
-    right_opening: float,
-) -> tuple[float, ...]:
-    left = tuple(float(qpos[a]) for a in arm_qpos_left)
-    right = tuple(float(qpos[a]) for a in arm_qpos_right)
-    return (*left, float(left_opening), *right, float(right_opening))
 
 
 def _drop_finger_source_pairs(
@@ -408,15 +367,15 @@ def build_teacher_plan(
                 result.failure_message or f"clearance failed at {result.segment}",
             )
 
-    velocity_limits, acceleration_limits = _joint_limits(profile, control_config, teacher)
+    velocity_limits, acceleration_limits = teacher_joint_limits(profile, control_config, teacher)
     close_open = float(teacher.close_gripper_opening_m)
 
-    start_positions = _public_positions(
+    start_positions = public_dual_arm_positions(
         snapshot.qpos, left_arm_qpos, right_arm_qpos, open_total, open_total
     )
 
     def public(phase: str, right_opening: float) -> tuple[float, ...]:
-        return _public_positions(
+        return public_dual_arm_positions(
             solved[phase].qpos, left_arm_qpos, right_arm_qpos, open_total, right_opening
         )
 
@@ -512,101 +471,24 @@ def sample_teacher_chunk(
     control_config: ControlConfig,
     start_sim_time_ns: int | None = None,
 ) -> TaskChunk:
-    if chunk_size != 60 or period_ns != 50_000_000:
-        raise _error(
-            "INVALID_TEACHER_CLOCK", "teacher chunks are exactly 60 points at 50 ms"
-        )
-    if feedback.capture_seq != capture_seq or feedback.sim_time_ns != observation_time_ns:
-        raise _error(
-            "TEACHER_FEEDBACK_MISMATCH",
-            "feedback does not belong to the retained capture/observation",
-        )
-    if gate.failure or gate.status == "FAILED":
-        raise _error("TEACHER_GATE_FAILED", gate.failure or "task gate failed")
-    if gate.step_index >= len(plan.segments):
-        raise _error("TEACHER_PLAN_COMPLETE", "all gated steps have passed")
-    if gate.active_start_sim_time_ns < 0:
-        raise _error("TEACHER_NOT_STARTED", "no measured step start exists")
-
-    segment = plan.step_at(gate.step_index)
-    motion_start = (
-        gate.active_start_sim_time_ns
-        if start_sim_time_ns is None
-        else int(start_sim_time_ns)
-    )
-    duration_ns = round(segment.duration_s * 1e9)
-    acceleration = scalar_acceleration(
-        segment.start_positions, segment.end_positions, plan.accelerations
-    )
-
-    positions: list[tuple[float, ...]] = []
-    phases: list[str] = []
-    times: list[int] = []
-    for index in range(chunk_size):
-        target_time_ns = observation_time_ns + (index + 1) * period_ns
-        elapsed = target_time_ns - motion_start
-        if segment.final or duration_ns <= 0 or elapsed >= duration_ns:
-            position = segment.end_positions
-        else:
-            progress = trapezoid_progress(
-                max(0.0, elapsed / 1e9), segment.duration_s, acceleration
-            )
-            position = tuple(
-                first + (last - first) * progress
-                for first, last in zip(
-                    segment.start_positions, segment.end_positions, strict=True
-                )
-            )
-        positions.append(position)
-        phases.append(segment.phase)
-        times.append((index + 1) * period_ns)
-
-    if not all(math.isfinite(v) for pos in positions for v in pos):
-        raise _error("INVALID_TEACHER_TARGET", "teacher produced a non-finite target")
-
-    targets = tuple(
-        Target(time_ns, pos) for time_ns, pos in zip(times, positions, strict=True)
-    )
-    validate_reference_inputs(
-        positions[0],
-        targets,
-        profile.joints,
-        control_config.max_accelerations,
-    )
-
-    digest_payload = {
-        "plan_digest": plan.plan_digest,
-        "step": segment.name,
-        "capture_seq": capture_seq,
-        "observation_time_ns": observation_time_ns,
-        "positions": positions,
-        "phase": segment.phase,
-        "gate": gate.status,
-    }
-    chunk_digest = hashlib.sha256(
-        json.dumps(
-            digest_payload, sort_keys=True, separators=(",", ":"), allow_nan=False
-        ).encode()
-    ).hexdigest()
-    wait_s = max(0.0, (observation_time_ns - motion_start - duration_ns) / 1e9)
-    return TaskChunk(
+    return sample_step_chunk(
+        plan,
+        steps=plan.segments,
+        behaviour_phases=BEHAVIOUR_PHASES,
+        gate=gate,
+        feedback=feedback,
         request_id=request_id,
         task_epoch=task_epoch,
         capture_seq=capture_seq,
         observation_time_ns=observation_time_ns,
-        source_time_ns=feedback.sim_time_ns,
-        robot_profile_hash=plan.context.robot_profile_hash,
-        plan_digest=plan.plan_digest,
-        chunk_digest=chunk_digest,
-        phase=segment.phase,
-        phases=tuple(phases),
-        phase_codes=tuple(BEHAVIOUR_PHASES.index(p) for p in phases),
-        time_from_observation_ns=tuple(times),
-        positions=tuple(positions),
-        ik_max_position_error_m=plan.ik_max_position_error_m,
-        ik_max_orientation_error_rad=plan.ik_max_orientation_error_rad,
-        gate_state=gate.status,
-        gate_failure=gate.failure,
-        phase_start_sim_time_ns=motion_start,
-        phase_wait_s=wait_s,
+        chunk_size=chunk_size,
+        period_ns=period_ns,
+        profile=profile,
+        control_config=control_config,
+        start_sim_time_ns=(
+            gate.active_start_sim_time_ns
+            if start_sim_time_ns is None
+            else int(start_sim_time_ns)
+        ),
+        error_cls=TeacherError,
     )

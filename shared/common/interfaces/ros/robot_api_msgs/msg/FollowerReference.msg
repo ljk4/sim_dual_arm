@@ -35,4 +35,3 @@ bool[<=64] velocity_limited
 bool[<=64] acceleration_limited
 bool[<=64] boundary_preserved
 string algorithm
-string reference_digest

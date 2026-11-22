@@ -37,12 +37,12 @@ def test_unknown_and_unsafe_fields_are_rejected():
     with pytest.raises(PolicyConfigError, match="test_only"):
         parse_policy_config(value)
     value = service_document()
-    value["chunk_size"] = 59
-    with pytest.raises(PolicyConfigError, match="60"):
+    value["chunk_size"] = 0
+    with pytest.raises(PolicyConfigError, match="chunk_size"):
         parse_policy_config(value)
     value = service_document()
-    value["action_period_ns"] = 40_000_000
-    with pytest.raises(PolicyConfigError, match="50 ms"):
+    value["action_period_ns"] = 0
+    with pytest.raises(PolicyConfigError, match="action_period_ns"):
         parse_policy_config(value)
 
 

@@ -11,10 +11,46 @@ from robot_contracts.models import ContractError
 __all__ = [
     "contact_normal_force",
     "duration_from_limits",
+    "matrix_as_tuple",
     "quaternion_wxyz_to_matrix",
+    "rotation_from_axes",
+    "rotation_z",
     "scalar_acceleration",
     "trapezoid_progress",
 ]
+
+
+def rotation_z(radians_value: float) -> Any:
+    """Return a 3x3 float64 rotation matrix around world +Z."""
+    import numpy as np
+
+    cosine, sine = math.cos(radians_value), math.sin(radians_value)
+    return np.array(
+        [[cosine, -sine, 0.0], [sine, cosine, 0.0], [0.0, 0.0, 1.0]],
+        dtype=np.float64,
+    )
+
+
+def rotation_from_axes(
+    approach: tuple[float, float, float], closing: tuple[float, float, float]
+) -> Any:
+    """Build gripper TCP rotation matrix where local -Y approaches and +Z closes."""
+    import numpy as np
+
+    first = np.asarray(approach, dtype=np.float64)
+    first /= np.linalg.norm(first)
+    second = np.asarray(closing, dtype=np.float64)
+    second -= first * float(np.dot(first, second))
+    second /= np.linalg.norm(second)
+    local_y = -first
+    local_z = second
+    local_x = np.cross(local_y, local_z)
+    return np.column_stack([local_x, local_y, local_z])
+
+
+def matrix_as_tuple(matrix: Any) -> tuple[tuple[float, float, float], ...]:
+    """Convert a 2D array-like matrix into nested Python float tuples."""
+    return tuple(tuple(float(value) for value in row) for row in matrix)
 
 
 def duration_from_limits(
@@ -101,4 +137,7 @@ def contact_normal_force(model: Any, data: Any, contact_index: int) -> float:
 
     value = np.zeros(6, dtype=float)
     mujoco.mj_contactForce(model, data, contact_index, value)
-    return abs(float(value[0]))
+    force = float(value[0])
+    if not math.isfinite(force):
+        raise ContractError("INVALID_CONTACT", "contact normal force is not finite")
+    return abs(force)

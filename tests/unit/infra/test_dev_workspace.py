@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import shutil
@@ -16,10 +15,13 @@ if str(SCRIPTS) not in sys.path:
 
 
 def load_tool(name: str, relative: str):
+    import importlib.util
+
     path = ROOT / relative
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -65,14 +67,12 @@ def add_common(shared: Path, name: str, **kwargs) -> Path:
 
 
 def add_extension(shared: Path, name: str, **kwargs) -> Path:
-    return write_package(
-        shared / "scenarios/demo/sim/extensions/ros" / name, name, **kwargs
-    )
+    return write_package(shared / "scenarios/demo/sim/extensions/ros" / name, name, **kwargs)
 
 
-def create_generated_install(build_root: Path, selection) -> None:
+def create_generated_install(build_root: Path, packages) -> None:
     install = build_root / "install"
-    for package in selection.packages:
+    for package in packages:
         module = install / f"{package.name}/lib/python3.12/site-packages/{package.name}"
         directories = [module]
         for submodule in ("msg", "srv", "action"):
@@ -85,63 +85,54 @@ def create_generated_install(build_root: Path, selection) -> None:
     (install / "setup.bash").write_text("# generated setup\n")
 
 
-def successful_runner(project: Path, build_root: Path, selection) -> int:
-    create_generated_install(build_root, selection)
+def successful_runner(project: Path, build_root: Path, packages) -> int:
+    create_generated_install(build_root, packages)
     return 0
 
 
-def failed_runner(project: Path, build_root: Path, selection) -> int:
+def failed_runner(project: Path, build_root: Path, packages) -> int:
     return 7
 
 
-def build(project: Path, shared: Path, build_root: Path, *, packages=None):
-    selection = dev_workspace.resolve_selection(
-        project, shared_root=shared, packages=packages
-    )
+def build(project: Path, shared: Path, build_root: Path):
     return dev_workspace.build_workspace(
-        project, build_root, selection=selection, shared_root=shared,
-        runner=successful_runner,
+        project, build_root, shared_root=shared, runner=successful_runner
     )
 
 
-def verify(project: Path, shared: Path, build_root: Path, *, packages=None):
-    selection = dev_workspace.resolve_selection(
-        project, shared_root=shared, packages=packages
-    )
-    return dev_workspace.verify_workspace(
-        project, build_root, selection=selection, shared_root=shared
-    )
+def verify(project: Path, shared: Path, build_root: Path):
+    return dev_workspace.verify_workspace(project, build_root, shared_root=shared)
 
 
 def test_package_digest_is_stable_and_ignores_readme_changes(tmp_path):
     project, shared = project_tree(tmp_path)
-    selection = dev_workspace.resolve_selection(project, shared_root=shared)
-    first = dev_workspace._selection_records(selection)
-    second = dev_workspace._selection_records(selection)
+    packages = dev_workspace.discover_packages(shared)
+    first = dev_workspace._package_records(packages)
+    second = dev_workspace._package_records(packages)
     assert first == second
 
     readme = shared / "common/interfaces/ros/robot_api_msgs/README.md"
     readme.write_text("changed documentation only\n")
-    assert dev_workspace._selection_records(selection) == first
+    assert dev_workspace._package_records(packages) == first
 
     idl = shared / "common/interfaces/ros/robot_api_msgs/msg/Example.msg"
     idl.write_text("int32 value\n# changed\n")
-    assert dev_workspace._selection_records(selection) != first
+    assert dev_workspace._package_records(packages) != first
 
 
 def test_build_metadata_and_relative_paths_change_the_digest(tmp_path):
     project, shared = project_tree(tmp_path)
-    selection = dev_workspace.resolve_selection(project, shared_root=shared)
-    first = dev_workspace._selection_records(selection)
+    packages = dev_workspace.discover_packages(shared)
+    first = dev_workspace._package_records(packages)
 
     cmake = shared / "common/interfaces/ros/robot_api_msgs/CMakeLists.txt"
     cmake.write_text("rosidl_generate_interfaces(pkg msg/Example.msg)\n")
-    changed = dev_workspace._selection_records(selection)
+    changed = dev_workspace._package_records(packages)
     assert changed != first
 
     msg = shared / "common/interfaces/ros/robot_api_msgs/msg/Example.msg"
     msg.rename(msg.with_name("Renamed.msg"))
-    assert dev_workspace._selection_records(selection) != changed
+    assert dev_workspace._package_records(packages) != changed
 
 
 def test_successful_core_build_writes_marker_and_verify_accepts_it(tmp_path):
@@ -155,31 +146,26 @@ def test_successful_core_build_writes_marker_and_verify_accepts_it(tmp_path):
     assert verify(project, shared, project / "output") == document
 
 
-def test_full_build_covers_every_scenario_and_check_accepts_a_subset(tmp_path):
+def test_full_build_covers_common_and_extension_packages(tmp_path):
     project, shared = project_tree(tmp_path)
     add_common(shared, "sim_api_msgs")
-    extension = add_extension(shared, "demo_api_msgs", service=True)
+    add_extension(shared, "demo_api_msgs", service=True)
     document = build(project, shared, project / "output")
 
     assert set(document["packages"]) == {"robot_api_msgs", "sim_api_msgs", "demo_api_msgs"}
     assert document["packages"]["sim_api_msgs"]["role"] == "common"
     assert document["packages"]["demo_api_msgs"]["role"] == "extension"
-    verify(
-        project,
-        shared,
-        project / "output",
-        packages=["sim_api_msgs", str(extension)],
-    )
+    assert verify(project, shared, project / "output") == document
 
 
-def test_check_rejects_a_required_package_missing_from_the_build(tmp_path):
+def test_check_rejects_a_new_package_added_after_build(tmp_path):
     project, shared = project_tree(tmp_path)
     build(project, shared, project / "output")
-    late = add_extension(shared, "late_api_msgs", service=True)
+    add_extension(shared, "late_api_msgs", service=True)
 
     with pytest.raises(dev_workspace.ContractCheckError) as caught:
-        verify(project, shared, project / "output", packages=[str(late)])
-    assert "missing required packages" in str(caught.value)
+        verify(project, shared, project / "output")
+    assert "stale" in str(caught.value)
 
 
 def test_readme_change_does_not_invalidate_but_idl_change_does(tmp_path):
@@ -196,26 +182,6 @@ def test_readme_change_does_not_invalidate_but_idl_change_does(tmp_path):
         verify(project, shared, project / "output")
     assert "stale" in str(caught.value)
     assert dev_workspace.BUILD_COMMAND in str(caught.value)
-
-
-def test_source_change_during_build_is_reported_as_stale(tmp_path):
-    project, shared = project_tree(tmp_path)
-
-    def racing_runner(project_root, build_root, selection):
-        create_generated_install(build_root, selection)
-        (shared / "common/interfaces/ros/robot_api_msgs/msg/Example.msg").write_text(
-            "int32 changed while building\n"
-        )
-        return 0
-
-    selection = dev_workspace.resolve_selection(project, shared_root=shared)
-    dev_workspace.build_workspace(
-        project, project / "output", selection=selection, shared_root=shared,
-        runner=racing_runner,
-    )
-    with pytest.raises(dev_workspace.ContractCheckError) as caught:
-        verify(project, shared, project / "output")
-    assert "stale" in str(caught.value)
 
 
 def test_verify_rejects_missing_or_damaged_generated_modules(tmp_path):
@@ -236,7 +202,7 @@ def test_verify_rejects_missing_or_damaged_generated_modules(tmp_path):
     assert "unreadable" in str(caught.value)
 
 
-def test_duplicate_module_origins_and_foreign_sources_are_rejected(tmp_path):
+def test_duplicate_packages_and_duplicate_modules_are_rejected(tmp_path):
     project, shared = project_tree(tmp_path)
     build_root = project / "output"
     build(project, shared, build_root)
@@ -251,107 +217,29 @@ def test_duplicate_module_origins_and_foreign_sources_are_rejected(tmp_path):
 
     with pytest.raises(dev_workspace.ContractCheckError) as caught:
         verify(project, shared, build_root)
-    assert "duplicated" in str(caught.value)
-
-    document = json.loads((build_root / "contracts.json").read_text())
-    document["packages"]["robot_api_msgs"]["source"] = "../outside/robot_api_msgs"
-    (build_root / "contracts.json").write_text(json.dumps(document))
-    with pytest.raises(dev_workspace.ContractCheckError) as caught:
-        verify(project, shared, build_root)
-    assert "unsafe source" in str(caught.value)
-
-
-def test_missing_packages_and_duplicate_names_are_rejected(tmp_path):
-    project, shared = project_tree(tmp_path)
-    with pytest.raises(dev_workspace.DevWorkspaceError) as caught:
-        dev_workspace.resolve_selection(
-            project, shared_root=shared, packages=["missing_api_msgs"]
-        )
-    assert "neither a common name nor a directory" in str(caught.value)
+    assert "expected one generated robot_api_msgs module" in str(caught.value)
 
     first = add_extension(shared, "demo_api_msgs", service=True)
     second = write_package(
         shared / "scenarios/other/sim/extensions/ros/demo_api_msgs", "demo_api_msgs"
     )
+    assert first.is_dir() and second.is_dir()
     with pytest.raises(dev_workspace.DevWorkspaceError) as caught:
-        dev_workspace.resolve_selection(
-            project, shared_root=shared, packages=[str(first), str(second)]
-        )
-    assert "duplicate package name" in str(caught.value)
-
-
-def test_dependency_closure_requires_selected_workspace_packages(tmp_path):
-    project, shared = project_tree(tmp_path)
-    add_common(shared, "sim_api_msgs")
-    extension = add_extension(
-        shared, "demo_api_msgs", service=True, dependencies=("sim_api_msgs",)
-    )
-    with pytest.raises(dev_workspace.DevWorkspaceError) as caught:
-        dev_workspace.resolve_selection(
-            project, shared_root=shared, packages=[str(extension)]
-        )
-    assert "depends on workspace package 'sim_api_msgs'" in str(caught.value)
-
-    selection = dev_workspace.resolve_selection(
-        project, shared_root=shared, packages=[str(extension), "sim_api_msgs"]
-    )
-    assert selection.names == ("robot_api_msgs", "demo_api_msgs", "sim_api_msgs")
-
-
-def test_scenario_selection_uses_binding_packages_and_teacher_capability(tmp_path):
-    project, shared = project_tree(tmp_path)
-    shutil.copytree(
-        ROOT / "shared/common/interfaces/schemas",
-        shared / "common/interfaces/schemas",
-    )
-    scenario = shared / "scenarios/demo/sim"
-    add_common(shared, "sim_api_msgs")
-    extension = write_package(
-        scenario / "extensions/ros/demo_api_msgs", "demo_api_msgs", service=True,
-        dependencies=("robot_api_msgs",),
-    )
-    (extension / "msg").mkdir(exist_ok=True)
-    (extension / "msg/TeacherCapability.msg").write_text(
-        "string ID=demo_api_msgs.teacher_chunk\n"
-    )
-    from scenario_fixtures import build_scenario
-
-    tree = build_scenario(scenario)
-    tree.document["interfaces"]["common_ros"] = ["robot_api_msgs", "sim_api_msgs"]
-    tree.document["interfaces"]["extension_ros"] = ["extensions/ros/demo_api_msgs"]
-    tree.document["interfaces"]["teacher_api"] = "demo_api_msgs.teacher_chunk"
-    tree.write()
-
-    selection = dev_workspace.resolve_selection(
-        project, shared_root=shared, scenario="demo/sim"
-    )
-    assert selection.names == (
-        "robot_api_msgs", "sim_api_msgs", "demo_api_msgs",
-    )
-    assert selection.kind == "binding"
-    assert selection.scenario_id == "synthetic_sim/stack"
-
-    tree.document["interfaces"]["teacher_api"] = "other_api_msgs.teacher_chunk"
-    tree.write()
-    with pytest.raises(dev_workspace.DevWorkspaceError) as caught:
-        dev_workspace.resolve_selection(project, shared_root=shared, scenario="demo/sim")
-    assert "no selected extension implements it" in str(caught.value)
+        dev_workspace.discover_packages(shared)
+    assert "duplicate package" in str(caught.value)
 
 
 def test_failed_build_removes_previous_marker(tmp_path):
     project, shared = project_tree(tmp_path)
     build_root = project / "output"
-    selection = dev_workspace.resolve_selection(project, shared_root=shared)
     dev_workspace.build_workspace(
-        project, build_root, selection=selection, shared_root=shared,
-        runner=successful_runner,
+        project, build_root, shared_root=shared, runner=successful_runner
     )
     assert (build_root / "contracts.json").is_file()
 
     with pytest.raises(dev_workspace.DevWorkspaceError) as caught:
         dev_workspace.build_workspace(
-            project, build_root, selection=selection, shared_root=shared,
-            runner=failed_runner,
+            project, build_root, shared_root=shared, runner=failed_runner
         )
     assert "exit code 7" in str(caught.value)
     assert not (build_root / "contracts.json").exists()
@@ -385,16 +273,14 @@ def test_build_rejects_concurrent_builder_before_cleaning(tmp_path):
     (build_root / "install").mkdir()
     calls = []
 
-    def runner(project_root, root, selection):
-        calls.append((project_root, root))
+    def runner(project_root, root, packages):
+        calls.append((project_root, root, packages))
         return 1
 
-    selection = dev_workspace.resolve_selection(project, shared_root=shared)
     with dev_workspace.build_lock(build_root):
         with pytest.raises(dev_workspace.BuildBusyError) as caught:
             dev_workspace.build_workspace(
-                project, build_root, selection=selection, shared_root=shared,
-                runner=runner,
+                project, build_root, shared_root=shared, runner=runner
             )
     assert "another builder" in str(caught.value)
     assert calls == []
@@ -448,8 +334,8 @@ def test_run_colcon_uses_temporary_intermediates_and_cleans_them(tmp_path, monke
     monkeypatch.setattr(dev_workspace.subprocess, "run", fake_run)
     project, shared = project_tree(tmp_path)
     build_root = project / "output"
-    selection = dev_workspace.resolve_selection(project, shared_root=shared)
-    assert dev_workspace.run_colcon(project, build_root, selection) == 0
+    packages = dev_workspace.discover_packages(shared)
+    assert dev_workspace.run_colcon(project, build_root, packages) == 0
 
     environment = captured["env"]
     assert environment.get("HOME") == os.environ.get("HOME")
@@ -467,16 +353,3 @@ def test_run_colcon_uses_temporary_intermediates_and_cleans_them(tmp_path, monke
     assert command[base_index + 1] == str(
         (shared / "common/interfaces/ros/robot_api_msgs").resolve()
     )
-
-
-def test_generic_check_verifies_the_recorded_set_without_downgrading_it(tmp_path):
-    project, shared = project_tree(tmp_path)
-    add_common(shared, "sim_api_msgs")
-    extension = add_extension(shared, "demo_api_msgs", service=True)
-    build_root = project / "output"
-    build(project, shared, build_root, packages=["sim_api_msgs", str(extension)])
-
-    document = dev_workspace.verify_workspace(project, build_root, shared_root=shared)
-    assert set(document["packages"]) == {
-        "robot_api_msgs", "sim_api_msgs", "demo_api_msgs",
-    }

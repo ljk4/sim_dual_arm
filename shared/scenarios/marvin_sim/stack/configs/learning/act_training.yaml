@@ -9,7 +9,6 @@ data:
   manifest: manifest.json
   train_dir: train
   validation_dir: validation
-  verify_hashes: true
   sample_filter: shared/scenarios/marvin_sim/stack/configs/learning/act_sample_filter.yaml
 model:
   vision_backbone: resnet18

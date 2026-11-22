@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -64,12 +63,6 @@ def test_profile_order_cameras_and_calibrations_match_the_scene(config):
     for camera, profile_camera in zip(config.cameras, profile.cameras, strict=True):
         declaration = camera_declared_description(camera)
         assert semantic_hash(declaration) == profile_camera.calibration_digest
-        calibration = json.loads(
-            (PROFILE_PATH.parent / f"{camera.name}_calibration.json").read_text(
-                encoding="utf-8"
-            )
-        )
-        assert calibration == declaration
 
 
 def test_scene_has_a_fixed_root_and_named_bindings(scene):

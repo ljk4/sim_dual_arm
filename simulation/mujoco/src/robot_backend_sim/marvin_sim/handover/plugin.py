@@ -12,10 +12,9 @@ from robot_backend_sim.common.tasks.base import (
     TaskChunk,
     TaskChunkView,
     TaskPlan,
-    TaskPrepareResult,
     TaskPrepareSnapshot,
 )
-from robot_backend_sim.common.tasks.plugin_base import BaseTeacherTaskPlugin, pose_moved
+from robot_backend_sim.common.tasks.plugin_base import BaseTeacherTaskPlugin
 from robot_backend_sim.marvin_sim.handover.evaluator import HandoverTaskRuntime
 from robot_backend_sim.marvin_sim.handover.gate import HandoverFeedback
 from robot_backend_sim.marvin_sim.handover.observation import (
@@ -114,26 +113,13 @@ class HandoverTaskPlugin(BaseTeacherTaskPlugin):
     def _cached_prepare_duration_s(self, fact: Any) -> float:
         return float(fact.plan_duration_s)
 
-    def _build_prepare_snapshot(
-        self,
-        *,
-        context: Any,
-        task_epoch: int,
-        sim_time_ns: int,
-        capture_seq: int,
-        qpos: tuple[float, ...],
-        seed: int,
-        controller_command_id: str,
-    ) -> HandoverSnapshot:
-        return HandoverSnapshot(
-            context=context,
-            task_epoch=task_epoch,
-            sim_time_ns=sim_time_ns,
-            capture_seq=capture_seq,
-            qpos=qpos,
-            seed=seed,
-            controller_command_id=controller_command_id,
-        )
+    def _pose_check_addresses(self) -> tuple[int, ...]:
+        assert self._binding is not None
+        return (self._binding.block_qpos_address,)
+
+    def _validate_plan_for_commit(self, plan_obj: Any) -> tuple[int, float, float]:
+        assert isinstance(plan_obj, HandoverPlan)
+        return super()._validate_plan_for_commit(plan_obj)
 
     def build_plan(
         self,
@@ -190,77 +176,6 @@ class HandoverTaskPlugin(BaseTeacherTaskPlugin):
             deadline=deadline,
         )
         return TaskPlan(plan, plan.plan_digest, plan.duration_ns, "teacher")
-
-    def commit_prepare(
-        self,
-        *,
-        scene: object,
-        controller: object,
-        snapshot: TaskPrepareSnapshot,
-        plan: TaskPlan,
-        request_id: str,
-        content_digest: str,
-        context: Any,
-        lease_id: str,
-        now: int,
-    ) -> TaskPrepareResult:
-        runtime = self._require_runtime()
-        handover_snapshot = snapshot
-        assert isinstance(handover_snapshot, HandoverSnapshot)
-        handover_plan = plan.plan
-        assert isinstance(handover_plan, HandoverPlan)
-        self._validate_commit_prepare(
-            runtime=runtime,
-            controller=controller,
-            snapshot=handover_snapshot,
-            context=context,
-            lease_id=lease_id,
-            now=now,
-        )
-        binding = self._binding
-        assert binding is not None
-        current_block = tuple(
-            float(value)
-            for value in scene.data.qpos[  # type: ignore[attr-defined]
-                binding.block_qpos_address : binding.block_qpos_address + 7
-            ]
-        )
-        snapshot_block = tuple(
-            handover_snapshot.qpos[
-                binding.block_qpos_address : binding.block_qpos_address + 7
-            ]
-        )
-        if pose_moved(current_block, snapshot_block):
-            raise _error("STALE_TASK_PREPARE", "the block moved between snapshot and commit")
-        self._reset_teacher_caches()
-        outcome = runtime.commit_prepare(
-            request_id=request_id,
-            content_digest=content_digest,
-            context=context,
-            plan=handover_plan,
-            plan_digest=plan.plan_digest,
-            plan_duration_ns=plan.duration_ns,
-            step_count=len(handover_plan.steps),
-            ik_max_position_error_m=handover_plan.ik_max_position_error_m,
-            ik_max_orientation_error_rad=handover_plan.ik_max_orientation_error_rad,
-            prepare_kind=plan.prepare_kind,
-        )
-        self._prepared_command_id = handover_snapshot.controller_command_id
-        return TaskPrepareResult(
-            task_type=self.task_type,
-            task_epoch=outcome.fact.state.task_epoch,
-            task_config_digest=self.config.config_digest,
-            plan_digest=plan.plan_digest,
-            idempotent=outcome.idempotent,
-            state=outcome.fact.state,
-            prepare_kind=plan.prepare_kind,
-            metrics={
-                "step_count": len(handover_plan.steps),
-                "ik_max_position_error_m": handover_plan.ik_max_position_error_m,
-                "ik_max_orientation_error_rad": handover_plan.ik_max_orientation_error_rad,
-                "planned_duration_s": plan.duration_ns / 1e9,
-            },
-        )
 
     def capture_observation(self, scene: object) -> object:
         binding = self._binding

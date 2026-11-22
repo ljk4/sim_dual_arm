@@ -19,6 +19,11 @@ import numpy as np
 from robot_backend_sim.common.kinematics.common import sample_joint_path
 from robot_backend_sim.common.kinematics.kinematics_clearance import ClearancePoint, KinematicsError
 from robot_backend_sim.common.physics.robot_geometry import ArmChain
+from robot_backend_sim.common.tasks.math import (
+    matrix_as_tuple as _as_tuple,
+    rotation_from_axes as _rotation_from_axes,
+    rotation_z as _rotation_z,
+)
 from robot_backend_sim.marvin_sim.handover.config import HandoverPlanConfig
 from robot_backend_sim.marvin_sim.handover.scene import MarvinScene
 from robot_backend_sim.marvin_sim.handover.scene_config import MarvinSceneConfig
@@ -47,7 +52,6 @@ __all__ = [
     "build_handover_targets",
     "layout_from_config",
     "layout_from_scene",
-    "plan_document",
     "plan_handover",
 ]
 
@@ -132,34 +136,6 @@ class HandoverPlan:
             and all(target.converged for target in self.targets)
             and all(segment.passed for segment in self.segments)
         )
-
-
-def _rotation_z(radians_value: float) -> np.ndarray:
-    cosine, sine = math.cos(radians_value), math.sin(radians_value)
-    return np.array(
-        [[cosine, -sine, 0.0], [sine, cosine, 0.0], [0.0, 0.0, 1.0]],
-        dtype=np.float64,
-    )
-
-
-def _rotation_from_axes(
-    approach: tuple[float, float, float], closing: tuple[float, float, float]
-) -> np.ndarray:
-    first = np.asarray(approach, dtype=np.float64)
-    first /= np.linalg.norm(first)
-    second = np.asarray(closing, dtype=np.float64)
-    second -= first * float(np.dot(first, second))
-    second /= np.linalg.norm(second)
-    # The hand's local +y points back along the fingers and local -y points
-    # toward the fingertips; local +z is the closing axis.
-    local_y = -first
-    local_z = second
-    local_x = np.cross(local_y, local_z)
-    return np.column_stack([local_x, local_y, local_z])
-
-
-def _as_tuple(matrix: np.ndarray) -> tuple[tuple[float, float, float], ...]:
-    return tuple(tuple(float(value) for value in row) for row in matrix)
 
 
 def _joint_velocities(
@@ -1431,109 +1407,3 @@ def plan_handover(
         coordination_summary=coordination_summary,
         failures=tuple(failures),
     )
-
-
-def _clearance_document(point: ClearancePoint | None) -> dict[str, object] | None:
-    if point is None:
-        return None
-    return {
-        "distance_m": float(point.distance_m),
-        "sample_index": int(point.sample_index),
-        "fraction": float(point.fraction),
-        "body1": point.body1,
-        "body2": point.body2,
-        "geom1": point.geom1_name,
-        "geom2": point.geom2_name,
-        "measured_pairs": int(point.measured_pairs),
-        "broadphase_skipped": int(point.broadphase_skipped),
-    }
-
-
-def plan_document(
-    plan: HandoverPlan, config: HandoverPlanConfig, scene: MarvinScene
-) -> dict[str, object]:
-    """Serialize the plan and its measured checks for the diagnostics run."""
-    return {
-        "status": "planned" if plan.passed else "failed",
-        "source": config.source,
-        "passed": plan.passed,
-        "frame": config.frame,
-        "scene_config": getattr(scene.config, "source", ""),
-        "layout": {
-            "base_position": list(plan.layout.base_position),
-            "base_yaw_deg": plan.layout.base_yaw_deg,
-            "table_top_z": plan.layout.table_top_z,
-            "block": {
-                "name": plan.layout.block_name,
-                "half_extents": list(plan.layout.block_half_extents),
-                "initial_center": list(plan.layout.block_initial_center),
-                "initial_yaw_rad": plan.layout.block_initial_yaw_rad,
-            },
-            "box": {
-                "name": plan.layout.box_name,
-                "center": list(plan.layout.box_center),
-                "inner_xy": list(plan.layout.box_inner_xy),
-                "inner_bottom_z": plan.layout.box_inner_bottom_z,
-                "rim_z": plan.layout.box_rim_z,
-                "yaw_rad": plan.layout.box_yaw_rad,
-            },
-        },
-        "tolerances": {
-            "ik_position_m": config.ik.position_tolerance_m,
-            "ik_orientation_rad": config.ik.orientation_tolerance_rad,
-            "minimum_clearance_m": config.clearance.minimum_clearance_m,
-        },
-        "targets": [
-            {
-                "name": target.name,
-                "side": target.side,
-                "position": list(target.position),
-                "rotation": [list(row) for row in target.rotation],
-                "qpos": list(target.qpos),
-                "converged": target.converged,
-                "position_error_m": target.position_error_m,
-                "orientation_error_rad": target.orientation_error_rad,
-                "iterations": target.iterations,
-                "reason": target.reason,
-                "message": target.message,
-            }
-            for target in plan.targets
-        ],
-        "segments": [
-            {
-                "name": segment.name,
-                "side": segment.side,
-                "start_target": segment.start_target,
-                "end_target": segment.end_target,
-                "duration_s": segment.duration_s,
-                "sample_count": segment.sample_count,
-                "passed": segment.passed,
-                "robot_minimum": _clearance_document(segment.robot_minimum),
-                "object_minimum": _clearance_document(segment.object_minimum),
-                "failure_reason": segment.failure_reason,
-                "failure_message": segment.failure_message,
-            }
-            for segment in plan.segments
-        ],
-        "placement": {
-            "contained": plan.placement_contained,
-            "message": plan.placement_message,
-        },
-        "coordination": {
-            "summary": plan.coordination_summary,
-            "curve": [
-                {
-                    "fraction": item.fraction,
-                    "left_position_error_m": item.left_position_error_m,
-                    "left_orientation_error_rad": item.left_orientation_error_rad,
-                    "right_position_error_m": item.right_position_error_m,
-                    "right_orientation_error_rad": item.right_orientation_error_rad,
-                }
-                for item in plan.coordination
-            ],
-            "waypoints": [list(qpos) for qpos in plan.coordinated_waypoints],
-        },
-        "planned_duration_s": plan.planned_duration_s,
-        "planning_elapsed_s": plan.planning_elapsed_s,
-        "failures": list(plan.failures),
-    }

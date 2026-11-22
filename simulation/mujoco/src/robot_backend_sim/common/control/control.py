@@ -32,7 +32,10 @@ from robot_backend_sim.common.config.motion_config import ControlConfig
 from robot_backend_sim.common.config.stream_config import StreamConfig
 from robot_backend_sim.common.control.control_events import CommandJournal
 from robot_backend_sim.common.control.control_state import (
+    COMMAND_ACCEPTED as _COMMAND_ACCEPTED,
     COMMAND_ACTIVE_PHASES,
+    COMMAND_STARTED as _COMMAND_STARTED,
+    COMMAND_STOPPING as _COMMAND_STOPPING,
     MAX_DEFERRED_EVENTS,
     ChunkHistory,
     ChunkRecord,
@@ -58,12 +61,6 @@ TIME_DOMAIN_ID = "mujoco-sim"
 
 _MOTION_ACTIVE = frozenset({Phase.ACCEPTED, Phase.RUNNING, Phase.SETTLING, Phase.STOPPING})
 _MOTION_RESETTABLE = frozenset({Phase.IDLE, Phase.COMPLETED, Phase.STOPPED, Phase.FAILED})
-_COMMAND_STARTED = "STARTED"
-_COMMAND_ACCEPTED = "ACCEPTED"
-_COMMAND_STOPPING = "STOPPING"
-_COMMAND_COMPLETED = "COMPLETED"
-_COMMAND_CANCELED = "CANCELED"
-_COMMAND_FAILED = "FAILED"
 
 
 def _invalid(reason: str, detail: str) -> ContractError:

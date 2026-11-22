@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import argparse
-import json
 import math
 import os
 from pathlib import Path
 from typing import Any
 
 import yaml
-from robot_contracts.io import sha256_file
 from robot_contracts.project_paths import project_path
 
 from dual_arm_runtime.offline.collection.campaign_ledger import CampaignError
@@ -18,28 +15,14 @@ from dual_arm_runtime.offline.collection.collect_attempt import REFERENCES, chec
 from dual_arm_runtime.offline.collection.scenario_selection import select_inference
 from dual_arm_runtime.offline.parallel_common import (
     backend_config_for_simulation,
-    simulation_path,
+    parse_worker_prep_args,
+    recipe_records,
     validate_backend_references,
+    validate_worker_bounds,
+    write_worker_manifest,
 )
 
 ROOT = Path(os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[7])
-
-
-def _direct_recipes(runtime_template: Path, backend_template: Path) -> dict[str, Any]:
-    return {
-        "runtime_policy": {
-            "field": "direct.runtime_policy",
-            "declared": None,
-            "path": str(runtime_template),
-            "sha256": sha256_file(runtime_template),
-        },
-        "simulation_policy": {
-            "field": "direct.simulation_policy",
-            "declared": None,
-            "path": str(backend_template),
-            "sha256": sha256_file(backend_template),
-        },
-    }
 
 
 def prepare_workers(
@@ -52,10 +35,7 @@ def prepare_workers(
     speed: float | None,
     selection: dict[str, Any] | None = None,
 ) -> Path:
-    if not 1 <= workers <= 16 or not 0 <= domain_base <= 232 - workers + 1:
-        raise CampaignError("workers must be 1..16 and ROS domain IDs must stay in 0..232")
-    if speed is not None and (not math.isfinite(speed) or not 0.1 < speed <= 100):
-        raise CampaignError("realtime speed must be finite and within (0.1, 100]")
+    validate_worker_bounds(workers, domain_base, speed)
     project, directory = project.resolve(), directory.resolve()
     if not directory.is_relative_to(project_path("var", project)):
         raise CampaignError("worker directory must be below the mounted project var directory")
@@ -76,112 +56,33 @@ def prepare_workers(
             runtime[name] = str((runtime_template.parent / runtime[name]).resolve())
     validate_backend_references(backend, backend_template, project)
     backend_config = backend_config_for_simulation(backend_template, project)
-    recipes = (
-        {
-            "runtime_policy": selection["recipes"]["runtime_policy"],
-            "simulation_policy": selection["recipes"]["simulation_policy"],
-        }
-        if selection is not None
-        else _direct_recipes(runtime_template, backend_template)
+    recipes = recipe_records(
+        ("runtime_policy", "simulation_policy"), runtime_template, backend_template, selection
     )
-    directory.mkdir(parents=True, exist_ok=False)
-    entries = []
-    for index in range(workers):
-        domain_id = domain_base + index
-        worker_id = f"worker-{index + 1:02d}"
-        worker_dir = directory / worker_id
-        worker_dir.mkdir()
-        namespace = f"/infer_{directory.name.replace('-', '_')[-40:]}_{index + 1}"
-        runtime["robot_namespace"] = namespace
-        runtime_path = worker_dir / "runtime.yaml"
-        runtime_path.write_text(yaml.safe_dump(runtime, sort_keys=False))
-        entries.append(
-            {
-                "id": worker_id,
-                "domain_id": domain_id,
-                "namespace": namespace,
-                "run_id_prefix": f"{directory.name}-{worker_id}",
-                "output_root": str(worker_dir),
-                "runtime_config": str(runtime_path),
-                "backend_config": backend_config,
-                "backend_log": str(worker_dir / "backend-runs/backend/log"),
-                "backend_ready": str(worker_dir / "backend-runs/backend/ready.json"),
-                "run_root": simulation_path(worker_dir / "backend-runs", project),
-                "binding": None
-                if selection is None
-                else {
-                    **selection.get("binding", {}),
-                    "robot": selection.get("robot"),
-                    "task": selection.get("task"),
-                    "scenario_id": selection.get("scenario_id"),
-                },
-                "recipes": recipes,
-                "overrides": {
-                    "domain_id": domain_id,
-                    "namespace": namespace,
-                    "realtime_speed": speed,
-                    "visualization_enabled": False,
-                    "task_mode": "inference",
-                    "action_source": "policy",
-                },
-            }
-        )
-    manifest_selection = selection or {
-        "mode": "direct",
-        "robot": None,
-        "task": None,
-        "scenario_id": None,
-        "binding": None,
-        "profiles": None,
-        "recipes": recipes,
-        "overrides": ["direct recipes supplied explicitly"],
-    }
-    manifest = directory / "workers.json"
-    manifest.write_text(
-        json.dumps(
-            {"selection": manifest_selection, "workers": entries},
-            indent=2,
-        )
-        + "\n"
+    return write_worker_manifest(
+        directory=directory,
+        project=project,
+        workers=workers,
+        domain_base=domain_base,
+        namespace_prefix="infer",
+        runtime_document=runtime,
+        backend_config=backend_config,
+        recipes=recipes,
+        selection=selection,
+        overrides=lambda domain_id, namespace: {
+            "domain_id": domain_id,
+            "namespace": namespace,
+            "realtime_speed": speed,
+            "visualization_enabled": False,
+            "task_mode": "inference",
+            "action_source": "policy",
+        },
     )
-    return manifest
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--directory", type=Path, required=True)
-    parser.add_argument("--workers", type=int, required=True)
-    parser.add_argument("--domain-base", type=int, required=True)
-    parser.add_argument("--realtime-speed", type=float, default=None)
-    parser.add_argument("--robot")
-    parser.add_argument("--task")
-    parser.add_argument("--shared-root", type=Path)
-    parser.add_argument("--binding-sha256")
-    parser.add_argument("--runtime-config", type=Path)
-    parser.add_argument("--backend-template", type=Path)
-    args = parser.parse_args()
-    if args.robot is not None:
-        if args.task is None:
-            parser.error("--robot requires --task")
-        if args.runtime_config is not None or args.backend_template is not None:
-            parser.error(
-                "--robot/--task cannot be combined with --runtime-config or --backend-template"
-            )
-    else:
-        if args.task is not None:
-            parser.error("--task requires --robot")
-        if args.shared_root is not None:
-            parser.error("--shared-root requires --robot/--task")
-        if args.binding_sha256 is not None:
-            parser.error("--binding-sha256 requires --robot/--task")
-        if args.runtime_config is None or args.backend_template is None:
-            parser.error("direct mode requires --runtime-config and --backend-template")
-    code = check_ros_sdk(
-        ROOT,
-        robot=args.robot,
-        task=args.task,
-        shared_root=args.shared_root,
-    )
+    parser, args = parse_worker_prep_args(__doc__ or "", default_speed=None)
+    code = check_ros_sdk(ROOT, robot=args.robot, task=args.task, shared_root=args.shared_root)
     if code:
         return code
     try:

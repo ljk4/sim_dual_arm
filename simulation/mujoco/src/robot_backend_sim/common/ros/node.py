@@ -47,7 +47,6 @@ from robot_run_logging import EventContext, EventLogger, LogFailure
 from sensor_msgs.msg import CameraInfo, Image, JointState
 from sim_api_msgs.msg import TaskState as TaskStateMessage
 from sim_api_msgs.srv import (
-    GetContactSnapshot,
     GetTaskState,
     PrepareTask,
     ResetSimulation,
@@ -78,7 +77,6 @@ _CAPABILITIES = (
     "control_events",
     "follower_reference",
     "execution_feedback.gripper_set",
-    "contact_snapshot",
 )
 _TASK_CAPABILITIES = ("task_plugin", "task_state")
 _FOLLOWER_CAPABILITY = "bounded_target_follower"
@@ -181,7 +179,6 @@ class BackendNode(Node):
             (GetStreamAnchor, "get_stream_anchor", self._service_adapter.get_anchor),
             (QueryStreamCommand, "query_stream_command", self._service_adapter.query_command),
             (ResetSimulation, "reset_simulation", self._service_adapter.reset),
-            (GetContactSnapshot, "get_contact_snapshot", self._service_adapter.contact_snapshot),
             (PrepareTask, "prepare_task", self._service_adapter.prepare_task),
             (StartTask, "start_task", self._service_adapter.start_task),
             (GetTaskState, "get_task_state", self._service_adapter.get_task_state),

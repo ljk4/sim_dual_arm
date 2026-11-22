@@ -21,7 +21,6 @@ from .common import (
     load_json_document,
     resolve_export_dir,
     source_archive_sha256,
-    tree_hashes,
 )
 from .export import (  # noqa: F401 - re-exported for tests and callers
     SourceEpisode,
@@ -225,5 +224,4 @@ __all__ = [
     "file_sha256",
     "resolve_export_dir",
     "source_archive_sha256",
-    "tree_hashes",
 ]

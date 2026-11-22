@@ -96,7 +96,7 @@ if [[ -n "$direct_config" ]]; then
   exec "${cmd[@]}"
 fi
 
-if [[ -z "$robot" || -n "$task" && -z "$robot" || -z "$task" ]]; then
+if [[ -z "$robot" || -z "$task" ]]; then
   printf 'scripts/backend.sh: --robot and --task are required (unless using --config)\n' >&2
   exit 2
 fi
@@ -111,49 +111,13 @@ if [[ ! "$base" =~ (_[0-9]{8}_[0-9]{6}|-[0-9]{8}T[0-9]{6}Z)$ ]]; then
 else
   run_id="$base"
 fi
-if [[ -e "$run_root/$run_id" || -e "$run_root/${run_id}-startup-parameters.yaml" ]]; then
+if [[ -e "$run_root/$run_id" ]]; then
   suffix=2
-  while [[ -e "$run_root/${run_id}_${suffix}" || -e "$run_root/${run_id}_${suffix}-startup-parameters.yaml" ]]; do
+  while [[ -e "$run_root/${run_id}_${suffix}" ]]; do
     suffix=$((suffix + 1))
   done
   run_id="${run_id}_${suffix}"
 fi
-
-python3 - "$robot" "$task" "$role" "$seed" "$run_id" "$run_root" "$shared_root" "$realtime_speed" "$namespace" "$no_visualization" <<'PY'
-import sys
-from pathlib import Path
-import yaml
-from robot_backend_sim.common.config.scenario_config import resolve_scenario_backend
-
-robot, task, role, seed_str, run_id, run_root, shared_root, speed, namespace, no_vis = sys.argv[1:]
-resolved = resolve_scenario_backend(
-    robot=robot,
-    task=task,
-    role=role,
-    shared_root=Path(shared_root) if shared_root else None,
-    seed=int(seed_str) if seed_str else None,
-    realtime_speed=float(speed) if speed else None,
-)
-doc = resolved.document
-if namespace:
-    doc.setdefault("robot", {})["namespace"] = namespace
-if no_vis == "true":
-    doc.setdefault("robot", {})["visualization_enabled"] = False
-run_dir = Path(run_root) / run_id
-Path(run_root).mkdir(parents=True, exist_ok=True)
-parameters_path = Path(run_root) / f"{run_id}-startup-parameters.yaml"
-parameters_path.write_text(
-    yaml.safe_dump(doc, sort_keys=False, allow_unicode=True),
-    encoding="utf-8",
-)
-effective_seed = doc.get("run", {}).get("seed")
-print(f"方案: {robot}/{task} | 角色: {role} | seed: {effective_seed}")
-print(f"Binding: {resolved.selection['binding']['path']}")
-print(f"后端配方: {resolved.selection['recipe']['path']}")
-print(f"运行日志: {run_dir / 'log'}")
-print(f"详细参数: {parameters_path}")
-print("================================", flush=True)
-PY
 
 cmd=(
   python3 -m robot_backend_sim.common.ros.node

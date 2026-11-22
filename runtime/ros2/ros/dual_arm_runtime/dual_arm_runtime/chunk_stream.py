@@ -308,6 +308,7 @@ class ContinuousStreamRunner:
         except TaskTerminal as terminal:
             self.task_end = (terminal.runtime_reason, terminal.task_reason, terminal.state)
             raise _TaskComplete from terminal
+        self._validate_prediction(prediction, observation)
         return observation, prediction
 
     def _request_id(self, chunk_index: int, observation_id: int) -> str:
@@ -357,24 +358,11 @@ class ContinuousStreamRunner:
         chunk_index: int,
         observation: ExactObservation,
         anchor: object,
-        *,
-        prediction: Prediction | None = None,
+        prediction: Prediction,
     ) -> None:
         self.last_observation_id = max(self.last_observation_id, observation.observation_id)
         request_id = self._request_id(chunk_index, observation.observation_id)
-        if prediction is None:
-            try:
-                prediction = self.source.predict(
-                    observation,
-                    chunk_index,
-                    request_id,
-                    handoff_time_ns=int(anchor.start_backend_time_ns),  # type: ignore[attr-defined]
-                )
-            except TaskTerminal as terminal:
-                self.task_end = (terminal.runtime_reason, terminal.task_reason, terminal.state)
-                raise _TaskComplete from terminal
         self._check_stop()
-        self._validate_prediction(prediction, observation)
         pending = prediction.task_end
         if pending:
             # The judge became terminal while the prediction was in flight.  The
@@ -425,7 +413,6 @@ class ContinuousStreamRunner:
                 "gate_state": prediction.gate_state or None,
                 "accepted_backend_time_ns": result.reference.accepted_backend_time_ns,
                 "accepted_wall_time_ns": result.reference.accepted_wall_time_ns,
-                "reference_digest": result.reference.reference_digest,
                 "chunk_digest": prediction.chunk_digest or None,
                 "queried": result.queried,
                 "submit_attempts": result.submit_attempts,
@@ -950,7 +937,6 @@ class PolicyStreamRunner(ContinuousStreamRunner):
             observation, prediction = super()._acquire_chunk_prediction(
                 chunk_index, anchor, first_observation, simulation_deadline
             )
-            self._validate_prediction(prediction, observation)
             self._record_cached_prediction(observation, prediction)
             return observation, prediction
 

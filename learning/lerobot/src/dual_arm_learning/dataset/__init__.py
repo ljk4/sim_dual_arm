@@ -15,7 +15,6 @@ from .dataset import (
     file_sha256,
     resolve_export_dir,
     source_archive_sha256,
-    tree_hashes,
 )
 
 __all__ = [
@@ -33,5 +32,4 @@ __all__ = [
     "file_sha256",
     "resolve_export_dir",
     "source_archive_sha256",
-    "tree_hashes",
 ]

@@ -30,9 +30,7 @@ from robot_backend_sim.common.control.control_state import (
 from robot_backend_sim.common.control.feedback_mailbox import FeedbackMailbox
 from robot_backend_sim.common.follower.follower_protocol import follower_reference_from_chunk_status
 from robot_backend_sim.common.motion.motion_controller import Phase
-from robot_backend_sim.common.physics.contact_snapshot import build_contact_snapshot
 from robot_backend_sim.common.physics.robot_adapters import build_io_for, build_scene_for
-from robot_backend_sim.common.physics.robot_io import gripper_indices
 from robot_backend_sim.common.physics.scene_container import CompiledScene
 from robot_backend_sim.common.render.render_worker import Capture, RenderedCapture, RendererThread
 from robot_backend_sim.common.render.rendering import capture_snapshot
@@ -394,32 +392,11 @@ class _Owner:
             return controller.context
         if name == "latest_status":
             return controller.current_status()
-        if name == "contact_snapshot":
-            return self._contact_snapshot(payload)
         if name == "system_stop":
             (reason,) = payload
             self._system_stop_requested = True
             return self._record_reply(controller, controller.system_stop(reason, now))
         raise ContractError("UNKNOWN_OPERATION", name)
-
-    def _contact_snapshot(self, payload: tuple[object, ...]) -> object:
-        if self._scene is None or self._io is None:
-            raise ContractError("SCENE_NOT_READY", "physics owner has no compiled scene")
-        (capture_seq,) = payload
-        import mujoco
-
-        # Refresh contact forces for the current qpos/qvel without stepping.
-        mujoco.mj_forward(self._scene.model, self._scene.data)
-        measurement = self._io.measure()
-        indices = gripper_indices(measurement.joint_names)
-        openings = {
-            side: measurement.positions[index] for side, index in indices.items()
-        }
-        return build_contact_snapshot(
-            self._scene,
-            gripper_openings=openings,
-            capture_seq=int(capture_seq),
-        )
 
     def _dispatch_task(
         self, controller: ControlSession, name: str, payload: tuple[object, ...], now: int

@@ -16,7 +16,12 @@ import numpy as np
 from ..config import TrainingConfig
 from ..console_progress import ConsoleProgress
 from ..dataset.sample_filter import SampleFilterMask
-from .bundle import build_schema, save_model_package
+from .bundle import (
+    TRAINING_ARGS_FILENAME,
+    build_schema,
+    save_model_package,
+    write_training_args,
+)
 from .manifest import sample_filter as _sample_filter
 from .manifest import verify_dataset_manifest
 from .support import (
@@ -24,10 +29,12 @@ from .support import (
     MetricsWriter,
     TrainingError,
     TrainingInterrupted,
+    build_act_config,
     build_optimizer_param_groups,
     build_policy,
     build_processors,
     build_report,
+    masked_l1,
     new_model_name,
 )
 from .support import (
@@ -82,6 +89,7 @@ class _TrainingContext:
     train_dataset: Any = None
     validation_dataset: Any = None
     policy_loader: Any = None
+    validation_loader: Any = None
     iterator: Iterator[Any] | None = None
     step: int = 0
     best_step: int | None = None
@@ -249,6 +257,8 @@ def _prepare_training_context(context: _TrainingContext) -> None:
         training=True,
         indices=(None if context.sample_filter is None else context.sample_filter.eligible_indices),
     )
+    if context.validation_dataset is not None:
+        context.validation_loader = _loader(context.validation_dataset, config, training=False)
     context.iterator = iter(context.policy_loader)
     context.policy.train()
     if context.progress is not None:
@@ -397,12 +407,7 @@ def _save_model(context: _TrainingContext, *, step: int) -> None:
 def _write_training_args(context: _TrainingContext) -> None:
     if not (context.model_dir / "model.safetensors").is_file():
         return
-    import yaml
-
-    (context.model_dir / "training_args.yaml").write_text(
-        yaml.safe_dump(_training_args(context), sort_keys=False, allow_unicode=True),
-        encoding="utf-8",
-    )
+    write_training_args(context.model_dir / TRAINING_ARGS_FILENAME, _training_args(context))
 
 
 def _maybe_validate(context: _TrainingContext) -> None:
@@ -418,6 +423,7 @@ def _maybe_validate(context: _TrainingContext) -> None:
         config,
         max_batches=config.val_batches,
         progress=context.progress,
+        data_loader=context.validation_loader,
     )
     validation.update({"step": context.step, "phase": "validation", "unit": "step"})
     context.metrics.write(validation)
@@ -568,11 +574,56 @@ def _raise_training_outcome(context: _TrainingContext, report: dict[str, Any]) -
         raise context.interrupted
 
 
+def train(
+    config: Any,
+    *,
+    allow_synthetic: bool = False,
+    max_steps: int | None = None,
+    progress: ConsoleProgress | None = None,
+    selection: dict[str, Any] | None = None,
+    overrides: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Run one mode and write one self-contained model package."""
+    context: _TrainingContext = _create_context(
+        config,
+        allow_synthetic,
+        max_steps,
+        progress=progress,
+        selection=selection,
+        overrides=overrides,
+    )
+    try:
+        _prepare_training_context(context)
+        _run_training_steps(context)
+    except TrainingInterrupted as error:
+        context.final_reason = f"{error.reason}_save_requested"
+        context.interrupted = error
+    except BaseException as error:
+        context.final_reason = "failed"
+        context.original_error = error
+    finally:
+        if progress is not None:
+            progress.phase("保存模型与训练报告")
+        report = _finalize_training(context)
+    _raise_training_outcome(context, report)
+    return report
+
+
 __all__ = [
+    "DatasetAudit",
+    "TrainingError",
+    "TrainingInterrupted",
     "_TrainingContext",
     "_create_context",
     "_finalize_training",
     "_prepare_training_context",
     "_raise_training_outcome",
     "_run_training_steps",
+    "build_act_config",
+    "build_policy",
+    "build_processors",
+    "build_report",
+    "masked_l1",
+    "train",
+    "verify_dataset_manifest",
 ]

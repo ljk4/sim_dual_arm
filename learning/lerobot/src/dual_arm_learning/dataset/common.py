@@ -110,20 +110,6 @@ def source_archive_sha256(config: DatasetConfig) -> str:
     return value if isinstance(value, str) and PNG_SHA.fullmatch(value) else ""
 
 
-def tree_files(root: Path) -> list[Path]:
-    return sorted(path for path in root.rglob("*") if path.is_file())
-
-
-def tree_hashes(root: Path) -> dict[str, dict[str, Any]]:
-    result: dict[str, dict[str, Any]] = {}
-    for path in tree_files(root):
-        result[path.relative_to(root).as_posix()] = {
-            "sha256": file_sha256(path),
-            "bytes": path.stat().st_size,
-        }
-    return result
-
-
 def resolve_export_dir(attempt_dir: Path, pattern: str) -> Path:
     candidates = sorted(
         path.parent if path.name == "labels.json" else path
@@ -154,6 +140,4 @@ __all__ = [
     "require_vector",
     "resolve_export_dir",
     "source_archive_sha256",
-    "tree_files",
-    "tree_hashes",
 ]

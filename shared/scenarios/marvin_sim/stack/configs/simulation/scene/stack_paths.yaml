@@ -1,0 +1,31 @@
+# Key-pose IK, clearance and geometry targets for Marvin stack.
+
+ik:
+  dt_s: 0.02
+  max_iterations: 1200
+  position_tolerance_m: 0.001
+  orientation_tolerance_rad: 0.005
+  posture_cost: 0.01
+  position_cost: 10.0
+  orientation_cost: 10.0
+  lm_damping: 0.1
+  limit_margin_rad: 0.05
+  solver: daqp
+  initial_right_joint_positions: [0.74, -1.815, 1.778, -1.264, 0.635, -0.413, -0.88]
+
+clearance:
+  minimum_clearance_m: 0.003
+  collision_detection_distance_m: 0.03
+  sample_step_rad: 0.02
+  max_samples_per_segment: 1000
+
+targets:
+  pregrasp_height_m: 0.09
+  grasp_height_m: 0.032
+  lift_height_m: 0.14
+  place_hover_height_m: 0.11
+  place_clearance_m: 0.006
+  retreat_height_m: 0.15
+  approach_tilt_deg: 20.0
+  approach_yaw_deg: -90.0
+  place_yaw_deg: -90.0

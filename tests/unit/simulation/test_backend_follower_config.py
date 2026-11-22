@@ -23,7 +23,7 @@ from robot_backend_sim.common.config.backend_config import (  # noqa: E402
 from robot_backend_sim.common.config.follower_config import load_follower_config  # noqa: E402
 from scenario_fixtures import MARVIN_SHARED_PROFILES  # noqa: E402
 
-BASE = SCENARIO / "configs/simulation/backend/backend.yaml"
+BASE = SCENARIO / "configs/simulation/backend/backend_stack_teacher.yaml"
 FOLLOWER = ROOT / "tests/fixtures/simulation/backend_follower.yaml"
 FOLLOWER_PARAMS = MARVIN_SHARED_PROFILES / "control/marvin_follower.yaml"
 
@@ -50,7 +50,7 @@ def test_config_without_a_follower_file_keeps_follower_disabled(tmp_path):
     path = write_variant(tmp_path, lambda document: document["robot"].pop("follower"))
     config = load_backend_config(path)
     assert config.follower_path is None
-    assert config.follower_reference_queue_capacity == config.accepted_reference_queue_capacity
+    assert config.follower_reference_queue_capacity == 64
 
 
 def test_follower_config_resolves_relative_follower_file_and_queue():

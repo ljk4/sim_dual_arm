@@ -3,8 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from dual_arm_runtime.offline.audit import label_export
-from dual_arm_runtime.offline.export import export_episode
+from dual_arm_runtime.offline.export import export_episode, label_export
 from robot_contracts.profiles import load_profile
 
 ROOT = Path(__file__).resolve().parents[3]

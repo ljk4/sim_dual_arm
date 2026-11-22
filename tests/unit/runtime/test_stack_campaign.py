@@ -123,46 +123,7 @@ def test_reserved_without_finish_still_consumes_budget(tmp_path):
     assert seeds == [1000, 1001]
 
 
-def test_label_replay_consumes_a_pilot_attempt_and_needs_used_seed(tmp_path):
-    root = _project(tmp_path)
-    assert _run(root, "one") == 0
-    assert (
-        campaign.main(
-            [
-                "--project-root",
-                str(root),
-                "--config",
-                str(_campaign(root)),
-                "run",
-                "--purpose",
-                "pilot",
-                "--kind",
-                "label_replay",
-                "--seed",
-                "1000",
-                "--run-id",
-                "replay",
-                "--runtime-config",
-                "shared/scenarios/marvin_sim/stack/configs/runtime/teacher_collect.yaml",
-                "--",
-                sys.executable,
-                "-c",
-                "print('ok')",
-                "runtime/ros2/scripts/test.sh",
-            ]
-        )
-        == 0
-    )
-    records = [
-        json.loads(line)
-        for line in (root / "build/campaign/attempts.jsonl").read_text().splitlines()
-    ]
-    reserved = [item for item in records if item["event"] == "RESERVED"]
-    assert [item["kind"] for item in reserved] == ["rollout", "label_replay"]
-    assert _run(root, "third") == 2
-
-
-def test_formal_is_teacher_only_and_test_is_act_only(tmp_path):
+def test_only_formal_and_pilot_teacher_rollouts_are_accepted(tmp_path):
     root = _project(tmp_path)
     base = [
         "--project-root",
@@ -177,18 +138,16 @@ def test_formal_is_teacher_only_and_test_is_act_only(tmp_path):
         "--runtime-config",
         "shared/scenarios/marvin_sim/stack/configs/runtime/teacher_collect.yaml",
     ]
-    assert (
+    with pytest.raises(SystemExit) as caught:
         campaign.main(
             [*base, "--purpose", "formal", "--mode", "act", "--", sys.executable, "-c", "pass"]
         )
-        == 2
-    )
-    assert (
+    assert caught.value.code == 2
+    with pytest.raises(SystemExit) as caught:
         campaign.main(
             [*base, "--purpose", "test", "--mode", "teacher", "--", sys.executable, "-c", "pass"]
         )
-        == 2
-    )
+    assert caught.value.code == 2
 
 
 def test_formal_stops_after_fifty_qualified(tmp_path):
@@ -256,33 +215,6 @@ def test_stale_run_lock_is_recovered_without_resetting_reserved_attempt(tmp_path
     lock.write_text("99999999", encoding="utf-8")
     assert _run(root, "recovered") == 0
     assert not lock.exists()
-
-
-def test_teacher_and_replay_cannot_consume_reserved_act_attempts(tmp_path):
-    import pytest
-
-    root = _project(tmp_path)
-    campaign_path = (
-        root
-        / "shared/scenarios/marvin_sim/stack/configs/runtime/experiments/stack_campaign.yaml"
-    )
-    config = yaml.safe_load(campaign_path.read_text())
-    config["budget"].update(pilot_max_attempts=10, pilot_act_reserved_attempts=2)
-    records = [
-        {
-            "event": "RESERVED",
-            "attempt_id": str(index),
-            "purpose": "pilot",
-            "kind": "rollout",
-            "mode": "teacher",
-            "seed": 1000 + index,
-        }
-        for index in range(8)
-    ]
-    with pytest.raises(campaign.CampaignError, match="preserve"):
-        campaign._allocate(config, records, "pilot", "rollout", "teacher", None, root)
-    seed, mode = campaign._allocate(config, records, "pilot", "rollout", "act", None, root)
-    assert (seed, mode) == (1008, "act")
 
 
 def test_select_writes_generated_manifest_only_after_success(tmp_path, capsys):
@@ -458,62 +390,6 @@ def test_classify_reads_recorded_episode_without_root_copies(tmp_path):
     }
 
 
-def test_interrupted_terminal_backfill_preserves_history_and_fills_real_fields(tmp_path):
-    root, attempt_id, ledger = _terminal_project(tmp_path)
-    config = (
-        root
-        / "shared/scenarios/marvin_sim/stack/configs/runtime/experiments/stack_campaign.yaml"
-    )
-    assert (
-        campaign.main(
-            [
-                "--project-root",
-                str(root),
-                "--config",
-                str(config),
-                "backfill-terminal",
-                "--attempt-id",
-                attempt_id,
-            ]
-        )
-        == 0
-    )
-    records = [json.loads(line) for line in ledger.read_text().splitlines()]
-    assert [record["event"] for record in records] == ["RESERVED", "INTERRUPTED", "INTERRUPTED"]
-    assert records[0]["budget"] == {"purpose_attempt_limit": 3}
-    assert records[1]["wall_s"] == 0.0
-    terminal = records[-1]
-    assert terminal["attempt_id"] == attempt_id
-    assert terminal["seed"] == 3102
-    assert terminal["purpose"] == "pilot"
-    assert terminal["exit_code"] == 130
-    assert terminal["wall_s"] == 41.0
-    assert terminal["recording_complete"] is True
-    assert terminal["runtime_outcome"] == "interrupted"
-    assert terminal["runtime_reason"] == "SIGTERM"
-    assert terminal["task_outcome"] == "failed"
-    assert terminal["qualified"] is False
-    assert terminal["finished_at_ns"] == 43_000_000_000
-    assert terminal["backfilled_from"]
-
-    # A second append is refused once the true fields are present.
-    assert (
-        campaign.main(
-            [
-                "--project-root",
-                str(root),
-                "--config",
-                str(config),
-                "backfill-terminal",
-                "--attempt-id",
-                attempt_id,
-            ]
-        )
-        == 2
-    )
-    assert len(ledger.read_text().splitlines()) == 3
-
-
 def test_interrupt_waits_for_the_whole_launch_group_and_keeps_wall_time(tmp_path):
     import os
     import signal
@@ -537,7 +413,6 @@ def test_interrupt_waits_for_the_whole_launch_group_and_keeps_wall_time(tmp_path
         episode_id="interrupt",
         directory=tmp_path,
         config="",
-        code={},
         budget={},
         reserved_at_ns=0,
     )

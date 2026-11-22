@@ -9,9 +9,6 @@ import yaml
 from dual_arm_learning import cli
 from dual_arm_learning.serving import cli as policy_service_cli
 from learning_scenario_fixtures import (
-    Audit as _Audit,
-)
-from learning_scenario_fixtures import (
     convert_args as _convert_args,
 )
 from learning_scenario_fixtures import (
@@ -49,9 +46,9 @@ def test_convert_uses_selected_dataset_recipe(tmp_path, monkeypatch):
     assert captured["selection"]["recipe"]["field"] == "recipes.dataset"
     assert captured["selection"]["recipe"]["path"] == str(tree.dataset_recipe.resolve())
     assert captured["selection"]["binding"]["sha256"] == _sha(tree.scenario.binding_path)
-    assert captured["overrides"]["select"]["value"] == str(tmp_path / "select.json")
-    assert captured["overrides"]["output_root"]["value"] == str(tmp_path / "out")
-    assert captured["overrides"]["synthetic"]["value"] is True
+    assert captured["overrides"]["select"] == str(tmp_path / "select.json")
+    assert captured["overrides"]["output_root"] == str(tmp_path / "out")
+    assert captured["overrides"]["synthetic"] is True
 
 
 def test_convert_requires_explicit_config_or_robot_task(tmp_path, monkeypatch):
@@ -118,7 +115,7 @@ def test_train_uses_selected_training_recipe_and_canonical_roots(tmp_path, monke
     selection = captured["kwargs"]["selection"]
     assert selection["recipe"]["field"] == "recipes.training"
     assert selection["dataset_recipe"]["path"] == str(tree.dataset_recipe.resolve())
-    assert captured["kwargs"]["overrides"]["mode"]["value"] == "smoke"
+    assert captured["kwargs"]["overrides"]["mode"] == "smoke"
 
 
 def test_train_rejects_training_recipe_with_another_dataset(tmp_path, monkeypatch, capsys):
@@ -136,21 +133,6 @@ def test_train_rejects_training_recipe_with_another_dataset(tmp_path, monkeypatc
     assert code == 1
     assert captured == {}
     assert "differs from the selected dataset recipe" in capsys.readouterr().err
-
-
-def test_verify_data_uses_selected_training_recipe(tmp_path, monkeypatch):
-    tree = _make_tree(tmp_path)
-    captured: dict = {}
-
-    def verify(config, **kwargs):
-        captured["config"] = config
-        captured["verify"] = kwargs
-        return _Audit()
-
-    monkeypatch.setattr(cli, "verify_dataset_manifest", verify)
-    assert cli.main(_scenario_args(tree, "verify-data", "--allow-synthetic")) == 0
-    assert captured["config"].source == tree.training_recipe.resolve()
-    assert captured["verify"]["allow_synthetic"] is True
 
 
 @pytest.mark.parametrize(
@@ -342,7 +324,7 @@ def test_policy_service_uses_recipe_and_explicit_model(
     assert snapshot["config"]["path"] == str(tree.service_recipe.resolve())
     assert snapshot["selection"]["mode"] == "scenario"
     assert snapshot["selection"]["recipe"]["path"] == str(tree.service_recipe.resolve())
-    assert snapshot["model_source"]["source"] == "override"
+    assert snapshot["model_source"]["source"] == "cli"
     assert snapshot["source"]["model"] == str(config.model_path)
 
 def test_policy_service_auto_picks_latest_model(
@@ -435,7 +417,7 @@ def test_train_applies_hyperparameters_from_the_recipe(tmp_path, monkeypatch):
 
 def test_learning_entries_reject_generic_overrides(tmp_path):
     tree = _make_tree(tmp_path)
-    for command in ("convert", "train", "verify-data"):
+    for command in ("convert", "train"):
         assert cli.main(_scenario_args(tree, command, "--set", "modes.smoke.steps=64")) == 2
     with pytest.raises(SystemExit) as error:
         policy_service_cli.main(

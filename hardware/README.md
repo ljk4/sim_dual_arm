@@ -14,7 +14,7 @@
 | Learning → Learning 策略服务 | 数据集、模型文件 | 训练读 LeRobot 数据集并输出 `model.safetensors`。策略服务加载权重和归一化数据。 |
 | Runtime ↔ Learning 策略服务 | gRPC，默认 `learning:50051` | Runtime 获取策略元数据、打开会话，用 `Predict` 发送同步关节与相机观测，收到带时间偏移的关节目标块后选窗并经 ROS 2 提交给执行后端。Teacher 采集可以独立运行。 |
 
-公共接口见 [Robot API](../shared/common/interfaces/ros/robot_api_msgs/README.md)。仿真扩展见 [Sim API](../shared/common/interfaces/ros/sim_api_msgs/README.md) 和各方案的 `extensions/ros/`。学习接口见 [Policy API](../shared/common/interfaces/policy/README.md)。
+公共接口位于 `shared/common/interfaces/ros/robot_api_msgs/`（Robot API）。仿真扩展位于 `shared/common/interfaces/ros/sim_api_msgs/`（Sim API）和各方案的 `extensions/ros/`。学习接口位于 `shared/common/interfaces/policy/policy.proto`（Policy API）。
 
 本机容器中，Runtime 同时加入 `ros` 和 `learning` 网络，Simulation 加入 `ros`，Learning 加入 `learning`。手动仿真与运行端默认使用 ROS 域 42，批采为每个实例分配独立域和命名空间。磁盘产物通过宿主机 `var/` 挂载的容器路径 `/data` 交接。
 

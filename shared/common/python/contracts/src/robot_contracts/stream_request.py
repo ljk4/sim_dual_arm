@@ -15,7 +15,7 @@ from .action_chunks import (
     ChunkAnchor,
 )
 from .control import MAX_ID_LENGTH, ControlCommand
-from .models import ContractError, FloatVector, RunContext, Target
+from .models import FloatVector, RunContext, Target
 from .trajectory.constants import VELOCITY_ATOL
 from .trajectory.spline import (
     MAX_HORIZON_NS,

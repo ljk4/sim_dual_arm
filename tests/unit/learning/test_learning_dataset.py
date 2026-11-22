@@ -89,11 +89,11 @@ def test_validate_export_accepts_capture_labels_and_checks_png_pixels(config, tm
         start_ns=1_000_000_000,
     )
     export = tmp_path / "attempt" / "export"
-    rows, raw, quality = _validate_export(export, config, profile_hash(config))
+    rows, raw, document, quality, facts = _validate_export(export, config, profile_hash(config))
     assert len(rows) == 2
     assert len(raw) == 1
     assert quality["qualified"] is True
-    document = json.loads((export / "labels.json").read_text())
+    assert facts["quality_qualified"] is True
     assert document["action_source"] == "teacher"
     assert rows[0]["label_backend_time_ns"] - rows[0]["observation_backend_time_ns"] == 50_000_000
 

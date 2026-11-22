@@ -5,8 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from collections.abc import Iterable
-from itertools import chain
 from pathlib import Path
 from typing import Any
 
@@ -15,13 +13,7 @@ from PIL import Image
 
 from ..config import DatasetConfig
 from ..console_progress import ConsoleProgress
-from .common import (
-    ExportError,
-    canonical_hash,
-    file_sha256,
-    source_archive_sha256,
-    tree_hashes,
-)
+from .common import ExportError, file_sha256, source_archive_sha256
 from .export import SourceEpisode
 
 _NORMALIZED_VECTOR_FEATURES = ("observation.state", "observation.velocity", "action")
@@ -194,11 +186,9 @@ def _split_manifest(
                 "seed": episode.seed,
                 "attempt_dir": str(episode.attempt_dir.resolve()),
                 "export_dir": str(episode.export_dir.resolve()),
-                "source_files": episode.source_files,
                 "frame_count": len(episode.rows),
                 "start_backend_time_ns": first["observation_backend_time_ns"],
                 "end_backend_time_ns": last["label_backend_time_ns"],
-                "quality_sha256": episode.source_files["quality.json"]["sha256"],
                 "source_facts": episode.source_facts,
                 "raw_chunk_count": len(episode.raw_by_chunk),
                 "action_lead_ns": config.action_lead_ns,
@@ -211,7 +201,6 @@ def _split_manifest(
         "episode_count": len(episodes),
         "frame_count": sum(len(episode.rows) for episode in episodes),
         "episodes": records,
-        "files": tree_hashes(root),
     }
 
 
@@ -249,23 +238,6 @@ def _write_processors(temp: Path, output_name: str, config: DatasetConfig) -> No
     post.save_pretrained(processors, config_filename="policy_postprocessor.json")
 
 
-def _source_facts_sha256(episodes: Iterable[SourceEpisode]) -> str:
-    return canonical_hash(
-        [
-            {
-                "attempt_id": episode.attempt_id,
-                "seed": episode.seed,
-                "facts": {
-                    key: value
-                    for key, value in episode.source_facts.items()
-                    if key != "facts_sha256"
-                },
-            }
-            for episode in episodes
-        ]
-    )
-
-
 def _split_sections(
     train_section: dict[str, Any],
     validation_section: dict[str, Any],
@@ -278,7 +250,6 @@ def _split_sections(
             "episode_count": len(train_eps),
             "frame_count": train_section["frame_count"],
             "episodes": train_section["episodes"],
-            "files": train_section["files"],
             "stats_source": "train/meta/stats.json",
         },
         "validation": {
@@ -286,7 +257,6 @@ def _split_sections(
             "episode_count": len(validation_eps),
             "frame_count": validation_section["frame_count"],
             "episodes": validation_section["episodes"],
-            "files": validation_section["files"],
             "stats_source": "validation/meta/stats.json",
         },
     }
@@ -308,7 +278,6 @@ def _manifest_body(
     profile_id: str,
     started: int,
     synthetic: bool,
-    processor_files: dict[str, Any],
     selection: dict[str, Any] | None = None,
     overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -365,9 +334,7 @@ def _manifest_body(
         "processors": {
             "root": "processors",
             "training_stats_only": True,
-            "files": processor_files,
         },
-        "source_facts_sha256": _source_facts_sha256(chain(train_eps, validation_eps)),
     }
     if selection is not None:
         manifest["selection"] = selection
@@ -396,7 +363,6 @@ def build_manifest(
 ) -> dict[str, Any]:
     train_section = _split_manifest(temp / "train", train_eps, config)
     validation_section = _split_manifest(temp / "validation", validation_eps, config)
-    processor_files = tree_hashes(temp / "processors")
     manifest = _manifest_body(
         config=config,
         select_path=select_path,
@@ -412,7 +378,6 @@ def build_manifest(
         profile_id=profile_id,
         started=started,
         synthetic=synthetic,
-        processor_files=processor_files,
         selection=selection,
         overrides=overrides,
     )

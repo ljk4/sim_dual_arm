@@ -8,8 +8,6 @@ identity for readers and logs, but is not compared with any shared constant.
 
 from __future__ import annotations
 
-import hashlib
-import json
 from typing import Annotated, ClassVar, Self
 
 from pydantic import BeforeValidator, Field, model_validator
@@ -34,7 +32,6 @@ from ..validation import (
 )
 
 FOLLOWER_REFERENCE_KINDS = (REQUEST_STREAM_FIRST, REQUEST_STREAM_NEXT)
-DIGEST_HEX_LENGTH = 64
 _UINT64_MAX = 2**64 - 1
 _INT64_MAX = 2**63 - 1
 _DEVIATION_ATOL = 1e-12
@@ -42,26 +39,6 @@ _DEVIATION_ATOL = 1e-12
 
 def _invalid(location: str, message: str) -> ContractError:
     return ContractError("INVALID_FOLLOWER_REFERENCE", f"{location}: {message}")
-
-
-def follower_reference_digest_payload(record: FollowerReference) -> dict[str, object]:
-    """Return the complete canonical document covered by the record digest."""
-    document = record.model_dump(mode="json", exclude={"reference_digest"})
-    document["window"]["selected_indices"] = list(record.window.selected_indices)
-    return document
-
-
-def _digest_of(payload: dict[str, object]) -> str:
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"),
-                         ensure_ascii=True, allow_nan=False)
-    return hashlib.sha256(encoded.encode("ascii")).hexdigest()
-
-
-def compute_follower_reference_digest(record: FollowerReference) -> str:
-    """SHA-256 over every protected identity/source/curve/limit/time field."""
-    if not isinstance(record, FollowerReference):
-        raise _invalid("record", "must be a FollowerReference")
-    return _digest_of(follower_reference_digest_payload(record))
 
 
 class FollowerAppliedSample(StrictContractModel):
@@ -113,7 +90,6 @@ class FollowerReference(StrictContractModel):
     boundary_preserved: Annotated[tuple[bool, ...], BeforeValidator(as_tuple),
                                   Field(min_length=1, max_length=MAX_JOINTS)]
     algorithm: NonEmptyStr
-    reference_digest: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{64})?$")] | None = None
 
     @model_validator(mode="after")
     def _record(self) -> Self:
@@ -171,14 +147,6 @@ class FollowerReference(StrictContractModel):
                 raise contract_error("plan.duration_ns", "a final plan must cover the window")
         elif self.plan.duration_ns != self.requested_window_ns:
             raise contract_error("plan.duration_ns", "a non-final plan must end at the hand-off")
-        expected = compute_follower_reference_digest(self)
-        if self.reference_digest is None:
-            object.__setattr__(self, "reference_digest", expected)
-        elif self.reference_digest != expected:
-            raise ContractError(
-                "FOLLOWER_DIGEST_MISMATCH",
-                "reference_digest does not cover the retained request/curve/times",
-            )
         return self
 
     context = property(lambda self: self.request.trajectory.context)

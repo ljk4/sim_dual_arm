@@ -2,11 +2,10 @@
 
 Pairs: RunContext -> RunContext.msg + policy.RunContext; Target -> policy.JointTarget;
 ControlEvent/ExecutionFeedback/FingerFeedback/GripperFeedback/StreamChunkStatus ->
-matching ROS messages; RobotProfile/JointSpec/CameraSpec -> profile schemas;
+matching ROS messages; RobotProfile/JointSpec/CameraSpec -> profile JSON documents;
 RecordingResult/RuntimeResult/TaskResult -> episode manifest sections.
 Action/observation schema files describe bindings, not ActionChunk/Observation
 payloads, so those are validated as profiles rather than falsely paired.
-Run events have no Pydantic DTO: check the rendered producer document directly.
 """
 from __future__ import annotations
 
@@ -29,10 +28,9 @@ from robot_contracts.execution_feedback import (
     GripperFeedback,
     StreamChunkStatus,
 )
-from robot_contracts.models import CameraSpec, JointSpec, RobotProfile, RunContext, Target
-from robot_contracts.profiles import load_profile, profile_schema_path, semantic_hash
+from robot_contracts.models import RunContext, Target
+from robot_contracts.profiles import load_profile
 from robot_contracts.task_state import TaskState
-from robot_run_logging import EventContext, EventLogger, LogSettings
 
 ROOT = Path(__file__).resolve().parents[3]
 SCHEMAS = ROOT / "shared/common/interfaces/schemas"
@@ -163,58 +161,19 @@ def test_episode_result_schema_matches_models(model, section, optional):
     )
 
 
-def test_profile_schema_matches_models():
-    schema = _document("robot_profile.schema.json")
-    # digest is derived from the source document, never part of that hashed document.
-    _schema_pair(RobotProfile, schema, excluded=("digest",))
-    # File schemas restrict physical units; JointSpec also supports synthetic test axes.
-    _schema_pair(
-        JointSpec,
-        schema["properties"]["joints"]["items"],
-        enum_differences={"unit": (None, ["rad", "m"])},
-    )
-    _schema_pair(CameraSpec, schema["properties"]["cameras"]["items"])
-
-
 def test_all_profile_documents_validate():
     documents = sorted((ROOT / "shared/scenarios/marvin_sim").glob("*/profiles/**/*.json"))
     assert documents
     for path in documents:
         document = json.loads(path.read_text())
         if path.name == "profile.json":
-            schema = json.loads(
-                profile_schema_path(SCHEMAS).read_text()
-            )
             load_profile(path, SCHEMAS)
-        elif path.parent.name in {"observations", "actions"}:
-            name = "observation" if path.parent.name == "observations" else "action"
-            schema = _document(f"{name}.schema.json")
-        else:
-            # Calibration metadata is checked against the owning profile.
-            assert path.name == f"{document['name']}_calibration.json", path
-            profile = load_profile(path.parent / "profile.json", SCHEMAS)
-            camera = next(camera for camera in profile.cameras if camera.name == document["name"])
-            assert camera.calibration_digest == semantic_hash(document)
             continue
+        assert path.parent.name in {"observations", "actions"}, path
+        name = "observation" if path.parent.name == "observations" else "action"
+        schema = _document(f"{name}.schema.json")
         Draft202012Validator.check_schema(schema)
         Draft202012Validator(schema).validate(document)
-
-
-def test_rendered_run_event_matches_schema(tmp_path):
-    logger = EventLogger(
-        tmp_path / "events", run_id="contract-test", component="test_only", settings=LogSettings()
-    )
-    logger.emit(
-        "contract.checked",
-        context=EventContext(episode_id="episode"),
-        exception=ValueError("test_only"),
-    )
-    logger.close()
-    document = json.loads(next((tmp_path / "events").glob("events.*.jsonl")).read_text())
-    schema = _document("run_event.schema.json")
-    _same_fields(document, schema["properties"])
-    assert set(document) == set(schema["required"])
-    Draft202012Validator(schema).validate(document)
 
 
 @pytest.mark.parametrize("format", ["ros", "proto", "schema"])

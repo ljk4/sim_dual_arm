@@ -8,15 +8,26 @@ import threading
 import time
 from pathlib import Path
 
-import jsonschema
 import pytest
 from robot_run_logging import EventContext, EventLogger, LogFailure, LogSettings
 
-ROOT = Path(__file__).resolve().parents[3]
-SCHEMA = json.loads(
-    (ROOT / "shared/common/interfaces/schemas/run_event.schema.json").read_text(encoding="utf-8")
-)
-VALIDATOR = jsonschema.Draft202012Validator(SCHEMA)
+REQUIRED_EVENT_KEYS = {
+    "event_seq",
+    "run_id",
+    "component",
+    "instance_id",
+    "event",
+    "level",
+    "wall_time_utc",
+    "critical",
+}
+
+
+def _assert_valid_event(event: dict[str, object]) -> None:
+    assert REQUIRED_EVENT_KEYS <= set(event)
+    assert isinstance(event["event_seq"], int) and event["event_seq"] >= 1
+    assert isinstance(event["wall_time_utc"], str) and event["wall_time_utc"]
+    assert isinstance(event["critical"], bool)
 
 
 def make_logger(tmp_path: Path, **overrides: object) -> EventLogger:
@@ -80,7 +91,7 @@ def test_event_shape_context_schema_and_summary(tmp_path: Path) -> None:
     events = read_events(logger)
     assert [event["event_seq"] for event, _ in events] == [1, 2]
     for event, _ in events:
-        VALIDATOR.validate(event)
+        _assert_valid_event(event)
     first = events[0][0]
     assert first["run_id"] == "run-1"
     assert first["component"] == "test"
@@ -431,7 +442,7 @@ def test_long_message_and_exception_are_truncated_with_markers(tmp_path: Path) -
     assert len(events) == 1
     event, line_size = events[0]
     assert line_size <= 2048
-    VALIDATOR.validate(event)
+    _assert_valid_event(event)
     assert "truncated" in event["message"]
     assert "original_chars=20000" in event["message"]
     assert event["exception"]["truncated"] is True

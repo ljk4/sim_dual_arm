@@ -10,7 +10,6 @@ data:
   manifest: manifest.json
   train_dir: train
   validation_dir: validation
-  verify_hashes: true
   # full 模式按此规则在内存中抽稀静止冗余锚点；smoke/overfit 不启用。
   sample_filter: shared/scenarios/marvin_sim/handover/configs/learning/act_sample_filter.yaml
 model:

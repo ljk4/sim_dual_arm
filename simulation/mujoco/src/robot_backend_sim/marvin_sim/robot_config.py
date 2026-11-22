@@ -22,7 +22,21 @@ __all__ = [
     "MARVIN_TEACHER_CAPABILITY",
     "MarvinRobotConfig",
     "Seven",
+    "public_dual_arm_positions",
 ]
+
+
+def public_dual_arm_positions(
+    qpos: object,
+    arm_qpos_left: tuple[int, ...],
+    arm_qpos_right: tuple[int, ...],
+    left_opening: float,
+    right_opening: float,
+) -> tuple[float, ...]:
+    """Assemble the 16-DOF Marvin public joint vector from MuJoCo qpos and gripper openings."""
+    left = tuple(float(qpos[a]) for a in arm_qpos_left)  # type: ignore[index]
+    right = tuple(float(qpos[a]) for a in arm_qpos_right)  # type: ignore[index]
+    return (*left, float(left_opening), *right, float(right_opening))
 
 MARVIN_TEACHER_CAPABILITY = "marvin_teacher_api_msgs.teacher_chunk"
 

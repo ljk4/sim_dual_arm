@@ -5,7 +5,6 @@
 # service.max_sessions/max_open_requests/max_request_cache：会话和请求缓存上限。
 # service.predict_deadline_s/open_deadline_s/close_deadline_s：各 RPC 超时，单位 s。
 # service.test_only：是否只允许测试使用。
-# service.stateful：是否为有状态会话。
 # service.model_bundle_digest/processor_digest：测试用固定摘要。
 # service.observation_schema_hash/action_schema_hash/robot_profile_hash：接口语义摘要。
 # service.joint_names/joint_lower_bounds/joint_upper_bounds：16 轴顺序和范围。
@@ -35,7 +34,6 @@ service:
   open_deadline_s: 2.0
   close_deadline_s: 2.0
   test_only: true
-  stateful: true
   model_bundle_digest: 9f2c67c0c4b0a4f6f5a0d9b6c1f8f0c5c4f3e2d1a0b9c8d7e6f5a4b3c2d1e0f9
   processor_digest: 1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809
   observation_schema_hash: 2e6a0da228b94e75eaf3bd9206589402abdd677ef3ce30bfe9d0572f24b5b678

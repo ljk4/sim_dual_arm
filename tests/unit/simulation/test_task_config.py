@@ -32,9 +32,7 @@ def document() -> dict:
 def write_config(tmp_path: Path, value: dict) -> Path:
     directory = tmp_path / "simulation" / "mujoco" / "configs" / "scene"
     directory.mkdir(parents=True)
-    checks = directory.parent / "checks"
-    checks.mkdir()
-    (checks / "kinematics_check.yaml").write_text("dummy: true\n", encoding="utf-8")
+    (directory / "stack_paths.yaml").write_text("dummy: true\n", encoding="utf-8")
     path = directory / "marvin_stack_task.yaml"
     path.write_text(yaml.safe_dump(value), encoding="utf-8")
     return path

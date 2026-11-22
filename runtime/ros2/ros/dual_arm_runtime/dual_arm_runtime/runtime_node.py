@@ -3,7 +3,7 @@
 The node owns ROS entities, exact-capture state, callback validation and the
 process/executor lifecycle.  Episode sequencing, command transport and
 MCAP auditing live in their own modules.  Subscription callbacks live in
-:mod:`runtime_callbacks` and execution identity in :mod:`runtime_identity`.
+:mod:`runtime_callbacks`.
 """
 
 from __future__ import annotations
@@ -21,12 +21,10 @@ from robot_api_msgs.msg import (
     ControlEvent,
     ObservationIndex,
     RobotState,
-    RuntimeStatus,
     StreamCommand,
 )
 from robot_api_msgs.msg import ExecutionFeedback as ExecutionFeedbackMessage
 from robot_api_msgs.msg import FollowerReference as FollowerReferenceMessage
-from robot_api_msgs.srv import EndEpisode, StartEpisode
 from robot_contracts.execution_feedback import ExecutionFeedback
 from robot_contracts.models import ContractError, RunContext
 from robot_contracts.stream_request import StreamRequest
@@ -47,16 +45,17 @@ from robot_ros_support.stream_conversions import (
     stream_command_message,
 )
 
-from dual_arm_runtime.follower_limits import follower_limits
 from dual_arm_runtime.episode_runner import EpisodeRunner
 from dual_arm_runtime.observation import ExactCaptureBuffer, ExactObservation
 from dual_arm_runtime.robot_control_client import RobotControlClient
 from dual_arm_runtime.run_logging import EventSink
-from dual_arm_runtime.runtime_callbacks import RuntimeCallbacks
-from dual_arm_runtime.runtime_config import RuntimeConfiguration
-from dual_arm_runtime.runtime_identity import execution_identity
-from dual_arm_runtime.runtime_limits import MAX_CHUNKS, control_limits
-from dual_arm_runtime.simulation.options import task_enabled
+from dual_arm_runtime.runtime_callbacks import RuntimeCallbacks, execution_identity
+from dual_arm_runtime.runtime_config import (
+    RuntimeConfiguration,
+    control_limits,
+    follower_limits,
+)
+from dual_arm_runtime.simulation.options import MAX_CHUNKS, task_enabled
 
 _TERMINAL = frozenset({"COMPLETED", "CANCELED", "FAILED"})
 _MAX_EXPECTED_COMMANDS = 64
@@ -111,7 +110,7 @@ class RuntimeNode(Node):
         self._terminal_chunk_events: set[tuple[str, int]] = set()
         self._overall_terminal_events: set[str] = set()
         self._last_task_state_seq = 0
-        self._follower_digests: dict[tuple[str, int], set[str]] = {}
+        self._recorded_follower_chunks: set[tuple[str, int]] = set()
         self._rejected = 0
         self._event_duplicates = 0
         self._execution_duplicates = 0
@@ -169,7 +168,6 @@ class RuntimeNode(Node):
         self._cameras = {camera.name: camera for camera in configuration.profile.cameras}
 
     def _setup_ros(self, auto_start: bool) -> None:
-        self._status = self.create_publisher(RuntimeStatus, "/runtime/status", INFO_QOS)
         self._commands = self.create_publisher(StreamCommand, "/runtime/commands", EVENT_QOS)
         self._indices = self.create_publisher(
             ObservationIndex, "/runtime/observation_index", EVENT_QOS
@@ -212,15 +210,8 @@ class RuntimeNode(Node):
                 self._on_follower_reference,
                 EVENT_QOS,
             )
-        self.create_service(
-            StartEpisode, "/runtime/episode/start", self._start_service, callback_group=self._group
-        )
-        self.create_service(
-            EndEpisode, "/runtime/episode/end", self._end_service, callback_group=self._group
-        )
         self.create_timer(0.05, self._publish_observation)
         self.create_timer(0.05, self._control.renew)
-        self.publish_status("IDLE", "", "", "")
         if auto_start:
             self._auto_timer = self.create_timer(0.1, self._auto_start)
 
@@ -320,7 +311,7 @@ class RuntimeNode(Node):
             self._terminal_chunk_events.clear()
             self._overall_terminal_events.clear()
             self._last_task_state_seq = 0
-            self._follower_digests.clear()
+            self._recorded_follower_chunks.clear()
             self._rejected = 0
             self._event_duplicates = 0
             self._execution_duplicates = 0
@@ -413,13 +404,11 @@ class RuntimeNode(Node):
         return self._task_client
 
     def record_follower_reference(self, reference: DomainFollowerReference) -> None:
-        command_id = reference.command_id
-        key = (command_id, reference.chunk_seq)
+        key = (reference.command_id, reference.chunk_seq)
         with self._condition:
-            digests = self._follower_digests.setdefault(key, set())
-            if reference.reference_digest in digests:
+            if key in self._recorded_follower_chunks:
                 return
-            digests.add(reference.reference_digest or "")
+            self._recorded_follower_chunks.add(key)
         self._episode.record(
             f"{self._root}/follower_references",
             follower_reference_message(reference),
@@ -519,22 +508,13 @@ class RuntimeNode(Node):
         accepted = {key for key in self._accepted_chunk_events if key[0] == command_id}
         if not accepted <= self._terminal_chunk_events:
             return False
-        if self._follower_limits is not None and not accepted <= self._follower_digests.keys():
+        if self._follower_limits is not None and not accepted <= self._recorded_follower_chunks:
             return False
         return True
 
     def robot_time_ns(self) -> int:
         """Current backend clock time used by the recorded observations."""
         return self._backend_now_ns()
-
-    def publish_status(
-        self, phase: str, episode_id: str, reason: str, record_directory: str
-    ) -> None:
-        self._status.publish(
-            RuntimeStatus(
-                phase=phase, episode_id=episode_id, reason=reason, record_directory=record_directory
-            )
-        )
 
     def record_topics(self) -> dict[str, str]:
         topics = {
@@ -620,21 +600,6 @@ class RuntimeNode(Node):
         )
         self._episode.record("/runtime/observation_index", message, observation.stamp_ns)
         self._indices.publish(message)
-
-    def _start_service(self, request, response):
-        try:
-            response.episode_id = self._episode.start(request.task_id)
-            response.success, response.reason = True, "PREPARING"
-        except ContractError as error:
-            response.success, response.reason = False, error.reason
-        return response
-
-    def _end_service(self, request, response):
-        if not self._episode.end_episode(request.reason):
-            response.success, response.reason = False, "NO_ACTIVE_EPISODE"
-        else:
-            response.success, response.reason = True, "ENDING"
-        return response
 
     def _auto_start(self) -> None:
         self._auto_timer.cancel()

@@ -1,5 +1,5 @@
-"""Offline runtime tooling organized by domain: collection, export, evaluation, and audit."""
+"""Offline runtime tooling organized by domain: collection, export, and evaluation."""
 
 from __future__ import annotations
 
-__all__ = ["audit", "collection", "evaluation", "export", "parallel_common"]
+__all__ = ["collection", "evaluation", "export", "parallel_common"]

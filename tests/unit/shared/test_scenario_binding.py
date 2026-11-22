@@ -36,9 +36,6 @@ def test_valid_binding_resolves_every_declared_reference(scenario):
     assert resolved.binding.scenario_id == "synthetic_sim/stack"
     assert resolved.path == scenario.binding_path.resolve()
     assert resolved.root == scenario.root.resolve()
-    assert resolved.bundle.source == "none"
-    assert resolved.bundle.path is None
-    assert resolved.bundle.declared is None
     assert len(resolved.sha256) == 64
     assert set(resolved.references) == {
         "profiles.robot",
@@ -62,30 +59,25 @@ def test_valid_binding_resolves_every_declared_reference(scenario):
         resolved.validate_stage(stage)
 
 
-def test_summary_and_paths_are_cwd_independent(scenario, tmp_path, monkeypatch):
-    first = _load(scenario).summary()
+def test_paths_and_records_are_cwd_independent(scenario, tmp_path, monkeypatch):
+    first = _load(scenario)
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
-    second = _load(scenario).summary()
+    second = _load(scenario)
 
-    assert first == second
-    assert first["binding"]["path"] == str(scenario.binding_path.resolve())
-    assert first["roots"]["binding"] == str(scenario.root.resolve())
-    assert first["references"]["profiles.robot"]["path"] == str(
-        (scenario.root / "profiles/robot.json").resolve()
-    )
-    assert first["models"]["digest"] is None
-    assert first["models"]["validated_by"] == "learning.training.bundle"
-    assert first["stages"]["collection"]["satisfied"] is True
-    assert first["stages"]["collection"]["requirements"] == [
+    assert first.path == second.path == scenario.binding_path.resolve()
+    assert first.root == second.root == scenario.root.resolve()
+    assert first.references["profiles.robot"].record() == second.references["profiles.robot"].record()
+    assert first.references["profiles.robot"].path == (scenario.root / "profiles/robot.json").resolve()
+    assert first.requirements("collection") == (
         "profiles.robot",
         "profiles.observation",
         "profiles.action",
         "recipes.runtime_teacher",
         "recipes.campaign",
         "recipes.simulation_teacher",
-    ]
+    )
 
 
 @pytest.mark.parametrize(
@@ -114,19 +106,6 @@ def test_stage_requirements_fail_with_a_clear_field(scenario, field, stage):
     assert str(scenario.binding_path.resolve()) in str(caught.value)
 
 
-def test_model_bundle_is_optional_for_every_stage(scenario):
-    document = scenario.copy()
-    document.setdefault("models", {})["bundle"] = None
-    _write(scenario, document)
-    resolved = _load(scenario)
-
-    assert resolved.bundle.source == "none"
-    assert resolved.bundle.path is None
-    for stage in BindingStage:
-        resolved.validate_stage(stage)
-    assert "models.bundle" not in resolved.requirements("inference")
-
-
 def test_hardware_backend_does_not_require_simulation_recipes(scenario):
     document = scenario.copy()
     document["backend"]["kind"] = "hardware"
@@ -146,40 +125,6 @@ def test_hardware_backend_does_not_require_simulation_recipes(scenario):
         _load(scenario).validate_stage("collection")
     with pytest.raises(BindingError, match="recipes.simulation_policy"):
         _load(scenario).validate_stage("inference")
-
-
-def test_bundle_override_records_the_real_source_without_a_fake_digest(scenario):
-    override = scenario.root / "override_bundle"
-    override.mkdir()
-    base = _load(scenario)
-    resolved = _load(scenario, bundle=override.resolve())
-
-    assert resolved.bundle.source == "override"
-    assert resolved.bundle.declared is None
-    assert resolved.bundle.path == override.resolve()
-    assert resolved.bundle.effective == str(override.resolve())
-    assert resolved.bundle.summary()["digest"] is None
-    resolved.validate_stage("inference")
-    base_profiles = {
-        field: reference.semantic_sha256
-        for field, reference in base.references.items()
-        if field.startswith("profiles.")
-    }
-    override_profiles = {
-        field: reference.semantic_sha256
-        for field, reference in resolved.references.items()
-        if field.startswith("profiles.")
-    }
-    assert base_profiles == override_profiles
-
-
-def test_bundle_override_is_relative_to_the_caller_cwd(scenario, monkeypatch):
-    (scenario.root / "override_bundle").mkdir()
-    monkeypatch.chdir(scenario.root)
-    resolved = _load(scenario, bundle="override_bundle")
-
-    assert resolved.bundle.source == "override"
-    assert resolved.bundle.path == (scenario.root / "override_bundle").resolve()
 
 
 def test_duplicate_yaml_key_is_rejected(scenario):
@@ -374,58 +319,6 @@ def test_explicit_cross_scenario_reuse_is_allowed(tmp_path):
     assert second.binding_path.is_file()
 
 
-def test_reference_cycle_is_rejected(tmp_path):
-    scenarios = tmp_path / "scenarios"
-    first = build_scenario(scenarios / "a")
-    second = build_scenario(scenarios / "b")
-    first_document = first.copy()
-    first_document["source_roots"] = [".."]
-    first_document["references"] = ["../b/binding.yaml"]
-    first.write(first_document)
-    second_document = second.copy()
-    second_document["source_roots"] = [".."]
-    second_document["references"] = ["../a/binding.yaml"]
-    second.write(second_document)
-
-    with pytest.raises(BindingError) as caught:
-        _load(first)
-    assert caught.value.reason == "BINDING_CYCLE"
-    assert str(first.binding_path.resolve()) in str(caught.value)
-    assert str(second.binding_path.resolve()) in str(caught.value)
-
-
-def test_self_reference_is_a_cycle(scenario):
-    document = scenario.copy()
-    document["references"] = ["binding.yaml"]
-    _write(scenario, document)
-
-    with pytest.raises(BindingError) as caught:
-        _load(scenario)
-    assert caught.value.reason == "BINDING_CYCLE"
-    assert str(scenario.binding_path.resolve()) in str(caught.value)
-
-
-def test_explicit_acyclic_reference_is_recorded(tmp_path):
-    scenarios = tmp_path / "scenarios"
-    first = build_scenario(scenarios / "a")
-    second = build_scenario(scenarios / "b")
-    second_document = second.copy()
-    second_document["robot_id"] = "synthetic_sim"
-    second_document["task_id"] = "dependency"
-    second.write(second_document)
-    first_document = first.copy()
-    first_document["source_roots"] = [".."]
-    first_document["references"] = ["../b/binding.yaml"]
-    first.write(first_document)
-
-    resolved = _load(first)
-    assert len(resolved.dependencies) == 1
-    assert resolved.dependencies[0].binding.scenario_id == "synthetic_sim/dependency"
-    summary = resolved.summary()
-    assert summary["dependencies"][0]["path"] == str(second.binding_path.resolve())
-    assert summary["references"]["references[0]"]["kind"] == "file"
-
-
 def test_profile_binding_mismatch_is_rejected(scenario):
     observation_path = scenario.root / "profiles/observation.json"
     observation = json.loads(observation_path.read_text())
@@ -436,26 +329,6 @@ def test_profile_binding_mismatch_is_rejected(scenario):
         _load(scenario)
     assert caught.value.reason == "BINDING_SCHEMA"
     assert "camera_names" in str(caught.value)
-
-
-def test_absolute_model_requires_a_declared_artifact_root(scenario, tmp_path):
-    artifacts = tmp_path / "artifacts"
-    (artifacts / "bundle").mkdir(parents=True)
-    document = scenario.copy()
-    document["artifact_roots"] = [str(artifacts.resolve())]
-    document.setdefault("models", {})["bundle"] = str((artifacts / "bundle").resolve())
-    _write(scenario, document)
-
-    resolved = _load(scenario)
-    assert resolved.bundle.path == (artifacts / "bundle").resolve()
-    assert resolved.bundle.source == "binding"
-
-    outside = tmp_path / "other_bundle"
-    outside.mkdir()
-    document["models"]["bundle"] = str(outside.resolve())
-    _write(scenario, document)
-    with pytest.raises(BindingError, match="outside the declared roots"):
-        _load(scenario)
 
 
 def test_invalid_roots_are_rejected(scenario, tmp_path):
@@ -508,7 +381,6 @@ def test_stage_requirement_helper_is_stable():
         "recipes.dataset",
         "recipes.training",
     )
-    assert "models.bundle" not in stage_requirements(binding, "inference")
 
     hardware = base_binding()
     hardware["backend"]["kind"] = "hardware"
@@ -544,23 +416,3 @@ def test_template_example_is_unfilled_and_not_runnable():
     assert caught.value.reason == "BINDING_REFERENCE"
     assert "profiles.robot" in str(caught.value)
     assert "REPLACE_ME" in str(caught.value)
-
-
-def test_artifact_root_data_resolves_via_data_root_env(scenario, tmp_path, monkeypatch):
-    artifacts = tmp_path / "var"
-    bundle = artifacts / "marvin_sim/stack/models/act_20261121_000000"
-    bundle.mkdir(parents=True)
-    document = scenario.copy()
-    document["artifact_roots"] = ["/data"]
-    _write(scenario, document)
-
-    monkeypatch.setenv("DATA_ROOT", str(artifacts))
-    resolved = _load(scenario, model=bundle)
-    assert resolved.artifact_roots == (artifacts.resolve(),)
-    assert resolved.bundle.path == bundle.resolve()
-    assert resolved.bundle.source == "override"
-
-    resolved_container_model = _load(
-        scenario, model="/data/marvin_sim/stack/models/act_20261121_000000"
-    )
-    assert resolved_container_model.bundle.path == bundle.resolve()

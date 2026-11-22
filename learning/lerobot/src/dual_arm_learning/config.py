@@ -235,7 +235,6 @@ class DatasetConfig(StrictMappingModel):
             vcodec=self.rgb_vcodec, g=self.rgb_g, crf=self.rgb_crf, preset=self.rgb_preset
         )
     )
-    profile_sha256 = property(lambda self: sha256_file(self.profile_path))
 
     def feature_spec(self) -> dict[str, dict[str, object]]:
         return feature_spec(self)
@@ -253,7 +252,6 @@ class TrainingConfig(StrictMappingModel):
     manifest_name: NonEmptyStr = Field(validation_alias=AliasPath("data", "manifest"))
     train_dir: NonEmptyStr = Field(validation_alias=AliasPath("data", "train_dir"))
     validation_dir: NonEmptyStr = Field(validation_alias=AliasPath("data", "validation_dir"))
-    verify_hashes: bool = Field(validation_alias=AliasPath("data", "verify_hashes"))
     sample_filter: Path | None = Field(
         default=None, validation_alias=AliasPath("data", "sample_filter")
     )
@@ -383,7 +381,6 @@ def training_before(data: object) -> object:
                 "manifest",
                 "train_dir",
                 "validation_dir",
-                "verify_hashes",
                 "sample_filter",
             },
             "data",

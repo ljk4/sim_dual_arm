@@ -8,9 +8,8 @@ from dual_arm_runtime.chunk_stream import (
     PolicyStreamRunner,
     PolicyTargetSource,
 )
-from dual_arm_runtime.follower_limits import follower_limits
 from dual_arm_runtime.policy_client import PolicyPrediction
-from dual_arm_runtime.runtime_config import load_runtime_configuration
+from dual_arm_runtime.runtime_config import follower_limits, load_runtime_configuration
 from dual_arm_runtime.simulation.teacher_source import TeacherStreamRunner, TeacherTargetSource
 from dual_arm_runtime.target_source import Prediction
 from robot_contracts.action_chunks import ChunkAnchor
@@ -116,7 +115,6 @@ class _Control:
             chunk_seq=sequence,
             accepted_backend_time_ns=request.observation_time_ns,
             accepted_wall_time_ns=1,
-            reference_digest=f"digest-{sequence}",
             request=request,
         )
         return SimpleNamespace(
@@ -682,7 +680,7 @@ def test_teacher_targets_are_not_rewritten_by_policy_adaptation():
         clock=lambda: 0.0,
     )
     assert runner._kind() == "teacher"
-    runner._run_chunk(1, observation, anchor)
+    runner._run_chunk(1, observation, anchor, prediction)
 
     original = tuple(
         Target(time_ns, positions)
@@ -719,7 +717,7 @@ def test_teacher_targets_are_not_rewritten_by_policy_adaptation():
         clock=lambda: 0.0,
     )
     with pytest.raises(ContractError) as error:
-        rejecting._run_chunk(1, observation, anchor)
+        rejecting._run_chunk(1, observation, anchor, prediction)
     assert error.value.reason == "FOLLOWER_DEVIATION_EXCEEDED"
     assert io.commands[-1].trajectory.targets == original
     assert not [event for event, _ in rejecting_log.events

@@ -13,11 +13,18 @@ from robot_contracts.task_state import TaskState
 from robot_backend_sim.common.tasks.base import (
     TaskChunk,
     TaskChunkView,
+    TaskPlan,
     TaskPrepareResult,
     TaskPrepareSnapshot,
+    TeacherPrepareSnapshot,
 )
 
-__all__ = ["BaseTeacherTaskPlugin", "pose_moved"]
+__all__ = [
+    "BaseTeacherTaskPlugin",
+    "pose_moved",
+    "sample_step_chunk",
+    "teacher_joint_limits",
+]
 
 _COMMAND_HISTORY = 64
 
@@ -78,7 +85,7 @@ class BaseTeacherTaskPlugin:
             "chunk_history": int(capacity.max_episode_chunks),
             "command_history": _COMMAND_HISTORY,
             "event_queue": int(capacity.expected_events),
-            "accepted_reference_queue": int(capacity.expected_references),
+            "follower_reference_queue": int(capacity.expected_references),
         }
 
     def _cached_prepare_duration_s(self, fact: Any) -> float:
@@ -94,8 +101,89 @@ class BaseTeacherTaskPlugin:
         qpos: tuple[float, ...],
         seed: int,
         controller_command_id: str,
-    ) -> Any:
-        raise NotImplementedError
+    ) -> TeacherPrepareSnapshot:
+        return TeacherPrepareSnapshot(
+            context=context,
+            task_epoch=task_epoch,
+            sim_time_ns=sim_time_ns,
+            capture_seq=capture_seq,
+            qpos=qpos,
+            seed=seed,
+            controller_command_id=controller_command_id,
+        )
+
+    def _pose_check_addresses(self) -> tuple[int, ...]:
+        return ()
+
+    def _validate_plan_for_commit(self, plan_obj: Any) -> tuple[int, float, float]:
+        steps = getattr(plan_obj, "steps", None)
+        if steps is None:
+            return (0, 0.0, 0.0)
+        return (
+            len(steps),
+            float(plan_obj.ik_max_position_error_m),
+            float(plan_obj.ik_max_orientation_error_rad),
+        )
+
+    def commit_prepare(
+        self,
+        *,
+        scene: object,
+        controller: object,
+        snapshot: TaskPrepareSnapshot,
+        plan: TaskPlan,
+        request_id: str,
+        content_digest: str,
+        context: Any,
+        lease_id: str,
+        now: int,
+    ) -> TaskPrepareResult:
+        runtime = self._require_runtime()
+        self._validate_commit_prepare(
+            runtime=runtime,
+            controller=controller,
+            snapshot=snapshot,
+            context=context,
+            lease_id=lease_id,
+            now=now,
+        )
+        for addr in self._pose_check_addresses():
+            current_obj = tuple(float(v) for v in scene.data.qpos[addr : addr + 7])  # type: ignore[attr-defined]
+            snap_obj = tuple(snapshot.qpos[addr : addr + 7])
+            if pose_moved(current_obj, snap_obj):
+                raise ContractError(
+                    "STALE_TASK_PREPARE", "scene objects moved between snapshot and commit"
+                )
+        step_count, ik_pos_err, ik_ori_err = self._validate_plan_for_commit(plan.plan)
+        self._reset_teacher_caches()
+        outcome = runtime.commit_prepare(
+            request_id=request_id,
+            content_digest=content_digest,
+            context=context,
+            plan=plan.plan,
+            plan_digest=plan.plan_digest,
+            plan_duration_ns=plan.duration_ns,
+            step_count=step_count,
+            ik_max_position_error_m=ik_pos_err,
+            ik_max_orientation_error_rad=ik_ori_err,
+            prepare_kind=plan.prepare_kind,
+        )
+        self._prepared_command_id = snapshot.controller_command_id
+        return TaskPrepareResult(
+            task_type=self.task_type,
+            task_epoch=outcome.fact.state.task_epoch,
+            task_config_digest=self.config.config_digest,
+            plan_digest=plan.plan_digest,
+            idempotent=outcome.idempotent,
+            state=outcome.fact.state,
+            prepare_kind=plan.prepare_kind,
+            metrics={
+                "step_count": outcome.fact.step_count,
+                "ik_max_position_error_m": outcome.fact.ik_max_position_error_m,
+                "ik_max_orientation_error_rad": outcome.fact.ik_max_orientation_error_rad,
+                "planned_duration_s": plan.duration_ns / 1e9,
+            },
+        )
 
     def prepare_snapshot(
         self,
@@ -384,3 +472,141 @@ class BaseTeacherTaskPlugin:
 
     def clear_chunk_cache(self) -> None:
         self._chunk_cache.clear()
+
+
+def teacher_joint_limits(
+    profile: RobotProfile,
+    control: Any,
+    teacher: Any,
+    gripper_indices: tuple[int, ...] = (7, 15),
+) -> tuple[tuple[float, ...], tuple[float, ...]]:
+    """Compute velocity and acceleration limits for Teacher path planning."""
+    velocities = [
+        float(joint.max_velocity) * teacher.max_joint_velocity_fraction
+        for joint in profile.joints
+    ]
+    accelerations = [
+        float(value) * teacher.max_joint_acceleration_fraction
+        for value in control.max_accelerations
+    ]
+    for index in gripper_indices:
+        velocities[index] = teacher.gripper_velocity_m_s
+        accelerations[index] = teacher.gripper_acceleration_m_s2
+    return tuple(velocities), tuple(accelerations)
+
+
+def sample_step_chunk(
+    plan: Any,
+    *,
+    steps: tuple[Any, ...],
+    behaviour_phases: tuple[str, ...],
+    gate: Any,
+    feedback: Any,
+    request_id: str,
+    task_epoch: int,
+    capture_seq: int,
+    observation_time_ns: int,
+    chunk_size: int,
+    period_ns: int,
+    profile: RobotProfile,
+    control_config: Any,
+    start_sim_time_ns: int,
+    error_cls: type[ContractError] = ContractError,
+) -> TaskChunk:
+    """Sample one 60-point Teacher chunk along the currently gated step."""
+    import hashlib
+    import json
+    import math
+
+    from robot_contracts.models import Target
+    from robot_trajectory.spline_math import validate_reference_inputs
+
+    from robot_backend_sim.common.tasks.math import scalar_acceleration, trapezoid_progress
+
+    if chunk_size != 60 or period_ns != 50_000_000:
+        raise error_cls(
+            "INVALID_TEACHER_CLOCK", "teacher chunks are exactly 60 points at 50 ms"
+        )
+    if feedback.capture_seq != capture_seq or feedback.sim_time_ns != observation_time_ns:
+        raise error_cls(
+            "TEACHER_FEEDBACK_MISMATCH",
+            "feedback does not belong to the retained capture/observation",
+        )
+    if gate.failure or gate.status == "FAILED":
+        raise error_cls("TEACHER_GATE_FAILED", gate.failure or "task gate failed")
+    if gate.step_index >= len(steps):
+        raise error_cls("TEACHER_PLAN_COMPLETE", "all gated steps have passed")
+    if gate.active_start_sim_time_ns < 0:
+        raise error_cls("TEACHER_NOT_STARTED", "no measured step start exists")
+
+    step = plan.step_at(gate.step_index)
+    duration_ns = round(step.duration_s * 1e9)
+    acceleration = scalar_acceleration(
+        step.start_positions, step.end_positions, plan.accelerations
+    )
+    positions: list[tuple[float, ...]] = []
+    phases: list[str] = []
+    times: list[int] = []
+    for index in range(chunk_size):
+        target_time_ns = observation_time_ns + (index + 1) * period_ns
+        elapsed = target_time_ns - start_sim_time_ns
+        if step.final or duration_ns <= 0 or elapsed >= duration_ns:
+            position = step.end_positions
+        else:
+            progress = trapezoid_progress(
+                max(0.0, elapsed / 1e9), step.duration_s, acceleration
+            )
+            position = tuple(
+                first + (last - first) * progress
+                for first, last in zip(step.start_positions, step.end_positions, strict=True)
+            )
+        positions.append(position)
+        phases.append(step.phase)
+        times.append((index + 1) * period_ns)
+
+    if not all(math.isfinite(value) for pos in positions for value in pos):
+        raise error_cls("INVALID_TEACHER_TARGET", "teacher produced a non-finite target")
+
+    targets = tuple(
+        Target(time_ns, pos) for time_ns, pos in zip(times, positions, strict=True)
+    )
+    validate_reference_inputs(
+        positions[0], targets, profile.joints, control_config.max_accelerations
+    )
+
+    digest_payload = {
+        "plan_digest": plan.plan_digest,
+        "step": step.name,
+        "capture_seq": capture_seq,
+        "observation_time_ns": observation_time_ns,
+        "positions": positions,
+        "phase": step.phase,
+        "gate": gate.status,
+    }
+    chunk_digest = hashlib.sha256(
+        json.dumps(
+            digest_payload, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode()
+    ).hexdigest()
+    wait_s = max(0.0, (observation_time_ns - start_sim_time_ns - duration_ns) / 1e9)
+    return TaskChunk(
+        request_id=request_id,
+        task_epoch=task_epoch,
+        capture_seq=capture_seq,
+        observation_time_ns=observation_time_ns,
+        source_time_ns=feedback.sim_time_ns,
+        robot_profile_hash=plan.context.robot_profile_hash,
+        plan_digest=plan.plan_digest,
+        chunk_digest=chunk_digest,
+        phase=step.phase,
+        phases=tuple(phases),
+        phase_codes=tuple(behaviour_phases.index(p) for p in phases),
+        time_from_observation_ns=tuple(times),
+        positions=tuple(positions),
+        ik_max_position_error_m=plan.ik_max_position_error_m,
+        ik_max_orientation_error_rad=plan.ik_max_orientation_error_rad,
+        gate_state=gate.status,
+        gate_failure=gate.failure,
+        phase_start_sim_time_ns=start_sim_time_ns,
+        phase_wait_s=wait_s,
+    )

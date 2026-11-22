@@ -7,7 +7,6 @@ loop live here so ``node.py`` stays focused on ROS conversion/lifecycle.
 from __future__ import annotations
 
 import argparse
-import importlib.metadata
 import os
 import re
 import signal
@@ -20,14 +19,13 @@ import rclpy
 import yaml
 from rclpy.executors import ExternalShutdownException, SingleThreadedExecutor
 from rclpy.signals import SignalHandlerOptions
-from robot_contracts.io import sha256_file, write_json_atomic
+from robot_contracts.io import write_json_atomic
 from robot_contracts.project_paths import container_data_root, logs_root, project_path
 from robot_contracts.validation import UniqueKeyError, read_unique_yaml
 from robot_run_logging import EventLogger, LogFailure, LogSettings
 
 from robot_backend_sim.common.config.backend_config import (
     BackendConfigError,
-    load_backend_config,
     load_backend_document,
 )
 from robot_backend_sim.common.config.scenario_config import (
@@ -38,7 +36,6 @@ from robot_backend_sim.common.config.scenario_config import (
 from robot_backend_sim.common.config.scene_loader import load_scene_config_for
 from robot_backend_sim.common.physics import assets
 from robot_backend_sim.common.ros.node import BackendNode
-from robot_backend_sim.common.runtime.diagnostics import code_provenance
 from robot_backend_sim.common.runtime.worker import WorkerSummary
 
 _RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -75,13 +72,6 @@ def _inside(path: Path, root: Path) -> bool:
         return True
     except ValueError:
         return False
-
-
-def _package_version(name: str) -> str | None:
-    try:
-        return importlib.metadata.version(name)
-    except importlib.metadata.PackageNotFoundError:
-        return None
 
 
 def _now_utc() -> str:
@@ -129,26 +119,6 @@ def _default_run_root(robot: str | None, task: str | None) -> Path:
         return logs_root(container_data_root(), robot, task) / "backend"
     except ValueError as error:
         raise SystemExit(f"robot/task id is not a safe artifact directory: {error}") from error
-
-
-def _configuration_sources(config) -> dict[str, dict[str, str]]:
-    return {
-        name: {
-            "path": str(path.resolve()),
-            "sha256": sha256_file(path),
-            "content": path.read_text(),
-        }
-        for name, path in {
-            "backend": config.source,
-            "scene": config.scene_path,
-            "control": config.control_path,
-            "stream": config.stream_path,
-            "profile": config.profile_path,
-            "follower": config.follower_path,
-            "task": config.task_path,
-        }.items()
-        if path is not None
-    }
 
 
 def _default_run_suffix() -> str:
@@ -258,7 +228,7 @@ def _prepare_run(parsed: argparse.Namespace):
                 robot_section["visualization_enabled"] = False
         # Validate before creating the run directory so a bad recipe leaves no
         # orphan directory behind.
-        load_backend_document(document, parsed.config or "scenario:selection")
+        config = load_backend_document(document, parsed.config or "scenario:selection")
     except (ScenarioError, BackendConfigError) as error:
         raise SystemExit(str(error)) from error
     try:
@@ -266,10 +236,16 @@ def _prepare_run(parsed: argparse.Namespace):
     except FileExistsError as error:
         raise SystemExit(f"run directory already exists: {run_dir}") from error
     snapshot = _write_snapshot(run_dir, document)
-    try:
-        config = load_backend_config(snapshot)
-    except BackendConfigError as error:
-        raise SystemExit(str(error)) from error
+    config = config.model_copy(update={"source": snapshot})
+    if target is not None:
+        print(
+            f"方案: {robot}/{task} | 角色: {parsed.role} | seed: {config.seed}\n"
+            f"Binding: {selection['binding']['path']}\n"
+            f"后端配方: {selection['recipe']['path']}\n"
+            f"运行日志: {run_dir / 'log'}\n"
+            "================================",
+            flush=True,
+        )
     logger = EventLogger(
         run_dir / "log",
         run_id=run_id,
@@ -284,7 +260,7 @@ def _prepare_run(parsed: argparse.Namespace):
             console=config.log.console,
         ),
     )
-    return config, run_id, run_dir, logger, selection
+    return config, run_id, run_dir, logger
 
 
 def _robot_metadata(config) -> dict[str, str]:
@@ -294,38 +270,6 @@ def _robot_metadata(config) -> dict[str, str]:
         "robot_assembly": assembly,
         "robot_model": str(assets.robot_model_path(assembly)),
     }
-
-
-def _write_run_document(
-    run_dir: Path, config, run_id: str, selection: dict[str, Any]
-) -> None:
-    write_json_atomic(
-        run_dir / "run.json",
-        {
-            "run_id": run_id,
-            "created_utc": _now_utc(),
-            "config": str(config.source),
-            "selection": selection,
-            **_robot_metadata(config),
-            "effective_configuration": config.canonical_dict(),
-            "configuration_sources": _configuration_sources(config),
-            "code_provenance": code_provenance(),
-            "namespace": config.namespace,
-            "seed": config.seed,
-            "capture_hz": config.capture_hz,
-            "realtime_speed": config.realtime_speed,
-            "velocity_feedforward": config.velocity_feedforward,
-            "reliable_sensors": config.reliable_sensors,
-            "versions": {
-                "python": sys.version.split()[0],
-                "executable": sys.executable,
-                "packages": {
-                    name: _package_version(name)
-                    for name in ("mujoco", "scipy", "numpy", "mink")
-                },
-            },
-        },
-    )
 
 
 def _emit_backend_start(logger, config, run_id: str) -> None:
@@ -471,8 +415,7 @@ def _teardown(executor, node, logger, previous, failure, exit_code) -> tuple[str
 
 def run(argv: list[str] | None = None) -> int:
     parsed = _parser().parse_args(argv)
-    config, run_id, run_dir, logger, selection = _prepare_run(parsed)
-    _write_run_document(run_dir, config, run_id, selection)
+    config, run_id, run_dir, logger = _prepare_run(parsed)
     signals = _Signals()
     previous = {signum: signal.getsignal(signum) for signum in (signal.SIGINT, signal.SIGTERM)}
     for signum in previous:

@@ -17,4 +17,4 @@
 - **高信噪比**：只记录问题现象、支撑证据、真实根因、已排除假说与最终生效的修复方案；不堆砌日常调试流水、临时备份路径或已废弃的中间过程提示词。
 - **可追溯性**：如需查阅早期单次实验原始记录或阶段任务书全文，可通过 `git log -- docs/experiments/` 在 Git 历史中检索。
 
-目录导航：[文档索引](../README.md) · [功能说明](../features/README.md) · [项目历史](../history/README.md) · [Agent 指导与规范](../../AGENTS.md) · [项目说明](../../README.md)
+目录导航：[文档索引](../README.md) · [功能说明](../features/README.md) · [Agent 指导与规范](../../AGENTS.md) · [项目说明](../../README.md)

@@ -11,9 +11,29 @@ import time
 from pathlib import Path
 from typing import Any, TextIO
 
-from robot_contracts.project_paths import project_path
+from robot_contracts.project_paths import container_data_root, logs_root, project_path
 
 from dual_arm_runtime.offline.collection.campaign_ledger import Attempt, CampaignError
+
+
+def default_backend_log(robot: str | None, task: str | None = None) -> Path:
+    backend_root = logs_root(container_data_root(), robot, task) / "backend"
+    if backend_root.is_dir():
+        candidates = [
+            child / "log"
+            for child in backend_root.iterdir()
+            if child.is_dir()
+            and (child / "log").is_dir()
+            and (
+                child.name.startswith("teacher-backend")
+                or "-teacher" in child.name
+                or "_teacher" in child.name
+            )
+        ]
+        if candidates:
+            candidates.sort(key=lambda item: item.parent.stat().st_mtime_ns, reverse=True)
+            return candidates[0]
+    return backend_root / "teacher-backend" / "log"
 
 
 def attempt_logs_root(config: dict[str, Any], project_root: Path) -> Path:
@@ -260,6 +280,7 @@ __all__ = [
     "attempt_log_directory",
     "attempt_logs_root",
     "classify",
+    "default_backend_log",
     "discard_unqualified_attempt",
     "episode_manifest",
     "episode_task_result",

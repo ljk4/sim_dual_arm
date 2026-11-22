@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 from typing import Annotated, Any, ClassVar, Self
@@ -122,10 +121,6 @@ class StrictContractModel(BaseModel):
     def canonical_dict(self) -> dict[str, Any]:
         return json.loads(json.dumps(self.model_dump(mode="json"), sort_keys=True,
                                      separators=(",", ":"), allow_nan=False))
-
-    def canonical_sha256(self) -> str:
-        return hashlib.sha256(json.dumps(
-            self.canonical_dict(), sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 class StrictMappingModel(StrictContractModel):

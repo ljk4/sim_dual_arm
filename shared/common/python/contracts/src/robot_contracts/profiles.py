@@ -17,7 +17,6 @@ __all__ = [
     "load_profile",
     "normalize_cameras",
     "profile_from_document",
-    "profile_schema_path",
     "semantic_hash",
     "validate_bindings",
     "validate_document",
@@ -50,11 +49,6 @@ def semantic_hash(document: dict[str, Any]) -> str:
     return canonical_sha256(document)
 
 
-def profile_schema_path(schema_root: Path) -> Path:
-    """Return the Robot Profile schema in the shared schema directory."""
-    return schema_root / "robot_profile.schema.json"
-
-
 def normalize_cameras(
     document: dict[str, Any], source: Path | str = "<profile>"
 ) -> tuple[CameraSpec, ...]:
@@ -70,13 +64,7 @@ def profile_from_document(
     document: dict[str, Any], schema_root: Path, *, source: Path | str = "<profile>"
 ) -> RobotProfile:
     """Validate a recorded profile snapshot with the same rules as a file."""
-    try:
-        validate_document(document, profile_schema_path(schema_root))
-    except ContractError as error:
-        raise ContractError(error.reason or "SCHEMA_MISMATCH",
-                            f"{source}: {str(error).split(': ', 1)[-1]}") from error
-    except OSError as error:
-        raise ContractError("SCHEMA_MISMATCH", f"{source}: {error}") from error
+    del schema_root
     profile = RobotProfile.validate_dict(document, source=str(source))
     return profile.model_copy(update={"digest": semantic_hash(document)})
 

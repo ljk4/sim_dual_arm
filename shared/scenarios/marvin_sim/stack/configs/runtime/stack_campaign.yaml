@@ -5,19 +5,11 @@ budget:
   pilot_seed_first: 1000
   pilot_seed_last: 1009
   pilot_max_attempts: 3
-  pilot_act_reserved_attempts: 0
-  pilot_teacher_seed_last: 1002
-  pilot_label_replay_max: 0
 
   formal_seed_first: 2000
   formal_seed_last: 2099
   formal_max_attempts: 100
   formal_target_qualified: 50
-
-  test_seed_first: 6000
-  test_seed_last: 6019
-  test_max_attempts: 20
-  evaluation_max_attempts: 20
 
   max_raw_bytes: 64424509440
   reserve_bytes: 2147483648
@@ -35,7 +27,7 @@ paths:
     - shared/scenarios/marvin_sim/stack/configs/simulation/backend/backend_stack_teacher.yaml
     - shared/scenarios/marvin_sim/stack/configs/simulation/scene/marvin_stack.yaml
     - shared/scenarios/marvin_sim/stack/configs/simulation/scene/marvin_stack_task.yaml
-    - shared/scenarios/marvin_sim/stack/configs/simulation/checks/kinematics_check.yaml
+    - shared/scenarios/marvin_sim/stack/configs/simulation/scene/stack_paths.yaml
     - shared/scenarios/marvin_sim/extensions/ros/marvin_teacher_api_msgs/srv/GetTeacherChunk.srv
     - shared/scenarios/marvin_sim/extensions/ros/marvin_teacher_api_msgs/msg/TeacherCapability.msg
     - shared/scenarios/marvin_sim/stack/profiles/robot/profile.json
@@ -47,8 +39,6 @@ paths:
   sdk_marker: build/ros-dev/contracts.json
 
 launch:
-  command: []
-  cleanup_command: []
   timeout_s: 600.0
   stop_grace_s: 45.0
 

@@ -11,6 +11,7 @@ import numpy as np
 from robot_contracts.models import ContractError, RunContext
 from robot_contracts.task_state import TaskState
 
+from robot_backend_sim.common.physics.robot_io import sim_time_ns
 from robot_backend_sim.common.tasks.math import (
     contact_normal_force,
     quaternion_wxyz_to_matrix,
@@ -338,7 +339,7 @@ def capture_task_observation(
     )
 
     return TaskObservation(
-        sim_time_ns=round(float(data.time) * 1_000_000_000),
+        sim_time_ns=sim_time_ns(data.time),
         source=source,
         target=target,
         source_target_normal_force_n=st_force,

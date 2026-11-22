@@ -197,7 +197,6 @@ def test_retry_returns_the_original_acceptance_times_and_digest():
     assert first.accepted_backend_time_ns == 100_000_000
     assert first.accepted_wall_time_ns == 1_900_000_000
     assert first.motion_seq == 3
-    assert first.reference_digest == second.reference_digest
     rebuilt = validate(
         first,
         PROFILE,
@@ -225,7 +224,7 @@ def test_retry_returns_the_original_acceptance_times_and_digest():
         snapshot=None,
     )
     from_status = follower_reference_from_status(raw, packet, status)
-    assert from_status.reference_digest == first.reference_digest
+    assert from_status == first
 
 
 def test_follower_protocol_rejects_non_stream_kind():

@@ -191,9 +191,6 @@ class EpisodeRunner:
         except ValueError:
             pass
 
-    def set_status(self, phase: str, episode_id: str = "", reason: str = "") -> None:
-        self._set_status(phase, episode_id, reason)
-
     def begin_finishing(self) -> None:
         self._finishing.set()
 
@@ -474,7 +471,6 @@ class EpisodeRunner:
             self._finish(episode_id)
 
     def _start_episode(self, episode_id: str, task_id: str) -> RunContext:
-        self._set_status("PREPARING", episode_id)
         self._emit_best_effort("episode.preparing", context=EventContext(episode_id=episode_id))
         info = self._prepare(episode_id)
         actual_context = self._build_context(episode_id, info)
@@ -508,7 +504,6 @@ class EpisodeRunner:
             context=EventContext(episode_id=episode_id, clock_epoch=actual_context.clock_epoch),
             fields={"task_id": task_id, "record_directory": self._current_path() or None},
         )
-        self._set_status("ACTIVE", episode_id)
         return actual_context
 
     def _reset_episode(self, episode_id: str, actual_context: RunContext) -> RunContext:
@@ -625,9 +620,6 @@ class EpisodeRunner:
     def _current_path(self) -> str:
         with self._recorder_lock:
             return self._record_directory or self._partial_directory
-
-    def _set_status(self, phase: str, episode_id: str = "", reason: str = "") -> None:
-        self._io.publish_status(phase, episode_id, reason, self.record_directory)
 
     def _new_recorder(
         self, episode_id: str, snapshot: dict[str, object], topics: dict[str, str]

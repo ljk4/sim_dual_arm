@@ -12,8 +12,10 @@ from pathlib import Path
 import yaml
 from robot_contracts.project_paths import project_path
 
-from dual_arm_runtime.artifact_paths import default_backend_log
-from dual_arm_runtime.offline.collection.campaign_execution import attempt_logs_root
+from dual_arm_runtime.offline.collection.campaign_execution import (
+    attempt_logs_root,
+    default_backend_log,
+)
 
 ROOT = Path(os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[7])
 REFERENCES = (
@@ -171,7 +173,6 @@ def main(argv: list[str] | None = None) -> int:
             str(logs / run_id / "logs" / "runtime"),
             "--backend-log",
             str(backend_log),
-            "--no-previews",
         ],
         check=False,
     )

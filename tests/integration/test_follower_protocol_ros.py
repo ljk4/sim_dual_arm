@@ -18,7 +18,7 @@ try:
     from robot_api_msgs.msg import FollowerReference as FollowerReferenceMessage
     from robot_api_msgs.srv import GetStreamAnchor, QueryStreamCommand, SubmitFollower
     from robot_contracts.action_chunks import ChunkAnchor
-    from robot_contracts.models import ContractError, RunContext, Target
+    from robot_contracts.models import RunContext, Target
     from robot_contracts.profiles import load_profile
     from robot_contracts.stream_request import (
         REQUEST_STREAM_FIRST,
@@ -213,7 +213,6 @@ def test_follower_reference_really_serializes_and_roundtrips():
     )
     restored = follower_reference_from_message(decoded)
     assert restored == record
-    assert restored.reference_digest == record.reference_digest
     assert restored.window.source_targets == raw.trajectory.targets
     assert restored.algorithm == record.algorithm
     validate(
@@ -221,13 +220,6 @@ def test_follower_reference_really_serializes_and_roundtrips():
         PROFILE,
         validation_limits(CONTROL, FOLLOWER, duration_grid_ns=GRID_NS),
     )
-
-    tampered = follower_reference_message(record)
-    tampered.reference_digest = "0" * 64
-    with pytest.raises(ContractError, match="FOLLOWER_DIGEST_MISMATCH"):
-        follower_reference_from_message(deserialize_message(
-            serialize_message(tampered), FollowerReferenceMessage
-        ))
 
     response = SubmitFollower.Response(
         accepted=True,
@@ -239,17 +231,7 @@ def test_follower_reference_really_serializes_and_roundtrips():
     )
     decoded_response = deserialize_message(serialize_message(response), SubmitFollower.Response)
     assert decoded_response.has_reference
-    assert (
-        follower_reference_from_message(decoded_response.reference).reference_digest
-        == record.reference_digest
-    )
-
-    tampered = follower_reference_message(record)
-    tampered.reference_digest = "0" * 64
-
-    with pytest.raises(ContractError) as caught:
-        follower_reference_from_message(tampered)
-    assert caught.value.reason == "FOLLOWER_DIGEST_MISMATCH"
+    assert follower_reference_from_message(decoded_response.reference) == record
 
 
 class FollowerStack(Stack):
@@ -293,14 +275,13 @@ def test_three_follower_blocks_over_real_ros_services(tmp_path):
         assert first.has_reference and first.has_chunk and first.has_execution
         first_record = follower_reference_from_message(first.reference)
         assert first_record.chunk_seq == 1 and not first_record.is_final
-        first_digest = first_record.reference_digest
         first_sim = first_record.accepted_backend_time_ns
         first_wall = first_record.accepted_wall_time_ns
 
         retry = _submit(stack, first_request)
         assert retry.accepted, retry.reason
         retry_record = follower_reference_from_message(retry.reference)
-        assert retry_record.reference_digest == first_digest
+        assert retry_record == first_record
         assert retry_record.accepted_backend_time_ns == first_sim
         assert retry_record.accepted_wall_time_ns == first_wall
 
@@ -364,7 +345,7 @@ def test_three_follower_blocks_over_real_ros_services(tmp_path):
         second_retry = _submit(stack, second_request)
         assert second_retry.accepted, second_retry.reason
         second_retry_record = follower_reference_from_message(second_retry.reference)
-        assert second_retry_record.reference_digest == second_record.reference_digest
+        assert second_retry_record == second_record
         assert second_retry_record.accepted_backend_time_ns == second_record.accepted_backend_time_ns
         assert second_retry_record.accepted_wall_time_ns == second_record.accepted_wall_time_ns
 
@@ -396,7 +377,7 @@ def test_three_follower_blocks_over_real_ros_services(tmp_path):
         third_retry = _submit(stack, third_request)
         assert third_retry.accepted, third_retry.reason
         third_retry_record = follower_reference_from_message(third_retry.reference)
-        assert third_retry_record.reference_digest == third_record.reference_digest
+        assert third_retry_record == third_record
         assert third_retry_record.accepted_backend_time_ns == third_record.accepted_backend_time_ns
         assert third_retry_record.accepted_wall_time_ns == third_record.accepted_wall_time_ns
 
@@ -415,7 +396,6 @@ def test_three_follower_blocks_over_real_ros_services(tmp_path):
             for record in (first_record, second_record, third_record)
         }
         assert set(records) == {1, 2, 3}
-        assert len({record.reference_digest for record in records.values()}) == 3
         assert records[1].window.source_targets == first_request.trajectory.targets
         assert records[3].actual_terminal_positions != records[2].actual_terminal_positions
         limits = validation_limits(CONTROL, FOLLOWER, duration_grid_ns=GRID_NS)

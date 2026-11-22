@@ -62,7 +62,6 @@ def write_training_recipe(
         "manifest": "manifest.json",
         "train_dir": "train",
         "validation_dir": "validation",
-        "verify_hashes": True,
     }
     document["model"]["weights"] = {"path": str(tmp_path / "resnet18.pth"), "sha256": ""}
     document["checkpoint"] = {"root": str(tmp_path / "models")}

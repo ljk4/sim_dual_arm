@@ -14,7 +14,6 @@ import yaml
 from dual_arm_learning.adapters.base import PolicyModelAdapter
 from dual_arm_learning.serving.config import PolicyServiceConfig, parse_policy_config
 from dual_arm_learning.serving.types import (
-    PolicyError,
     ProviderObservation,
     ProviderPrediction,
     ProviderTarget,

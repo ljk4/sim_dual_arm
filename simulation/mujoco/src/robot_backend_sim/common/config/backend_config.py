@@ -88,8 +88,7 @@ class QueueSection(StrictMappingModel):
     captures: Annotated[PositiveInt, Field(le=_MAX_QUEUE)]
     events: Annotated[PositiveInt, Field(le=_MAX_QUEUE)]
     feedback: Annotated[PositiveInt, Field(le=_MAX_QUEUE)]
-    accepted_references: Annotated[PositiveInt, Field(le=_MAX_QUEUE)]
-    follower_references: Annotated[PositiveInt, Field(le=_MAX_QUEUE)] | None = None
+    follower_references: Annotated[PositiveInt, Field(le=_MAX_QUEUE)]
 
 
 class LimitsSection(StrictMappingModel):
@@ -153,11 +152,7 @@ class BackendConfig(StrictMappingModel):
     capture_queue_capacity = property(lambda self: self.queues.captures)
     event_queue_capacity = property(lambda self: self.queues.events)
     feedback_queue_capacity = property(lambda self: self.queues.feedback)
-    accepted_reference_queue_capacity = property(lambda self: self.queues.accepted_references)
-    follower_reference_queue_capacity = property(
-        lambda self: self.queues.follower_references
-        if self.queues.follower_references is not None
-        else self.queues.accepted_references)
+    follower_reference_queue_capacity = property(lambda self: self.queues.follower_references)
     command_history_capacity = property(lambda self: self.limits.command_history)
     chunk_history_capacity = property(lambda self: self.limits.chunk_history)
     planner_health_timeout_s = property(lambda self: self.limits.planner_health_s)

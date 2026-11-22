@@ -3,14 +3,14 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from dual_arm_runtime.offline.audit import label_export
-from dual_arm_runtime.offline.audit.label_export import (
+from dual_arm_runtime.offline.export import label_export
+from dual_arm_runtime.offline.export.label_export import (
     AppliedBlock,
     BrakeInterval,
     ObservationFact,
     RawPrediction,
 )
-from dual_arm_runtime.offline.audit.label_export import (
+from dual_arm_runtime.offline.export.label_export import (
     build_labels as _build_labels,
 )
 from robot_contracts.profiles import load_profile

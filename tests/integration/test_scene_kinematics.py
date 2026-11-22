@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import dataclasses
-import json
 import sys
 from pathlib import Path
 
@@ -18,16 +17,13 @@ if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
 from robot_backend_sim.common.kinematics import common, kinematics_clearance  # noqa: E402
-from robot_backend_sim.common.render.rendering import SceneRenderer  # noqa: E402
 from robot_backend_sim.marvin_sim.stack import plan as stack_plan  # noqa: E402
 from robot_backend_sim.marvin_sim.stack.kinematics_config import load_kinematics_config  # noqa: E402
 from robot_backend_sim.marvin_sim.stack.scene import build_marvin_stack_scene  # noqa: E402
 from robot_backend_sim.marvin_sim.stack.scene_config import load_marvin_stack_scene_config  # noqa: E402
-from robot_backend_sim.marvin_sim.stack.checks import check_kinematics, check_kinematics_report  # noqa: E402
 
 CONFIG_PATH = SCENARIO / "configs/simulation/scene/marvin_stack.yaml"
-CHECK_PATH = SCENARIO / "configs/simulation/checks/scene_check.yaml"
-KINEMATICS_PATH = SCENARIO / "configs/simulation/checks/kinematics_check.yaml"
+KINEMATICS_PATH = SCENARIO / "configs/simulation/scene/stack_paths.yaml"
 
 
 @pytest.fixture(scope="module")
@@ -45,19 +41,6 @@ def scene(scene_config):
     return build_marvin_stack_scene(
         scene_config,
     )
-
-
-@pytest.fixture(scope="module")
-def renderer(scene, scene_config):
-    first = scene_config.cameras[0]
-    instance = SceneRenderer(
-        scene.model,
-        [camera.name for camera in scene_config.cameras],
-        width=first.width,
-        height=first.height,
-    )
-    yield instance
-    instance.close()
 
 
 def initial_state(scene, scene_config, seed: int = 11):
@@ -243,42 +226,6 @@ def test_plane_with_zero_rbound_is_not_culled_and_reports_penetration():
     assert point.distance_m < 0.002
 
 
-def test_nominal_layout_end_to_end_with_real_logger_scene_renderer_and_png(tmp_path, scene_config):
-    arguments = check_kinematics.KinematicsCheckArguments(
-        scene_config=CONFIG_PATH,
-        check_config=CHECK_PATH,
-        kinematics_config=KINEMATICS_PATH,
-        report_root=tmp_path / "reports",
-        run_id="e2e-layout",
-    )
-    code = check_kinematics.run(arguments)
-    run_dir = arguments.report_root / arguments.run_id
-    report = json.loads((run_dir / "report.json").read_text())
-    assert code == 0
-    assert report["status"] == "succeeded"
-    assert report["logs_closed"] is True
-    assert len(report["layouts"]) == 1
-    assert report["layouts"][0]["passed"] is True, report["layouts"][0]["failures"]
-    assert report["artifacts"]["png_count"] == 19
-    assert report["artifacts"]["overview"] is not None
-    assert (run_dir / "artifacts" / "overview.png").is_file()
-    log_dir = run_dir / report["log_directory"]
-    assert log_dir.is_dir()
-    assert any(log_dir.glob("events*.jsonl"))
-    for phase in (
-        "pregrasp",
-        "grasp",
-        "lift",
-        "place_hover",
-        "place",
-        "retreat",
-    ):
-        for camera in scene_config.cameras:
-            assert (
-                run_dir / "artifacts" / "layouts" / "nominal" / phase / f"{camera.name}.png"
-            ).is_file()
-
-
 def test_collision_pair_enumeration_records_mujoco_exclusions(scene):
     pair_set = stack_plan.stack_pair_set(scene.model)
     assert pair_set.pairs
@@ -290,139 +237,3 @@ def test_collision_pair_enumeration_records_mujoco_exclusions(scene):
     assert pair_set.exclusions.get("parent_child", 0) > 0
     assert pair_set.exclusions.get("welded_body", 0) > 0
     assert pair_set.exclusions.get("explicit_exclude", 0) > 0
-
-
-def test_real_segmentation_fails_an_impossible_visibility_threshold(
-    scene, scene_config, kinematics_config, renderer
-):
-    qpos, poses = initial_state(scene, scene_config)
-    pair_set = stack_plan.stack_pair_set(scene.model)
-    targets = make_targets(scene_config, kinematics_config, poses)
-    result = stack_plan.solve_key_poses(
-        scene.model,
-        qpos,
-        targets[:1],
-        kinematics_config.ik,
-        kinematics_config.clearance,
-        pair_set,
-    )[0]
-    assert result.converged
-    snapshot = renderer.capture(scene.data)
-    addresses = tuple(scene.indices.robot.arm_joint_qpos["right"])
-    updates = {
-        address: (value,) for address, value in zip(addresses, result.qpos_right, strict=True)
-    }
-    pose_snapshot = renderer.derive_snapshot(snapshot, updates)
-    segmentation = renderer.render_segmentation(pose_snapshot)
-    strict_rules = tuple(
-        rule.model_copy(update={"min_pixels": 10**6}) if not rule.record_only else rule
-        for rule in kinematics_config.visibility_rules
-    )
-    strict_visibility = kinematics_config.visibility.model_copy(
-        update={"rules": strict_rules}
-    )
-    strict_config = kinematics_config.model_copy(update={"visibility": strict_visibility})
-    geom_ids = {
-        "source": int(scene.model.geom("source_geom").id),
-        "target": int(scene.model.geom("target_geom").id),
-        "table": int(scene.model.geom("table_top").id),
-    }
-    rgb_paths = {camera: f"artifacts/{camera}.png" for camera in segmentation}
-    document = check_kinematics._vision_document(
-        "nominal",
-        result.phase,
-        segmentation,
-        geom_ids,
-        strict_config,
-        rgb_paths,
-    )
-    assert document["passed"] is False
-    assert document["first_failure"] is not None
-
-
-class FakeLogger:
-    def __init__(self, directory: Path, *, fail_close: bool = False):
-        self.directory = directory
-        self.events: list[str] = []
-        self.fail_close = fail_close
-
-    def emit(self, event, **fields):
-        self.events.append(event)
-
-    def check_health(self):
-        return None
-
-    def close(self):
-        if self.fail_close:
-            raise OSError("close failed")
-
-
-class FakeRenderer:
-    def __init__(self):
-        self.closed = False
-
-    def close(self):
-        self.closed = True
-
-
-def fake_arguments(tmp_path: Path) -> check_kinematics.KinematicsCheckArguments:
-    return check_kinematics.KinematicsCheckArguments(
-        scene_config=CONFIG_PATH,
-        check_config=CHECK_PATH,
-        kinematics_config=KINEMATICS_PATH,
-        report_root=tmp_path / "reports",
-        run_id="close-test",
-    )
-
-
-def install_success_fakes(monkeypatch, tmp_path: Path, *, logger, renderer):
-    arguments = fake_arguments(tmp_path)
-    monkeypatch.setattr(check_kinematics, "_open_logger", lambda *_args: logger)
-    monkeypatch.setattr(
-        check_kinematics.probe_environment,
-        "check_dependencies",
-        lambda: {"python": {"version": "3.12"}, "packages": {}, "imports": {}},
-    )
-    monkeypatch.setattr(
-        check_kinematics.probe_environment, "_verify_mounted_source", lambda *_args: None
-    )
-    monkeypatch.setattr(check_kinematics, "code_provenance", lambda: {})
-    monkeypatch.setattr(check_kinematics, "_build_scene", lambda *_args: object())
-    monkeypatch.setattr(check_kinematics, "_scene_info", lambda *_args: {})
-    monkeypatch.setattr(check_kinematics, "_make_renderer", lambda *_args: renderer)
-    monkeypatch.setattr(check_kinematics, "_run_layouts", lambda *_args: ([], None))
-    monkeypatch.setattr(check_kinematics, "_write_overview", lambda *_args: None)
-    return arguments
-
-
-def test_logger_close_failure_turns_success_into_nonzero(tmp_path, monkeypatch):
-    arguments = fake_arguments(tmp_path)
-    logger = FakeLogger(
-        arguments.report_root / arguments.run_id / "logs",
-        fail_close=True,
-    )
-    renderer = FakeRenderer()
-    arguments = install_success_fakes(monkeypatch, tmp_path, logger=logger, renderer=renderer)
-    code = check_kinematics.run(arguments)
-    report = json.loads((arguments.report_root / arguments.run_id / "report.json").read_text())
-    assert code == 1
-    assert report["status"] == "failed"
-    assert report["reason"] == "logger_close_failed"
-    assert report["logs_closed"] is False
-    assert renderer.closed is True
-
-
-def test_report_write_failure_is_nonzero_and_loud(tmp_path, monkeypatch, capsys):
-    arguments = fake_arguments(tmp_path)
-    logger = FakeLogger(arguments.report_root / arguments.run_id / "logs")
-    install_success_fakes(monkeypatch, tmp_path, logger=logger, renderer=FakeRenderer())
-    monkeypatch.setattr(
-        check_kinematics_report,
-        "write_json_atomic",
-        lambda *_args: (_ for _ in ()).throw(OSError("disk full")),
-    )
-    code = check_kinematics.run(arguments)
-    captured = capsys.readouterr()
-    assert code == 1
-    assert "report_write_failed" in captured.err
-    assert "disk full" in captured.err

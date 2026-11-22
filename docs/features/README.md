@@ -30,4 +30,3 @@
 - 项目级操作指南：[根 README](../../README.md)
 - 工程规范与契约准则：[Agent 指导与规范](../../AGENTS.md)
 - 实验排查经验：[重要实践](../experiments/README.md)
-- 阶段演进记录：[项目历史](../history/README.md)

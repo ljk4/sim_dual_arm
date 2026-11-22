@@ -6,10 +6,13 @@ import json
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
+from collections.abc import Sequence
+
 from pydantic import BeforeValidator, Field, model_validator
 from robot_contracts.models import ContractError, RobotProfile
 from robot_contracts.profiles import load_profile, semantic_hash, validate_bindings
 from robot_contracts.project_paths import project_path
+from robot_contracts.trajectory.follower_reference import FollowerValidationLimits
 from robot_contracts.validation import (
     NonEmptyStr,
     NonNegativeInt,
@@ -27,14 +30,16 @@ from robot_contracts.validation import (
 from robot_run_logging import LogSettings
 
 from dual_arm_runtime.recording_queue import RecordingSettings
-from dual_arm_runtime.runtime_limits import (
+from dual_arm_runtime.simulation.options import (
     INT64_MAX,
     MAX_CHUNKS,
     MAX_TASK_BUDGET_NS,
     STREAM_CHUNK_SIZE,
     STREAM_PERIOD_NS,
+    ResetConfig,
+    TeacherConfig,
+    task_enabled,
 )
-from dual_arm_runtime.simulation.options import ResetConfig, TeacherConfig, task_enabled
 from dual_arm_runtime.simulation.options import required_capabilities as simulation_capabilities
 
 MIN_LEASE_DURATION_NS = 100_000_000
@@ -453,4 +458,47 @@ def load_runtime_configuration_document(
         snapshot_json=json.dumps(snapshot, sort_keys=True, separators=(",", ":"), allow_nan=False),
         selection=selection,
         configuration_source=source,
+    )
+
+
+def control_limits(configuration: RuntimeConfiguration) -> tuple[float, ...]:
+    names = configuration.control_document.get("joint_names")
+    limits = configuration.control_document.get("max_accelerations")
+    if list(names or ()) != list(configuration.profile.joint_names):
+        raise ContractError(
+            "SCHEMA_MISMATCH", "control joint_names differ from the robot profile"
+        )
+    if not isinstance(limits, list) or len(limits) != len(configuration.profile.joints):
+        raise ContractError(
+            "SCHEMA_MISMATCH", "control max_accelerations must match the profile joints"
+        )
+    result: list[float] = []
+    for index, value in enumerate(limits):
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            raise ContractError(
+                "SCHEMA_MISMATCH", f"max_accelerations[{index}] must be a number"
+            )
+        number = float(value)
+        if not number >= 0.0:
+            raise ContractError(
+                "SCHEMA_MISMATCH", f"max_accelerations[{index}] must be non-negative"
+            )
+        result.append(number)
+    return tuple(result)
+
+
+def follower_limits(
+    configuration: RuntimeConfiguration, max_accelerations: Sequence[float]
+) -> FollowerValidationLimits:
+    """Build the concrete follower validation limits from configuration only."""
+    follower = configuration.recipe.follower
+    if follower is None:
+        raise ContractError("FOLLOWER_DISABLED", "follower constraints are absent")
+    return FollowerValidationLimits(
+        joint_names=configuration.profile.joint_names,
+        max_accelerations=tuple(float(value) for value in max_accelerations),
+        max_target_deviations=follower.max_target_deviations,
+        target_count=follower.target_count,
+        max_terminal_tail_duration_ns=follower.max_terminal_tail_duration_ns,
+        duration_grid_ns=follower.duration_grid_ns,
     )

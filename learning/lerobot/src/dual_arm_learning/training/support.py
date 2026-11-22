@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import csv
 import json
 import os
 import time
@@ -31,7 +30,6 @@ class DatasetAudit:
     train_frames: int
     validation_frames: int
     manifest_sha256: str
-    verified_files: int
     synthetic: bool
 
 
@@ -228,10 +226,11 @@ def validation_loss(
     *,
     max_batches: int,
     progress: Any = None,
+    data_loader: Any = None,
 ) -> dict[str, Any]:
     import torch
 
-    loader_ = loader(dataset, config, training=False)
+    loader_ = loader(dataset, config, training=False) if data_loader is None else data_loader
     expected_batches = min(len(loader_), max_batches) if progress is not None else 0
     was_training = bool(policy.training)
     total = 0.0
@@ -268,43 +267,15 @@ def validation_loss(
     }
 
 
-METRIC_FIELDS = (
-    "step",
-    "phase",
-    "unit",
-    "loss",
-    "l1_loss",
-    "kl_loss",
-    "lr",
-    "grad_norm",
-    "step_seconds",
-    "elapsed_seconds",
-    "vram_allocated_mb",
-    "vram_reserved_mb",
-    "val_l1",
-    "val_batches",
-    "val_valid_scalars",
-    "val_frames",
-)
-
-
 class MetricsWriter:
     def __init__(self, directory: Path) -> None:
         directory.mkdir(parents=True, exist_ok=True)
         self.jsonl = directory / "metrics.jsonl"
-        self.csv = directory / "metrics.csv"
-        self._csv_ready = self.csv.is_file() and self.csv.stat().st_size > 0
 
     def write(self, row: dict[str, Any]) -> None:
         payload = json.dumps(row, sort_keys=True, separators=(",", ":"), allow_nan=False)
         with self.jsonl.open("a", encoding="utf-8") as stream:
             stream.write(payload + "\n")
-        if not self._csv_ready:
-            with self.csv.open("w", encoding="utf-8", newline="") as stream:
-                csv.DictWriter(stream, fieldnames=METRIC_FIELDS).writeheader()
-            self._csv_ready = True
-        with self.csv.open("a", encoding="utf-8", newline="") as stream:
-            csv.DictWriter(stream, fieldnames=METRIC_FIELDS, extrasaction="ignore").writerow(row)
 
 
 def make_logger(config: TrainingConfig, model_name: str) -> tuple[Any, Path]:
@@ -424,7 +395,6 @@ def build_report(
 
 __all__ = [
     "DatasetAudit",
-    "METRIC_FIELDS",
     "MetricsWriter",
     "TrainingError",
     "TrainingInterrupted",

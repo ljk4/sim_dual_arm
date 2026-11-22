@@ -4,8 +4,6 @@ import importlib
 _EXPORTS = {
     "FollowerLimitFlags": ".follower",
     "NormalizedFollowerPositions": ".follower",
-    "follower_reference_digest_payload": ".follower_reference",
-    "compute_follower_reference_digest": ".follower_reference",
     "FollowerAppliedSample": ".follower_reference",
     "FollowerReference": ".follower_reference",
     "FollowerValidationLimits": ".follower_reference",
@@ -23,7 +21,6 @@ _EXPORTS = {
     "RELATIVE_TOLERANCE": ".constants",
     "LIMIT_ATOL": ".constants",
     "LIMIT_RTOL": ".constants",
-    "DIGEST_HEX_LENGTH": ".follower_reference",
     "FOLLOWER_REFERENCE_KINDS": ".follower_reference",
 }
 __all__ = sorted(_EXPORTS)

@@ -15,11 +15,11 @@
 | --- | --- |
 | `binding.yaml` | 方案绑定与三端配方选择（`--robot marvin_sim --task stack`） |
 | `../extensions/ros/marvin_teacher_api_msgs/` | `marvin_sim` 共享 `marvin_teacher_api_msgs` ROS 2 IDL 扩展 |
-| `profiles/` | `profiles/robot/profile.json`、三路相机标定与本任务的连续流超时 |
+| `profiles/` | `profiles/robot/profile.json` 与本任务的连续流超时 |
 | `configs/simulation/scene/marvin_stack.yaml` | 物理、Marvin 装配参数、桌块与三路相机声明 |
 | `configs/simulation/scene/marvin_stack_task.yaml` | 14 项堆叠成功判据、阶段门禁与 Teacher 参数 |
-| `configs/simulation/checks/` | 名义布局的静态可见性、运动学和净空检查配置 |
-| `configs/simulation/backend/` | direct / teacher / policy 三类后端启动配方 |
+| `configs/simulation/scene/stack_paths.yaml` | 右臂抓取、搬运与堆叠路径规划参数 |
+| `configs/simulation/backend/` | teacher / policy 两类后端启动配方 |
 | `configs/runtime/` | Teacher 采集、Policy 推理、阶段评估与 50 条正式 campaign 预算 |
 | `configs/learning/` | ACT 45/5 数据转换、采样过滤、训练与推理服务配置 |
 

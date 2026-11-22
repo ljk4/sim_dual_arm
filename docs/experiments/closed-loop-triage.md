@@ -55,7 +55,7 @@
 
 1. 按[根 README](../../README.md)执行 Teacher 试采，核对 `task_result.json` 的物理判定、MCAP 完整性和导出质量。
 2. **试训权重只用于链路冒烟。** 核对模型加载、gRPC 会话、实际观测输入、动作块准入及跟随器反馈。试训局不纳入推理成功率统计。
-3. **用合格示教验证完整执行链路。** 用录制时的方案和种子复位仿真。测试策略读取 `export/labels.json` 中按仿真时钟对齐的 `applied_positions`，按原来的 20 Hz、60 点动作块经 gRPC 送入 Runtime。核对选窗、跟随器接收、执行反馈、物理成功判据及 MCAP 完整性。仓库的[测试策略](../../tests/fakes/policy/README.md)支持这种回放，运行需显式启用 `test_only`。记录来源 episode 和回放结果。
+3. **用合格示教验证完整执行链路。** 用录制时的方案和种子复位仿真。测试策略读取 `export/labels.json` 中按仿真时钟对齐的 `applied_positions`，按原来的 20 Hz、60 点动作块经 gRPC 送入 Runtime。核对选窗、跟随器接收、执行反馈、物理成功判据及 MCAP 完整性。`tests/fakes/policy/` 支持这种回放，运行需显式启用 `test_only`。记录来源 episode 和回放结果。
 4. **用正式训练权重评估成功率。** 记录方案、模型、测试种子、`TASK_SUCCEEDED` 局数和首发失败原因。Stack 核对 14 项物理判据和连续 2 s 稳定窗口，Handover 核对空中交接顺序和入箱稳定窗口。
 
 ---

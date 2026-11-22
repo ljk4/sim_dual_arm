@@ -136,5 +136,4 @@ class ChunkAnchor(StrictContractModel):
         return self.predecessor_seq + 1
 
 
-__all__ = ["INT64_MAX", "MAX_STREAM_ID_LENGTH", "MAX_TARGET_COUNT", "UINT64_MAX",
-           "ActionWindow", "ChunkAnchor"]
+__all__ = ["INT64_MAX", "MAX_TARGET_COUNT", "UINT64_MAX", "ActionWindow", "ChunkAnchor"]

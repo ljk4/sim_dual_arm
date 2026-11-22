@@ -20,10 +20,26 @@ __all__ = [
     "SimTaskPlugin",
     "TaskChunk",
     "TaskChunkView",
+    "TaskGateFact",
     "TaskPlan",
     "TaskPrepareResult",
     "TaskPrepareSnapshot",
+    "TeacherPrepareSnapshot",
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class TaskGateFact:
+    """Gate progress snapshot bound to one captured observation."""
+
+    step_index: int
+    step: str
+    phase: str
+    status: str
+    active_start_sim_time_ns: int
+    phase_wait_s: float
+    stable_elapsed_s: float
+    failure: str
 
 
 @runtime_checkable
@@ -37,6 +53,19 @@ class TaskPrepareSnapshot(Protocol):
     qpos: tuple[float, ...]
     seed: int
     controller_command_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class TeacherPrepareSnapshot:
+    """Immutable snapshot captured at prepare; never holds a live MjData reference."""
+
+    context: RunContext
+    task_epoch: int
+    sim_time_ns: int
+    qpos: tuple[float, ...]
+    capture_seq: int = 0
+    seed: int = 0
+    controller_command_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)

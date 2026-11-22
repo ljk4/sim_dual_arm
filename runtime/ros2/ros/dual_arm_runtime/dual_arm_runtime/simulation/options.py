@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated, Literal
+from pathlib import Path
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import Field
+from robot_contracts.io import read_yaml_unique_mapping
 from robot_contracts.models import ContractError
 from robot_contracts.validation import (
     NonEmptyStr,
@@ -14,13 +16,11 @@ from robot_contracts.validation import (
     StrictMappingModel,
 )
 
-from dual_arm_runtime.runtime_limits import (
-    INT64_MAX,
-    MAX_CHUNKS,
-    MAX_TASK_BUDGET_NS,
-    STREAM_CHUNK_SIZE,
-    STREAM_PERIOD_NS,
-)
+INT64_MAX = 2**63 - 1
+MAX_CHUNKS = 2048
+MAX_TASK_BUDGET_NS = 300_000_000_000
+STREAM_CHUNK_SIZE = 60
+STREAM_PERIOD_NS = 50_000_000
 
 if TYPE_CHECKING:
     from dual_arm_runtime.runtime_config import RuntimeRecipe
@@ -76,4 +76,50 @@ def require_simulation_backend(backend_kind: str) -> None:
         raise ContractError(
             "UNSUPPORTED_CAPABILITY",
             f"simulation features require a MuJoCo backend (received {backend_kind!r})",
+        )
+
+
+def check_teacher_budget(
+    runtime_document: dict[str, Any],
+    backend_document: dict[str, Any],
+    backend_path: Path,
+    *,
+    error_cls: type[Exception] = ValueError,
+) -> None:
+    """Runtime stream clock and budget must equal the simulation task judge."""
+    teacher = runtime_document.get("teacher")
+    robot = backend_document.get("robot")
+    if not isinstance(teacher, dict) or "task_sim_budget_ns" not in teacher:
+        return
+    if not isinstance(robot, dict) or not isinstance(robot.get("task"), str):
+        raise error_cls(f"simulation teacher recipe must declare robot.task ({backend_path})")
+    task_path = (backend_path.parent / robot["task"]).resolve()
+    if not task_path.is_file():
+        raise error_cls(f"simulation task recipe is missing: {task_path}")
+    task = read_yaml_unique_mapping(
+        task_path, label="simulation task recipe", error_cls=error_cls
+    )
+    success = task.get("success") if isinstance(task, dict) else None
+    if not isinstance(success, dict) or "max_task_sim_duration_s" not in success:
+        return
+    task_teacher = task.get("teacher") if isinstance(task, dict) else None
+    if not isinstance(task_teacher, dict):
+        raise error_cls(f"simulation task recipe is incomplete: {task_path}")
+    try:
+        budget_ns = round(float(success["max_task_sim_duration_s"]) * 1e9)
+        chunk_size = int(task_teacher["chunk_size"])
+        period_ns = int(task_teacher["action_period_ns"])
+        runtime_budget_ns = int(teacher["task_sim_budget_ns"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise error_cls(f"teacher budget fields are not numeric: {error}") from error
+    if runtime_budget_ns != budget_ns:
+        raise error_cls(
+            f"runtime teacher.task_sim_budget_ns {runtime_budget_ns} differs from "
+            f"simulation success.max_task_sim_duration_s ({budget_ns})"
+        )
+    if int(teacher.get("chunk_size", -1)) != chunk_size:
+        raise error_cls("runtime teacher.chunk_size differs from the simulation task")
+    if int(teacher.get("action_period_ns", -1)) != period_ns:
+        raise error_cls(
+            "runtime teacher.action_period_ns differs from the simulation task"
         )

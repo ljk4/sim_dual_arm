@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from dual_arm_runtime.offline.export import export_episode, mcap_reader
+from dual_arm_runtime.offline.export import export_episode
 from dual_arm_runtime.offline.export.follower_definition import (
     FOLLOWER_REFERENCE_TYPE,
     require_current_follower_reference_definition,
@@ -107,99 +107,6 @@ def _install_ros_modules(monkeypatch, reader):
         SimpleNamespace(get_message=lambda type_name: type_name),
     )
     return decoded
-
-
-class _AuditReader(_ExportReader):
-    def get_all_topics_and_types(self):
-        return [
-            SimpleNamespace(name="/robot/info", type="robot_api_msgs/msg/BackendInfo"),
-            SimpleNamespace(name="/robot/state", type="robot_api_msgs/msg/RobotState"),
-            SimpleNamespace(
-                name="/robot/control_events", type="robot_api_msgs/msg/ControlEvent"
-            ),
-            SimpleNamespace(
-                name="/robot/execution_feedback",
-                type="robot_api_msgs/msg/ExecutionFeedback",
-            ),
-            SimpleNamespace(
-                name="/robot/follower_references", type=FOLLOWER_REFERENCE_TYPE
-            ),
-            SimpleNamespace(
-                name="/runtime/commands", type="robot_api_msgs/msg/StreamCommand"
-            ),
-            SimpleNamespace(
-                name="/runtime/observation_index",
-                type="sim_api_msgs/msg/ObservationIndex",
-            ),
-            SimpleNamespace(
-                name="/robot/cameras/global/frame",
-                type="robot_api_msgs/msg/CameraFrame",
-            ),
-        ]
-
-
-class _FakeAudit:
-    root = "/robot"
-    reference_topic = "/robot/follower_references"
-    camera_names = ("global",)
-    required_capabilities = frozenset(
-        {"execution_feedback.gripper_set", "bounded_target_follower"}
-    )
-
-    def __init__(self) -> None:
-        from collections import Counter
-
-        self.counts = Counter()
-        self.feedback = []
-
-    def context_value(self, _context) -> bool:
-        return True
-
-    def capture_payload(self, *_args) -> None:
-        pass
-
-    def state(self, _message) -> None:
-        pass
-
-    def frame(self, _topic, _message) -> None:
-        pass
-
-    def observation(self, _message) -> None:
-        pass
-
-    def command(self, _message) -> None:
-        pass
-
-    def reference(self, _message) -> None:
-        pass
-
-    def event(self, _message) -> None:
-        pass
-
-    def info(self, _message) -> None:
-        pass
-
-    def feedback_message(self, message) -> None:
-        self.feedback.append(message)
-
-    def finish(self) -> dict:
-        return {"ok": True}
-
-
-def test_audit_decodes_installed_feedback(monkeypatch):
-    reader = _AuditReader(
-        [("/robot/execution_feedback", b"payload", 0),]
-    )
-    decoded = _install_ros_modules(monkeypatch, reader)
-    execution = SimpleNamespace(context="ctx", reference_kind="TRAJECTORY")
-    monkeypatch.setattr(
-        mcap_reader, "decode_message", lambda *args, **kwargs: execution
-    )
-    audit = _FakeAudit()
-    assert mcap_reader._run_audit(audit, Path("/recording")) == {"ok": True}
-    assert audit.feedback == [execution]
-    assert [payload for payload, _type in decoded] == [b"payload"]
-    assert reader.closed
 
 
 def test_export_reads_installed_layout(monkeypatch):

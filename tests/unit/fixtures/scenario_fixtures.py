@@ -75,7 +75,6 @@ def base_binding() -> dict[str, Any]:
         },
         "source_roots": [],
         "artifact_roots": [],
-        "references": [],
     }
 
 

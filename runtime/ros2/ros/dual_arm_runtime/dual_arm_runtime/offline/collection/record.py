@@ -13,8 +13,8 @@ from pathlib import Path
 import yaml
 from robot_contracts.project_paths import project_path
 
-from dual_arm_runtime.artifact_paths import default_backend_log
 from dual_arm_runtime.offline.collection import campaign
+from dual_arm_runtime.offline.collection.campaign_execution import default_backend_log
 from dual_arm_runtime.offline.collection.campaign_ledger import (
     CampaignError,
     Ledger,

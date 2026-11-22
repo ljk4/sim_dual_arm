@@ -5,26 +5,15 @@
 diagnostic: false
 
 budget:
-  # One pilot qualifies the teacher/export chain; at most three attempts and
-  # three distinct teacher seeds.  No ACT attempt is reserved in this stage.
   pilot_seed_first: 3100
   pilot_seed_last: 3109
   pilot_max_attempts: 3
-  pilot_act_reserved_attempts: 0
-  pilot_teacher_seed_last: 3102
-  pilot_label_replay_max: 0
 
   # Fifty qualified demonstrations, at most one hundred attempts.
   formal_seed_first: 4100
   formal_seed_last: 4199
   formal_max_attempts: 100
   formal_target_qualified: 50
-
-  # Model smoke runs use the shared test budget, never pilot or formal seeds.
-  test_seed_first: 5100
-  test_seed_last: 5119
-  test_max_attempts: 20
-  evaluation_max_attempts: 20
 
   # 60 GiB including failed attempts and every raw byte under the attempt
   # root; the 50-qualified target is not capped below 50 GiB.
@@ -55,9 +44,6 @@ paths:
   sdk_marker: build/ros-dev/contracts.json
 
 launch:
-  # The supervisor supplies the real two-container command.
-  command: []
-  cleanup_command: []
   timeout_s: 600.0
   # runtime closes control, recording and the log inside this bound.
   stop_grace_s: 45.0
@@ -69,7 +55,7 @@ quality:
   sidecar: export/quality.json
   max_blackout_s: 0.35
   min_qualified_ratio: 0.85
-  phases: &handover_phases
+  phases: &all_handover_phases
     [left_approach, left_grasp, left_lift, handover_approach, dual_hold,
      left_release, left_retreat, right_transport, right_place, right_release,
      stable]
@@ -87,10 +73,7 @@ quality:
     # Left grasp: global context plus the left wrist view of the block.
     - camera: global
       object: block
-      phases: &all_handover_phases
-        [left_approach, left_grasp, left_lift, handover_approach, dual_hold,
-         left_release, left_retreat, right_transport, right_place, right_release,
-         stable]
+      phases: *all_handover_phases
       mode: required
       min_pixels: 128
     - camera: left_wrist

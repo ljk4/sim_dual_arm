@@ -23,7 +23,6 @@ __all__ = [
     "Snapshot",
     "apply_snapshot",
     "capture_snapshot",
-    "derive_snapshot",
     "read_gl_info",
 ]
 
@@ -116,47 +115,6 @@ def apply_snapshot(model: mujoco.MjModel, data: mujoco.MjData, snapshot: Snapsho
         raise SceneRenderError(
             "snapshot_forward_failed", f"{type(error).__name__}: {error}"
         ) from error
-
-
-def derive_snapshot(
-    model: mujoco.MjModel,
-    base: Snapshot,
-    qpos_updates: Mapping[int, Sequence[float]],
-) -> Snapshot:
-    """Return a new snapshot with explicit qpos slices applied to a private MjData."""
-    _check_snapshot(model, base)
-    updates: list[tuple[int, tuple[float, ...]]] = []
-    for address, values in qpos_updates.items():
-        if isinstance(address, bool) or not isinstance(address, int):
-            raise SceneRenderError("qpos_update_invalid", "qpos addresses must be integers")
-        numbers = tuple(float(value) for value in values)
-        if not numbers:
-            raise SceneRenderError("qpos_update_invalid", "qpos updates must not be empty")
-        if address < 0 or address + len(numbers) > model.nq:
-            raise SceneRenderError(
-                "qpos_update_invalid",
-                f"qpos update [{address}, {address + len(numbers)}) is outside [0, {model.nq})",
-            )
-        if not np.isfinite(numbers).all():
-            raise SceneRenderError("qpos_update_invalid", "qpos updates must be finite")
-        updates.append((address, numbers))
-    updates.sort()
-    for (first_address, first_values), (second_address, _second_values) in zip(
-        updates, updates[1:], strict=False
-    ):
-        if first_address + len(first_values) > second_address:
-            raise SceneRenderError("qpos_update_invalid", "qpos updates overlap")
-    data = mujoco.MjData(model)
-    _restore(model, data, base)
-    for address, numbers in updates:
-        data.qpos[address : address + len(numbers)] = numbers
-    try:
-        mujoco.mj_forward(model, data)
-    except Exception as error:
-        raise SceneRenderError(
-            "snapshot_forward_failed", f"{type(error).__name__}: {error}"
-        ) from error
-    return capture_snapshot(model, data)
 
 
 def _gl_string(name: int) -> str | None:
@@ -313,11 +271,6 @@ class SceneRenderer:
 
     def capture(self, data: mujoco.MjData) -> Snapshot:
         return capture_snapshot(self._model, data)
-
-    def derive_snapshot(
-        self, base: Snapshot, qpos_updates: Mapping[int, Sequence[float]]
-    ) -> Snapshot:
-        return derive_snapshot(self._model, base, qpos_updates)
 
     def render_rgb(self, snapshot: Snapshot) -> Mapping[str, np.ndarray]:
         return self._render(snapshot, segmentation=False)

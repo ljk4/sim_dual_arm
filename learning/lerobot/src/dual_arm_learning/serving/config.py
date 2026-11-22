@@ -52,7 +52,6 @@ class PolicyServiceConfig(rv.StrictMappingModel):
     open_deadline_s: rv.PositiveFloat
     close_deadline_s: rv.PositiveFloat
     test_only: bool
-    stateful: bool
     model_bundle_digest: OptionalSha = ""
     processor_digest: OptionalSha = ""
     observation_schema_hash: OptionalSha = ""
@@ -87,10 +86,6 @@ class PolicyServiceConfig(rv.StrictMappingModel):
 
     @model_validator(mode="after")
     def _service_contract(self) -> PolicyServiceConfig:
-        if self.chunk_size != CHUNK_SIZE:
-            raise rv.contract_error("chunk_size", f"must contain exactly {CHUNK_SIZE} targets")
-        if self.action_period_ns != PERIOD_NS:
-            raise rv.contract_error("action_period_ns", "must use a uniform 50 ms period")
         state_dim = len(self.joint_names)
         if len(self.joint_lower_bounds) != state_dim or len(self.joint_upper_bounds) != state_dim:
             raise rv.contract_error("joint_lower_bounds", "must match joint_names length")
@@ -141,8 +136,6 @@ def load_policy_config(path: str | Path, **overrides: object) -> PolicyServiceCo
     if values.get("model_path") is not None:
         if values.get("robot_profile_path") is None or values.get("test_only"):
             raise PolicyConfigError(str(path), "robot_profile_path", "required")
-        if not values.get("stateful"):
-            raise PolicyConfigError(str(path), "stateful", "stateful session required")
         values.update(resolve_policy_contract(values))
     return rv.validate_config_model(PolicyServiceConfig, values, str(path), PolicyConfigError)
 

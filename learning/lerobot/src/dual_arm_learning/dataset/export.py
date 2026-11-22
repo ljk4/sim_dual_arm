@@ -14,7 +14,6 @@ from robot_contracts.project_paths import project_path
 from ..config import PNG_SHA, DatasetConfig
 from .common import (
     ExportError,
-    canonical_hash,
     file_sha256,
     load_json_document,
     require_chunk,
@@ -33,7 +32,6 @@ class SourceEpisode:
     global_index: int
     rows: tuple[dict[str, Any], ...]
     raw_by_chunk: dict[int, dict[str, Any]]
-    source_files: dict[str, dict[str, Any]]
     quality: dict[str, Any]
     profile_hash: str
     source_facts: dict[str, Any]
@@ -253,7 +251,7 @@ def _source_facts(labels: dict[str, Any], quality: dict[str, Any]) -> dict[str, 
         raise ExportError("export: recording is not complete")
     if recording.get("failure_reason") not in {"", None}:
         raise ExportError("export: recording has a failure reason")
-    facts = {
+    return {
         "episode_id": labels.get("episode_id"),
         "task": {"outcome": task.get("outcome"), "reason": task.get("reason")},
         "runtime": {"outcome": runtime.get("outcome"), "reason": runtime.get("reason")},
@@ -263,8 +261,6 @@ def _source_facts(labels: dict[str, Any], quality: dict[str, Any]) -> dict[str, 
         },
         "quality_qualified": quality.get("qualified"),
     }
-    facts["facts_sha256"] = canonical_hash(facts)
-    return facts
 
 
 _EXPORT_NAMES = (
@@ -272,20 +268,6 @@ _EXPORT_NAMES = (
     "raw_predictions.json",
     "quality.json",
 )
-
-
-def _source_files(export_dir: Path) -> dict[str, dict[str, Any]]:
-    source_files: dict[str, dict[str, Any]] = {}
-    for name in _EXPORT_NAMES:
-        path = export_dir / name
-        if not path.is_file():
-            raise ExportError(f"{export_dir}: missing {name}")
-        source_files[name] = {
-            "path": str(path.resolve()),
-            "sha256": file_sha256(path),
-            "bytes": path.stat().st_size,
-        }
-    return source_files
 
 
 def _export_documents(export_dir: Path) -> tuple[dict[str, Any], ...]:
@@ -397,10 +379,12 @@ def _validate_export(
     tuple[dict[str, Any], ...],
     dict[int, dict[str, Any]],
     dict[str, Any],
+    dict[str, Any],
+    dict[str, Any],
 ]:
     labels, raw_doc, quality = _export_documents(export_dir)
     _validate_export_headers(labels, quality, config, profile_hash)
-    _source_facts(labels, quality)
+    facts = _source_facts(labels, quality)
     rows_value = labels.get("labels")
     if not isinstance(rows_value, list) or not rows_value:
         raise ExportError("export: labels array is empty")
@@ -409,15 +393,16 @@ def _validate_export(
         raise ExportError("export: label summary count is inconsistent")
     raw_by_chunk = _validate_raw_predictions(raw_doc, config)
     rows = _validate_label_rows(rows_value, raw_by_chunk, config, export_dir)
-    return rows, raw_by_chunk, quality
+    return rows, raw_by_chunk, labels, quality, facts
 
 
 def _predict_episode(
     entry: dict[str, Any], config: DatasetConfig, profile_hash: str
 ) -> SourceEpisode:
     export_dir = resolve_export_dir(entry["attempt_dir"], config.attempt_export_glob)
-    rows, raw_by_chunk, quality = _validate_export(export_dir, config, profile_hash)
-    labels = load_json_document(export_dir / "labels.json")
+    rows, raw_by_chunk, labels, quality, facts = _validate_export(
+        export_dir, config, profile_hash
+    )
     if labels.get("seed") != entry["seed"]:
         raise ExportError(
             f"{export_dir}: labels seed {labels.get('seed')} != selected seed {entry['seed']}"
@@ -429,7 +414,6 @@ def _predict_episode(
         raise ExportError(
             f"{export_dir}: formal data must come from teacher, not {action_source!r}"
         )
-    facts = _source_facts(labels, quality)
     return SourceEpisode(
         attempt_id=entry["attempt_id"],
         seed=entry["seed"],
@@ -438,7 +422,6 @@ def _predict_episode(
         global_index=entry["global_index"],
         rows=rows,
         raw_by_chunk=raw_by_chunk,
-        source_files=_source_files(export_dir),
         quality=quality,
         profile_hash=profile_hash,
         source_facts=facts,

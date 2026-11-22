@@ -6,11 +6,11 @@
 
 | 目录 | 说明 |
 | :--- | :--- |
-| [`src/robot_backend_sim/`](src/robot_backend_sim/README.md) | 物理引擎封装、运动控制、渲染线程、任务插件与 ROS 2 节点 |
-| [`assets/`](assets/README.md) | 机器人模型与网格资源（`marvin/`） |
-| [`configs/`](configs/README.md) | 仿真端环境变量 `container.env` |
-| [`docker/`](docker/README.md) | `Dockerfile`、`docker-compose.yml` 与依赖清单 |
-| [`scripts/`](scripts/README.md) | 容器内单职责脚本：`backend.sh`（及薄封装 `teacher_backend.sh`、`inference_backend.sh`）、`viewer.sh`、`test.sh` |
+| `src/robot_backend_sim/` | 物理引擎封装、运动控制、渲染线程、任务插件与 ROS 2 节点 |
+| `assets/` | 机器人模型与网格资源（[`marvin/`](assets/marvin/README.md)） |
+| `configs/` | 仿真端环境变量 `container.env` |
+| `docker/` | `Dockerfile` 与 `docker-compose.yml` |
+| `scripts/` | 容器内单职责脚本：`backend.sh`（及薄封装 `teacher_backend.sh`、`inference_backend.sh`）、`viewer.sh`、`test.sh` |
 
 ## 快速使用
 
@@ -23,4 +23,4 @@
 ./env.sh viewer --robot marvin_sim --task stack
 ```
 
-详细操作见 [`docker/README.md`](docker/README.md) 与 [`scripts/README.md`](scripts/README.md)。
+更多用法见 [脚本入口与使用指南](../../docs/features/脚本入口与使用指南.md)。

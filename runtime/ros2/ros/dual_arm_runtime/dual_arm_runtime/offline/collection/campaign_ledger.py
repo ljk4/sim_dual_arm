@@ -1,13 +1,11 @@
-"""Append-only campaign ledger, budget allocation and code fingerprints."""
+"""Append-only campaign ledger and seed/byte budget allocation."""
 
 from __future__ import annotations
 
 import fcntl
-import hashlib
 import json
 import os
 import shutil
-import subprocess
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -18,9 +16,9 @@ from typing import Any
 import yaml
 from robot_contracts.project_paths import project_path
 
-PURPOSES = {"pilot", "formal", "test", "evaluation"}
-MODES = {"teacher", "act"}
-KINDS = {"rollout", "label_replay"}
+PURPOSES = {"pilot", "formal"}
+MODES = {"teacher"}
+KINDS = {"rollout"}
 TERMINAL_EVENTS = {"FINISHED", "FAILED", "INTERRUPTED"}
 
 
@@ -53,77 +51,6 @@ def safe_component(value: str, name: str) -> str:
     ):
         raise CampaignError(f"{name} must be 1..128 safe ASCII characters")
     return value
-
-
-def tree_sha256(project_root: Path) -> str:
-    digest = hashlib.sha256()
-    roots = (
-        "simulation",
-        "runtime",
-        "learning",
-        "hardware",
-        "scripts",
-        "shared",
-    )
-    for root_name in roots:
-        root = project_root / root_name
-        if not root.is_dir():
-            continue
-        for path in sorted(root.rglob("*")):
-            if not path.is_file() or "__pycache__" in path.parts:
-                continue
-            if path.suffix not in {".py", ".yaml", ".yml", ".json", ".proto", ".msg", ".srv"}:
-                continue
-            try:
-                digest.update(path.relative_to(project_root).as_posix().encode())
-                digest.update(b"\0")
-                digest.update(path.read_bytes())
-                digest.update(b"\0")
-            except OSError as error:
-                raise CampaignError(f"cannot hash source content {path}: {error}") from error
-    return digest.hexdigest()
-
-
-def code_fingerprint(project_root: Path, *config_paths: Path) -> dict[str, str]:
-    """Identify the working tree and the recipes this attempt actually uses.
-
-    Only the explicitly supplied campaign/runtime recipes are hashed; the
-    fingerprint carries no scenario-specific path.
-    """
-    head = ""
-    dirty = "unknown"
-    try:
-        head = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=project_root,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        ).stdout.strip()
-        status = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=project_root,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        ).stdout
-        dirty = "clean" if not status.strip() else "dirty"
-    except (OSError, subprocess.SubprocessError):
-        pass
-    files: dict[str, str] = {}
-    for name in config_paths:
-        try:
-            files[str(name)] = hashlib.sha256(name.read_bytes()).hexdigest()
-        except OSError:
-            files[str(name)] = ""
-    return {
-        "head": head,
-        "worktree": dirty,
-        "files": files,
-        "source_tree_sha256": tree_sha256(project_root),
-    }
 
 
 def read_records(path: Path) -> list[dict[str, Any]]:
@@ -189,7 +116,6 @@ class Attempt:
     episode_id: str
     directory: Path
     config: str
-    code: dict[str, str]
     budget: dict[str, int]
     reserved_at_ns: int
 
@@ -212,21 +138,16 @@ def finished(records: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
 
 
 def seed_range(config: dict[str, Any], purpose: str) -> range:
-    prefix = "pilot" if purpose == "pilot" else "test" if purpose == "evaluation" else purpose
-    first = int(config["budget"][f"{prefix}_seed_first"])
-    if purpose == "pilot" and "pilot_seed_last" in config["budget"]:
-        last = int(config["budget"]["pilot_seed_last"])
-    else:
-        last = int(config["budget"][f"{prefix}_seed_last"])
+    budget = config["budget"]
+    first = int(budget[f"{purpose}_seed_first"])
+    last = int(budget[f"{purpose}_seed_last"])
     return range(first, last + 1)
 
 
 def used_seeds(records: list[dict[str, Any]], purpose: str) -> set[int]:
-    purposes = {"test", "evaluation"} if purpose in {"test", "evaluation"} else {purpose}
     return {
         int(record["seed"])
-        for item in purposes
-        for record in attempts(records, item)
+        for record in attempts(records, purpose)
         if int(record.get("seed", -1)) >= 0
     }
 
@@ -278,17 +199,19 @@ def allocate(
     requested_seed: int | None,
     root: Path,
 ) -> tuple[int, str]:
+    if purpose not in PURPOSES:
+        raise CampaignError(f"unsupported campaign purpose: {purpose!r}")
+    if kind != "rollout":
+        raise CampaignError(f"unsupported attempt kind: {kind!r}")
+    if mode != "teacher":
+        raise CampaignError(f"{purpose} data must come from teacher rollouts, not {mode!r}")
     budget = config["budget"]
     reserved = attempts(records, purpose)
     terminal = finished(records)
-    if purpose == "formal" and mode != "teacher":
-        raise CampaignError("formal data must come from teacher rollouts, not ACT")
-    if purpose in {"test", "evaluation"} and mode != "act":
-        raise CampaignError(f"{purpose} seeds are reserved for ACT inference")
     if purpose == "formal":
         qualified = sum(
             1
-            for record in attempts(records, "formal")
+            for record in reserved
             if (terminal.get(str(record["attempt_id"])) or {}).get("qualified")
         )
         if qualified >= int(budget["formal_target_qualified"]):
@@ -299,21 +222,9 @@ def allocate(
         raise CampaignError(
             f"raw-byte budget would be exceeded: consumed {consumed}, limit {raw_limit}"
         )
-    if purpose == "pilot":
-        return _allocate_pilot(config, records, kind, mode, requested_seed, reserved)
-    if purpose in {"test", "evaluation"}:
-        maximum = int(budget.get(f"{purpose}_max_attempts", budget["test_max_attempts"]))
-        used_attempts = [
-            record
-            for record in attempts(records)
-            if record.get("purpose") in {"test", "evaluation"}
-        ]
-        if len(used_attempts) >= maximum:
-            raise CampaignError(f"{purpose} attempt budget is exhausted")
-    else:
-        maximum = int(budget[f"{purpose}_max_attempts"])
-        if len(reserved) >= maximum:
-            raise CampaignError(f"{purpose} attempt budget is exhausted")
+    maximum = int(budget[f"{purpose}_max_attempts"])
+    if len(reserved) >= maximum:
+        raise CampaignError(f"{purpose} attempt budget is exhausted")
     used = used_seeds(records, purpose)
     for seed in seed_range(config, purpose):
         if seed not in used:
@@ -323,46 +234,6 @@ def allocate(
                 )
             return seed, mode
     raise CampaignError(f"no unused {purpose} seed remains")
-
-
-def _allocate_pilot(
-    config: dict[str, Any],
-    records: list[dict[str, Any]],
-    kind: str,
-    mode: str,
-    requested_seed: int | None,
-    reserved: list[dict[str, Any]],
-) -> tuple[int, str]:
-    budget = config["budget"]
-    if len(reserved) >= int(budget["pilot_max_attempts"]):
-        raise CampaignError("pilot attempt budget is exhausted")
-    reserved_act = int(budget.get("pilot_act_reserved_attempts", 0))
-    teacher_used = sum(item.get("mode", "teacher") != "act" for item in reserved)
-    if mode != "act" and teacher_used >= int(budget["pilot_max_attempts"]) - reserved_act:
-        raise CampaignError("teacher/replay budget must preserve the reserved ACT slots")
-    if kind == "label_replay":
-        count = sum(1 for record in attempts(records) if record.get("kind") == "label_replay")
-        if count >= int(budget["pilot_label_replay_max"]):
-            raise CampaignError("pilot label-replay budget is exhausted")
-        if requested_seed is None:
-            raise CampaignError("label replay needs --seed of an existing teacher attempt")
-        if requested_seed not in used_seeds(records, "pilot"):
-            raise CampaignError("label replay seed was never reserved")
-        return requested_seed, "teacher"
-    first = int(budget["pilot_seed_first"])
-    teacher_last = int(budget["pilot_teacher_seed_last"])
-    act_first = int(budget["pilot_teacher_seed_last"]) + 1
-    act_last = int(budget["pilot_seed_last"])
-    start, end = (act_first, act_last) if mode == "act" else (first, teacher_last)
-    used = used_seeds(records, "pilot")
-    for seed in range(start, end + 1):
-        if seed not in used:
-            if requested_seed is not None and requested_seed != seed:
-                raise CampaignError(
-                    f"explicit rollout seed {requested_seed} would skip the next seed {seed}"
-                )
-            return seed, mode
-    raise CampaignError(f"no unused {mode} pilot seed remains")
 
 
 def summarize(
@@ -398,7 +269,6 @@ __all__ = [
     "allocate",
     "attempts",
     "check_environment",
-    "code_fingerprint",
     "finished",
     "load",
     "measure",
@@ -408,6 +278,5 @@ __all__ = [
     "safe_component",
     "seed_range",
     "summarize",
-    "tree_sha256",
     "used_seeds",
 ]

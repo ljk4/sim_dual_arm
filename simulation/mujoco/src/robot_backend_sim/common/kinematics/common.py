@@ -17,7 +17,6 @@ __all__ = [
     "ObjectPose",
     "extract_object_pose",
     "finite_float",
-    "rotation_down",
     "sample_joint_path",
     "vector",
 ]
@@ -45,18 +44,6 @@ def vector(value: object, length: int, field: str) -> tuple[float, ...]:
     if not isinstance(value, tuple | list) or len(value) != length:
         raise KinematicsError("target_invalid", f"{field} must contain {length} values")
     return tuple(finite_float(item, f"{field}[{index}]") for index, item in enumerate(value))
-
-
-def rotation_down(yaw_rad: float) -> tuple[tuple[float, float, float], ...]:
-    """Return ``Rz(yaw) @ diag(1, -1, -1)`` as an explicit row-major matrix."""
-    yaw = finite_float(yaw_rad, "yaw_rad")
-    cosine = math.cos(yaw)
-    sine = math.sin(yaw)
-    return (
-        (cosine, sine, 0.0),
-        (sine, -cosine, 0.0),
-        (0.0, 0.0, -1.0),
-    )
 
 
 def extract_object_pose(qpos: object, address: int, name: str) -> ObjectPose:

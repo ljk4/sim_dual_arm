@@ -26,7 +26,6 @@ class ProviderInfo:
     action_joint_names: tuple[str, ...]
     required_camera_names: tuple[str, ...]
     action_period_ns: int
-    stateful: bool
     ready: bool
     command_space: str
     chunk_size: int
@@ -45,7 +44,6 @@ class ProviderInfo:
             action_joint_names=config.action_joint_names,  # type: ignore[attr-defined]
             required_camera_names=config.camera_names,  # type: ignore[attr-defined]
             action_period_ns=config.action_period_ns,  # type: ignore[attr-defined]
-            stateful=config.stateful,  # type: ignore[attr-defined]
             ready=True,
             command_space=config.command_space,  # type: ignore[attr-defined]
             chunk_size=config.chunk_size,  # type: ignore[attr-defined]

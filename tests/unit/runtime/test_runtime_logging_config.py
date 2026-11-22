@@ -160,33 +160,7 @@ def test_initialize_run_writes_metadata_and_exclusive_directory(tmp_path, monkey
         assert resolved["instance_id"] == session.instance_id
         assert resolved["recipe"]["logging"] == asdict(configuration.recipe.logging)
         assert resolved["profile_hash"] == configuration.snapshot["profile_hash"]
-
-        versions = json.loads((session.run_directory / "versions.json").read_text())
-        assert set(versions) == {
-            "run_id",
-            "instance_id",
-            "python",
-            "dependencies",
-            "sources",
-            "configuration_sha256",
-            "recipe_sha256",
-            "logging",
-            "image",
-            "git",
-        }
-        assert versions["python"]["version"]
-        assert set(versions["dependencies"]) == {"PyYAML", "jsonschema"}
-        assert set(versions["sources"]) == {
-            "dual_arm_runtime",
-            "robot_contracts",
-            "robot_run_logging",
-            "robot_ros_support",
-        }
-        assert versions["image"]["digest"] is None
-        assert versions["git"] == {"revision": None, "dirty": None}
-        assert len(versions["configuration_sha256"]) == 64
-        serialized = json.dumps(versions)
-        assert "secret-value" not in serialized
+        assert not (session.run_directory / "versions.json").exists()
     finally:
         session.logger.close()
 

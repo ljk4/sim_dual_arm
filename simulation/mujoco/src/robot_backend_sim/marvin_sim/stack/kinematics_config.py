@@ -2,20 +2,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from pathlib import Path
-from types import MappingProxyType
-from typing import Annotated, Literal
+from typing import Annotated
 
-from pydantic import BeforeValidator, Field, StrictInt, model_validator
+from pydantic import Field, model_validator
 from robot_contracts.validation import (
     PositiveFloat,
-    PositiveInt,
     StrictFloat,
     StrictMappingError,
     StrictMappingModel,
     UniqueKeyError,
-    as_tuple,
     contract_error,
     read_unique_yaml,
     validate_config_model,
@@ -25,15 +21,9 @@ from robot_backend_sim.common.tasks.config import (
     ClearanceSettings as ClearanceConfig,
     IKSettingsBase,
 )
-from robot_backend_sim.marvin_sim.robot_config import (
-    MARVIN_ARM_JOINT_RANGES,
-    MARVIN_CAMERA_NAMES as CAMERA_NAMES,
-    Seven,
-)
-from robot_backend_sim.marvin_sim.stack.scene_config import MarvinStackSceneConfig
+from robot_backend_sim.marvin_sim.robot_config import MARVIN_ARM_JOINT_RANGES, Seven
 
 __all__ = [
-    "BudgetConfig",
     "ClearanceConfig",
     "IKConfig",
     "KinematicsCheckConfig",
@@ -41,8 +31,6 @@ __all__ = [
     "MARVIN_ARM_JOINT_RANGES",
     "STACK_KEY_POSES",
     "TargetConfig",
-    "VisibilityRule",
-    "VisibilitySection",
     "load_kinematics_config",
 ]
 
@@ -56,13 +44,6 @@ STACK_KEY_POSES = (
     "place",
     "retreat",
 )
-_OBJECT_NAMES = ("source", "target")
-
-
-def _camera_objects(camera: str) -> tuple[str, ...]:
-    if camera == "left_wrist":
-        return ("source", "target", "table")
-    return ("source", "target")
 
 
 class IKConfig(IKSettingsBase):
@@ -95,97 +76,17 @@ class TargetConfig(StrictMappingModel):
     place_yaw_deg: Annotated[StrictFloat, Field(ge=-180.0, le=180.0)] = 0.0
 
 
-class VisibilityRule(StrictMappingModel):
-    camera: Literal["global", "left_wrist", "right_wrist"]
-    object: Literal["source", "target", "table"]
-    phase: Literal["pregrasp", "grasp", "lift", "place_hover", "place", "retreat"]
-    mode: Literal["min_pixels", "record_only"]
-    min_pixels: Annotated[PositiveInt, Field(le=4096 * 4096)] | None = None
-
-    @model_validator(mode="after")
-    def _rule(self) -> VisibilityRule:
-        if self.mode == "min_pixels" and self.min_pixels is None:
-            raise contract_error("min_pixels", "is required when mode is 'min_pixels'")
-        if self.mode == "record_only" and self.min_pixels is not None:
-            raise contract_error("min_pixels", "must be omitted when mode is 'record_only'")
-        return self
-
-    @property
-    def record_only(self) -> bool:
-        return self.mode == "record_only"
-
-
-class VisibilitySection(StrictMappingModel):
-    rules: Annotated[tuple[VisibilityRule, ...], BeforeValidator(as_tuple)]
-
-    @model_validator(mode="after")
-    def _rules(self) -> VisibilitySection:
-        expected = {
-            (camera, obj, phase)
-            for camera in CAMERA_NAMES
-            for obj in _camera_objects(camera)
-            for phase in STACK_KEY_POSES
-        }
-        seen: set[tuple[str, str, str]] = set()
-        for index, rule in enumerate(self.rules):
-            key = (rule.camera, rule.object, rule.phase)
-            if key in seen:
-                raise contract_error(f"rules[{index}]", f"duplicate rule for {key}")
-            if key not in expected:
-                raise contract_error(f"rules[{index}]", f"unexpected rule for {key}")
-            seen.add(key)
-        missing = sorted(expected - seen)
-        if missing:
-            raise contract_error("rules", f"missing visibility rules: {missing[0]}")
-        return self
-
-
-class BudgetConfig(StrictMappingModel):
-    max_total_samples: Annotated[StrictInt, Field(ge=1000, le=5_000_000)]
-    max_elapsed_s: Annotated[PositiveFloat, Field(gt=1.0, le=3600.0)]
-    max_png_count: Annotated[StrictInt, Field(ge=0, le=10_000)]
-    max_png_total_bytes: Annotated[StrictInt, Field(ge=0, le=1_000_000_000)]
-    max_report_bytes: Annotated[StrictInt, Field(ge=1024, le=100_000_000)]
-
-
 class KinematicsCheckConfig(StrictMappingModel):
     source: str = ""
     ik: IKConfig
     clearance: ClearanceConfig
     targets: TargetConfig
-    visibility: VisibilitySection
-    budgets: BudgetConfig
-    camera_resolutions: Mapping[str, tuple[int, int]] = Field(default_factory=dict)
-
-    @model_validator(mode="after")
-    def _freeze_maps(self) -> KinematicsCheckConfig:
-        object.__setattr__(
-            self, "camera_resolutions", MappingProxyType(dict(self.camera_resolutions))
-        )
-        return self
-
-    @property
-    def camera_names(self) -> tuple[str, ...]:
-        return CAMERA_NAMES
-
-    @property
-    def object_names(self) -> tuple[str, ...]:
-        return _OBJECT_NAMES
-
-    @property
-    def visibility_rules(self) -> tuple[VisibilityRule, ...]:
-        return self.visibility.rules
-
-    def thresholds(self, camera: str, object_name: str, phase: str) -> VisibilityRule:
-        for rule in self.visibility.rules:
-            if rule.camera == camera and rule.object == object_name and rule.phase == phase:
-                return rule
-        raise KeyError((camera, object_name, phase))
 
 
 def load_kinematics_config(
-    path: Path | str, scene_config: MarvinStackSceneConfig
+    path: Path | str, scene_config: object = None
 ) -> KinematicsCheckConfig:
+    del scene_config
     source_path = Path(path).resolve()
     try:
         document = read_unique_yaml(source_path)
@@ -195,22 +96,9 @@ def load_kinematics_config(
         raise KinematicsConfigError(error.source, error.field, error.message) from error
     if not isinstance(document, dict):
         raise KinematicsConfigError(source_path, "<root>", "must be a mapping")
-    resolutions = {
-        camera.name: (camera.width, camera.height) for camera in scene_config.cameras
-    }
-    config = validate_config_model(
+    return validate_config_model(
         KinematicsCheckConfig,
-        {**document, "source": str(source_path), "camera_resolutions": resolutions},
+        {**document, "source": str(source_path)},
         source_path,
         KinematicsConfigError,
     )
-    for rule in config.visibility.rules:
-        if rule.min_pixels is not None:
-            width, height = resolutions[rule.camera]
-            if rule.min_pixels > width * height:
-                raise KinematicsConfigError(
-                    source_path,
-                    "visibility.rules",
-                    f"min_pixels {rule.min_pixels} exceeds resolution for {rule.camera}",
-                )
-    return config

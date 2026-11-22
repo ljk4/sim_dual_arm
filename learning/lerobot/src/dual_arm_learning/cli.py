@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import dataclasses
 import json
 import os
 import sys
@@ -25,7 +24,7 @@ from .scenario import (
     check_profile_consistency,
     select_scenario,
 )
-from .training import TrainingError, train, verify_dataset_manifest
+from .training import TrainingError, train
 
 
 def _default_root() -> Path:
@@ -97,13 +96,6 @@ def build_parser() -> argparse.ArgumentParser:
         )
         command_parser.add_argument("--log-file", type=Path, help="detail log with --progress")
 
-    verify_parser = sub.add_parser(
-        "verify-data", help="check the configured split, hashes and source files"
-    )
-    _add_selection_arguments(verify_parser)
-    verify_parser.add_argument("--mode", choices=("smoke", "overfit", "full"), default=None)
-    verify_parser.add_argument("--data-root", type=Path, default=None)
-    verify_parser.add_argument("--allow-synthetic", action="store_true")
     return parser
 
 
@@ -177,21 +169,14 @@ def _selection_manifest(selection, *, dataset_recipe: bool = False) -> dict | No
 
 def _training_overrides(args: argparse.Namespace, root: Path) -> dict[str, object]:
     overrides: dict[str, object] = {}
-    mode = getattr(args, "mode", None)
-    if mode is not None:
-        overrides["mode"] = {"value": mode, "source": "argument", "target": "mode"}
-    max_steps = getattr(args, "max_steps", None)
-    if max_steps is not None:
-        overrides["max_steps"] = {"value": max_steps, "source": "argument"}
-    data_root = getattr(args, "data_root", None)
-    if data_root is not None:
-        overrides["data_root"] = {
-            "value": str(_resolve(data_root, root)),
-            "source": "argument",
-            "target": "data.root",
-        }
+    if getattr(args, "mode", None) is not None:
+        overrides["mode"] = args.mode
+    if getattr(args, "max_steps", None) is not None:
+        overrides["max_steps"] = args.max_steps
+    if getattr(args, "data_root", None) is not None:
+        overrides["data_root"] = str(_resolve(args.data_root, root))
     if getattr(args, "allow_synthetic", False):
-        overrides["allow_synthetic"] = {"value": True, "source": "argument"}
+        overrides["allow_synthetic"] = True
     return overrides
 
 
@@ -238,14 +223,14 @@ def _command_convert(args: argparse.Namespace, root: Path) -> int:
         )
     if args.select is not None:
         changes["select_path"] = _resolve(args.select, root)
-        overrides["select"] = {"value": str(changes["select_path"]), "source": "argument"}
+        overrides["select"] = str(changes["select_path"])
     if args.output_root is not None:
         changes["output_root"] = _resolve(args.output_root, root)
-        overrides["output_root"] = {"value": str(changes["output_root"]), "source": "argument"}
+        overrides["output_root"] = str(changes["output_root"])
     if args.replace:
-        overrides["replace"] = {"value": True, "source": "argument"}
+        overrides["replace"] = True
     if args.synthetic:
-        overrides["synthetic"] = {"value": True, "source": "argument"}
+        overrides["synthetic"] = True
     if changes:
         config = config.model_copy(update=changes)
     settings = [
@@ -353,27 +338,9 @@ def _command_train(args: argparse.Namespace, root: Path) -> int:
     return 0
 
 
-def _command_verify_data(args: argparse.Namespace, root: Path) -> int:
-    config_path, selection = _learning_selection(args, root, recipe_field="training")
-    config = _training_config(args, config_path, selection)
-    _check_selection(
-        selection,
-        profile_path=config.dataset.profile_path,
-        dataset_config_path=config.dataset_config_path,
-    )
-    audit = verify_dataset_manifest(
-        config,
-        allow_synthetic=args.allow_synthetic,
-        require_full=config.mode == "full",
-    )
-    _print(dataclasses.asdict(audit))
-    return 0
-
-
 _COMMANDS = {
     "convert": _command_convert,
     "train": _command_train,
-    "verify-data": _command_verify_data,
 }
 
 
@@ -407,7 +374,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise
         print(f"learning: {type(error).__name__}: {error}", file=sys.stderr)
         return 1
-    return 1
 
 
 if __name__ == "__main__":

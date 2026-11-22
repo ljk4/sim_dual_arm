@@ -36,15 +36,6 @@ class ModelHandle:
     action_schema: dict[str, Any]
     device: str
 
-    def prediction_metadata(self) -> dict[str, Any]:
-        return {
-            "model": str(self.root),
-            "model_sha256": _file_sha256(self.model_file),
-            "step": self.metadata.get("step"),
-            "config_sha256": self.metadata.get("config_sha256"),
-            "synthetic": self.metadata.get("synthetic"),
-        }
-
 
 def resolve_model_path(path: str | Path) -> Path:
     """Accept either a model directory or its ``model.safetensors`` file."""
@@ -405,7 +396,7 @@ def save_model_package(
     temporary = model_dir / (MODEL_FILENAME + ".tmp")
     save_file(tensors, temporary, metadata=metadata)
     temporary.replace(model_dir / MODEL_FILENAME)
-    _write_training_args(model_dir / TRAINING_ARGS_FILENAME, training_args)
+    write_training_args(model_dir / TRAINING_ARGS_FILENAME, training_args)
     return model_dir
 
 
@@ -427,7 +418,7 @@ def _act_config_document(act_config: Any) -> dict[str, Any]:
     }
 
 
-def _write_training_args(path: Path, document: dict[str, Any]) -> None:
+def write_training_args(path: Path, document: dict[str, Any]) -> None:
     import yaml
 
     path.write_text(
@@ -475,4 +466,5 @@ __all__ = [
     "resolve_model_path",
     "save_model_package",
     "verify_model_dir",
+    "write_training_args",
 ]

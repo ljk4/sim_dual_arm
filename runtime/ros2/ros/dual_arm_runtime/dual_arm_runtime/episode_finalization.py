@@ -32,10 +32,6 @@ def stat_fields(stats: RecordingStats | None) -> dict[str, Scalar]:
 
 
 def _cleanup(runner: EpisodeLifecycle, episode_id: str, clock_epoch: int | None) -> None:
-    try:
-        runner.set_status("ENDING", episode_id)
-    except Exception as error:
-        runner.append_fault(f"STATUS_ERROR: {error}")
     if runner.managed_runtime is not None:
         cleanup_reason = runner.managed_runtime.reason
     else:
@@ -202,19 +198,6 @@ def _emit_finished(
     return runtime
 
 
-def _final_status(
-    runner: EpisodeLifecycle, episode_id: str, runtime: RuntimeResult
-) -> None:
-    try:
-        runner.set_status(
-            "FAULT" if runtime.outcome is RuntimeOutcome.FAILED else "IDLE",
-            episode_id,
-            runner.failure_reason if runtime.outcome is RuntimeOutcome.FAILED else "",
-        )
-    except Exception as error:
-        runner.append_fault(f"STATUS_ERROR: {error}")
-
-
 def _print_summary(
     runner: EpisodeLifecycle,
     episode_id: str,
@@ -244,7 +227,7 @@ def finish(runner: EpisodeLifecycle, episode_id: str) -> None:
         runner, episode_id, clock_epoch
     )
     runner.clear_run_context()
-    runtime = _emit_finished(
+    _emit_finished(
         runner,
         episode_id,
         clock_epoch,
@@ -253,7 +236,6 @@ def finish(runner: EpisodeLifecycle, episode_id: str) -> None:
         recording_failure,
         recording_stats,
     )
-    _final_status(runner, episode_id, runtime)
     _print_summary(runner, episode_id, recording_complete, recording_failure)
 
 

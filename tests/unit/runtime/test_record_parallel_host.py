@@ -1,12 +1,11 @@
 """Host resource selection and argument errors must not start Docker work."""
 
-import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-from host import record_parallel
+from host import docker_pool, record_parallel
 
 
 @pytest.mark.parametrize("cpus,memory_gib,gpu_free,expected", [
@@ -15,10 +14,10 @@ from host import record_parallel
 def test_auto_workers_respects_cpu_memory_and_gpu_headroom(
     monkeypatch, cpus, memory_gib, gpu_free, expected
 ):
-    monkeypatch.setattr(record_parallel.os, "sched_getaffinity", lambda _: set(range(cpus)))
+    monkeypatch.setattr(docker_pool.os, "sched_getaffinity", lambda _: set(range(cpus)))
     monkeypatch.setattr(Path, "read_text", lambda self: f"MemAvailable: {int(memory_gib*2**20)} kB")
     monkeypatch.setattr(
-        record_parallel.subprocess, "run",
+        docker_pool.subprocess, "run",
         lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=f"{gpu_free}\n"),
     )
     assert record_parallel.automatic_workers() == expected
@@ -84,7 +83,7 @@ def test_cleanup_honors_controller_stop_grace_before_stopping_backend(
 
 
 @pytest.mark.parametrize("current,remaining", [(0, 50), (17, 33), (50, 0)])
-def test_target_total_counts_existing_formal_data(tmp_path, monkeypatch, current, remaining):
+def test_target_total_counts_existing_formal_data(tmp_path, current, remaining):
     args = SimpleNamespace(
         target_total=50,
         purpose="formal",
@@ -92,17 +91,13 @@ def test_target_total_counts_existing_formal_data(tmp_path, monkeypatch, current
         count=None,
     )
     docker = record_parallel.DockerWorkers(args, tmp_path)
-    docker.runtime = "runtime-id"
     status = {"formal_target_qualified": 50, "purposes": {"formal": {"qualified": current}}}
-    run = Mock(return_value=SimpleNamespace(stdout=json.dumps(status)))
-    monkeypatch.setattr(record_parallel.subprocess, "run", run)
 
-    assert docker.resolve_target() is (remaining == 0)
+    assert docker.resolve_target({"campaign_status": status}) is (remaining == 0)
     assert args.count == remaining
-    assert "status" in run.call_args.args[0]
 
 
-def test_target_total_cannot_exceed_formal_campaign_target(tmp_path, monkeypatch):
+def test_target_total_cannot_exceed_formal_campaign_target(tmp_path):
     args = SimpleNamespace(
         target_total=51,
         purpose="formal",
@@ -110,12 +105,9 @@ def test_target_total_cannot_exceed_formal_campaign_target(tmp_path, monkeypatch
         count=None,
     )
     docker = record_parallel.DockerWorkers(args, tmp_path)
-    docker.runtime = "runtime-id"
     status = {"formal_target_qualified": 50, "purposes": {"formal": {"qualified": 0}}}
-    monkeypatch.setattr(record_parallel.subprocess, "run",
-                        Mock(return_value=SimpleNamespace(stdout=json.dumps(status))))
     with pytest.raises(RuntimeError, match="exceeds"):
-        docker.resolve_target()
+        docker.resolve_target({"campaign_status": status})
 
 
 def test_already_reached_target_does_not_start_simulation_workers(tmp_path, monkeypatch):

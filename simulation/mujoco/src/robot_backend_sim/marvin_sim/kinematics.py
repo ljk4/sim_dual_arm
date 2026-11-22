@@ -43,7 +43,6 @@ __all__ = [
     "robot_pair_set",
     "solve_targets",
     "tcp_matrix",
-    "tcp_pose",
 ]
 
 _IDENTITY = (
@@ -426,13 +425,6 @@ def _site_matrix(configuration: object, site_name: str) -> object:
     matrix[:3, 3] = configuration.data.site_xpos[site_id]
     return matrix
 
-
-def tcp_pose(
-    model: object, qpos: object, site_name: str
-) -> tuple[tuple[float, float, float], tuple[float, float, float, float]]:
-    """Return the world TCP position and wxyz quaternion for one joint vector."""
-    matrix = tcp_matrix(model, qpos, site_name)
-    return tuple(float(value) for value in matrix[:3, 3]), _quaternion(matrix[:3, :3])
 
 
 def tcp_matrix(model: object, qpos: object, site_name: str) -> object:

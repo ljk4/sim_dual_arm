@@ -12,10 +12,9 @@ from robot_backend_sim.common.tasks.base import (
     TaskChunk,
     TaskChunkView,
     TaskPlan,
-    TaskPrepareResult,
     TaskPrepareSnapshot,
 )
-from robot_backend_sim.common.tasks.plugin_base import BaseTeacherTaskPlugin, pose_moved
+from robot_backend_sim.common.tasks.plugin_base import BaseTeacherTaskPlugin
 from robot_backend_sim.marvin_sim.robot_config import MARVIN_TEACHER_CAPABILITY
 from robot_backend_sim.marvin_sim.stack.config import (
     StackTaskConfig,
@@ -28,7 +27,7 @@ from robot_backend_sim.marvin_sim.stack.evaluator import (
     capture_task_observation,
     make_task_binding,
 )
-from robot_backend_sim.marvin_sim.stack.gate import StackGateFact, TeacherFeedback
+from robot_backend_sim.marvin_sim.stack.gate import TeacherFeedback
 from robot_backend_sim.marvin_sim.stack.kinematics_config import (
     KinematicsCheckConfig,
     load_kinematics_config,
@@ -98,25 +97,18 @@ class StackTaskPlugin(BaseTeacherTaskPlugin):
         self._binding = binding
         self._runtime = StackTaskRuntime(self.config, binding)
 
-    def _build_prepare_snapshot(
-        self,
-        *,
-        context: Any,
-        task_epoch: int,
-        sim_time_ns: int,
-        capture_seq: int,
-        qpos: tuple[float, ...],
-        seed: int,
-        controller_command_id: str,
-    ) -> TeacherSnapshot:
-        return TeacherSnapshot(
-            context=context,
-            task_epoch=task_epoch,
-            sim_time_ns=sim_time_ns,
-            capture_seq=capture_seq,
-            qpos=qpos,
-            seed=seed,
-            controller_command_id=controller_command_id,
+    def _pose_check_addresses(self) -> tuple[int, ...]:
+        assert self._binding is not None
+        return (self._binding.source_qpos_address, self._binding.target_qpos_address)
+
+    def _validate_plan_for_commit(self, plan_obj: object) -> tuple[int, float, float]:
+        stack_plan = plan_obj if isinstance(plan_obj, StackPlan) else None
+        if stack_plan is None:
+            return (0, 0.0, 0.0)
+        return (
+            len(stack_plan.segments),
+            stack_plan.ik_max_position_error_m,
+            stack_plan.ik_max_orientation_error_rad,
         )
 
     def build_plan(
@@ -155,74 +147,6 @@ class StackTaskPlugin(BaseTeacherTaskPlugin):
             deadline=deadline,
         )
         return TaskPlan(plan, plan.plan_digest, plan.duration_ns, "teacher")
-
-    def commit_prepare(
-        self,
-        *,
-        scene: object,
-        controller: object,
-        snapshot: TaskPrepareSnapshot,
-        plan: TaskPlan,
-        request_id: str,
-        content_digest: str,
-        context: Any,
-        lease_id: str,
-        now: int,
-    ) -> TaskPrepareResult:
-        runtime = self._require_runtime()
-        snap = snapshot
-        assert isinstance(snap, TeacherSnapshot)
-        self._validate_commit_prepare(
-            runtime=runtime,
-            controller=controller,
-            snapshot=snap,
-            context=context,
-            lease_id=lease_id,
-            now=now,
-        )
-        binding = self._binding
-        assert binding is not None
-        for addr in (binding.source_qpos_address, binding.target_qpos_address):
-            current_obj = tuple(float(v) for v in scene.data.qpos[addr : addr + 7])  # type: ignore[attr-defined]
-            snap_obj = tuple(snap.qpos[addr : addr + 7])
-            if pose_moved(current_obj, snap_obj):
-                raise _error(
-                    "STALE_TASK_PREPARE", "scene objects moved between snapshot and commit"
-                )
-        self._reset_teacher_caches()
-        stack_plan = plan.plan if isinstance(plan.plan, StackPlan) else None
-        outcome = runtime.commit_prepare(
-            request_id=request_id,
-            content_digest=content_digest,
-            context=context,
-            plan=plan.plan,
-            plan_digest=plan.plan_digest,
-            plan_duration_ns=plan.duration_ns,
-            step_count=len(stack_plan.segments) if stack_plan is not None else 0,
-            ik_max_position_error_m=(
-                stack_plan.ik_max_position_error_m if stack_plan is not None else 0.0
-            ),
-            ik_max_orientation_error_rad=(
-                stack_plan.ik_max_orientation_error_rad if stack_plan is not None else 0.0
-            ),
-            prepare_kind=plan.prepare_kind,
-        )
-        self._prepared_command_id = snap.controller_command_id
-        return TaskPrepareResult(
-            task_type=self.task_type,
-            task_epoch=outcome.fact.state.task_epoch,
-            task_config_digest=self.config.config_digest,
-            plan_digest=plan.plan_digest,
-            idempotent=outcome.idempotent,
-            state=outcome.fact.state,
-            prepare_kind=plan.prepare_kind,
-            metrics={
-                "step_count": outcome.fact.step_count,
-                "ik_max_position_error_m": outcome.fact.ik_max_position_error_m,
-                "ik_max_orientation_error_rad": outcome.fact.ik_max_orientation_error_rad,
-                "planned_duration_s": plan.duration_ns / 1e9,
-            },
-        )
 
     def capture_observation(self, scene: object) -> object:
         binding = self._binding

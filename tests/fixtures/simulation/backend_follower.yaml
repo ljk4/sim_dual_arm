@@ -26,7 +26,6 @@ queues:
   captures: 32
   events: 256
   feedback: 64
-  accepted_references: 64
   follower_references: 64
 
 limits:

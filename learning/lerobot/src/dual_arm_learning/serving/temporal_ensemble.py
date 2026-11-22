@@ -7,7 +7,6 @@ from dataclasses import dataclass
 
 import numpy as np
 
-ACTION_DIM = 16
 CHUNK_SIZE = 60
 PERIOD_NS = 50_000_000
 MAX_HISTORY_AGE_NS = 3_000_000_000
@@ -49,12 +48,12 @@ class TemporalEnsemble:
         coefficient: float,
         *,
         chunk_size: int = CHUNK_SIZE,
-        action_dim: int = ACTION_DIM,
+        action_dim: int | None = None,
         period_ns: int = PERIOD_NS,
     ) -> None:
         self._coefficient = validate_coefficient(coefficient)
         self._chunk_size = int(chunk_size)
-        self._action_dim = int(action_dim)
+        self._action_dim = None if action_dim is None else int(action_dim)
         self._period_ns = int(period_ns)
         self._max_history_age_ns = self._chunk_size * self._period_ns
         self._max_history = self._chunk_size
@@ -165,15 +164,24 @@ def _observation_id(value: object) -> int:
 
 
 def _block(
-    actions: object, *, chunk_size: int = CHUNK_SIZE, action_dim: int = ACTION_DIM
+    actions: object, *, chunk_size: int = CHUNK_SIZE, action_dim: int | None = None
 ) -> np.ndarray:
+    expected_shape = (
+        f"[{chunk_size}, {action_dim}]" if action_dim is not None else f"[{chunk_size}, D]"
+    )
     try:
         block = np.asarray(actions, dtype=np.float64)
     except (TypeError, ValueError) as error:
         raise ValueError(
-            f"temporal ensemble actions must be a numeric {chunk_size}x{action_dim} chunk"
+            f"temporal ensemble actions must be a numeric {expected_shape} chunk"
         ) from error
-    if block.shape != (chunk_size, action_dim):
+    if action_dim is None:
+        if block.ndim != 2 or block.shape[0] != chunk_size or block.shape[1] < 1:
+            raise ValueError(
+                f"temporal ensemble actions have shape {list(block.shape)}, "
+                f"expected [{chunk_size}, >=1]"
+            )
+    elif block.shape != (chunk_size, action_dim):
         raise ValueError(
             f"temporal ensemble actions have shape {list(block.shape)}, "
             f"expected [{chunk_size}, {action_dim}]"
@@ -184,7 +192,6 @@ def _block(
 
 
 __all__ = [
-    "ACTION_DIM",
     "CHUNK_SIZE",
     "MAX_HISTORY",
     "MAX_HISTORY_AGE_NS",

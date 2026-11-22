@@ -1,19 +1,14 @@
 """Process run identity, metadata, and explicit event-emission helpers.
 
 This module deliberately owns only deployment-time concerns: the exclusive run
-directory, ``resolved/runtime.json``, ``versions.json`` and the one
-``EventLogger`` for this runtime process.  It does not call ROS, change the
-robot configuration, or intercept unrelated log records.
+directory, ``resolved/runtime.json`` and the one ``EventLogger`` for this
+runtime process.
 """
 
 from __future__ import annotations
 
-import hashlib
-import importlib
-import importlib.metadata
 import json
 import os
-import platform
 import re
 import uuid
 from dataclasses import dataclass
@@ -24,21 +19,10 @@ from robot_run_logging import (
     EventContext,
     EventLogger,
     LogFailure,
-    LogSettings,
     Scalar,
 )
 
 _RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
-_DEPENDENCY_DISTRIBUTIONS = (
-    "PyYAML",
-    "jsonschema",
-)
-_SOURCE_MODULES = (
-    "dual_arm_runtime",
-    "robot_contracts",
-    "robot_run_logging",
-    "robot_ros_support",
-)
 
 
 class EventSink(Protocol):
@@ -185,14 +169,7 @@ def initialize_run(
         "instance_id": instance_id,
         **configuration.snapshot,
     }
-    versions = collect_versions(
-        configuration,
-        run_id=run_id,
-        instance_id=instance_id,
-        settings=effective_settings,
-    )
     _write_json_atomic(run_directory / "resolved" / "runtime.json", resolved)
-    _write_json_atomic(run_directory / "versions.json", versions)
     log_directory = run_directory / "logs" / "runtime" / instance_id
     logger = EventLogger(
         log_directory,
@@ -209,69 +186,6 @@ def initialize_run(
         log_directory=log_directory,
         logger=logger,
     )
-
-
-def collect_versions(
-    configuration: object,
-    *,
-    run_id: str,
-    instance_id: str,
-    settings: LogSettings,
-) -> dict[str, object]:
-    """Collect a small, explicit provenance whitelist; never dump the environment."""
-    snapshot = configuration.snapshot
-    recipe = snapshot["recipe"]
-    return {
-        "run_id": run_id,
-        "instance_id": instance_id,
-        "python": {
-            "implementation": platform.python_implementation(),
-            "version": platform.python_version(),
-        },
-        "dependencies": {name: _distribution_version(name) for name in _DEPENDENCY_DISTRIBUTIONS},
-        "sources": {name: _source_path(name) for name in _SOURCE_MODULES},
-        "configuration_sha256": _sha256(_canonical_json(snapshot)),
-        "recipe_sha256": _sha256(_canonical_json(recipe)),
-        "logging": {
-            "queue_capacity": settings.queue_capacity,
-            "max_event_bytes": settings.max_event_bytes,
-            "max_file_bytes": settings.max_file_bytes,
-            "max_total_bytes": settings.max_total_bytes,
-            "close_timeout_s": settings.close_timeout_s,
-            "flush_interval_s": settings.flush_interval_s,
-            "console": settings.console,
-        },
-        # Filled by the launcher once an image/manifest exists. Unknown values
-        # stay null rather than claiming a Git revision or source state.
-        "image": {"digest": None},
-        "git": {"revision": None, "dirty": None},
-    }
-
-
-def _canonical_json(document: object) -> str:
-    return json.dumps(document, sort_keys=True, separators=(",", ":"), allow_nan=False)
-
-
-def _sha256(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
-def _distribution_version(name: str) -> str | None:
-    try:
-        return importlib.metadata.version(name)
-    except importlib.metadata.PackageNotFoundError:
-        return None
-
-
-def _source_path(name: str) -> str | None:
-    try:
-        module = importlib.import_module(name)
-    except Exception:
-        return None
-    filename = getattr(module, "__file__", None)
-    if not filename:
-        return None
-    return str(Path(filename).resolve())
 
 
 def _write_json_atomic(path: Path, document: object) -> None:

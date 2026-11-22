@@ -136,7 +136,7 @@ class Worker:
             "chunk_history": config.chunk_history_capacity,
             "command_history": config.command_history_capacity,
             "event_queue": config.event_queue_capacity,
-            "accepted_reference_queue": config.accepted_reference_queue_capacity,
+            "follower_reference_queue": config.follower_reference_queue_capacity,
         }
         for name, required in plugin.capacity_requirements().items():
             if configured[name] < required:
@@ -274,10 +274,6 @@ class Worker:
             "latest_status", (), self.config.request_timeout_s if timeout_s is None else timeout_s
         )
         return value if isinstance(value, ControlStatus) else None
-
-    def contact_snapshot(self) -> Future:
-        """One consistent owner-thread snapshot of contacts and object motion."""
-        return self.request("contact_snapshot", (self._owner.capture_seq,))
 
     def system_stop(self, reason: str, timeout_s: float | None = None) -> Future:
         return self.request(

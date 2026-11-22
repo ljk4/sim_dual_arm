@@ -41,7 +41,6 @@ message PolicyInfo {
   repeated string required_camera_names = 9;
   // Explicit diagnostic period and chunk size of the selected recipe.
   uint64 action_period_ns = 10;
-  bool stateful = 11;
   bool ready = 12;
   // The command space is "joint_position". RobotProfile declares the units.
   string command_space = 13;
@@ -76,7 +75,6 @@ message JointSample {
   // Optional measurements: empty, or the same length/order as joint_names.
   // No object truth, teacher phase or task-evaluator value is transmitted.
   repeated double velocities = 5;
-  repeated double efforts = 6;
 }
 
 enum ImageEncoding {

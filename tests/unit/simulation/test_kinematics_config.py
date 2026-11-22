@@ -26,7 +26,7 @@ from robot_backend_sim.marvin_sim.stack.scene_config import (  # noqa: E402
 )
 
 SCENE_PATH = SCENARIO / "configs/simulation/scene/marvin_stack.yaml"
-KINEMATICS_PATH = SCENARIO / "configs/simulation/checks/kinematics_check.yaml"
+KINEMATICS_PATH = SCENARIO / "configs/simulation/scene/stack_paths.yaml"
 
 
 @pytest.fixture(scope="module")
@@ -78,25 +78,6 @@ def test_config_records_all_mandated_initial_values(config):
     assert config.targets.place_yaw_deg == -90.0
 
 
-def test_visibility_rules_cover_every_camera_object_phase_once(config):
-    seen = set()
-    for rule in config.visibility_rules:
-        if rule.record_only:
-            assert rule.min_pixels is None
-        else:
-            assert rule.min_pixels is not None and rule.min_pixels >= 1
-        key = (rule.camera, rule.object, rule.phase)
-        assert key not in seen
-        seen.add(key)
-    for camera in config.camera_names:
-        objects = list(config.object_names)
-        if camera == "left_wrist":
-            objects.append("table")
-        for obj in objects:
-            for phase in STACK_KEY_POSES:
-                assert (camera, obj, phase) in seen
-
-
 @pytest.mark.parametrize(
     "mutate, field",
     [
@@ -114,10 +95,6 @@ def test_visibility_rules_cover_every_camera_object_phase_once(config):
         (
             lambda d: d["clearance"].__setitem__("max_samples_per_segment", 5001),
             "clearance.max_samples_per_segment",
-        ),
-        (
-            lambda d: d["budgets"].__setitem__("max_png_total_bytes", 1_000_000_001),
-            "budgets.max_png_total_bytes",
         ),
         (lambda d: d["ik"].__setitem__("solver", "quadprog"), "ik.solver"),
         (
@@ -143,39 +120,8 @@ def test_config_rejects_invalid_values_with_file_and_field(tmp_path, scene_confi
 def test_config_rejects_duplicate_yaml_keys(tmp_path, scene_config):
     path = tmp_path / "duplicate.yaml"
     text = KINEMATICS_PATH.read_text(encoding="utf-8")
-    path.write_text(text + "\nbudgets: {}\n", encoding="utf-8")
+    path.write_text(text + "\nclearance: {}\n", encoding="utf-8")
     with pytest.raises(KinematicsConfigError, match="duplicate key"):
-        load_kinematics_config(path, scene_config)
-
-
-def test_config_rejects_missing_or_duplicate_visibility_coverage(tmp_path, scene_config):
-    missing = copy.deepcopy(document())
-    missing["visibility"]["rules"].pop(0)
-    missing_path = write_document(tmp_path, missing, "missing.yaml")
-    with pytest.raises(KinematicsConfigError, match="missing visibility rules"):
-        load_kinematics_config(missing_path, scene_config)
-
-    duplicate = copy.deepcopy(document())
-    duplicate["visibility"]["rules"].append(copy.deepcopy(duplicate["visibility"]["rules"][0]))
-    duplicate_path = write_document(tmp_path, duplicate, "duplicate-coverage.yaml")
-    with pytest.raises(KinematicsConfigError, match="duplicate rule"):
-        load_kinematics_config(duplicate_path, scene_config)
-
-
-def test_config_rejects_record_only_threshold_and_unknown_camera(tmp_path, scene_config):
-    record_threshold = copy.deepcopy(document())
-    rule = next(
-        item for item in record_threshold["visibility"]["rules"] if item["mode"] == "record_only"
-    )
-    rule["min_pixels"] = 1
-    path = write_document(tmp_path, record_threshold, "record-threshold.yaml")
-    with pytest.raises(KinematicsConfigError, match="must be omitted when mode is 'record_only'"):
-        load_kinematics_config(path, scene_config)
-
-    unknown_camera = copy.deepcopy(document())
-    unknown_camera["visibility"]["rules"][0]["camera"] = "overhead"
-    path = write_document(tmp_path, unknown_camera, "unknown-camera.yaml")
-    with pytest.raises(KinematicsConfigError, match="camera"):
         load_kinematics_config(path, scene_config)
 
 
@@ -250,27 +196,3 @@ def test_path_sampling_rejects_excessive_or_invalid_input():
         )
     with pytest.raises(plan.KinematicsError, match="same non-zero length"):
         common.sample_joint_path((0.0,), (), max_step_rad=0.01, max_samples=10)
-
-
-def test_png_budget_is_checked_before_creating_a_file(tmp_path):
-    from PIL import Image
-    from robot_backend_sim.marvin_sim.stack.checks import check_kinematics
-
-    image = Image.new("RGB", (8, 8), (120, 60, 20))
-    budget = check_kinematics.ArtifactBudget(limit_bytes=1)
-    rejected = tmp_path / "rejected.png"
-    with pytest.raises(check_kinematics.KinematicsCheckFailure) as caught:
-        check_kinematics._save_png(rejected, image, budget)
-    assert caught.value.reason == "png_budget_exceeded"
-    assert not rejected.exists()
-    assert budget.total_bytes == budget.count == 0
-
-    budget = check_kinematics.ArtifactBudget(limit_bytes=10000)
-    accepted = tmp_path / "accepted.png"
-    check_kinematics._save_png(accepted, image, budget)
-    actual = accepted.read_bytes()
-    assert budget.total_bytes == len(actual) and budget.count == 1
-    budget.limit_bytes = budget.total_bytes
-    with pytest.raises(check_kinematics.KinematicsCheckFailure):
-        check_kinematics._save_png(rejected, image, budget)
-    assert not rejected.exists() and accepted.read_bytes() == actual

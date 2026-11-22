@@ -16,6 +16,8 @@ from typing import Any
 
 from robot_contracts.models import ContractError
 
+from robot_backend_sim.common.tasks.math import contact_normal_force
+
 __all__ = [
     "ContactBinding",
     "FingerBinding",
@@ -208,22 +210,6 @@ class GripperCompletion:
     fingers: tuple[FingerContactEvidence, ...]
 
 
-def _normal_force(model: Any, data: Any, contact_index: int) -> float:
-    try:
-        import mujoco
-        import numpy as np
-    except ImportError as error:  # pragma: no cover - native path only
-        raise ContractError(
-            "MUJOCO_UNAVAILABLE", "MuJoCo is required for contact forces"
-        ) from error
-    value = np.zeros(6, dtype=float)
-    mujoco.mj_contactForce(model, data, contact_index, value)
-    result = float(value[0])
-    if not math.isfinite(result):
-        raise ContractError("INVALID_CONTACT", "contact normal force is not finite")
-    return abs(result)
-
-
 def _collect_object_forces(
     model: Any,
     data: Any,
@@ -247,7 +233,7 @@ def _collect_object_forces(
         if object_name is None:
             continue
         total = totals.setdefault(object_name, [0.0, 0])
-        total[0] = float(total[0]) + _normal_force(model, data, contact_index)
+        total[0] = float(total[0]) + contact_normal_force(model, data, contact_index)
         total[1] = int(total[1]) + 1
     return tuple((name, float(value[0]), int(value[1])) for name, value in totals.items())
 

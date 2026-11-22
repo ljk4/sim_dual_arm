@@ -63,7 +63,7 @@ from robot_backend_sim.common.ros.node import BackendNode  # noqa: E402
 from robot_backend_sim.common.ros.ros_bridge import RosFutureBridge  # noqa: E402
 from robot_backend_sim.common.runtime.worker import Worker  # noqa: E402
 
-CONFIG = SCENARIO / "configs/simulation/backend/backend.yaml"
+CONFIG = SCENARIO / "configs/simulation/backend/backend_stack_teacher.yaml"
 PROFILE_PATH = PROFILES / "robot/profile.json"
 SCHEMAS = ROOT / "shared/common/interfaces/schemas"
 

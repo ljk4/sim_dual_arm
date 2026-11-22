@@ -45,7 +45,8 @@ def test_generated_sdk_matches_the_contract_when_available():
     assert target["time_from_observation_ns"].number == 1
     assert "time_from_start_ns" not in target
     info = pb2.PolicyInfo.DESCRIPTOR.fields_by_name
-    assert len(info) == 14
+    assert len(info) == 13
+    assert "stateful" not in info
     assert info["chunk_size"].number == 14
     assert info["test_only"].number == 15
     assert info["action_period_ns"].number == 10

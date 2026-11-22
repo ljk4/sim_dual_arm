@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from robot_backend_sim.common.tasks.gate import TaskGateFact
+from robot_backend_sim.common.tasks.base import TaskGateFact
 
 __all__ = ["HandoverFeedback", "HandoverGateFact"]
 

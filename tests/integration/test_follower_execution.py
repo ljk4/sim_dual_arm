@@ -62,7 +62,7 @@ def replace(value, **changes):
 
 
 SCENARIO = ROOT / "shared/scenarios/marvin_sim/stack"
-BACKEND = load_backend_config(SCENARIO / "configs/simulation/backend/backend.yaml")
+BACKEND = load_backend_config(SCENARIO / "configs/simulation/backend/backend_stack_teacher.yaml")
 DT_NS = 2_000_000
 LEASE_NS = 10_000_000_000
 FIRST_START_NS = 250_000_000

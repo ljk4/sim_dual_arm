@@ -10,14 +10,11 @@ Marvin 固定根双臂方案：左手抓取物块、空中交接给右手、再�
 | --- | --- |
 | `binding.yaml` | 三端方案、档案、配方与 Teacher 扩展包选择 |
 | `configs/simulation/scene/marvin_handover.yaml` | 机器人装配选择、任务环境、执行器/复位数值和相机安装 |
-| `configs/simulation/backend/backend_marvin_control.yaml` | 无任务插件的 direct backend 配方；`task`/`task_mode` 省略 |
 | `configs/simulation/backend/backend_marvin_teacher.yaml` | 任务插件与 Teacher 后端（`task_type: handover`、`task_mode: teacher`），启用分割质量计数 |
-| `configs/simulation/backend/backend_marvin_teacher_right_miss.yaml` | 右手未接稳的负向诊断后端配方 |
 | `configs/simulation/backend/backend_marvin_policy.yaml` | Policy 推理后端（`task_mode: inference`），只运行同一物理评价 |
 | `configs/simulation/scene/marvin_handover_task.yaml` | 阶段门禁、终态评价、180 s 执行预算、Teacher 时钟与容量 |
 | `configs/simulation/scene/marvin_handover_task_inference.yaml` | 完整任务推理评价：Teacher 关闭、180 s 仿真 / 420 s 墙钟、同一门禁与成功判定 |
 | `configs/simulation/scene/handover_paths.yaml` | 任务目标、抓持点、接近/退避位、协调抬升、执行时长与诊断阈值 |
-| `configs/simulation/checks/handover_right_grasp_miss_task.yaml` | 右手未接稳负向诊断：右闭爪命令宽于物块，其他参数相同 |
 | `configs/runtime/teacher_collect.yaml` | runtime Teacher 采集配方（180 s 任务预算、能力标识） |
 | `configs/runtime/policy_eval.yaml` | runtime Policy 执行配方（180 s 任务预算、1 s 停止余量、420 s 墙钟） |
 | `configs/learning/act_dataset.yaml` | 正式数据转换，50 条合格局，随机抽取 10% 作为验证集 |
@@ -29,7 +26,7 @@ Marvin 固定根双臂方案：左手抓取物块、空中交接给右手、再�
 | `profiles/control/marvin_stream.yaml` | 连续块流的提前量、观测年龄与超时 |
 | `../profiles/control/marvin_follower.yaml` | Teacher 有界跟随窗口、参考偏差预算与终端尾长 |
 | `../profiles/control/marvin_follower_inference.yaml` | ACT 推理窗口与逐轴参考偏差上限，独立于关节硬限位 |
-| `profiles/robot/` | Robot Profile（`profile.json`）和三路相机标定文件。Profile 摘要根据场景声明计算。 |
+| `profiles/robot/` | Robot Profile（`profile.json`）。Profile 摘要根据场景声明计算。 |
 | `../profiles/observations/marvin_rgb_joint.json` | 三路 RGB + 16 维机器人状态 |
 | `../profiles/actions/marvin_joint_position.json` | 16 维关节位置动作 |
 
@@ -64,21 +61,6 @@ scripts/build_sdk.sh
 - 夹爪执行器控制量为两指闭合量（`0 .. 0.08 m`）；总开度与闭合量之和为开端测量值。名义 TCP 位于机器人适配指定的手部站点。
 - 手指联动来自源 URDF mimic，MuJoCo 导入为每侧一条 joint equality；编译模型 `neq=2`，没有重复的手工约束。
 - 同臂碰撞排除只有 `Arm_*5_Link`/`Arm_*7_Link`；左右臂、同臂其余配对和手指碰撞保持有效。底座网格仅渲染，适用边界见资产说明。
-
-## 离线检查
-
-在 `simulation` 容器内：
-
-```bash
-python3 -m robot_backend_sim.marvin_sim.checks.check_marvin_scene \
-  --scene-config /shared/scenarios/marvin_sim/handover/configs/simulation/scene/marvin_handover.yaml \
-  --profile /shared/scenarios/marvin_sim/handover/profiles/robot/profile.json \
-  --schemas /shared/common/interfaces/schemas \
-  --report-root /data/marvin_sim/handover/debug/marvin \
-  --run-id marvin-p01a
-```
-
-每次检查在 `/data/marvin_sim/handover/debug/marvin/<run-id>/` 保存 `report.json` 和 `artifacts/renders/`，记录编译模型、关节和夹爪测量、接触、净空及三路渲染结果。
 
 ## 操作入口
 
@@ -139,17 +121,5 @@ scripts/client_policy.sh --robot marvin_sim --task handover \
 ```
 
 本轮 evaluation 种子为 5100–5219，累计 120 次。失败、拒绝和取消同样占用次数。任务使用 180 s 仿真预算、1 s 停止余量和 420 s 墙钟预算，每批最多 10 次。验收要求至少一次交接与入箱成功，并从录制核对左手抬升、空中共持、左手释放后右手持稳及入箱完成。
-
-## 物理诊断入口
-
-| 诊断 | 仓库入口 |
-| --- | --- |
-| 左手独立抓取与持稳 | [test_marvin_left_hold_ros.py](../../../../tests/integration/test_marvin_left_hold_ros.py) |
-| 右手独立抓取与持稳 | [test_marvin_right_hold_ros.py](../../../../tests/integration/test_marvin_right_hold_ros.py) |
-| 共持全过程与抬升 | [test_marvin_dual_hold_ros.py](../../../../tests/integration/test_marvin_dual_hold_ros.py) |
-| 带物受控停止 | [test_marvin_stop_hold_ros.py](../../../../tests/integration/test_marvin_stop_hold_ros.py) |
-| 连续空中交接、退手与入箱释放 | [test_marvin_transfer_ros.py](../../../../tests/integration/test_marvin_transfer_ros.py) |
-
-`READY_POSE` 仅是离线渲染用的诊断位姿，不是任务抓取位姿。当前箱位、物块初态、相机安装、交接区和抓持区由场景与任务/运动学配方声明。
 
 目录导航：[公共层与方案绑定](../../../README.md) · [根 README](../../../../README.md)

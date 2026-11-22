@@ -10,7 +10,7 @@ import json
 import math
 import re
 import traceback
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 type Scalar = bool | int | float | str | None
@@ -287,20 +287,6 @@ class _PreparedEvent:
             separators=(",", ":"),
         ).encode("utf-8")
 
-    def _largest_fitting(
-        self,
-        high: int,
-        make: Callable[[int], dict[str, object]],
-    ) -> int:
-        low = 0
-        while low < high:
-            middle = (low + high + 1) // 2
-            if len(self._dump(make(middle))) + 1 <= self.event_limit:
-                low = middle
-            else:
-                high = middle - 1
-        return low
-
     def _fit(
         self,
         event_seq: int,
@@ -308,36 +294,27 @@ class _PreparedEvent:
         elapsed_ns: int,
         caps: tuple[int, int, int],
     ) -> bytes:
-        message_cap, exception_message_cap, stacktrace_cap = caps
-
-        def build(msg_cap: int, exc_cap: int, stack_cap: int) -> dict[str, object]:
-            return self._build(
-                event_seq, wall_time_utc, elapsed_ns, msg_cap, exc_cap, stack_cap
-            )
-
-        body = self._dump(build(message_cap, exception_message_cap, stacktrace_cap))
+        msg_cap, exc_cap, stack_cap = caps
+        body = self._dump(self._build(event_seq, wall_time_utc, elapsed_ns, msg_cap, exc_cap, stack_cap))
         if len(body) + 1 <= self.event_limit:
             return body
-        minimum = self._dump(build(0, 0, 0))
-        if len(minimum) + 1 > self.event_limit:
+        minimum = self._dump(self._build(event_seq, wall_time_utc, elapsed_ns, 0, 0, 0))
+        remaining = self.event_limit - 1 - len(minimum)
+        if remaining < 0:
             raise ValueError(
                 f"event {self.event!r} cannot fit in max_event_bytes={self.event_limit}"
             )
-        stacktrace_cap = self._largest_fitting(
-            stacktrace_cap, lambda cap: build(message_cap, exception_message_cap, cap)
-        )
-        exception_message_cap = self._largest_fitting(
-            exception_message_cap, lambda cap: build(message_cap, cap, stacktrace_cap)
-        )
-        message_cap = self._largest_fitting(
-            message_cap, lambda cap: build(cap, exception_message_cap, stacktrace_cap)
-        )
-        body = self._dump(build(message_cap, exception_message_cap, stacktrace_cap))
-        if len(body) + 1 > self.event_limit:
-            raise ValueError(
-                f"event {self.event!r} cannot fit in max_event_bytes={self.event_limit}"
-            )
-        return body
+        # Allocate remaining byte budget across message -> exception message -> stacktrace.
+        # UTF-8/JSON escaping can expand up to ~6x in worst case; iteratively halve if needed.
+        for divisor in (1, 2, 4, 8):
+            budget = remaining // divisor
+            m_cap = min(msg_cap, budget)
+            e_cap = min(exc_cap, max(0, budget - m_cap))
+            s_cap = min(stack_cap, max(0, budget - m_cap - e_cap))
+            body = self._dump(self._build(event_seq, wall_time_utc, elapsed_ns, m_cap, e_cap, s_cap))
+            if len(body) + 1 <= self.event_limit:
+                return body
+        return minimum
 
     def _console(self, wall_time_utc: str, event_seq: int) -> str | None:
         if not self.console_enabled:

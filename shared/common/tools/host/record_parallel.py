@@ -7,7 +7,6 @@ import argparse
 import concurrent.futures
 import json
 import math
-import os
 import random
 import signal
 import subprocess
@@ -20,43 +19,13 @@ from host.docker_pool import (
     CONTAINER_MOUNTS,
     ROOT,
     BaseDockerWorkers,
+    automatic_workers,
     container_path_to_host,
     host_path_to_container,
     positive_int,
     scenario_root,
     shared_root_to_container,
 )
-
-
-def automatic_workers() -> int:
-    cpus = (
-        len(os.sched_getaffinity(0))
-        if hasattr(os, "sched_getaffinity")
-        else os.cpu_count() or 1
-    )
-    limits = [4, max(1, cpus // 4)]
-    try:
-        memory = next(
-            line
-            for line in Path("/proc/meminfo").read_text().splitlines()
-            if line.startswith("MemAvailable:")
-        )
-        limits.append(max(1, (int(memory.split()[1]) - 1024 * 1024) // (1536 * 1024)))
-    except (OSError, StopIteration, ValueError):
-        pass
-    try:
-        result = subprocess.run(
-            ["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
-        if result.returncode == 0:
-            limits.append(max(1, (int(result.stdout.splitlines()[0]) - 512) // 1024))
-    except (OSError, ValueError, IndexError, subprocess.TimeoutExpired):
-        limits.append(2)
-    return min(limits)
 
 
 def parser() -> argparse.ArgumentParser:
@@ -162,31 +131,9 @@ class DockerWorkers(BaseDockerWorkers):
         self.plan = json.loads(result.stdout)
         return self.plan
 
-    def resolve_target(self, plan: dict | None = None) -> bool:
+    def resolve_target(self, plan: dict) -> bool:
         """Read campaign progress before creating any simulation workers."""
-        if plan is None:
-            self.ensure_runtime()
-            result = subprocess.run(
-                self.runtime_command(
-                    [
-                        "python3",
-                        "-m",
-                        "dual_arm_runtime.offline.collection.campaign",
-                        "--project-root",
-                        "/app",
-                        "--config",
-                        self.args.config,
-                        "status",
-                    ]
-                ),
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            status = json.loads(result.stdout)
-        else:
-            status = plan["campaign_status"]
+        status = plan["campaign_status"]
         if self.args.purpose == "formal" and self.args.target_total > int(
             status["formal_target_qualified"]
         ):

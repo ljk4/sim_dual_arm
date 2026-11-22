@@ -8,7 +8,6 @@ import yaml
 from dual_arm_learning.config import TrainingConfig, load_training_config
 from dual_arm_learning.training import TrainingError, masked_l1, verify_dataset_manifest
 from model_helpers import replace
-from robot_contracts.io import canonical_sha256 as canonical_hash
 
 ROOT = Path(__file__).resolve().parents[3]
 SCENARIO = ROOT / "shared/scenarios/marvin_sim/stack"
@@ -39,7 +38,6 @@ def _manifest(config: TrainingConfig, root: Path) -> dict:
             "recording": {"complete": True, "failure_reason": ""},
             "quality_qualified": True,
         }
-        facts["facts_sha256"] = canonical_hash(facts)
         return {
             "global_success_index": index,
             "attempt_id": f"attempt-{index}",
@@ -67,19 +65,8 @@ def _manifest(config: TrainingConfig, root: Path) -> dict:
             },
         )
         _write(split_root / "meta/stats.json", {"action": {"mean": [0.0] * 16, "count": [1]}})
-    fact_records = [
-        {
-            "attempt_id": item["attempt_id"],
-            "seed": item["seed"],
-            "facts": {
-                key: value for key, value in item["source_facts"].items() if key != "facts_sha256"
-            },
-        }
-        for item in training_episodes + validation_episodes
-    ]
     return {
         "status": "complete",
-        "source_facts_sha256": canonical_hash(fact_records),
         "synthetic": False,
         "expected": {
             "formal_episodes": config.dataset.expected_formal_episodes,
@@ -100,14 +87,12 @@ def _manifest(config: TrainingConfig, root: Path) -> dict:
                 "episode_count": len(training_episodes),
                 "frame_count": len(training_episodes) * 60,
                 "episodes": training_episodes,
-                "files": {"meta/info.json": {}, "meta/stats.json": {}},
             },
             "validation": {
                 "root": "validation",
                 "episode_count": len(validation_episodes),
                 "frame_count": len(validation_episodes) * 60,
                 "episodes": validation_episodes,
-                "files": {"meta/info.json": {}, "meta/stats.json": {}},
             },
         },
     }
@@ -115,7 +100,7 @@ def _manifest(config: TrainingConfig, root: Path) -> dict:
 
 def test_manifest_reads_saved_45_5_split_and_validates_partition(tmp_path):
     config = load_training_config(SCENARIO / "configs/learning/act_training.yaml", ROOT)
-    config = replace(config, data_root=tmp_path, verify_hashes=False, mode="full")
+    config = replace(config, data_root=tmp_path, mode="full")
     manifest = _manifest(config, tmp_path)
     manifest["expected"]["validation_positions"].reverse()
     _write(tmp_path / "manifest.json", manifest)
@@ -151,7 +136,7 @@ def test_manifest_reads_saved_45_5_split_and_validates_partition(tmp_path):
 
 def test_full_refuses_short_episode_and_synthetic_data(tmp_path):
     config = load_training_config(SCENARIO / "configs/learning/act_training.yaml", ROOT)
-    config = replace(config, data_root=tmp_path, verify_hashes=False, mode="full")
+    config = replace(config, data_root=tmp_path, mode="full")
     manifest = _manifest(config, tmp_path)
     manifest["splits"]["training"]["episodes"][0]["frame_count"] = 1
     _write(tmp_path / "manifest.json", manifest)
@@ -183,7 +168,7 @@ def test_small_manifest_requires_matching_dataset_recipe(tmp_path):
     training_path.write_text(yaml.safe_dump(training_document))
 
     config = load_training_config(training_path, ROOT)
-    config = replace(config, data_root=tmp_path, verify_hashes=False)
+    config = replace(config, data_root=tmp_path)
     _write(tmp_path / "manifest.json", _manifest(config, tmp_path))
     audit = verify_dataset_manifest(config, allow_synthetic=False, require_full=False)
     assert audit.training_global_indices == (0,)
@@ -192,7 +177,7 @@ def test_small_manifest_requires_matching_dataset_recipe(tmp_path):
     assert audit.validation_frames == 60
 
     standard = load_training_config(SCENARIO / "configs/learning/act_training.yaml", ROOT)
-    standard = replace(standard, data_root=tmp_path, verify_hashes=False, mode="smoke")
+    standard = replace(standard, data_root=tmp_path, mode="smoke")
     with pytest.raises(TrainingError, match="episode counts do not match"):
         verify_dataset_manifest(standard, allow_synthetic=False, require_full=False)
 

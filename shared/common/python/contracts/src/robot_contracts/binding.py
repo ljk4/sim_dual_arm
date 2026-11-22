@@ -31,7 +31,6 @@ from .profiles import (
     semantic_hash,
     validate_bindings,
 )
-from .project_paths import resolve_shared_root
 from .validation import (
     NonEmptyStr,
     StrictContractModel,
@@ -43,12 +42,10 @@ __all__ = [
     "BindingStage",
     "ROBOT_REFERENCE_FIELDS",
     "ResolvedBinding",
-    "ResolvedBundle",
     "ResolvedReference",
     "ScenarioBinding",
     "load_binding",
     "resolve_binding_path",
-    "resolve_scenario_binding",
     "stage_requirements",
 ]
 
@@ -69,7 +66,6 @@ ScenarioId = Annotated[
 _SCENARIO_ID_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.:-]{0,127}$")
 BackendKind = Literal["simulation", "hardware"]
 ReferenceKind = Literal["file", "directory"]
-BundleSource = Literal["binding", "override", "none"]
 
 _RECIPE_FIELDS = (
     "simulation_teacher",
@@ -154,10 +150,6 @@ class InterfacesSpec(StrictContractModel):
     policy_api: NonEmptyStr | None = None
 
 
-class ModelsSpec(StrictContractModel):
-    bundle: NonEmptyStr | None = None
-
-
 class ScenarioBinding(StrictContractModel):
     """A strictly validated scenario binding.
 
@@ -176,10 +168,8 @@ class ScenarioBinding(StrictContractModel):
     profiles: ProfilesSpec
     recipes: RecipesSpec = Field(default_factory=RecipesSpec)
     interfaces: InterfacesSpec = Field(default_factory=InterfacesSpec)
-    models: ModelsSpec = Field(default_factory=ModelsSpec)
     source_roots: PathList = ()
     artifact_roots: PathList = ()
-    references: PathList = ()
 
     @property
     def scenario_id(self) -> str:
@@ -209,45 +199,6 @@ class ResolvedReference:
             record["semantic_sha256"] = self.semantic_sha256
         return record
 
-    def summary(self) -> dict[str, Any]:
-        record: dict[str, Any] = {
-            "declared": self.declared,
-            "path": str(self.path),
-            "kind": self.kind,
-        }
-        if self.sha256 is not None:
-            record["sha256"] = self.sha256
-        if self.semantic_sha256 is not None:
-            record["semantic_sha256"] = self.semantic_sha256
-        return record
-
-
-@dataclass(frozen=True)
-class ResolvedBundle:
-    """The effective model bundle reference.
-
-    Only existence and directory type are checked here.  Bundle contents are
-    deliberately left to the learning-side verifier; ``digest`` is always
-    ``None`` so the public layer never invents a placeholder identity.
-    """
-
-    declared: str | None
-    effective: str | None
-    path: Path | None
-    source: BundleSource
-
-    def summary(self) -> dict[str, Any]:
-        return {
-            "declared": self.declared,
-            "effective": self.effective,
-            "source": self.source,
-            "path": None if self.path is None else str(self.path),
-            "kind": None if self.path is None else "directory",
-            "exists": self.path is not None and self.path.is_dir(),
-            "digest": None,
-            "validated_by": "learning.training.bundle",
-        }
-
 
 @dataclass(frozen=True)
 class ResolvedBinding:
@@ -260,8 +211,6 @@ class ResolvedBinding:
     source_roots: tuple[Path, ...]
     artifact_roots: tuple[Path, ...]
     references: Mapping[str, ResolvedReference]
-    dependencies: tuple[ResolvedBinding, ...]
-    bundle: ResolvedBundle
 
     def requirements(self, stage: BindingStage | str) -> tuple[str, ...]:
         return stage_requirements(self.binding, stage)
@@ -284,48 +233,6 @@ class ResolvedBinding:
     def _satisfied(self, field: str) -> bool:
         section, name = field.split(".", 1)
         return getattr(getattr(self.binding, section), name) is not None
-
-    def effective_bundle(self) -> dict[str, Any]:
-        """Return the real effective source, never a placeholder digest."""
-        return self.bundle.summary()
-
-    def summary(self) -> dict[str, Any]:
-        """JSON-safe, deterministic view used by the read-only CLI."""
-        stages: dict[str, Any] = {}
-        for stage in BindingStage:
-            missing = self.missing(stage)
-            stages[stage.value] = {
-                "requirements": list(self.requirements(stage)),
-                "missing": list(missing),
-                "satisfied": not missing,
-            }
-        return {
-            "binding": {
-                "path": str(self.path),
-                "sha256": self.sha256,
-                "scenario_id": self.binding.scenario_id,
-                "description": self.binding.description,
-            },
-            "declarations": self.binding.model_dump(mode="json"),
-            "roots": {
-                "binding": str(self.root),
-                "source": [str(path) for path in self.source_roots],
-                "artifact": [str(path) for path in self.artifact_roots],
-            },
-            "references": {
-                field: reference.summary() for field, reference in self.references.items()
-            },
-            "models": self.bundle.summary(),
-            "dependencies": [
-                {
-                    "path": str(dependency.path),
-                    "sha256": dependency.sha256,
-                    "scenario_id": dependency.binding.scenario_id,
-                }
-                for dependency in self.dependencies
-            ],
-            "stages": stages,
-        }
 
 
 def stage_requirements(binding: ScenarioBinding, stage: BindingStage | str) -> tuple[str, ...]:
@@ -448,33 +355,6 @@ def _resolve_source_reference(
     return candidate
 
 
-def _resolve_model_reference(
-    source: Path,
-    field: str,
-    declared: str,
-    *,
-    roots: tuple[Path, ...],
-    binding_dir: Path,
-) -> Path:
-    path = Path(declared)
-    candidate = _resolve_artifact_path(path, binding_dir)
-    if not _inside_roots(candidate, roots):
-        raise BindingError(
-            "BINDING_REFERENCE",
-            f"{source}: {field}: path is outside the declared roots: {candidate}",
-        )
-    if candidate.is_file():
-        raise BindingError(
-            "BINDING_REFERENCE",
-            f"{source}: {field}: expected a directory, found a file: {candidate}",
-        )
-    if not candidate.is_dir():
-        raise BindingError(
-            "BINDING_REFERENCE", f"{source}: {field}: directory does not exist: {candidate}"
-        )
-    return candidate
-
-
 def _reference(
     field: str, declared: str, path: Path, kind: ReferenceKind
 ) -> ResolvedReference:
@@ -533,15 +413,11 @@ def _load_profile_documents(
     return references
 
 
-def _load_binding_document(source: Path) -> dict[str, Any]:
+def _parse_binding(source: Path) -> ScenarioBinding:
     try:
-        return load_document(source)
+        document = load_document(source)
     except ContractError as error:
         raise BindingError("BINDING_SCHEMA", str(error)) from error
-
-
-def _parse_binding(source: Path) -> ScenarioBinding:
-    document = _load_binding_document(source)
     try:
         return ScenarioBinding.validate_dict(document, source=str(source))
     except ContractError as error:
@@ -553,8 +429,6 @@ def _load(
     source: Path,
     *,
     schema_root: Path,
-    bundle: Path | None,
-    stack: tuple[Path, ...],
 ) -> ResolvedBinding:
     source = Path(source)
     if source.is_dir():
@@ -564,10 +438,6 @@ def _load(
     if not source.is_file():
         raise BindingError("BINDING_REFERENCE", f"{source}: binding file does not exist")
     resolved_source = _resolved(source)
-    if resolved_source in stack:
-        chain = " -> ".join(str(path) for path in (*stack, resolved_source))
-        raise BindingError("BINDING_CYCLE", chain)
-    stack = (*stack, resolved_source)
 
     binding = _parse_binding(source)
     binding_dir = resolved_source.parent
@@ -598,44 +468,6 @@ def _load(
         )
         references[field] = _reference(field, declared, path, "directory")
 
-    dependencies: list[ResolvedBinding] = []
-    for index, declared in enumerate(binding.references):
-        field = f"references[{index}]"
-        path = _resolve_source_reference(
-            source, field, declared, kind="file",
-            roots=source_reference_roots, binding_dir=binding_dir,
-        )
-        references[field] = _reference(field, declared, path, "file")
-        dependencies.append(
-            _load(path, schema_root=schema_root, bundle=None, stack=stack)
-        )
-
-    declared_bundle = binding.models.bundle
-    model_roots = (binding_dir, *source_roots, *artifact_roots)
-    if bundle is not None:
-        effective_path = _resolve_model_reference(
-            source, "--bundle", str(bundle), roots=model_roots, binding_dir=binding_dir
-        )
-        bundle_record = ResolvedBundle(
-            declared=declared_bundle,
-            effective=str(effective_path),
-            path=effective_path,
-            source="override",
-        )
-    elif declared_bundle is not None:
-        effective_path = _resolve_model_reference(
-            source, "models.bundle", declared_bundle,
-            roots=model_roots, binding_dir=binding_dir,
-        )
-        bundle_record = ResolvedBundle(
-            declared=declared_bundle,
-            effective=str(effective_path),
-            path=effective_path,
-            source="binding",
-        )
-    else:
-        bundle_record = ResolvedBundle(None, None, None, "none")
-
     return ResolvedBinding(
         root=binding_dir,
         path=resolved_source,
@@ -644,8 +476,6 @@ def _load(
         source_roots=source_roots,
         artifact_roots=artifact_roots,
         references=MappingProxyType(references),
-        dependencies=tuple(dependencies),
-        bundle=bundle_record,
     )
 
 
@@ -670,19 +500,8 @@ def load_binding(
     path: Path | str,
     *,
     shared_root: Path | str,
-    model: Path | str | None = None,
-    bundle: Path | str | None = None,
 ) -> ResolvedBinding:
-    """Load and fully validate one binding without executing any scenario code.
-
-    ``shared_root`` is the explicit shared tree (for example ``/shared`` or the
-    repository's ``shared/``); profile schemas are read from
-    ``common/interfaces/schemas`` below it.  All binding-internal paths resolve
-    against the binding directory and declared roots, never the current working
-    directory.  ``bundle`` (or its alias ``model``) is an explicit caller path
-    resolved against the current working directory and overrides a declared
-    ``models.bundle``; it is never required by stage validation.
-    """
+    """Load and fully validate one binding without executing any scenario code."""
     shared_root = Path(shared_root)
     schema_root = shared_root / "common" / "interfaces" / "schemas"
     if not schema_root.is_dir():
@@ -690,45 +509,4 @@ def load_binding(
             "BINDING_REFERENCE",
             f"{shared_root}: shared schema directory does not exist: {schema_root}",
         )
-    if model is not None and bundle is not None and Path(model) != Path(bundle):
-        raise BindingError(
-            "BINDING_REFERENCE",
-            f"model {model} and bundle {bundle} name different overrides",
-        )
-    declared_override = bundle if bundle is not None else model
-    override = None if declared_override is None else _resolved(Path(declared_override))
-    return _load(Path(path), schema_root=schema_root, bundle=override, stack=())
-
-
-def resolve_scenario_binding(
-    *,
-    robot: str | None = None,
-    task: str | None = None,
-    scenario: str | None = None,
-    stage: BindingStage | str | None = None,
-    shared_root: Path | str | None = None,
-    project_root: Path | None = None,
-    model: Path | str | None = None,
-    bundle: Path | str | None = None,
-) -> ResolvedBinding:
-    """Resolve ``(robot, task)`` (or ``'<robot>/<task>'``), load and optionally validate stage."""
-    if scenario is not None:
-        if robot is not None or task is not None:
-            raise BindingError("BINDING_REFERENCE", "scenario cannot be combined with robot/task")
-        robot, separator, task = scenario.partition("/")
-        if not separator or not robot or not task or "/" in task:
-            raise BindingError("BINDING_REFERENCE", "scenario must be '<robot>/<task>'")
-    if not robot or not task:
-        raise BindingError("BINDING_REFERENCE", "robot and task are required")
-    explicit_shared = None if shared_root is None else Path(shared_root)
-    root = resolve_shared_root(explicit=explicit_shared, project_root=project_root)
-    binding_path = resolve_binding_path(root, robot, task)
-    if not binding_path.is_file():
-        raise BindingError(
-            "BINDING_REFERENCE",
-            f"scenario {robot}/{task} has no binding file: {binding_path}",
-        )
-    resolved = load_binding(binding_path, shared_root=root, model=model, bundle=bundle)
-    if stage is not None:
-        resolved.validate_stage(stage)
-    return resolved
+    return _load(Path(path), schema_root=schema_root)
