@@ -152,3 +152,54 @@ def test_optional_temporal_arrays_are_saved_in_the_same_artifact(tmp_path: Path)
         np.testing.assert_array_equal(stored["ensemble_counts"], counts)
         np.testing.assert_array_equal(stored["history_observation_ids"], [1, 2])
         np.testing.assert_array_equal(stored["history_observation_time_ns"], [10, 20])
+
+
+def test_two_tier_soft_overrun_accepts_clipped_within_tier2_and_rejects_above_tier2():
+    soft_quotas = {"right_gripper_width": 0.03, "right_joint6": 0.02}
+
+    raw = np.zeros((60, 16), dtype=np.float32)
+    raw[57, 15] = 0.0859  # 0.0059 m overrun > Tier-1 0.005, <= Tier-2 0.03
+    soft = admit_action_chunk(
+        raw, NAMES, LOWER, UPPER, GRIPPER_QUOTA, soft_corrections=soft_quotas
+    )
+    assert soft.accepted and soft.soft_overrun
+    assert soft.positions[57, 15] == 0.08
+    assert soft.correction[57, 15] == pytest.approx(-0.0059, abs=1e-6)
+    assert "soft admission correction" in soft.reason
+
+    # Unlisted in Tier-1 (0.0), listed in Tier-2 (0.02): clean inside bounds is not soft_overrun.
+    clean = np.zeros((60, 16), dtype=np.float32)
+    clean_res = admit_action_chunk(
+        clean, NAMES, LOWER, UPPER, GRIPPER_QUOTA, soft_corrections=soft_quotas
+    )
+    assert clean_res.accepted and not clean_res.soft_overrun and clean_res.reason == ""
+
+    # Tier-2 overshoot on axis with Tier-1=0.0 is flagged as soft_overrun and clipped.
+    arm_soft = np.zeros((60, 16), dtype=np.float32)
+    arm_soft[59, 13] = 3.015
+    arm_res = admit_action_chunk(
+        arm_soft, NAMES, LOWER, UPPER, GRIPPER_QUOTA, soft_corrections=soft_quotas
+    )
+    assert arm_res.accepted and arm_res.soft_overrun
+    assert arm_res.positions[59, 13] == 3.0
+
+    # Exceeding Tier-2 ceiling rejects cleanly.
+    over_tier2 = np.zeros((60, 16), dtype=np.float32)
+    over_tier2[57, 15] = 0.115  # 0.035 m overrun > Tier-2 0.03
+    hard = admit_action_chunk(
+        over_tier2, NAMES, LOWER, UPPER, GRIPPER_QUOTA, soft_corrections=soft_quotas
+    )
+    assert not hard.accepted and not hard.soft_overrun
+    assert hard.reason.startswith("right_gripper_width: admission correction 0.035 exceeds 0.03")
+
+
+def test_mixed_soft_and_hard_overrun_rejects_with_hard_reason():
+    soft_quotas = {"right_gripper_width": 0.03}
+    raw = np.zeros((60, 16), dtype=np.float32)
+    raw[57, 15] = 0.09  # soft overrun on gripper
+    raw[59, 0] = 3.1    # hard out-of-bounds on unlisted left_joint1
+    res = admit_action_chunk(
+        raw, NAMES, LOWER, UPPER, GRIPPER_QUOTA, soft_corrections=soft_quotas
+    )
+    assert not res.accepted and not res.soft_overrun
+    assert res.reason == "left_joint1: prediction outside hard limits"

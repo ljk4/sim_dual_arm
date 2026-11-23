@@ -21,7 +21,9 @@ CHUNK_SIZE, PERIOD_NS, FPS = 60, 50_000_000, 20
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _MODEL_KEYS = (
     "model_path", "robot_profile_path", "observation_schema_path", "action_schema_path",
-    "device", "require_formal", "max_prediction_corrections", "temporal_ensemble_coeff",
+    "device", "require_formal", "max_prediction_corrections",
+    "soft_prediction_corrections", "max_consecutive_soft_overruns",
+    "temporal_ensemble_coeff",
 )
 
 
@@ -77,6 +79,8 @@ class PolicyServiceConfig(rv.StrictMappingModel):
     device: rv.NonEmptyStr = "cpu"
     require_formal: bool = True
     max_prediction_corrections: dict[str, rv.NonNegativeFloat] = Field(default_factory=dict)
+    soft_prediction_corrections: dict[str, rv.NonNegativeFloat] = Field(default_factory=dict)
+    max_consecutive_soft_overruns: Annotated[int, Field(strict=True, ge=0, le=10)] = 0
     temporal_ensemble_coeff: rv.StrictFloat | None = None
 
     @field_validator("logging", mode="before")
@@ -98,6 +102,18 @@ class PolicyServiceConfig(rv.StrictMappingModel):
             raise rv.contract_error(
                 "max_prediction_corrections", f"unknown axes: {sorted(unknown)}"
             )
+        unknown_soft = set(self.soft_prediction_corrections) - set(self.joint_names)
+        if unknown_soft:
+            raise rv.contract_error(
+                "soft_prediction_corrections", f"unknown axes: {sorted(unknown_soft)}"
+            )
+        for axis, soft_limit in self.soft_prediction_corrections.items():
+            hard_quota = self.max_prediction_corrections.get(axis, 0.0)
+            if soft_limit < hard_quota:
+                raise rv.contract_error(
+                    "soft_prediction_corrections",
+                    f"{axis}: soft limit {soft_limit:g} must be >= max_prediction_corrections {hard_quota:g}",
+                )
         if self.temporal_ensemble_coeff is not None and not (
             0.0 <= self.temporal_ensemble_coeff <= 1.0
         ):

@@ -64,7 +64,12 @@ def settings_for(bundle: Path) -> PolicyServiceConfig:
 
 def plain(config: PolicyServiceConfig) -> PolicyServiceConfig:
     return config.model_copy(
-        update={"max_prediction_corrections": {}, "temporal_ensemble_coeff": None}
+        update={
+            "max_prediction_corrections": {},
+            "soft_prediction_corrections": {},
+            "max_consecutive_soft_overruns": 0,
+            "temporal_ensemble_coeff": None,
+        }
     )
 
 
@@ -698,6 +703,76 @@ def test_temporal_history_is_per_session_and_reset_discards_it(bundle, tmp_path)
         assert stored["history_observation_ids"].size == 0
 
 
+def test_two_tier_admission_allows_bounded_soft_streak_resets_and_rejects_third(
+    bundle, tmp_path
+):
+    config = settings_for(bundle)
+    base = initial_positions(bundle)
+    rg = config.action_joint_names.index("right_gripper_width")
+    rj6 = config.action_joint_names.index("right_joint6")
+    rg_hi = config.joint_upper_bounds[rg]
+    rj6_hi = config.joint_upper_bounds[rj6]
+
+    overrides = {
+        1: (rg, rg_hi + 0.020),   # soft #1
+        2: (rg, rg_hi + 0.025),   # soft #2
+        3: (None, None),          # clean -> resets streak
+        4: (rj6, rj6_hi + 0.010), # soft #1
+        5: (rg, rg_hi + 0.020),   # soft #2
+        6: (rg, rg_hi + 0.020),   # soft #3 -> rejected
+        7: (rg, rg_hi + 0.035),   # > Tier-2 0.03 -> rejected immediately
+        8: (rg, rg_hi + 0.020),   # after reset_session -> soft #1 accepted
+    }
+    service = PolicyService(
+        config,
+        AxisChunkModel(bundle, base, overrides),
+        prediction_directory=tmp_path / "predictions",
+    )
+    ctx = context(config)
+    opened = service.open_session(open_request(config, ctx))
+
+    def call(req_id: str, obs_id: int, run_ctx: RunContext):
+        return service.predict(
+            pb2.PredictRequest(
+                session_id=opened.session_id,
+                request_id=req_id,
+                context=pb2.RunContext(**run_ctx.model_dump(mode="python")),
+                observation=pb2_observation(config, bundle, obs_id, obs_id * 1_000_000_000),
+            )
+        )
+
+    for obs_id in (1, 2, 3, 4, 5):
+        reply = call(f"p{obs_id}", obs_id, ctx)
+        for target in reply.action.targets:
+            for idx, val in enumerate(target.positions):
+                assert config.joint_lower_bounds[idx] <= val <= config.joint_upper_bounds[idx]
+
+    session = service._sessions[opened.session_id]
+    assert session.pipeline._consecutive_soft_overruns == 2
+
+    with pytest.raises(PolicyError, match="consecutive soft overruns 3 exceeds 2"):
+        call("p6", 6, ctx)
+    assert "p6" not in session.request_cache
+    assert session.last_observation_id == 5 and session.predictions == 5
+
+    with pytest.raises(PolicyError, match="exceeds 0.03"):
+        call("p7", 7, ctx)
+    assert "p7" not in session.request_cache
+
+    ctx2 = context(config, clock_epoch=2)
+    service.reset_session(
+        pb2.ResetSessionRequest(
+            session_id=opened.session_id,
+            reset_id="r1",
+            new_context=pb2.RunContext(**ctx2.model_dump(mode="python")),
+        )
+    )
+    assert session.pipeline._consecutive_soft_overruns == 0
+    reply8 = call("p8", 1, ctx2)
+    assert reply8.action.targets[0].positions[rg] == pytest.approx(rg_hi, abs=1e-6)
+    assert session.pipeline._consecutive_soft_overruns == 1
+
+
 class AxisChunkModel(RecordingModel):
     """Deterministic chunk whose scripted axis values change per call."""
 
@@ -729,9 +804,16 @@ def test_real_recipe_quota_reaches_the_pipeline_and_legal_chunks_are_unchanged(
 ):
     config = settings_for(bundle)
     assert config.max_prediction_corrections == {
-        "left_gripper_width": 0.005,
-        "right_gripper_width": 0.005,
+        "left_gripper_width": 0.015,
+        "right_gripper_width": 0.015,
     }
+    assert config.soft_prediction_corrections == {
+        "left_gripper_width": 0.03,
+        "right_gripper_width": 0.03,
+        "right_joint6": 0.02,
+        "right_joint7": 0.02,
+    }
+    assert config.max_consecutive_soft_overruns == 2
     assert "gripper_max_correction_m" not in config.to_document()
     directory = tmp_path / "predictions"
     pipeline = ChunkedPolicyPipeline(

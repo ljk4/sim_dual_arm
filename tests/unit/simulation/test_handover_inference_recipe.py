@@ -151,7 +151,13 @@ def test_marvin_learning_recipe_declares_per_axis_correction_quotas():
     )
     assert policy_service["model"]["max_prediction_corrections"] == {
         "left_joint7": 0.01,
-        "left_gripper_width": 0.005,
-        "right_gripper_width": 0.005,
+        "left_gripper_width": 0.015,
+        "right_gripper_width": 0.015,
     }
+    assert policy_service["model"]["soft_prediction_corrections"] == {
+        "left_joint7": 0.02,
+        "left_gripper_width": 0.03,
+        "right_gripper_width": 0.03,
+    }
+    assert policy_service["model"]["max_consecutive_soft_overruns"] == 2
     assert "gripper_max_correction_m" not in policy_service["model"]

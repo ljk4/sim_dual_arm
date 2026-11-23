@@ -10,7 +10,7 @@ from typing import Any
 import numpy as np
 
 from ..adapters.base import PolicyModelAdapter
-from .chunk_admission import admit_action_chunk, save_prediction
+from .chunk_admission import Admission, admit_action_chunk, save_prediction
 from .config import PolicyServiceConfig
 from .temporal_ensemble import EnsembleResult, TemporalEnsemble, validate_coefficient
 from .types import PolicyError, ProviderCameraSample
@@ -47,6 +47,8 @@ class PipelineResult:
     observation_time_ns: int
     ensemble: EnsembleResult | None = None
     artifact: Path | None = None
+    soft_overrun: bool = False
+    admission_reason: str = ""
 
 
 class ChunkedPolicyPipeline:
@@ -67,6 +69,7 @@ class ChunkedPolicyPipeline:
         self.prediction_directory = prediction_directory
         self.prediction_max_bytes = prediction_max_bytes
         self.budget = budget or PredictionBudget()
+        self._consecutive_soft_overruns = 0
         self._ensemble = (
             None
             if config.temporal_ensemble_coeff is None
@@ -79,6 +82,7 @@ class ChunkedPolicyPipeline:
         )
 
     def reset(self) -> None:
+        self._consecutive_soft_overruns = 0
         self.adapter.reset()
         if self._ensemble is not None:
             self._ensemble.reset()
@@ -137,7 +141,9 @@ class ChunkedPolicyPipeline:
     ) -> tuple[Any, Any, bool]:
         config = self.config
         evidence_enabled = bool(
-            config.max_prediction_corrections or self._ensemble is not None
+            config.max_prediction_corrections
+            or config.soft_prediction_corrections
+            or self._ensemble is not None
         )
         decision = admit_action_chunk(
             output,
@@ -145,7 +151,21 @@ class ChunkedPolicyPipeline:
             config.joint_lower_bounds,
             config.joint_upper_bounds,
             config.max_prediction_corrections,
+            soft_corrections=config.soft_prediction_corrections,
         )
+        if decision.accepted and decision.soft_overrun:
+            next_streak = self._consecutive_soft_overruns + 1
+            if next_streak > config.max_consecutive_soft_overruns:
+                decision = Admission(
+                    decision.positions,
+                    decision.correction,
+                    accepted=False,
+                    reason=(
+                        f"{decision.reason}; consecutive soft overruns "
+                        f"{next_streak} exceeds {config.max_consecutive_soft_overruns}"
+                    ),
+                    soft_overrun=True,
+                )
         ensemble_result = None
         if decision.accepted and self._ensemble is not None:
             try:
@@ -217,6 +237,8 @@ class ChunkedPolicyPipeline:
             observation_time_ns=observation_time_ns,
             ensemble=ensemble_result,
             artifact=artifact,
+            soft_overrun=decision.soft_overrun,
+            admission_reason=decision.reason,
         )
 
     def commit(self, result: PipelineResult) -> None:
@@ -230,6 +252,10 @@ class ChunkedPolicyPipeline:
                 raise PolicyError(
                     "INVALID_OBSERVATION", f"temporal ensemble commit: {error}"
                 ) from error
+        if result.soft_overrun:
+            self._consecutive_soft_overruns += 1
+        else:
+            self._consecutive_soft_overruns = 0
 
 
 __all__ = ["ChunkedPolicyPipeline", "PipelineResult", "PredictionBudget", "decode_rgb"]

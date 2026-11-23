@@ -81,3 +81,47 @@ def test_correction_quotas_are_per_axis_and_strictly_validated():
         document["max_prediction_corrections"] = value
         with pytest.raises(PolicyConfigError, match="max_prediction_corrections"):
             parse_policy_config(document)
+
+
+def test_soft_prediction_corrections_and_streak_budget_are_strictly_validated():
+    assert PolicyServiceConfig.model_fields["soft_prediction_corrections"].default_factory() == {}
+    assert PolicyServiceConfig.model_fields["max_consecutive_soft_overruns"].default == 0
+
+    document = service_document()
+    document["max_prediction_corrections"] = {
+        "left_gripper_width": 0.015,
+        "right_gripper_width": 0.015,
+    }
+    document["soft_prediction_corrections"] = {
+        "left_gripper_width": 0.03,
+        "right_gripper_width": 0.03,
+        "right_joint6": 0.02,
+    }
+    document["max_consecutive_soft_overruns"] = 2
+    config = parse_policy_config(document)
+    assert config.soft_prediction_corrections == {
+        "left_gripper_width": 0.03,
+        "right_gripper_width": 0.03,
+        "right_joint6": 0.02,
+    }
+    assert config.max_consecutive_soft_overruns == 2
+
+    for bad_soft in (
+        {"missing_joint": 0.02},
+        {"right_joint6": -0.01},
+        {"right_joint6": float("inf")},
+        {"right_joint6": float("nan")},
+        {"right_joint6": "0.02"},
+        {"left_gripper_width": 0.01},  # < Tier-1 0.015
+    ):
+        doc = service_document()
+        doc["max_prediction_corrections"] = {"left_gripper_width": 0.015}
+        doc["soft_prediction_corrections"] = bad_soft
+        with pytest.raises(PolicyConfigError, match="soft_prediction_corrections"):
+            parse_policy_config(doc)
+
+    for bad_streak in (-1, 11, 1.5, "2", True):
+        doc = service_document()
+        doc["max_consecutive_soft_overruns"] = bad_streak
+        with pytest.raises(PolicyConfigError, match="max_consecutive_soft_overruns"):
+            parse_policy_config(doc)

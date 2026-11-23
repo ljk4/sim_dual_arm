@@ -7,8 +7,14 @@ model:
   device: cuda
   require_formal: true
   max_prediction_corrections:
-    left_gripper_width: 0.005
-    right_gripper_width: 0.005
+    left_gripper_width: 0.015
+    right_gripper_width: 0.015
+  soft_prediction_corrections:
+    left_gripper_width: 0.03
+    right_gripper_width: 0.03
+    right_joint6: 0.02
+    right_joint7: 0.02
+  max_consecutive_soft_overruns: 2
   temporal_ensemble_coeff: null
 
 service:

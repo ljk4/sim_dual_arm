@@ -17,26 +17,45 @@ class Admission:
     correction: np.ndarray
     accepted: bool
     reason: str
+    soft_overrun: bool = False
 
 
 def admit_action_chunk(
-    raw, names, lower, upper, corrections: Mapping[str, float]
+    raw,
+    names,
+    lower,
+    upper,
+    corrections: Mapping[str, float],
+    *,
+    soft_corrections: Mapping[str, float] | None = None,
 ) -> Admission:
-    """Project named axes to the profile bounds and reject every overrun."""
+    """Project named axes to the profile bounds and enforce Tier-1/Tier-2 overrun limits."""
     original = np.asarray(raw, dtype=np.float64)
     admitted = original.copy()
-    reason = ""
+    hard_reason = ""
+    soft_reason = ""
+    soft_map = soft_corrections or {}
     for index, name in enumerate(names):
-        quota = float(corrections.get(name, 0.0))
+        tier1 = float(corrections.get(name, 0.0))
+        tier2 = max(tier1, float(soft_map.get(name, tier1)))
         values = original[:, index]
-        if quota > 0.0:
+        if tier2 > 0.0:
             admitted[:, index] = np.clip(values, lower[index], upper[index])
             correction = float(np.max(np.abs(admitted[:, index] - values)))
-            if correction > quota and not reason:
-                reason = f"{name}: admission correction {correction:.6g} exceeds {quota:.6g}"
-        elif (np.any(values < lower[index]) or np.any(values > upper[index])) and not reason:
-            reason = f"{name}: prediction outside hard limits"
-    return Admission(admitted, admitted - original, not reason, reason)
+            if correction > tier2 and not hard_reason:
+                hard_reason = f"{name}: admission correction {correction:.6g} exceeds {tier2:.6g}"
+            elif correction > tier1 and not soft_reason:
+                soft_reason = (
+                    f"{name}: soft admission correction {correction:.6g} "
+                    f"exceeds {tier1:.6g} (soft limit {tier2:.6g})"
+                )
+        elif (np.any(values < lower[index]) or np.any(values > upper[index])) and not hard_reason:
+            hard_reason = f"{name}: prediction outside hard limits"
+    if hard_reason:
+        return Admission(admitted, admitted - original, False, hard_reason, soft_overrun=False)
+    if soft_reason:
+        return Admission(admitted, admitted - original, True, soft_reason, soft_overrun=True)
+    return Admission(admitted, admitted - original, True, "", soft_overrun=False)
 
 
 def save_prediction(
