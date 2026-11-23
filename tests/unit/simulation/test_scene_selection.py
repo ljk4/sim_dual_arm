@@ -34,6 +34,7 @@ def test_each_scene_recipe_selects_its_task():
     assert isinstance(marvin, MarvinSceneConfig)
     assert marvin.robot.assembly == "marvin"
     assert marvin.task.environment == "handover"
+    assert stack.robot.home_joint_positions == marvin.robot.home_joint_positions
 
 
 def test_unknown_or_missing_assembly_is_rejected(tmp_path):

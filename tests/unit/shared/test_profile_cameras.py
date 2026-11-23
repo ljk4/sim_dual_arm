@@ -56,7 +56,7 @@ def test_profile_is_an_immutable_multi_camera_view():
     raw["cameras"][0]["name"] = "mutated"
     raw["joints"][0]["initial"] = 9.0
     assert profile.cameras[0].name == "global"
-    assert profile.joints[0].initial == 0.75
+    assert profile.joints[0].initial == 0.5
 
     with pytest.raises(ValidationError):
         profile.cameras[0].name = "changed"

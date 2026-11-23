@@ -71,14 +71,23 @@ def test_default_config_loads_frozen_typed_values():
         "right_wrist",
     ]
     assert all(camera.width == 320 and camera.height == 240 for camera in config.cameras)
-    assert config.reset.home_joint_positions == (
-        0.75,
-        -1.55,
-        1.65,
-        -1.35,
+    assert config.reset.home_joint_positions.left == (
+        0.5,
+        -0.8,
         0.6,
-        -0.3,
+        -1.45,
+        0.45,
+        -0.25,
+        -0.15,
+    )
+    assert config.reset.home_joint_positions.right == (
+        -0.5,
+        -0.8,
         -0.6,
+        -1.45,
+        0.45,
+        0.25,
+        0.15,
     )
 
     with pytest.raises(ValidationError):
@@ -347,17 +356,29 @@ def test_non_mapping_and_missing_file_are_rejected(tmp_path):
 
 
 def test_home_rejects_wrong_length_and_boolean_values(tmp_path):
-    short_path = config_with(tmp_path, set_value("robot", "home_joint_positions", value=[0.0] * 6))
-    with pytest.raises(StackSceneConfigError) as caught:
-        load_marvin_stack_scene_config(short_path)
-    assert caught.value.field == "robot.home_joint_positions"
+    for side in ("left", "right"):
+        short_path = config_with(
+            tmp_path, set_value("robot", "home_joint_positions", side, value=[0.0] * 6)
+        )
+        with pytest.raises(StackSceneConfigError) as caught:
+            load_marvin_stack_scene_config(short_path)
+        assert caught.value.field == f"robot.home_joint_positions.{side}"
 
-    positions = list(DEFAULT_DOCUMENT["robot"]["home_joint_positions"])
+    positions = list(DEFAULT_DOCUMENT["robot"]["home_joint_positions"]["left"])
     positions[0] = True
-    bool_path = config_with(tmp_path, set_value("robot", "home_joint_positions", value=positions))
+    bool_path = config_with(
+        tmp_path, set_value("robot", "home_joint_positions", "left", value=positions)
+    )
     with pytest.raises(StackSceneConfigError) as caught:
         load_marvin_stack_scene_config(bool_path)
-    assert caught.value.field == "robot.home_joint_positions[0]"
+    assert caught.value.field == "robot.home_joint_positions.left[0]"
+
+    flat_path = config_with(
+        tmp_path, set_value("robot", "home_joint_positions", value=[0.0] * 7)
+    )
+    with pytest.raises(StackSceneConfigError) as caught:
+        load_marvin_stack_scene_config(flat_path)
+    assert caught.value.field == "robot.home_joint_positions"
 
 
 def test_huge_integer_is_rejected_without_leaking_overflow(tmp_path):

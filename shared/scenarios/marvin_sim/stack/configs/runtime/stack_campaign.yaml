@@ -62,12 +62,12 @@ quality:
       min_pixels: 64
     - camera: right_wrist
       object: source
-      phases: [pregrasp, grasp, close, lift, transport, lower, open]
+      phases: [grasp, close, lift, transport, lower, open]
       mode: required
       min_pixels: 64
     - camera: right_wrist
       object: source
-      phases: [retreat, stable]
+      phases: [pregrasp, retreat, stable]
       mode: record_only
       min_pixels: 16
     - camera: right_wrist

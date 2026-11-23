@@ -61,7 +61,7 @@ def test_config_records_all_mandated_initial_values(config):
     assert config.ik.limit_margin_rad == 0.05
     assert config.ik.solver == "daqp"
     assert config.ik.initial_right_joint_positions == pytest.approx(
-        (0.74, -1.815, 1.778, -1.264, 0.635, -0.413, -0.88)
+        (0.0, -1.0, -0.2, -1.4, 0.4, -0.4, 1.0)
     )
     assert config.clearance.minimum_clearance_m == 0.003
     assert config.clearance.collision_detection_distance_m == 0.03

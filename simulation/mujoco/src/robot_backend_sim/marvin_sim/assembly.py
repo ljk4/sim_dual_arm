@@ -325,12 +325,13 @@ def _configure_finger_couplings(spec: mujoco.MjSpec) -> None:
 def _add_actuators(
     spec: mujoco.MjSpec, config: MarvinRobotConfig, semantics: UrdfSemantics
 ) -> None:
-    for _public_side, prefix in SIDES:
+    for public_side, prefix in SIDES:
+        home = config.home_joint_positions.for_side(public_side)
         for index in range(1, ARM_JOINT_COUNT + 1):
             name = f"Arm_{prefix}{index}_Joint"
             joint = spec.joint(name)
             source = semantics.joints[name]
-            if not source.lower <= config.home_joint_positions[index - 1] <= source.upper:
+            if not source.lower <= home[index - 1] <= source.upper:
                 raise SceneBuildError(f"home position for {name!r} is outside the source limits")
             joint.damping[:] = config.joint_damping
             joint.armature = config.joint_armature

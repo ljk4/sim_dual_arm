@@ -354,8 +354,8 @@ class MarvinSceneBase(CompiledScene):
     def _reset_robot_joints(self) -> None:
         data = self.data
         robot = self.indices.robot
-        home = self.config.robot.home_joint_positions
         for public_side, _ in SIDES:
+            home = self.config.robot.home_joint_positions.for_side(public_side)
             for address, value in zip(
                 robot.arm_joint_qpos[public_side], home, strict=True
             ):

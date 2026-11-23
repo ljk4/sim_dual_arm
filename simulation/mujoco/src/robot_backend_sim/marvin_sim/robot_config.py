@@ -16,6 +16,7 @@ from robot_contracts.validation import (
 from robot_backend_sim.common.config.camera_config import Vec3
 
 __all__ = [
+    "HomeJointPositions",
     "MARVIN_ARM_JOINT_RANGES",
     "MARVIN_CAMERA_NAMES",
     "MARVIN_CONTROL_JOINT_NAMES",
@@ -76,11 +77,22 @@ Seven = Annotated[
 ]
 
 
+class HomeJointPositions(StrictMappingModel):
+    """Side-specific 7-DOF home joint positions for Marvin."""
+
+    left: Seven
+    right: Seven
+
+    def for_side(self, side: Literal["left", "right"]) -> tuple[float, ...]:
+        """Return the 7 home joint positions for the requested arm."""
+        return self.left if side == "left" else self.right
+
+
 class MarvinRobotConfig(StrictMappingModel):
     assembly: Literal["marvin"]
     base_position: Vec3
     base_yaw_deg: Annotated[StrictFloat, Field(ge=-180.0, le=180.0)]
-    home_joint_positions: Seven
+    home_joint_positions: HomeJointPositions
     gravity_compensation: StrictBool
     gripper_open_total: Annotated[PositiveFloat, Field(gt=0.0, le=0.2)]
     gripper_closed_total: Annotated[StrictFloat, Field(ge=0.0, le=0.2)]

@@ -245,10 +245,11 @@ def _validate_scene_contract(scene: MarvinSceneBase, joints: tuple[JointSpec, ..
         )
     spec_by_name = {joint.name: joint for joint in joints}
     for side in SIDES:
+        home = config.home_joint_positions.for_side(side)
         for index in range(1, _ARM_COUNT + 1):
             public = f"{side}_joint{index}"
             expected = spec_by_name[public]
-            source = config.home_joint_positions[index - 1]
+            source = home[index - 1]
             joint = model.joint(f"Arm_{'L' if side == 'left' else 'R'}{index}_Joint")
             lower, upper = (float(value) for value in model.jnt_range[joint.id])
             if not close(lower, expected.minimum) or not close(upper, expected.maximum):

@@ -88,8 +88,8 @@ def test_model_has_dual_marvin_names_dof_and_cameras(scene):
 def test_joint_ranges_and_initial_values_match_fixed_upstream(scene):
     scene.reset(0)
     model = scene.model
-    home = scene.config.robot.home_joint_positions
     for side, prefix in (("left", "L"), ("right", "R")):
+        home = scene.config.robot.home_joint_positions.for_side(side)
         for index, (lower, upper) in enumerate(MARVIN_ARM_JOINT_RANGES, start=1):
             joint = model.joint(f"Arm_{prefix}{index}_Joint")
             np.testing.assert_allclose(model.jnt_range[joint.id], [lower, upper], atol=1e-4)
@@ -99,6 +99,21 @@ def test_joint_ranges_and_initial_values_match_fixed_upstream(scene):
             assert scene.data.qpos[scene.indices.robot.arm_joint_qpos[side][index - 1]] == (
                 pytest.approx(position)
             )
+
+    for left_name, right_name in (
+        ("Arm_L3_Link", "Arm_R3_Link"),
+        ("Arm_L5_Link", "Arm_R5_Link"),
+    ):
+        left_pos = scene.data.body(left_name).xpos
+        right_pos = scene.data.body(right_name).xpos
+        np.testing.assert_allclose(
+            right_pos, [left_pos[0], -left_pos[1], left_pos[2]], atol=2e-3
+        )
+    left_tcp = scene.data.site(scene.indices.robot.tcp_site_ids["left"]).xpos
+    right_tcp = scene.data.site(scene.indices.robot.tcp_site_ids["right"]).xpos
+    np.testing.assert_allclose(
+        right_tcp, [left_tcp[0], -left_tcp[1], left_tcp[2]], atol=2e-3
+    )
 
 
 def test_objects_are_free_colliding_bodies_under_gravity(scene):
