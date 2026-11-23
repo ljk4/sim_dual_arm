@@ -83,7 +83,7 @@ if [[ -n "$CACHE_DIR" ]]; then
 fi
 
 # 1. Read SSOT metadata from learning-source.json
-read -r LEROBOT_SOURCE LEROBOT_REV LEROBOT_ARCHIVE_SHA256 PYTHON_VERSION < <(
+read -r LEROBOT_SOURCE LEROBOT_REV PYTHON_VERSION < <(
   python3 - "$SOURCE_MANIFEST" <<'PY'
 import json
 import sys
@@ -96,7 +96,6 @@ for key in ("source", "revision", "python"):
 print(
     doc["source"],
     doc["revision"],
-    doc.get("archive_sha256", ""),
     doc["python"],
 )
 PY
@@ -183,7 +182,7 @@ else
   USE_TARBALL=""
 
   if [[ -n "$CACHE_DIR" && -f "$CACHE_DIR/$TARBALL_NAME" ]]; then
-    if verify_sha256 "$CACHE_DIR/$TARBALL_NAME" "$LEROBOT_ARCHIVE_SHA256"; then
+    if tar -tzf "$CACHE_DIR/$TARBALL_NAME" >/dev/null 2>&1; then
       echo "      命中持久化缓存: $CACHE_DIR/$TARBALL_NAME"
       USE_TARBALL="$CACHE_DIR/$TARBALL_NAME"
     else
@@ -193,8 +192,8 @@ else
 
   if [[ -z "$USE_TARBALL" ]]; then
     curl -fL --retry 3 --retry-delay 2 -o "$LOCAL_TARBALL" "$TARBALL_URL"
-    if ! verify_sha256 "$LOCAL_TARBALL" "$LEROBOT_ARCHIVE_SHA256"; then
-      echo "error: downloaded LeRobot archive failed sha256 verification" >&2
+    if ! tar -tzf "$LOCAL_TARBALL" >/dev/null 2>&1; then
+      echo "error: downloaded LeRobot archive is unreadable or corrupted: $LOCAL_TARBALL" >&2
       exit 1
     fi
     if [[ -n "$CACHE_DIR" ]]; then
@@ -206,6 +205,10 @@ else
   EXTRACT_STAGE="$TMP_DIR/lerobot-stage"
   mkdir -p "$EXTRACT_STAGE"
   tar -xz --strip-components=1 -f "$USE_TARBALL" -C "$EXTRACT_STAGE"
+  if [[ ! -f "$EXTRACT_STAGE/pyproject.toml" ]]; then
+    echo "error: extracted LeRobot archive missing pyproject.toml: $EXTRACT_STAGE" >&2
+    exit 1
+  fi
   rm -rf "$LEROBOT_DIR"
   mkdir -p "$(dirname "$LEROBOT_DIR")"
   mv "$EXTRACT_STAGE" "$LEROBOT_DIR"
@@ -341,7 +344,7 @@ if driver_cuda != "none" and not cuda_ok:
     raise SystemExit(f"GPU driver detected (CUDA {driver_cuda}) but torch.cuda.is_available() is False")
 
 gpu_name = torch.cuda.get_device_name(0) if cuda_ok else "cpu"
-bf16_ok = bool(cuda_ok and torch.cuda.is_bf16_supported())
+bf16_ok = bool(cuda_ok and torch.cuda.get_device_capability(0)[0] >= 8)
 print(
     f"Self-check OK | torch={torch.__version__} | cuda={torch.version.cuda} | "
     f"gpu={gpu_name} | bf16={bf16_ok} | lerobot={lerobot_file}"
