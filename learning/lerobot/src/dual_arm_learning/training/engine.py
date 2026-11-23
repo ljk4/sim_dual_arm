@@ -270,6 +270,9 @@ def _signal_reason(context: _TrainingContext) -> TrainingInterrupted:
     return TrainingInterrupted(reason)
 
 
+_MAX_AMP_OVERFLOW_SKIPS = 32
+
+
 def _amp_settings(config: TrainingConfig) -> tuple[bool, Any, Any]:
     import torch
 
@@ -285,39 +288,56 @@ def _train_step(context: _TrainingContext, amp: tuple[bool, Any, Any]) -> dict[s
     import torch
 
     config = context.config
-    if context.stop_signal is not None:
-        raise _signal_reason(context)
-    try:
-        batch = next(context.iterator)
-    except StopIteration:
-        context.iterator = iter(context.policy_loader)
-        batch = next(context.iterator)
-    step_started = time.monotonic()
-    processed = _process_batch(context.pre, batch, _sample_keys(config))
-    context.optimizer.zero_grad(set_to_none=True)
     amp_enabled, amp_dtype, scaler = amp
-    with torch.amp.autocast(device_type="cuda", dtype=amp_dtype, enabled=amp_enabled):
-        loss, loss_metrics = context.policy.forward(processed)
-    if not torch.isfinite(loss):
-        raise TrainingError(f"non-finite training loss at step {context.step}")
-    scaler.scale(loss).backward()
-    scaler.unscale_(context.optimizer)
-    grad_norm = torch.nn.utils.clip_grad_norm_(context.policy.parameters(), config.grad_clip_norm)
-    if not torch.isfinite(grad_norm):
-        raise TrainingError(f"non-finite gradient norm at step {context.step}")
-    scaler.step(context.optimizer)
-    scaler.update()
-    context.scheduler.step()
-    context.step += 1
-    if context.stop_signal is not None:
-        raise _signal_reason(context)
-    return {
-        "loss": float(loss.detach().cpu()),
-        "l1_loss": float(loss_metrics.get("l1_loss", 0.0)),
-        "kl_loss": float(loss_metrics.get("kld_loss", 0.0)),
-        "grad_norm": float(grad_norm.detach().cpu()),
-        "step_seconds": time.monotonic() - step_started,
-    }
+    scaler_enabled = bool(scaler.is_enabled())
+    overflow_skips = 0
+    while True:
+        if context.stop_signal is not None:
+            raise _signal_reason(context)
+        try:
+            batch = next(context.iterator)
+        except StopIteration:
+            context.iterator = iter(context.policy_loader)
+            batch = next(context.iterator)
+        step_started = time.monotonic()
+        processed = _process_batch(context.pre, batch, _sample_keys(config))
+        context.optimizer.zero_grad(set_to_none=True)
+        with torch.amp.autocast(device_type="cuda", dtype=amp_dtype, enabled=amp_enabled):
+            loss, loss_metrics = context.policy.forward(processed)
+        if not torch.isfinite(loss):
+            raise TrainingError(f"non-finite training loss at step {context.step}")
+        scaler.scale(loss).backward()
+        scaler.unscale_(context.optimizer)
+        grad_norm = torch.nn.utils.clip_grad_norm_(
+            context.policy.parameters(), config.grad_clip_norm
+        )
+        grad_finite = bool(torch.isfinite(grad_norm))
+        if not grad_finite and not scaler_enabled:
+            raise TrainingError(f"non-finite gradient norm at step {context.step}")
+        scale_before = scaler.get_scale() if scaler_enabled else 0.0
+        scaler.step(context.optimizer)
+        scaler.update()
+        if scaler_enabled and scaler.get_scale() < scale_before:
+            overflow_skips += 1
+            if overflow_skips >= _MAX_AMP_OVERFLOW_SKIPS:
+                raise TrainingError(
+                    f"non-finite gradient norm at step {context.step} "
+                    f"after {overflow_skips} consecutive GradScaler backoffs"
+                )
+            continue
+        if not grad_finite:
+            raise TrainingError(f"non-finite gradient norm at step {context.step}")
+        context.scheduler.step()
+        context.step += 1
+        if context.stop_signal is not None:
+            raise _signal_reason(context)
+        return {
+            "loss": float(loss.detach().cpu()),
+            "l1_loss": float(loss_metrics.get("l1_loss", 0.0)),
+            "kl_loss": float(loss_metrics.get("kld_loss", 0.0)),
+            "grad_norm": float(grad_norm.detach().cpu()),
+            "step_seconds": time.monotonic() - step_started,
+        }
 
 
 def _step_row(context: _TrainingContext, metrics: dict[str, Any]) -> dict[str, Any]:
