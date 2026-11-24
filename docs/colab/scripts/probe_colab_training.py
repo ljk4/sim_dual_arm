@@ -19,7 +19,7 @@ def _default_project_root() -> Path:
     env_root = os.environ.get("PROJECT_ROOT")
     if env_root:
         return Path(env_root).resolve()
-    return Path(__file__).resolve().parents[2]
+    return Path(__file__).resolve().parents[3]
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:

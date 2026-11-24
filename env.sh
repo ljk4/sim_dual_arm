@@ -15,7 +15,7 @@ usage() {
   ./env.sh <env>                  复用本地镜像、后台启动并进入容器 (等同于 enter <env>)
   ./env.sh enter <env>            启动已有镜像后进入容器 bash
   ./env.sh up <env>               后台启动，不构建或拉取镜像
-  ./env.sh build <env>            显式构建指定环境镜像（直连失败时自动回退公开镜像源）
+  ./env.sh build <env>            显式构建指定环境镜像（先并行测连通性，再选用直连或可用镜像源）
   ./env.sh exec <env> [cmd...]    进入已运行的容器执行命令 (默认 bash)
   ./env.sh stop <env>             停止指定环境容器
   ./env.sh rm <env>               删除指定环境容器 (先 stop 再 rm -f)
@@ -29,8 +29,9 @@ usage() {
   learning      LeRobot 学习端 (learning/lerobot/docker/docker-compose.yml)
 
 构建镜像源环境变量 (用于 ./env.sh build <env>):
-  DOCKER_MIRROR=<host>            直接使用指定镜像源 (如 docker.m.daocloud.io)
-  DOCKER_MIRRORS="<h1 h2 ...>"    自定义直连失败后的回退镜像源列表（空格分隔）
+  DOCKER_MIRROR=<host>            跳过探测，直接使用指定镜像源 (如 docker.m.daocloud.io)
+  DOCKER_MIRRORS="<h1 h2 ...>"    自定义探测列表（空格分隔）
+  DOCKER_PROBE_TIMEOUT_S=<sec>    单源连通性探测超时秒数 (默认: 10)
 EOF
 }
 
@@ -39,16 +40,19 @@ resolve_env() {
     runtime)
       COMPOSE_FILE="$ROOT_DIR/runtime/ros2/docker/docker-compose.yml"
       SERVICE="runtime"
+      BASE_IMAGE_DIRECT="ros:jazzy-ros-base-noble"
       BASE_IMAGE_REPO="library/ros:jazzy-ros-base-noble"
       ;;
     simulation)
       COMPOSE_FILE="$ROOT_DIR/simulation/mujoco/docker/docker-compose.yml"
       SERVICE="simulation"
+      BASE_IMAGE_DIRECT="ros:jazzy-ros-base-noble"
       BASE_IMAGE_REPO="library/ros:jazzy-ros-base-noble"
       ;;
     learning)
       COMPOSE_FILE="$ROOT_DIR/learning/lerobot/docker/docker-compose.yml"
       SERVICE="learning"
+      BASE_IMAGE_DIRECT="huggingface/lerobot-gpu:latest"
       BASE_IMAGE_REPO="huggingface/lerobot-gpu:latest"
       ;;
     "")
@@ -70,6 +74,28 @@ normalize_mirror() {
   printf '%s' "$raw"
 }
 
+probe_image_ref() {
+  local ref="$1"
+  local timeout_s="$2"
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$timeout_s" docker manifest inspect "$ref" >/dev/null 2>&1
+  else
+    docker manifest inspect "$ref" >/dev/null 2>&1
+  fi
+}
+
+cleanup_probe() {
+  local dir="$1"
+  shift || true
+  local pid=""
+  for pid in "$@"; do
+    pkill -P "$pid" 2>/dev/null || true
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+  done
+  rm -rf -- "$dir"
+}
+
 cmd_up() {
   local env_name="${1:-}"
   resolve_env "$env_name"
@@ -80,7 +106,14 @@ cmd_up() {
 cmd_build() {
   resolve_env "${1:-}"
   local mirror=""
+  local probe_timeout="${DOCKER_PROBE_TIMEOUT_S:-10}"
   local -a mirrors=()
+  local -a candidate_refs=("$BASE_IMAGE_DIRECT")
+  local -a candidate_labels=("直连 Docker Hub")
+  local -a pids=()
+  local probe_dir=""
+  local selected_idx=""
+  local idx=0
 
   if [[ -n "${DOCKER_MIRROR:-}" ]]; then
     mirror="$(normalize_mirror "$DOCKER_MIRROR")"
@@ -93,28 +126,57 @@ cmd_build() {
     return $?
   fi
 
-  if docker compose -f "$COMPOSE_FILE" build "$SERVICE"; then
-    return 0
-  fi
-
   if [[ -n "${DOCKER_MIRRORS:-}" ]]; then
     read -r -a mirrors <<<"$DOCKER_MIRRORS"
   else
     mirrors=("${DEFAULT_DOCKER_MIRRORS[@]}")
   fi
-
-  echo "直连 Docker Hub 构建失败，按顺序尝试回退镜像源..." >&2
   for raw_mirror in "${mirrors[@]}"; do
     mirror="$(normalize_mirror "$raw_mirror")"
     [[ -z "$mirror" ]] && continue
-    echo "尝试镜像源: ${mirror}/${BASE_IMAGE_REPO}" >&2
-    if docker compose -f "$COMPOSE_FILE" build --build-arg "BASE_IMAGE=${mirror}/${BASE_IMAGE_REPO}" "$SERVICE"; then
-      return 0
-    fi
+    candidate_refs+=("${mirror}/${BASE_IMAGE_REPO}")
+    candidate_labels+=("${mirror}")
   done
 
-  echo "错误: 直连及全部回退镜像源均构建失败；可手动指定 DOCKER_MIRROR=<mirror> ./env.sh build ${SERVICE}" >&2
-  return 1
+  echo "正在并行探测基础镜像连通性 (超时 ${probe_timeout}s): ${candidate_refs[*]}"
+  probe_dir="$(mktemp -d)"
+  for idx in "${!candidate_refs[@]}"; do
+    (
+      if probe_image_ref "${candidate_refs[$idx]}" "$probe_timeout"; then
+        : > "$probe_dir/${idx}.ok"
+      fi
+    ) &
+    pids+=("$!")
+  done
+
+  wait "${pids[0]}" || true
+  if [[ -f "$probe_dir/0.ok" ]]; then
+    selected_idx=0
+  else
+    echo "直连 Docker Hub (${BASE_IMAGE_DIRECT}) 不可达，检查备用镜像源探测结果..." >&2
+    for ((idx = 1; idx < ${#candidate_refs[@]}; idx++)); do
+      wait "${pids[$idx]}" || true
+      if [[ -f "$probe_dir/${idx}.ok" ]]; then
+        selected_idx="$idx"
+        break
+      fi
+    done
+  fi
+
+  cleanup_probe "$probe_dir" "${pids[@]}"
+
+  if [[ -z "$selected_idx" ]]; then
+    echo "错误: 直连与全部镜像源均不可达 (${candidate_refs[*]})；可尝试 DOCKER_PROBE_TIMEOUT_S=20 或手动指定 DOCKER_MIRROR=<mirror> ./env.sh build ${SERVICE}" >&2
+    return 1
+  fi
+
+  if [[ "$selected_idx" -eq 0 ]]; then
+    echo "连通性探测通过: 直连 Docker Hub (${BASE_IMAGE_DIRECT})"
+    docker compose -f "$COMPOSE_FILE" build "$SERVICE"
+  else
+    echo "连通性探测通过，选用镜像源: ${candidate_refs[$selected_idx]}"
+    docker compose -f "$COMPOSE_FILE" build --build-arg "BASE_IMAGE=${candidate_refs[$selected_idx]}" "$SERVICE"
+  fi
 }
 
 cmd_exec() {

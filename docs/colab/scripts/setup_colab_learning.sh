@@ -3,7 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-DEFAULT_REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
+DEFAULT_REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd -P)"
 
 RESNET18_URL="https://download.pytorch.org/models/resnet18-f37072fd.pth"
 RESNET18_SHA256="f37072fd47e89c5e827621c5baffa7500819f7896bbacec160b1a16c560e07ec"
@@ -270,7 +270,7 @@ uv pip install --python "$VENV_PYTHON" \
   "pyarrow>=21.0.0,<30.0.0" \
   "av>=15.0.0,<16.0.0" \
   "jsonlines>=4.0.0,<5.0.0" \
-  pydantic pyyaml jsonschema pillow safetensors grpcio grpcio-tools
+  pydantic pyyaml jsonschema pillow matplotlib safetensors grpcio grpcio-tools
 
 # 4. Generate Policy SDK and write .env.learning
 echo "[4/5] 生成 Policy gRPC SDK 并写入 .env.learning..."
