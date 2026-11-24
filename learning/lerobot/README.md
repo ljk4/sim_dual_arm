@@ -1,8 +1,47 @@
 # LeRobot ACT 学习与策略服务
 
-提供无 ROS 依赖的 LeRobot 数据集转换、ACT 训练与 gRPC Policy 推理服务。
+提供无 ROS 依赖的 LeRobot 数据集转换、ACT 训练与 gRPC Policy 推理服务（默认监听 `127.0.0.1:50051`）。
 
-除了全部四端跑在本机之外，也可以把**学习端放在远端 GPU 机器**（训练 + 策略推理），**本机只跑运行端与仿真端**，两者通过 SSH 隧道连接：
+## 目录结构
+
+| 目录 / 文件 | 说明 |
+| :--- | :--- |
+| `src/dual_arm_learning/` | 核心 Python 包，按 `dataset/`（数据转换）、`training/`（ACT 训练）、`serving/`（gRPC 策略服务）与 `adapters/`（模型适配器）组织 |
+| `configs/` | 容器环境配置 `container.env` |
+| `docker/` | `Dockerfile`、[`docker-compose.yml`](docker/docker-compose.yml)（`network_mode: host`）与 [`learning-source.json`](docker/learning-source.json)（固定 LeRobot 版本、Python 版本与基础镜像声明） |
+| `scripts/` | 容器内单职责入口脚本：`convert.sh`、`train.sh`、`server_policy.sh`、`test.sh` |
+
+---
+
+## 本机容器快速使用与常用脚本
+
+首次在本机使用学习端前，先按 [`third_party/README.md`](../../third_party/README.md) 准备 `third_party/` 离线源码与权重，在 `runtime` 容器内执行 `scripts/build_sdk.sh` 生成 Policy SDK，再构建并进入 `learning` 容器：
+
+```bash
+./env.sh build learning
+./env.sh learning
+```
+
+在 `learning` 容器内执行，使用 `--robot <robot> --task <task>` 或 `--config <recipe>` 选择配方。训练模式、步数上限、模型路径和设备等常用设置有专用参数，其余参数在对应配方中修改：
+
+- `scripts/convert.sh`：将合格采集数据转换为训练/验证 LeRobot 数据集（输出到 `var/<robot>/<task>/datasets/lerobot/`）。
+- `scripts/train.sh`：训练 ACT 模型，直接写出 `var/<robot>/<task>/models/act_<时间戳>/model.safetensors` 与 `training_args.yaml`；训练日志、指标和终态摘要输出到 `var/<robot>/<task>/logs/training/act_<时间戳>/`。
+- `scripts/server_policy.sh`：启动 gRPC Policy 推理服务（默认监听 `127.0.0.1:50051`），默认读取 `var/<robot>/<task>/models/` 下最新的 `act_*` 模型，也可用 `--model` 显式指定模型目录或 `model.safetensors`。
+- `scripts/test.sh`：运行容器内 `pytest` 测试。
+
+```bash
+scripts/convert.sh --robot marvin_sim --task stack
+scripts/train.sh --robot marvin_sim --task stack --mode full
+scripts/server_policy.sh --robot marvin_sim --task stack
+```
+
+> `convert.sh` 和 `train.sh` 启动时会打印配置文件与有效参数，终端使用原地刷新的单行进度条，详细日志写入启动时提示的日志文件。完整参数说明见 [脚本入口与使用指南](../../docs/features/脚本入口与使用指南.md)。
+
+---
+
+## 远端 GPU 机器部署与 SSH 隧道联调
+
+除了三端容器全部跑在本机之外，也可以把**学习端放在远端 GPU 机器**（训练 + 策略推理），**本机只跑运行端与仿真端**，两者通过 SSH 隧道连接：
 
 ```text
 本机: simulation ◀──ROS 2──▶ runtime ──gRPC──▶ 127.0.0.1:50051
@@ -12,77 +51,43 @@
 远端:                                          127.0.0.1:50051 (learning)
 ```
 
----
-
-## 第一步：搭建远端学习端环境（二选一）
+### 第一步：搭建远端学习端环境（二选一）
 
 两种方式均把工具、依赖和运行产物限制在当前仓库目录内，不修改系统环境或用户主目录（`~`）。
 
-### 方式 A：云服务器（无 Docker，使用 `uv` 在本目录配环境）
+#### 方式 A：云服务器（无 Docker，使用仓库 `uv` 初始化脚本）
 
-适用于没有 Docker、只提供 NVIDIA 驱动与 CUDA 的云服务器。以下全部命令在**远端仓库根目录**执行：
+适用于没有 Docker、只提供 NVIDIA 驱动与 CUDA 的云服务器。仓库内 [`setup_colab_learning.sh`](../../docs/colab/scripts/setup_colab_learning.sh) 根据 [`learning-source.json`](docker/learning-source.json) 一步完成全部初始化：准备并校验 `third_party/`（LeRobot 源码与 ResNet18 权重）、在 `var/_system/uv/` 与 `.venv/` 中安装 `uv` 与 Python 3.12、按驱动 CUDA 版本自动选择 PyTorch（`cu128` / `cu126` / `cpu`）及全部学习端依赖、生成 Policy SDK、写出 `.env.learning` 并执行导入与 CUDA 自检。
 
-1. **拉取仓库并准备第三方源码与权重**（详见 [`third_party/README.md`](../../third_party/README.md)）。
-2. **在本目录内安装 `uv`、Python 3.12 与依赖**：所有文件收敛在已被 `.gitignore` 忽略的 `var/_system/uv/` 和 `.venv/` 中，不会写入 `~/.local` 或 `~/.bashrc`。
+以下全部命令在**远端仓库根目录**执行：
 
-   ```bash
-   export UV_INSTALL_DIR="$PWD/var/_system/uv/bin"
-   export UV_PYTHON_INSTALL_DIR="$PWD/var/_system/uv/python"
-   export UV_CACHE_DIR="$PWD/var/_system/uv/cache"
-   export PATH="$UV_INSTALL_DIR:$PATH"
+```bash
+bash docs/colab/scripts/setup_colab_learning.sh
+```
 
-   mkdir -p "$UV_INSTALL_DIR" "$UV_PYTHON_INSTALL_DIR" "$UV_CACHE_DIR" build var
-   curl -LsSf https://astral.sh/uv/install.sh | env UV_NO_MODIFY_PATH=1 UV_INSTALL_DIR="$UV_INSTALL_DIR" sh
+常用可选参数：
+- `--cache-dir <dir>`：指定持久化缓存目录（复用已下载的 LeRobot 源码包与 ResNet18 权重）。
+- `--torch-index-url <url>`：显式覆盖 PyTorch wheel 源。
 
-   uv python install 3.12
-   uv venv --python 3.12 .venv
-   source .venv/bin/activate
+激活 `.env.learning` 后即可直接运行学习端脚本（以后每次新开终端只需先执行 `source .env.learning`）：
 
-   # 按显卡 CUDA 版本选择 PyTorch 轮子（示例为 CUDA 12.4）
-   uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
-   uv pip install -e third_party/src/lerobot-act-v0.6.1
-   uv pip install pydantic pyyaml jsonschema pillow pyarrow safetensors grpcio grpcio-tools av
-   ```
+```bash
+source .env.learning
+bash learning/lerobot/scripts/convert.sh --robot marvin_sim --task stack
+bash learning/lerobot/scripts/train.sh --robot marvin_sim --task stack --mode full
+bash learning/lerobot/scripts/server_policy.sh --robot marvin_sim --task stack
+```
 
-3. **生成 Policy SDK 与目录内环境文件 `.env.learning`**（已被 `.gitignore` 忽略）：
-
-   ```bash
-   python3 shared/common/tools/scripts/generate_policy_sdk.py
-
-   cat > .env.learning <<EOF
-   source "$PWD/.venv/bin/activate"
-   export PROJECT_CONTAINER=1
-   export PROJECT_ROOT="$PWD"
-   export SHARED_ROOT="$PWD/shared"
-   export DATA_ROOT="$PWD/var"
-   export BUILD_ROOT="$PWD/build"
-   export THIRD_PARTY_ROOT="$PWD/third_party"
-   export POLICY_SDK_ROOT="$PWD/build/generated/policy-sdk"
-   export HF_HOME="$PWD/var/_system/hf-cache"
-   export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1
-   export PATH="$PWD/var/_system/uv/bin:\$PATH"
-   export PYTHONPATH="$PWD/learning/lerobot/src:$PWD/shared/common/python/run_logging/src:$PWD/shared/common/python/contracts/src:$PWD/third_party/src/lerobot-act-v0.6.1/src:$PWD/build/generated/policy-sdk"
-   EOF
-   ```
-
-4. **激活环境并运行**（以后每次新开终端只需先执行 `source .env.learning`）：
-
-   ```bash
-   source .env.learning
-   bash learning/lerobot/scripts/convert.sh --robot marvin_sim --task stack
-   bash learning/lerobot/scripts/train.sh --robot marvin_sim --task stack --mode full
-   bash learning/lerobot/scripts/server_policy.sh --robot marvin_sim --task stack
-   ```
-
-### 方式 B：GPU 工作站（有 Docker，使用项目容器）
+#### 方式 B：GPU 工作站（有 Docker，使用项目容器）
 
 适用于已安装 NVIDIA 驱动、Docker Compose 插件和 NVIDIA Container Toolkit 的工作站。容器默认使用 `network_mode: host`，`server_policy.sh` 直接绑定远端 `127.0.0.1:50051`。所有命令在**远端仓库根目录**执行：
 
 1. **拉取仓库并准备第三方源码与权重**（详见 [`third_party/README.md`](../../third_party/README.md)）。
-2. **构建、准备 Policy SDK 并启动容器**：
-   `learning` 容器以只读方式将宿主机 `build/generated/policy-sdk/` 挂载至 `/opt/policy-sdk`。可在宿主机先生成 Policy SDK，再启动容器：
+2. **创建宿主机输出目录、构建镜像、生成 Policy SDK 并启动容器**：
+   先由当前用户创建 `build` 与 `var` 目录避免挂载归 root 所有，`learning` 容器以只读方式将宿主机 `build/generated/policy-sdk/` 挂载至 `/opt/policy-sdk`：
 
    ```bash
+   mkdir -p build var
    ./env.sh build learning
    docker compose -f learning/lerobot/docker/docker-compose.yml run --rm --no-deps \
      -v "$PWD/build:/build" learning \
@@ -98,11 +103,9 @@
    ./env.sh exec learning scripts/server_policy.sh --robot marvin_sim --task stack
    ```
 
----
+### 第二步：本机通过 SSH 隧道联调（通用）
 
-## 第二步：本机通过 SSH 隧道联调（通用）
-
-远端环境就绪后，按以下顺序完成数据同步与跨机推理（示例中的 `user@remote:/path/to/sim_dual_arm/` 请替换为实际 SSH 地址与远端仓库路径）：
+远端环境就绪后，按以下顺序完成数据/模型同步与跨机推理（示例中的 `user@remote:/path/to/sim_dual_arm/` 请替换为实际 SSH 地址与远端仓库路径）：
 
 1. **同步数据或模型（在本机仓库根目录执行）**：
 
@@ -110,8 +113,11 @@
    # 将本机采集的原始数据传给远端用于转换和训练
    rsync -aR var/marvin_sim/stack/datasets/raw/ user@remote:/path/to/sim_dual_arm/
 
-   # 或直接把本机已有模型传给远端用于推理
+   # 或把本机已有模型传给远端用于推理
    rsync -aR var/marvin_sim/stack/models/act_YYYYMMDD_HHMMSS/ user@remote:/path/to/sim_dual_arm/
+
+   # 训练完成后，将远端模型拉回本机
+   rsync -aR user@remote:/path/to/sim_dual_arm/./var/marvin_sim/stack/models/act_YYYYMMDD_HHMMSS/ .
    ```
 
 2. **远端启动策略服务并保持运行**：按方式 A 或方式 B 启动 `server_policy.sh`（默认监听 `127.0.0.1:50051`）。
@@ -141,26 +147,13 @@
 
 ---
 
-## 目录结构
+## Google Colab 云端训练
 
-- `src/dual_arm_learning/`：`dual_arm_learning` 核心 Python 包。
-- `configs/`：容器环境配置 `container.env`。
-- `docker/`：`Dockerfile`、`docker-compose.yml` 与源码声明。
-- `scripts/`：容器内单职责入口脚本（`convert.sh`、`train.sh`、`server_policy.sh`、`test.sh`）。
+如使用 Google Colab GPU 与 Google Drive 进行数据集与模型中转，可配合仓库提供的两个 Notebook：
 
-## 常用脚本
+- [`docs/colab/sync_drive_rclone.ipynb`](../../docs/colab/sync_drive_rclone.ipynb)：在本机 Python 环境中通过 `rclone` 打包上传 `datasets/lerobot/`、查看云端清单以及拉回训练好的模型与日志。
+- [`docs/colab/train_act_colab.ipynb`](../../docs/colab/train_act_colab.ipynb)：在 Colab GPU 运行时中调用 [`setup_colab_learning.sh`](../../docs/colab/scripts/setup_colab_learning.sh) 自动配置环境，执行资源探测（最优 `batch_size` / `num_workers` / `prefetch_factor`）、按 batch 比例自适应缩放训练步数、周期绘制训练/验证损失曲线并将模型回传至 Google Drive。
 
-在 `learning` 容器内执行，使用 `--robot <robot> --task <task>` 或 `--config <recipe>` 选择配方。训练模式、步数上限、模型路径和设备等常用设置有专用参数，其余参数在对应配方中修改。
+---
 
-- `scripts/convert.sh`：将合格采集数据转换为训练/验证 LeRobot 数据集（输出到 `var/<robot>/<task>/datasets/lerobot/`）。
-- `scripts/train.sh`：训练 ACT 模型，直接写出 `var/<robot>/<task>/models/act_<时间戳>/model.safetensors` 与 `training_args.yaml`；训练日志、指标和终态摘要输出到 `var/<robot>/<task>/logs/training/act_<时间戳>/`。
-- `scripts/server_policy.sh`：启动 gRPC Policy 推理服务（默认端口 `50051`），默认读取 `var/<robot>/<task>/models/` 下最新的 `act_*` 模型。
-- `scripts/test.sh`：运行容器内 `pytest` 测试。
-
-```bash
-scripts/convert.sh --robot marvin_sim --task stack
-scripts/train.sh --robot marvin_sim --task stack --mode full
-scripts/server_policy.sh --robot marvin_sim --task stack
-```
-
-> `convert.sh` 和 `train.sh` 启动时会打印配置文件与有效参数，终端使用原地刷新的单行进度条，详细日志写入启动时提示的日志文件。
+目录导航：[上级目录](../../README.md) · [脚本入口与使用指南](../../docs/features/脚本入口与使用指南.md) · [第三方源码说明](../../third_party/README.md) · [Colab 训练流程](../../docs/colab/train_act_colab.ipynb)
