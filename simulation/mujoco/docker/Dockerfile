@@ -1,5 +1,6 @@
 # MuJoCo dependency image. Runtime paths and options live in configs/container.env.
-FROM ros:jazzy-ros-base-noble
+ARG BASE_IMAGE=ros:jazzy-ros-base-noble
+FROM ${BASE_IMAGE}
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ARG DEBIAN_FRONTEND=noninteractive

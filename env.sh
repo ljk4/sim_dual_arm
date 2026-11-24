@@ -3,6 +3,11 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_NAME="sim-dual-arm"
+DEFAULT_DOCKER_MIRRORS=(
+  "docker.m.daocloud.io"
+  "docker.1ms.run"
+  "docker.xuanyuan.me"
+)
 
 usage() {
   cat <<'EOF'
@@ -10,7 +15,7 @@ usage() {
   ./env.sh <env>                  复用本地镜像、后台启动并进入容器 (等同于 enter <env>)
   ./env.sh enter <env>            启动已有镜像后进入容器 bash
   ./env.sh up <env>               后台启动，不构建或拉取镜像
-  ./env.sh build <env>            显式构建指定环境镜像
+  ./env.sh build <env>            显式构建指定环境镜像（直连失败时自动回退公开镜像源）
   ./env.sh exec <env> [cmd...]    进入已运行的容器执行命令 (默认 bash)
   ./env.sh stop <env>             停止指定环境容器
   ./env.sh rm <env>               删除指定环境容器 (先 stop 再 rm -f)
@@ -22,6 +27,10 @@ usage() {
   runtime       ROS 2 运行端   (runtime/ros2/docker/docker-compose.yml)
   simulation    MuJoCo 仿真端  (simulation/mujoco/docker/docker-compose.yml)
   learning      LeRobot 学习端 (learning/lerobot/docker/docker-compose.yml)
+
+构建镜像源环境变量 (用于 ./env.sh build <env>):
+  DOCKER_MIRROR=<host>            直接使用指定镜像源 (如 docker.m.daocloud.io)
+  DOCKER_MIRRORS="<h1 h2 ...>"    自定义直连失败后的回退镜像源列表（空格分隔）
 EOF
 }
 
@@ -30,14 +39,17 @@ resolve_env() {
     runtime)
       COMPOSE_FILE="$ROOT_DIR/runtime/ros2/docker/docker-compose.yml"
       SERVICE="runtime"
+      BASE_IMAGE_REPO="library/ros:jazzy-ros-base-noble"
       ;;
     simulation)
       COMPOSE_FILE="$ROOT_DIR/simulation/mujoco/docker/docker-compose.yml"
       SERVICE="simulation"
+      BASE_IMAGE_REPO="library/ros:jazzy-ros-base-noble"
       ;;
     learning)
       COMPOSE_FILE="$ROOT_DIR/learning/lerobot/docker/docker-compose.yml"
       SERVICE="learning"
+      BASE_IMAGE_REPO="huggingface/lerobot-gpu:latest"
       ;;
     "")
       usage
@@ -50,6 +62,14 @@ resolve_env() {
   esac
 }
 
+normalize_mirror() {
+  local raw="${1:-}"
+  raw="${raw#https://}"
+  raw="${raw#http://}"
+  raw="${raw%/}"
+  printf '%s' "$raw"
+}
+
 cmd_up() {
   local env_name="${1:-}"
   resolve_env "$env_name"
@@ -59,7 +79,42 @@ cmd_up() {
 
 cmd_build() {
   resolve_env "${1:-}"
-  docker compose -f "$COMPOSE_FILE" build "$SERVICE"
+  local mirror=""
+  local -a mirrors=()
+
+  if [[ -n "${DOCKER_MIRROR:-}" ]]; then
+    mirror="$(normalize_mirror "$DOCKER_MIRROR")"
+    if [[ -z "$mirror" ]]; then
+      echo "错误: DOCKER_MIRROR 无效: '$DOCKER_MIRROR'" >&2
+      return 2
+    fi
+    echo "使用指定镜像源构建: ${mirror}/${BASE_IMAGE_REPO}"
+    docker compose -f "$COMPOSE_FILE" build --build-arg "BASE_IMAGE=${mirror}/${BASE_IMAGE_REPO}" "$SERVICE"
+    return $?
+  fi
+
+  if docker compose -f "$COMPOSE_FILE" build "$SERVICE"; then
+    return 0
+  fi
+
+  if [[ -n "${DOCKER_MIRRORS:-}" ]]; then
+    read -r -a mirrors <<<"$DOCKER_MIRRORS"
+  else
+    mirrors=("${DEFAULT_DOCKER_MIRRORS[@]}")
+  fi
+
+  echo "直连 Docker Hub 构建失败，按顺序尝试回退镜像源..." >&2
+  for raw_mirror in "${mirrors[@]}"; do
+    mirror="$(normalize_mirror "$raw_mirror")"
+    [[ -z "$mirror" ]] && continue
+    echo "尝试镜像源: ${mirror}/${BASE_IMAGE_REPO}" >&2
+    if docker compose -f "$COMPOSE_FILE" build --build-arg "BASE_IMAGE=${mirror}/${BASE_IMAGE_REPO}" "$SERVICE"; then
+      return 0
+    fi
+  done
+
+  echo "错误: 直连及全部回退镜像源均构建失败；可手动指定 DOCKER_MIRROR=<mirror> ./env.sh build ${SERVICE}" >&2
+  return 1
 }
 
 cmd_exec() {
