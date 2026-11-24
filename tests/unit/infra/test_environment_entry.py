@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import yaml
@@ -16,21 +17,20 @@ COMPOSES = {
 }
 
 
-def test_standalone_compose_files_share_only_required_networks():
+def test_standalone_compose_files_use_host_network():
     assert not (ROOT / "docker-compose.yml").exists()
     assert not (ROOT / "scripts/env.sh").exists()
-    expected_networks = {
-        "simulation": ["ros"],
-        "runtime": ["ros", "learning"],
-        "learning": ["learning"],
-    }
     for service_name, path in COMPOSES.items():
         document = yaml.safe_load(path.read_text())
         assert document["name"] == "sim-dual-arm"
         assert set(document["services"]) == {service_name}
+        assert "networks" not in document
         service = document["services"][service_name]
         assert service["build"] == "."
-        assert service["networks"] == expected_networks[service_name]
+        assert service["network_mode"] == "host"
+        assert "networks" not in service
+        assert "hostname" not in service
+        assert "extra_hosts" not in service
         assert service["env_file"] == "../configs/container.env"
         assert "command" not in service and "entrypoint" not in service
         assert service["init"] is True
@@ -39,6 +39,21 @@ def test_standalone_compose_files_share_only_required_networks():
         assert (path.parent.parent / "scripts/test.sh").is_file()
         assert not (path.parent.parent / "scripts/run.sh").exists()
     assert (COMPOSES["simulation"].parent / "../").resolve() == ROOT / "simulation/mujoco"
+
+    fastdds = ET.fromstring((ROOT / "shared/common/tools/docker/fastdds.xml").read_text())
+    ns = {"fast": "http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles"}
+    descriptor = fastdds.find(".//fast:transport_descriptor", ns)
+    assert descriptor is not None
+    assert descriptor.findtext("fast:type", default="", namespaces=ns) == "UDPv4"
+    addresses = [
+        node.text
+        for node in descriptor.findall("fast:interfaceWhiteList/fast:address", ns)
+    ]
+    assert addresses == ["127.0.0.1"]
+    assert (
+        fastdds.findtext(".//fast:rtps/fast:useBuiltinTransports", default="", namespaces=ns)
+        == "false"
+    )
 
 
 def test_business_scripts_still_refuse_host_execution():

@@ -5,10 +5,10 @@
 除了全部四端跑在本机之外，也可以把**学习端放在远端 GPU 机器**（训练 + 策略推理），**本机只跑运行端与仿真端**，两者通过 SSH 隧道连接：
 
 ```text
-本机: simulation ◀──ROS 2──▶ runtime ──gRPC──▶ host.docker.internal:15051
-                                                         │
-                                                     SSH 隧道
-                                                         ▼
+本机: simulation ◀──ROS 2──▶ runtime ──gRPC──▶ 127.0.0.1:50051
+                                                     │
+                                                 SSH 隧道
+                                                     ▼
 远端:                                          127.0.0.1:50051 (learning)
 ```
 
@@ -76,19 +76,10 @@
 
 ### 方式 B：GPU 工作站（有 Docker，使用项目容器）
 
-适用于已安装 NVIDIA 驱动、Docker Compose 插件和 NVIDIA Container Toolkit 的工作站。所有命令在**远端仓库根目录**执行：
+适用于已安装 NVIDIA 驱动、Docker Compose 插件和 NVIDIA Container Toolkit 的工作站。容器默认使用 `network_mode: host`，`server_policy.sh` 直接绑定远端 `127.0.0.1:50051`。所有命令在**远端仓库根目录**执行：
 
 1. **拉取仓库并准备第三方源码与权重**（详见 [`third_party/README.md`](../../third_party/README.md)）。
-2. **暴露工作站本机回环端口**：在工作站的 [`learning/lerobot/docker/docker-compose.yml`](docker/docker-compose.yml) 中为 `services.learning` 添加以下 `ports` 配置（仅监听工作站 `127.0.0.1`，不对外开放）：
-
-   ```yaml
-   services:
-     learning:
-       ports:
-         - "127.0.0.1:50051:50051"
-   ```
-
-3. **构建、准备 Policy SDK 并启动容器**：
+2. **构建、准备 Policy SDK 并启动容器**：
    `learning` 容器以只读方式将宿主机 `build/generated/policy-sdk/` 挂载至 `/opt/policy-sdk`。可在宿主机先生成 Policy SDK，再启动容器：
 
    ```bash
@@ -99,7 +90,7 @@
    ./env.sh up learning
    ```
 
-4. **在容器内运行转换、训练与策略服务**：
+3. **在容器内运行转换、训练与策略服务**：
 
    ```bash
    ./env.sh exec learning scripts/convert.sh --robot marvin_sim --task stack
@@ -123,29 +114,29 @@
    rsync -aR var/marvin_sim/stack/models/act_YYYYMMDD_HHMMSS/ user@remote:/path/to/sim_dual_arm/
    ```
 
-2. **远端启动策略服务并保持运行**：按方式 A 或方式 B 启动 `server_policy.sh`（默认监听 `50051`）。
+2. **远端启动策略服务并保持运行**：按方式 A 或方式 B 启动 `server_policy.sh`（默认监听 `127.0.0.1:50051`）。
 3. **本机建立 SSH 本地转发（在本机宿主机新终端保持运行）**：
-   本机的 `runtime` 在容器内，通过 `host.docker.internal` 访问宿主机网络，因此把隧道绑定到 `runtime` 容器解析出的 Docker 网关 IP（示例使用本地 `15051` 端口）：
+   本机容器共享宿主机回环网络，将远端 `127.0.0.1:50051` 直接转发到本机 `127.0.0.1:50051`：
 
    ```bash
-   ./env.sh up runtime
-   GATEWAY_IP=$(./env.sh exec runtime getent ahostsv4 host.docker.internal | awk 'NR == 1 { print $1 }')
-   ssh -NT -o ExitOnForwardFailure=yes -L "${GATEWAY_IP}:15051:127.0.0.1:50051" user@remote
+   ssh -NT -o ExitOnForwardFailure=yes -L 127.0.0.1:50051:127.0.0.1:50051 user@remote
    ```
 
+   > 若本机 `50051` 端口已被本地策略服务占用，可转发至其他本地端口（如 `-L 127.0.0.1:15051:127.0.0.1:50051`），并在下一步推理命令中追加 `--policy-endpoint 127.0.0.1:15051`。
+
 4. **本机启动仿真与推理**：
-   在本机按[推理仿真后端启动步骤](../../README.md#34-直接启动推理仿真后端)启动仿真后端，并在推理命令中追加 `--policy-endpoint host.docker.internal:15051`：
+   在本机按[推理仿真后端启动步骤](../../README.md#34-直接启动推理仿真后端)启动仿真后端，直接运行推理（默认连接 `127.0.0.1:50051`）：
 
    ```bash
    # 单局或交互推理（在 runtime 容器内执行）
    ./env.sh exec runtime scripts/client_policy.sh --robot marvin_sim --task stack \
-     --reset-seed 20000 --policy-endpoint host.docker.internal:15051
+     --reset-seed 20000
    ./env.sh exec runtime scripts/client_interactive.sh --robot marvin_sim --task stack \
-     --seed 20000 --policy-endpoint host.docker.internal:15051
+     --seed 20000
 
    # 批量并行推理（在本机宿主机仓库根目录执行）
    ./inference_parallel.sh --robot marvin_sim --task stack \
-     --count 10 --workers auto --policy-endpoint host.docker.internal:15051
+     --count 10 --workers auto
    ```
 
 ---

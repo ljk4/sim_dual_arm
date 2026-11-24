@@ -6,7 +6,7 @@ services:
     image: sim-dual-arm/learning:current
     build: .
     container_name: sim-dual-arm-learning
-    hostname: learning
+    network_mode: host
     user: "1000:1000"
     working_dir: /app
     init: true
@@ -24,7 +24,3 @@ services:
       - ../../../var:/data
       - ../../../third_party:/third_party:ro
       - ../../../shared/common/tools/docker/container_bashrc.sh:/etc/bash.bashrc:ro
-    networks: [learning]
-
-networks:
-  learning: {}

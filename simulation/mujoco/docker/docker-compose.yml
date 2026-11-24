@@ -6,7 +6,7 @@ services:
     image: sim-dual-arm/simulation:current
     build: .
     container_name: sim-dual-arm-simulation
-    hostname: simulation
+    network_mode: host
     user: "1000:1000"
     working_dir: /app
     init: true
@@ -22,7 +22,3 @@ services:
       - ../../../var:/data
       - ../../../build/ros-dev:/opt/ros-dev:ro
       - ../../../shared/common/tools/docker/container_bashrc.sh:/etc/bash.bashrc:ro
-    networks: [ros]
-
-networks:
-  ros: {}

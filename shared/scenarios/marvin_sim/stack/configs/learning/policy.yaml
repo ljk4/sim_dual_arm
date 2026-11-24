@@ -18,7 +18,7 @@ model:
   temporal_ensemble_coeff: null
 
 service:
-  bind_address: 0.0.0.0
+  bind_address: 127.0.0.1
   port: 50051
   max_workers: 4
   max_message_bytes: 16777216

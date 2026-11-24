@@ -12,11 +12,11 @@
 | Runtime ↔ Simulation 的任务功能 | 可选 ROS 2 服务、话题和日志 | `reset_simulation` 复位物理场景，`prepare_task`、`start_task`、`get_task_state` 和 `task_state` 提供仿真任务生命周期。`get_task_chunk` 返回方案 Teacher 的动作。Renderer 逐帧像素统计写入后端日志，由当前采集导出读取。 |
 | Runtime → Learning 转换 | 共享文件 `var/<robot>/<task>/datasets/raw/` | Runtime 产生 MCAP、任务结果、RGB、标签、质量结果及 `formal-select.json`。当前转换器消费选定 episode 的导出文件，生成 LeRobot 数据集。MCAP 保留原始观测和执行证据，供回读、审计与重导出。 |
 | Learning → Learning 策略服务 | 数据集、模型文件 | 训练读 LeRobot 数据集并输出 `model.safetensors`。策略服务加载权重和归一化数据。 |
-| Runtime ↔ Learning 策略服务 | gRPC，默认 `learning:50051` | Runtime 获取策略元数据、打开会话，用 `Predict` 发送同步关节与相机观测，收到带时间偏移的关节目标块后选窗并经 ROS 2 提交给执行后端。Teacher 采集可以独立运行。 |
+| Runtime ↔ Learning 策略服务 | gRPC，默认 `127.0.0.1:50051` | Runtime 获取策略元数据、打开会话，用 `Predict` 发送同步关节与相机观测，收到带时间偏移的关节目标块后选窗并经 ROS 2 提交给执行后端。Teacher 采集可以独立运行。 |
 
 公共接口位于 `shared/common/interfaces/ros/robot_api_msgs/`（Robot API）。仿真扩展位于 `shared/common/interfaces/ros/sim_api_msgs/`（Sim API）和各方案的 `extensions/ros/`。学习接口位于 `shared/common/interfaces/policy/policy.proto`（Policy API）。
 
-本机容器中，Runtime 同时加入 `ros` 和 `learning` 网络，Simulation 加入 `ros`，Learning 加入 `learning`。手动仿真与运行端默认使用 ROS 域 42，批采为每个实例分配独立域和命名空间。磁盘产物通过宿主机 `var/` 挂载的容器路径 `/data` 交接。
+本机容器统一采用 `network_mode: host`，并通过 FastDDS 回环白名单将 ROS 2 UDPv4 限制在 `127.0.0.1`，策略服务默认绑定 `127.0.0.1:50051`。手动仿真与运行端默认使用 ROS 域 42，批采为每个实例分配独立域和命名空间。磁盘产物通过宿主机 `var/` 挂载的容器路径 `/data` 交接。
 
 ## 当前耦合点
 

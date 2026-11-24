@@ -31,7 +31,7 @@ control:
   terminal_timeout_s: 20.0
 
 policy:
-  endpoint: learning:50051
+  endpoint: 127.0.0.1:50051
   allow_test_policy: false
   expected_test_only: false
   task_id: marvin-stack
