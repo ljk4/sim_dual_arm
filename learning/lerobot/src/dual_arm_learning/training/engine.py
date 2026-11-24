@@ -38,6 +38,9 @@ from .support import (
     new_model_name,
 )
 from .support import (
+    augment_visual_batch as _augment_visual_batch,
+)
+from .support import (
     emit as _emit,
 )
 from .support import (
@@ -204,6 +207,15 @@ def _prepare_model(context: _TrainingContext) -> None:
     )
 
 
+def _visual_augmentation_active(config: Any) -> bool:
+    visual_aug = getattr(config, "visual_augmentation", None)
+    return bool(
+        visual_aug is not None
+        and getattr(visual_aug, "enabled", False)
+        and getattr(config, "mode", None) == "full"
+    )
+
+
 def _emit_model_ready(context: _TrainingContext) -> None:
     config = context.config
     sample_filter = context.sample_filter
@@ -217,6 +229,8 @@ def _emit_model_ready(context: _TrainingContext) -> None:
         batch_size=config.batch_size,
         lr=config.lr,
         lr_backbone=(config.lr if config.lr_backbone is None else config.lr_backbone),
+        visual_augmentation_enabled=config.visual_augmentation.enabled,
+        visual_augmentation_active=_visual_augmentation_active(config),
         loaded_backbone_tensors=context.loaded_backbone,
         weights_sha256=context.weights_sha256,
         train_frames=len(context.train_dataset),
@@ -300,6 +314,12 @@ def _train_step(context: _TrainingContext, amp: tuple[bool, Any, Any]) -> dict[s
             context.iterator = iter(context.policy_loader)
             batch = next(context.iterator)
         step_started = time.monotonic()
+        if _visual_augmentation_active(config):
+            batch = _augment_visual_batch(
+                batch,
+                config.visual_augmentation,
+                device=getattr(config, "device", None),
+            )
         processed = _process_batch(context.pre, batch, _sample_keys(config))
         context.optimizer.zero_grad(set_to_none=True)
         with torch.amp.autocast(device_type="cuda", dtype=amp_dtype, enabled=amp_enabled):
@@ -379,6 +399,7 @@ def _training_args(context: _TrainingContext) -> dict[str, Any]:
         "val_every_steps": config.val_every_steps,
         "val_batches": config.val_batches,
         "deterministic": config.deterministic,
+        "visual_augmentation": config.visual_augmentation.model_dump(mode="json"),
     }
     return {
         "model_name": "act",

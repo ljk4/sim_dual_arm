@@ -86,6 +86,12 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--max-steps", type=int, default=None)
     train_parser.add_argument("--data-root", type=Path, default=None)
     train_parser.add_argument("--allow-synthetic", action="store_true")
+    train_parser.add_argument(
+        "--visual-augment",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="override training.visual_augmentation.enabled for full training",
+    )
 
     for command_parser in (convert_parser, train_parser):
         command_parser.add_argument(
@@ -124,6 +130,10 @@ def _training_config(
         updates["cache_root"] = paths["cache"]
         updates["checkpoint"] = config.checkpoint.model_copy(update={"root": paths["models"]})
         updates["logging"] = config.logging.model_copy(update={"root": paths["training_logs"]})
+    if getattr(args, "visual_augment", None) is not None:
+        updates["visual_augmentation"] = config.visual_augmentation.model_copy(
+            update={"enabled": bool(args.visual_augment)}
+        )
     return config.model_copy(update=updates)
 
 
@@ -177,6 +187,8 @@ def _training_overrides(args: argparse.Namespace, root: Path) -> dict[str, objec
         overrides["data_root"] = str(_resolve(args.data_root, root))
     if getattr(args, "allow_synthetic", False):
         overrides["allow_synthetic"] = True
+    if getattr(args, "visual_augment", None) is not None:
+        overrides["visual_augment"] = bool(args.visual_augment)
     return overrides
 
 
@@ -297,6 +309,10 @@ def _command_train(args: argparse.Namespace, root: Path) -> int:
         f"batch：{config.batch_size}",
         f"学习率：{config.lr:g}；AMP：{config.amp_dtype if config.use_amp else '关闭'}；"
         f"数据 worker：{config.num_workers}",
+        (
+            f"视觉增强：{'开启' if config.visual_augmentation.enabled else '关闭'}"
+            f"（仅 full 生效；camera_dropout_prob={config.visual_augmentation.camera_dropout_prob:g}）"
+        ),
         f"数据集：{config.data_root}",
         f"模型目录：{config.checkpoint.root}",
         f"验证：每 {config.val_every_steps} step",

@@ -38,6 +38,7 @@ __all__ = [
     "ModelSpec",
     "RGBEncoderSpec",
     "TrainingConfig",
+    "VisualAugmentationSpec",
     "load_dataset_config",
     "load_training_config",
     "load_yaml_mapping",
@@ -156,6 +157,19 @@ class LoggingSpec(StrictMappingModel):
     close_timeout_s: Annotated[PositiveFloat, Field(ge=0.1)]
     flush_interval_s: Annotated[PositiveFloat, Field(ge=0.01)]
     console: bool
+
+
+class VisualAugmentationSpec(StrictMappingModel):
+    """Spatial-preserving photometric, blur, noise and single-camera dropout settings."""
+
+    enabled: bool = False
+    brightness: Annotated[NonNegativeFloat, Field(le=0.9)] = 0.15
+    contrast: Annotated[NonNegativeFloat, Field(le=0.9)] = 0.15
+    saturation: Annotated[NonNegativeFloat, Field(le=0.9)] = 0.15
+    hue: Annotated[NonNegativeFloat, Field(le=0.5)] = 0.03
+    noise_std: Annotated[NonNegativeFloat, Field(le=0.5)] = 0.02
+    blur_prob: Annotated[NonNegativeFloat, Field(le=1.0)] = 0.3
+    camera_dropout_prob: Annotated[NonNegativeFloat, Field(le=1.0)] = 0.10
 
 
 class DatasetConfig(StrictMappingModel):
@@ -289,6 +303,10 @@ class TrainingConfig(StrictMappingModel):
         validation_alias=AliasPath("training", "val_batches")
     )
     deterministic: bool = Field(validation_alias=AliasPath("training", "deterministic"))
+    visual_augmentation: VisualAugmentationSpec = Field(
+        default_factory=VisualAugmentationSpec,
+        validation_alias=AliasPath("training", "visual_augmentation"),
+    )
     modes: dict[str, ModeSpec]
     model: ModelSpec
     checkpoint: CheckpointSpec
@@ -403,6 +421,7 @@ def training_before(data: object) -> object:
             "val_every_steps",
             "val_batches",
             "deterministic",
+            "visual_augmentation",
         },
         "training",
     )

@@ -40,6 +40,15 @@ training:
   val_every_steps: 1000
   val_batches: 512
   deterministic: true
+  visual_augmentation:
+    enabled: true
+    brightness: 0.15
+    contrast: 0.15
+    saturation: 0.15
+    hue: 0.03
+    noise_std: 0.02
+    blur_prob: 0.3
+    camera_dropout_prob: 0.10
 modes:
   smoke:
     steps: 128

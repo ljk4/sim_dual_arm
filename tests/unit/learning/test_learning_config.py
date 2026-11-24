@@ -23,8 +23,17 @@ def test_real_learning_configs_load():
     assert training.model.pretrained_backbone_weights is None
     assert training.lr == pytest.approx(1e-4)
     assert training.lr_backbone == pytest.approx(1e-4)
+    assert training.visual_augmentation.enabled is True
+    assert training.visual_augmentation.camera_dropout_prob == pytest.approx(0.10)
     assert training.checkpoint.root == project_path("var/marvin_sim/stack/models", ROOT)
     assert training.dataset.camera_names == dataset.camera_names
+
+    handover = load_training_config(
+        ROOT / "shared/scenarios/marvin_sim/handover/configs/learning/act_training.yaml",
+        ROOT,
+    )
+    assert handover.visual_augmentation.enabled is True
+    assert handover.visual_augmentation.camera_dropout_prob == pytest.approx(0.10)
 
 
 def test_lr_backbone_contract_and_optimizer_param_groups(tmp_path):
@@ -167,3 +176,29 @@ def test_training_recipe_rejects_removed_image_shift_field(tmp_path):
     bad.write_text(yaml.safe_dump(document))
     with pytest.raises(ConfigError, match=r"training\.image_shift_px: unknown key"):
         load_training_config(bad, ROOT)
+
+
+def test_visual_augmentation_config_validation(tmp_path):
+    base = yaml.safe_load((SCENARIO / "configs/learning/act_training.yaml").read_text())
+    no_aug = dict(base)
+    no_aug["training"] = {
+        k: v for k, v in base["training"].items() if k != "visual_augmentation"
+    }
+    no_aug_path = tmp_path / "no-aug.yaml"
+    no_aug_path.write_text(yaml.safe_dump(no_aug))
+    assert load_training_config(no_aug_path, ROOT).visual_augmentation.enabled is False
+
+    bad_unknown = yaml.safe_load((SCENARIO / "configs/learning/act_training.yaml").read_text())
+    bad_unknown["training"]["visual_augmentation"]["image_shift_px"] = 2
+    bad_unknown_path = tmp_path / "bad-aug-unknown.yaml"
+    bad_unknown_path.write_text(yaml.safe_dump(bad_unknown))
+    with pytest.raises(ConfigError, match="image_shift_px"):
+        load_training_config(bad_unknown_path, ROOT)
+
+    for key, val in (("camera_dropout_prob", 1.2), ("hue", 0.6), ("noise_std", -0.01)):
+        bad_bound = yaml.safe_load((SCENARIO / "configs/learning/act_training.yaml").read_text())
+        bad_bound["training"]["visual_augmentation"][key] = val
+        bad_bound_path = tmp_path / f"bad-{key}.yaml"
+        bad_bound_path.write_text(yaml.safe_dump(bad_bound))
+        with pytest.raises(ConfigError, match=key):
+            load_training_config(bad_bound_path, ROOT)

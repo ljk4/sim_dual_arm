@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import time
 from collections.abc import Iterable, Sequence
@@ -10,7 +11,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from ..config import TrainingConfig
+from ..config import TrainingConfig, VisualAugmentationSpec
 from ..dataset.common import configure_local_caches, file_sha256
 from ..dataset.sample_filter import SampleFilterMask
 
@@ -190,6 +191,117 @@ def process_batch(pre: Any, batch: dict[str, Any], keys: tuple[str, ...]) -> dic
     if processed["action_is_pad"].dim() == 1:
         processed["action_is_pad"] = processed["action_is_pad"].unsqueeze(0)
     return processed
+
+
+def _augment_single_camera(images: Any, spec: VisualAugmentationSpec) -> Any:
+    import torch
+    import torch.nn.functional as F
+
+    batch_size, _channels, height, width = images.shape
+    dev = images.device
+    x = images
+
+    def _factor(lo: float, hi: float) -> Any:
+        return torch.empty((batch_size, 1, 1, 1), device=dev, dtype=torch.float32).uniform_(lo, hi)
+
+    if spec.brightness > 0.0:
+        x = (x * _factor(1.0 - spec.brightness, 1.0 + spec.brightness)).clamp_(0.0, 1.0)
+    if spec.contrast > 0.0:
+        luma = 0.2989 * x[:, 0:1] + 0.5870 * x[:, 1:2] + 0.1140 * x[:, 2:3]
+        gray_mean = luma.mean(dim=(-2, -1), keepdim=True)
+        factor = _factor(1.0 - spec.contrast, 1.0 + spec.contrast)
+        x = (x * factor + gray_mean * (1.0 - factor)).clamp_(0.0, 1.0)
+    if spec.saturation > 0.0:
+        gray = 0.2989 * x[:, 0:1] + 0.5870 * x[:, 1:2] + 0.1140 * x[:, 2:3]
+        factor = _factor(1.0 - spec.saturation, 1.0 + spec.saturation)
+        x = (x * factor + gray * (1.0 - factor)).clamp_(0.0, 1.0)
+    if spec.hue > 0.0:
+        max_angle = spec.hue * 2.0 * math.pi
+        theta = torch.empty((batch_size,), device=dev, dtype=torch.float32).uniform_(
+            -max_angle, max_angle
+        )
+        cos_t = theta.cos().view(batch_size, 1, 1)
+        sin_t = theta.sin().view(batch_size, 1, 1)
+        eye = torch.eye(3, device=dev, dtype=torch.float32).unsqueeze(0)
+        uu = torch.full((1, 3, 3), 1.0 / 3.0, device=dev, dtype=torch.float32)
+        inv_sqrt3 = 1.0 / math.sqrt(3.0)
+        skew = torch.tensor(
+            [[0.0, -inv_sqrt3, inv_sqrt3], [inv_sqrt3, 0.0, -inv_sqrt3], [-inv_sqrt3, inv_sqrt3, 0.0]],
+            device=dev,
+            dtype=torch.float32,
+        ).unsqueeze(0)
+        rot = cos_t * eye + (1.0 - cos_t) * uu + sin_t * skew
+        x = torch.einsum("bij,bjhw->bihw", rot, x).clamp_(0.0, 1.0)
+    if spec.blur_prob > 0.0:
+        blur_mask = torch.rand((batch_size,), device=dev) < spec.blur_prob
+        if blur_mask.any():
+            idx = blur_mask.nonzero(as_tuple=False).squeeze(-1)
+            n_blur = int(idx.numel())
+            sigma = torch.empty((n_blur, 1), device=dev, dtype=torch.float32).uniform_(0.2, 1.0)
+            coords = torch.tensor([-1.0, 0.0, 1.0], device=dev, dtype=torch.float32).view(1, 3)
+            k1d = torch.exp(-0.5 * (coords / sigma) ** 2)
+            k1d = k1d / k1d.sum(dim=-1, keepdim=True)
+            k2d = k1d.unsqueeze(2) * k1d.unsqueeze(1)
+            weight = k2d.unsqueeze(1).expand(n_blur, 3, 3, 3).reshape(n_blur * 3, 1, 3, 3).contiguous()
+            pad_mode = "reflect" if min(height, width) > 1 else "replicate"
+            padded = F.pad(x.index_select(0, idx), (1, 1, 1, 1), mode=pad_mode)
+            blurred = F.conv2d(
+                padded.reshape(1, n_blur * 3, padded.shape[2], padded.shape[3]),
+                weight,
+                groups=n_blur * 3,
+            ).reshape(n_blur, 3, height, width).clamp_(0.0, 1.0)
+            x[idx] = blurred
+    if spec.noise_std > 0.0:
+        x = (x + torch.randn_like(x) * spec.noise_std).clamp_(0.0, 1.0)
+    return x
+
+
+def augment_visual_batch(
+    batch: dict[str, Any],
+    spec: VisualAugmentationSpec,
+    *,
+    device: str | None = None,
+) -> dict[str, Any]:
+    """Apply spatial-preserving photometric, blur, noise and single-camera dropout."""
+    if not spec.enabled:
+        return batch
+    import torch
+
+    image_keys = [
+        key
+        for key, value in batch.items()
+        if key.startswith("observation.images.")
+        and isinstance(value, torch.Tensor)
+        and value.ndim == 4
+        and value.shape[1] == 3
+    ]
+    if not image_keys:
+        return batch
+    target_device = (
+        torch.device(device)
+        if device is not None and device.startswith("cuda") and torch.cuda.is_available()
+        else None
+    )
+    augmented = dict(batch)
+    for key in image_keys:
+        tensor = batch[key]
+        if target_device is not None and tensor.device != target_device:
+            x = tensor.to(target_device, dtype=torch.float32, non_blocking=True)
+        else:
+            x = tensor.to(dtype=torch.float32).clone()
+        augmented[key] = _augment_single_camera(x, spec)
+
+    if spec.camera_dropout_prob > 0.0:
+        ref = augmented[image_keys[0]]
+        batch_size = int(ref.shape[0])
+        drop_mask = torch.rand((batch_size,), device=ref.device) < spec.camera_dropout_prob
+        if drop_mask.any():
+            chosen = torch.randint(0, len(image_keys), (batch_size,), device=ref.device)
+            for cam_idx, key in enumerate(image_keys):
+                cam_mask = drop_mask & (chosen == cam_idx)
+                if cam_mask.any():
+                    augmented[key][cam_mask] = 0.0
+    return augmented
 
 
 def loader(
@@ -398,6 +510,7 @@ __all__ = [
     "MetricsWriter",
     "TrainingError",
     "TrainingInterrupted",
+    "augment_visual_batch",
     "build_act_config",
     "build_optimizer_param_groups",
     "build_policy",
