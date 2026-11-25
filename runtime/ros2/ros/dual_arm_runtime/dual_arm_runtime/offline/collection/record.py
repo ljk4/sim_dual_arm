@@ -277,17 +277,14 @@ def _print_status(args: argparse.Namespace, config: dict, ledger: Ledger) -> Non
     paths = config["paths"]
     output = (project_path(str(paths["attempts_root"]), args.project_root)).resolve()
     summary = summarize(ledger.records(), config, output)
-    target = int(config["budget"]["formal_target_qualified"])
     formal = summary["purposes"].get("formal", {})
     pilot = summary["purposes"].get("pilot", {})
     formal_qualified = int(formal.get("qualified", 0))
-    remaining = max(0, target - formal_qualified)
     used_mb = summary["raw_bytes"] / (1024 * 1024)
-    limit_mb = summary["raw_limit_bytes"] / (1024 * 1024)
     title = args.selection["scenario_id"] if args.selection is not None else "direct"
     print(f"=== 数据集与采集状态 ({title}) ===", flush=True)
     print(
-        f"正式采集 (formal): 合格 {formal_qualified}/{target} 条（还差 {remaining} 条），"
+        f"正式采集 (formal): 合格 {formal_qualified} 条，"
         f"总尝试 {formal.get('reserved_attempts', 0)} 次"
         f"（已结束 {formal.get('terminal_attempts', 0)}，"
         f"进行中/异常 {formal.get('running_or_crashed', 0)}）",
@@ -298,7 +295,7 @@ def _print_status(args: argparse.Namespace, config: dict, ledger: Ledger) -> Non
         f"总尝试 {pilot.get('reserved_attempts', 0)} 次（不计入正式采集）",
         flush=True,
     )
-    print(f"磁盘占用:          {used_mb:.1f} MB / {limit_mb:.1f} MB", flush=True)
+    print(f"磁盘占用:          {used_mb:.1f} MB", flush=True)
     formal_select_rel = paths.get("formal_select")
     if formal_select_rel:
         formal_select_path = (project_path(formal_select_rel, args.project_root)).resolve()
@@ -312,8 +309,7 @@ def _print_status(args: argparse.Namespace, config: dict, ledger: Ledger) -> Non
             )
         else:
             print(
-                f"合格录制清单:      未生成（正式合格达 {target} 条后自动生成于 "
-                f"{formal_select_path}）",
+                f"合格录制清单:      未生成（完成正式采集后自动生成于 {formal_select_path}）",
                 flush=True,
             )
     print("======================================", flush=True)

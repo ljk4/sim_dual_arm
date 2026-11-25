@@ -118,7 +118,7 @@ scripts/build_sdk.sh
 ./env.sh simulation
 ```
 
-在 `simulation` 容器内直接以方案启动示教后端（显式指定机器人/任务；默认 `--seed 0 --run-id teacher-backend`，启动时会打印所用配置文件路径与完整生效参数）：
+在 `simulation` 容器内直接以方案启动示教后端（显式指定机器人/任务；`--seed` 未传时随机，`--run-id` 默认 `teacher-backend`，启动时会打印所用配置文件路径与完整生效参数）：
 
 ```bash
 scripts/teacher_backend.sh --robot marvin_sim --task stack
@@ -140,7 +140,7 @@ scripts/teacher_backend.sh --robot marvin_sim --task stack --seed 0 --run-id tea
 
 ### 2.4 单路试采一次，确认完整链路
 
-回到 `runtime` 容器终端，使用刚启动的手动 teacher backend 试采一次。试采指定 `pilot`，不占用正式 50 条的名额（`scripts/record.sh` 会在目录不存在时自动创建、已有台账时默认增量追加，并在启动后自动打印所用配置文件路径、详细参数与当前 campaign 状态）：
+回到 `runtime` 容器终端，使用刚启动的手动 teacher backend 试采一次。试采指定 `pilot`，不占正式采集名额（`scripts/record.sh` 会在目录不存在时自动创建、已有台账时默认增量追加，并在启动后自动打印所用配置文件路径、详细参数与当前采集状态）：
 
 ```bash
 # 只试一次：合格即结束，失败也立即结束
@@ -166,9 +166,9 @@ scripts/record.sh \
   --workers auto --max-consecutive-failures 3
 ```
 
-`--target-total 50` 表示正式台账累计达到 50 条合格数据：已有正式数据时只补足差额；已经达到目标则直接成功退出。若中断或连续失败提前结束，修复原因后再次执行相同命令即可续采，不需要手动计算剩余条数或清空台账。
+`--target-total 50` 表示正式台账累计达到 50 条合格数据（可按需改为任意正整数，配方不限制数量上限）：已有正式数据时只补足差额；已经达到目标则直接成功退出。若中断或连续失败提前结束，修复原因后再次执行相同命令即可续采，不需要手动计算剩余条数或清空台账。
 
-并行 worker 禁用 viewer 状态发布、预览 PNG 和 GIF，保留训练 RGB、标签及质量门禁。连续失败按各 worker 进程独立计数，合格一次清零，终端只显示当前最大连败数；任一 worker 连续 3 次不合格会取消在途任务并提前退出，取消项仍占预算。预算/种子不足也会停止。按 `Ctrl-C` 可中断本批次；命令结束时自动清理本批次后台实例。配置、backend 日志和性能汇总保存到 `var/marvin_sim/stack/logs/collection/record-pools/pool_*/`。
+并行 worker 禁用 viewer 状态发布、预览 PNG 和 GIF，保留训练 RGB、标签及质量门禁。连续失败按各 worker 进程独立计数，合格一次清零，终端只显示当前最大连败数；任一 worker 连续 3 次不合格会取消在途任务并提前退出，取消项仍保留在台账中。剩余磁盘低于配方 `min_free_bytes` 时也会停止。按 `Ctrl-C` 可中断本批次；命令结束时自动清理本批次后台实例。配置、backend 日志和性能汇总保存到 `var/marvin_sim/stack/logs/collection/record-pools/pool_*/`。
 
 ### 2.7 查看采集与正式清单状态
 
@@ -225,24 +225,23 @@ scripts/server_policy.sh --robot marvin_sim --task stack \
 
 ### 3.4 直接启动推理仿真后端
 
-回到 `simulation` 容器，以 policy 角色启动后端：
+回到 `simulation` 容器，以 policy 角色启动后端（自动生成 `inference_backend_<robot>_<task>_<YYYYMMDD_HHMMSS>` 作为 `run_id`，`--seed` 未传时随机）：
 
 ```bash
 scripts/inference_backend.sh \
-  --robot marvin_sim --task stack \
-  --seed 6000 --run-id policy-backend
+  --robot marvin_sim --task stack
 ```
 
-就绪标记、运行快照与日志分别位于 `/data/marvin_sim/stack/logs/backend/policy-backend/ready.json`、`backend.yaml` 与 `log`。后端与第 3.3 节的 Policy 服务、第 3.5 节的 runtime 需同时在线。
+就绪标记、运行快照与日志分别位于 `/data/marvin_sim/stack/logs/backend/inference_backend_marvin_sim_stack_<YYYYMMDD_HHMMSS>/ready.json`、`backend.yaml` 与 `log`。后端与第 3.3 节的 Policy 服务、第 3.5 节的 runtime 需同时在线。
 
 ### 3.5 直接运行推理或交互闭环
 
-回到 `runtime` 容器，直接以方案启动一局交互式闭环（自动生成或使用指定 `run-id`，输入 `y` 复位环境并执行一局，结束后保持 IDLE 直至 `Ctrl-C` 退出）：
+回到 `runtime` 容器，直接以方案启动一局交互式闭环（自动生成 `client_interactive_<robot>_<task>_<YYYYMMDD_HHMMSS>` 作为 `run_id`，`--seed` 未传时随机；输入 `y` 复位环境并执行一局，结束后保持 IDLE 直至 `Ctrl-C` 退出）：
 
 ```bash
 scripts/client_interactive.sh \
   --robot marvin_sim --task stack \
-  --seed 6000 --run-id policy-interactive
+  --seed 6000
 ```
 
 非交互式单局执行使用 `scripts/client_policy.sh`，录制默认落到 `/data/marvin_sim/stack/logs/recordings/<run-id>`；需要另选位置时再显式传 `--output`：
@@ -258,7 +257,7 @@ scripts/client_policy.sh \
 ```bash
 scripts/client_interactive.sh \
   --robot marvin_sim --task stack \
-  --seed 6001 --run-id policy-interactive-2
+  --seed 6001
 ```
 
 如需无人工干预的**并行**批量仿真推理测试，在**本机项目根目录**执行（仅支持 MuJoCo 仿真后端且禁止可视化；只需保持第 3.3 节 `learning` 容器的 `scripts/server_policy.sh` 在线，入口会自动启动多路隔离的仿真后端与运行时，结束时清理）：
@@ -299,9 +298,9 @@ scripts/train.sh --robot marvin_sim --task handover --mode full
 # 推理：learning 策略服务、simulation 后端、runtime 交互闭环（可选用 ./env.sh viewer --robot marvin_sim --task handover 查看可视化）
 scripts/server_policy.sh --robot marvin_sim --task handover
 scripts/inference_backend.sh --robot marvin_sim --task handover \
-  --seed 5100 --run-id policy-backend
+  --seed 5100
 scripts/client_interactive.sh --robot marvin_sim --task handover \
-  --seed 5100 --run-id policy-interactive
+  --seed 5100
 
 # 本机项目根目录：并行批量推理（需保持上方 server_policy.sh 在线）
 ./inference_parallel.sh --robot marvin_sim --task handover \

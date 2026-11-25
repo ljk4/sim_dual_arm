@@ -51,3 +51,121 @@ def test_direct_runtime_config_uses_declared_shared_mount(monkeypatch):
     )
     assert config.configuration_source == str(resolved.selection["recipe"]["path"])
     assert config.recipe.action_source == "teacher"
+
+
+def test_interactive_cli_removes_run_id_and_generates_robot_task_timestamp(
+    tmp_path, capsys
+):
+    from dual_arm_runtime.runtime_cli import (
+        _interactive_run_id_base,
+        _parse_arguments,
+        _unique_run_id,
+    )
+
+    with pytest.raises(SystemExit):
+        _parse_arguments(
+            [
+                "--robot",
+                "marvin_sim",
+                "--task",
+                "stack",
+                "--once",
+                "--confirm",
+                "--run-id",
+                "manual-id",
+            ]
+        )
+
+    with pytest.raises(SystemExit):
+        _parse_arguments(["--confirm", "--help"])
+    help_output = capsys.readouterr().out
+    assert "--run-id" not in help_output
+
+    args, _ = _parse_arguments(
+        ["--robot", "marvin_sim", "--task", "stack", "--once", "--confirm"]
+    )
+    assert args.run_id is None
+    assert args.episode_id == ""
+
+    policy_args, _ = _parse_arguments(
+        ["--robot", "marvin_sim", "--task", "stack", "--once", "--run-id", "custom-run"]
+    )
+    assert policy_args.run_id == "custom-run"
+
+    root = Path(os.environ.get("PROJECT_ROOT", Path(__file__).resolve().parents[3]))
+    resolved = resolve_scenario_runtime(
+        robot="marvin_sim", task="stack", role="policy", project_root=root
+    )
+    configuration = load_runtime_configuration_document(
+        resolved.document,
+        source=resolved.selection["recipe"]["path"],
+        base_dir=resolved.base_dir,
+        project_root=root,
+        selection=resolved.selection,
+    )
+    base = _interactive_run_id_base(args, configuration, stamp="20261125_120000")
+    assert base == "client_interactive_marvin_sim_stack_20261125_120000"
+
+    direct_args, _ = _parse_arguments(
+        [
+            "--config",
+            "shared/scenarios/marvin_sim/stack/configs/runtime/policy_rollout.yaml",
+            "--once",
+            "--confirm",
+        ]
+    )
+    direct_base = _interactive_run_id_base(
+        direct_args, configuration, stamp="20261125_120000"
+    )
+    assert direct_base == "client_interactive_marvin_stack_marvin-stack_20261125_120000"
+
+    out_dir = tmp_path / "recordings"
+    runs_dir = tmp_path / "runs"
+    (out_dir / f".partial-{base}").mkdir(parents=True)
+    (runs_dir / f"{base}_2").mkdir(parents=True)
+    assert _unique_run_id(out_dir, runs_dir, base) == f"{base}_3"
+
+
+def test_runtime_cli_random_default_seed_and_explicit_override(monkeypatch, capsys):
+    from dual_arm_runtime import runtime_cli
+
+    root = Path(os.environ.get("PROJECT_ROOT", Path(__file__).resolve().parents[3]))
+    monkeypatch.setattr(runtime_cli, "_random_seed", lambda: 654321)
+
+    args_default, _ = runtime_cli._parse_arguments(
+        [
+            "--project-root",
+            str(root),
+            "--robot",
+            "marvin_sim",
+            "--task",
+            "stack",
+            "--once",
+        ]
+    )
+    config_default = runtime_cli._load_configuration(args_default)
+    assert config_default.recipe.reset.seed == 654321
+
+    args_explicit, _ = runtime_cli._parse_arguments(
+        [
+            "--project-root",
+            str(root),
+            "--robot",
+            "marvin_sim",
+            "--task",
+            "stack",
+            "--once",
+            "--reset-seed",
+            "77",
+        ]
+    )
+    config_explicit = runtime_cli._load_configuration(args_explicit)
+    assert config_explicit.recipe.reset.seed == 77
+
+    _print_configuration_summary(
+        config_default,
+        argparse.Namespace(output="/tmp/recording"),
+        Path("/tmp/runs/run-1"),
+    )
+    output = capsys.readouterr().out
+    assert "seed: 654321" in output

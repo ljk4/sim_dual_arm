@@ -186,6 +186,9 @@ class PolicyTargetSource:
     def task_terminal(self) -> tuple[str, str, object | None]:
         return self._task_end
 
+    def poll_task(self) -> None:
+        self._refresh_task()
+
     def finish(self) -> None:
         self.client.close()
 
@@ -769,6 +772,7 @@ class PolicyStreamRunner(ContinuousStreamRunner):
         self._async_thread: threading.Thread | None = None
         self._async_closed = False
         self._async_job: tuple[int, int, int, ExactObservation | None] | None = None
+        self._async_inflight: tuple[int, ExactObservation] | None = None
         self._async_completed_chunk = 0
         self._async_latest: tuple[int, ExactObservation, Prediction] | None = None
         self._async_error: BaseException | None = None
@@ -827,6 +831,11 @@ class PolicyStreamRunner(ContinuousStreamRunner):
     def _async_producer_loop(self) -> None:
         period_ns = int(self.policy.action_period_ns)
         prefetch_lead_ns = int(self.policy.prefetch_lead_ns)
+        fallback_margin_ns = (
+            min(100_000_000, max(50_000_000, prefetch_lead_ns // 2))
+            if prefetch_lead_ns > 0
+            else 0
+        )
         while True:
             with self._async_cond:
                 while (
@@ -844,6 +853,8 @@ class PolicyStreamRunner(ContinuousStreamRunner):
             try:
                 if fixed_obs is not None:
                     request_id = self._request_id(chunk_index, fixed_obs.observation_id)
+                    with self._async_cond:
+                        self._async_inflight = (chunk_index, fixed_obs)
                     prediction = self.source.predict(
                         fixed_obs,
                         chunk_index,
@@ -853,8 +864,14 @@ class PolicyStreamRunner(ContinuousStreamRunner):
                     self._validate_prediction(prediction, fixed_obs)
                     self._record_cached_prediction(fixed_obs, prediction)
                     with self._async_cond:
-                        self._async_latest = (chunk_index, fixed_obs, prediction)
-                        self._async_completed_chunk = chunk_index
+                        if (
+                            self._async_inflight is not None
+                            and self._async_inflight[0] == chunk_index
+                        ):
+                            self._async_inflight = None
+                        if self._async_job is not None and self._async_job[0] == chunk_index:
+                            self._async_latest = (chunk_index, fixed_obs, prediction)
+                            self._async_completed_chunk = chunk_index
                         self._async_cond.notify_all()
                     continue
 
@@ -903,6 +920,20 @@ class PolicyStreamRunner(ContinuousStreamRunner):
                     )
                     if not reached_target and not run_speculative:
                         continue
+                    with self._async_cond:
+                        if self._async_closed:
+                            return
+                        if self._async_job is None or self._async_job[0] != chunk_index:
+                            break
+                        if (
+                            speculative_done
+                            and fallback_margin_ns > 0
+                            and self.io.robot_time_ns() >= handoff_ns - fallback_margin_ns
+                        ):
+                            self._async_completed_chunk = chunk_index
+                            self._async_cond.notify_all()
+                            break
+                        self._async_inflight = (chunk_index, observation)
                     request_id = self._request_id(chunk_index, observation.observation_id)
                     prediction = self.source.predict(
                         observation,
@@ -912,19 +943,146 @@ class PolicyStreamRunner(ContinuousStreamRunner):
                     )
                     self._validate_prediction(prediction, observation)
                     self._record_cached_prediction(observation, prediction)
+                    cutoff_passed = (
+                        fallback_margin_ns > 0
+                        and self.io.robot_time_ns() >= handoff_ns - fallback_margin_ns
+                    )
                     with self._async_cond:
-                        self._async_latest = (chunk_index, observation, prediction)
-                        if reached_target:
-                            self._async_completed_chunk = chunk_index
+                        if (
+                            self._async_inflight is not None
+                            and self._async_inflight[0] == chunk_index
+                        ):
+                            self._async_inflight = None
+                        job_current = (
+                            self._async_job is not None and self._async_job[0] == chunk_index
+                        )
+                        if job_current:
+                            self._async_latest = (chunk_index, observation, prediction)
+                            if reached_target or cutoff_passed:
+                                self._async_completed_chunk = chunk_index
                         self._async_cond.notify_all()
-                    if reached_target:
+                    if not job_current or reached_target or cutoff_passed:
                         break
                     speculative_done = True
             except BaseException as error:
                 with self._async_cond:
+                    self._async_inflight = None
                     self._async_error = error
                     self._async_cond.notify_all()
                 return
+
+    def _horizon_fallback(
+        self, chunk_index: int, handoff_ns: int
+    ) -> tuple[ExactObservation, Prediction] | None:
+        poll = getattr(self.source, "poll_task", None)
+        if callable(poll):
+            poll()
+        self._check_task_end()
+        with self._async_cond:
+            history = list(reversed(self._prediction_history))
+            inflight = self._async_inflight
+        if not history:
+            return None
+
+        now_ns = self.io.robot_time_ns()
+        max_age_ns = self.configuration.recipe.observation.max_age_ns
+        safe_age_ns = max(50_000_000, max_age_ns - 100_000_000)
+        obs: ExactObservation | None = None
+        if (
+            inflight is not None
+            and inflight[0] == chunk_index
+            and inflight[1].stamp_ns < handoff_ns
+            and 0 <= now_ns - inflight[1].stamp_ns <= safe_age_ns
+        ):
+            obs = inflight[1]
+        else:
+            try:
+                candidate = self.io.wait_observation(
+                    self.last_observation_id, 0.05, self.stop_requested
+                )
+            except ContractError as error:
+                if error.reason == "EPISODE_STOPPED":
+                    raise
+                candidate = None
+            if (
+                candidate is not None
+                and candidate.stamp_ns < handoff_ns
+                and 0 <= self.io.robot_time_ns() - candidate.stamp_ns <= max_age_ns
+            ):
+                obs = candidate
+                self.last_observation_id = max(
+                    self.last_observation_id, candidate.observation_id
+                )
+            elif (
+                inflight is not None
+                and inflight[0] == chunk_index
+                and inflight[1].stamp_ns < handoff_ns
+                and 0 <= self.io.robot_time_ns() - inflight[1].stamp_ns <= max_age_ns
+            ):
+                obs = inflight[1]
+        if obs is None:
+            return None
+
+        period_ns = int(self.policy.action_period_ns)
+        chunk_size = int(self.policy.chunk_size)
+        target_count = int(self.source.target_count)
+        exec_steps = self._execution_latency_steps()
+        times = tuple((index + 1) * period_ns for index in range(chunk_size))
+        selected_indices = [
+            index for index, t_rel in enumerate(times) if obs.stamp_ns + t_rel > handoff_ns
+        ][:target_count]
+        if len(selected_indices) != target_count or selected_indices[-1] + exec_steps >= chunk_size:
+            return None
+        last_required_idx = selected_indices[-1] + exec_steps
+        required_abs = tuple(
+            obs.stamp_ns + times[index] for index in range(last_required_idx + 1)
+        )
+
+        chosen_entry: _CachedPrediction | None = None
+        for entry in history:
+            if all(t_abs in entry.by_abs_time_ns for t_abs in required_abs):
+                chosen_entry = entry
+                break
+        if chosen_entry is None:
+            return None
+
+        fallback_pos = chosen_entry.by_abs_time_ns[required_abs[-1]]
+        positions = tuple(
+            chosen_entry.by_abs_time_ns.get(obs.stamp_ns + t_rel, fallback_pos)
+            for t_rel in times
+        )
+        prediction = Prediction(
+            context=self.context,
+            observation_id=obs.observation_id,
+            joint_names=self.profile.joint_names,
+            times_from_observation_ns=times,
+            positions=positions,
+            target_count=chunk_size,
+            chunk_digest="",
+            task_end="",
+            task_reason="",
+            task_state=None,
+        )
+        self._validate_prediction(prediction, obs)
+        self._emit(
+            "policy.horizon_fallback_applied",
+            reason="HORIZON_FALLBACK_APPLIED",
+            context=EventContext(
+                episode_id=self.episode_id,
+                request_id=self._request_id(chunk_index, obs.observation_id),
+                command_id=self.command_id,
+                clock_epoch=self.context.clock_epoch,
+                sim_time_ns=obs.stamp_ns,
+            ),
+            fields={
+                "chunk_index": chunk_index,
+                "observation_id": obs.observation_id,
+                "source_observation_id": chosen_entry.observation_id,
+                "source_stamp_ns": chosen_entry.stamp_ns,
+                "handoff_backend_time_ns": handoff_ns,
+            },
+        )
+        return obs, prediction
 
     def _acquire_chunk_prediction(
         self,
@@ -954,9 +1112,11 @@ class PolicyStreamRunner(ContinuousStreamRunner):
             self._async_cond.notify_all()
 
         interval = min(float(self.source.poll_interval_s), 0.005)
+        horizon_attempted = False
         while True:
             self._check_stop()
             self._check_task_end()
+            try_horizon = False
             with self._async_cond:
                 if self._async_error is not None:
                     error = self._async_error
@@ -981,7 +1141,21 @@ class PolicyStreamRunner(ContinuousStreamRunner):
                 ):
                     _, observation, prediction = latest
                     break
-                self._async_cond.wait(timeout=interval)
+                if (
+                    not horizon_attempted
+                    and chunk_index > 1
+                    and fallback_margin_ns > 0
+                    and self.io.robot_time_ns() >= handoff_ns - fallback_margin_ns
+                ):
+                    horizon_attempted = True
+                    try_horizon = True
+                else:
+                    self._async_cond.wait(timeout=interval)
+            if try_horizon:
+                bridged = self._horizon_fallback(chunk_index, handoff_ns)
+                if bridged is not None:
+                    observation, prediction = bridged
+                    break
 
         self._check_deadline(observation, simulation_deadline)
         return observation, prediction

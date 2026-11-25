@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
+import secrets
 import signal
 import sys
 import time
@@ -71,7 +73,11 @@ def _destroy_ros_resources(
         rclpy.shutdown()
 
 
-def _parse_arguments() -> tuple[argparse.Namespace, list[str]]:
+def _parse_arguments(argv: list[str] | None = None) -> tuple[argparse.Namespace, list[str]]:
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    ros_split = raw_argv.index("--ros-args") if "--ros-args" in raw_argv else len(raw_argv)
+    interactive = "--confirm" in raw_argv[:ros_split]
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project-root", type=Path, default=Path("/app"))
     selection = parser.add_mutually_exclusive_group(required=True)
@@ -93,8 +99,9 @@ def _parse_arguments() -> tuple[argparse.Namespace, list[str]]:
         default=None,
         help="exact final directory for the recorded episode (default: <output>/<episode-id>)",
     )
-    parser.add_argument("--run-id", default=None)
-    parser.add_argument("--episode-id", default=os.environ.get("RUNTIME_EPISODE_ID", ""))
+    if not interactive:
+        parser.add_argument("--run-id", default=None)
+        parser.add_argument("--episode-id", default=os.environ.get("RUNTIME_EPISODE_ID", ""))
     parser.add_argument("--runs-output", type=Path, default=None)
     parser.add_argument("--once", action="store_true")
     parser.add_argument(
@@ -113,7 +120,7 @@ def _parse_arguments() -> tuple[argparse.Namespace, list[str]]:
         dest="reset_seed",
         type=int,
         default=None,
-        help="override the configured scene/reset seed for this runtime process",
+        help="scene/reset seed for this runtime process (default: random)",
     )
     parser.add_argument(
         "--shutdown-timeout",
@@ -121,7 +128,10 @@ def _parse_arguments() -> tuple[argparse.Namespace, list[str]]:
         default=20.0,
         help="bounded seconds to wait for episode cleanup after a signal",
     )
-    args, ros_args = parser.parse_known_args()
+    args, ros_args = parser.parse_known_args(raw_argv)
+    if interactive:
+        args.run_id = None
+        args.episode_id = ""
     if ros_args and ros_args[0] != "--ros-args":
         parser.error(f"unrecognized arguments: {' '.join(ros_args)}")
     if args.robot is not None and args.task is None:
@@ -146,9 +156,13 @@ def _initialization_error(error: BaseException) -> None:
     raise SystemExit(EXIT_RUNTIME_FAILURE) from error
 
 
-def _load_configuration(args: argparse.Namespace, run_id: str):
-    del run_id
+def _random_seed() -> int:
+    return secrets.randbelow(2**31)
+
+
+def _load_configuration(args: argparse.Namespace):
     try:
+        fallback_seed = _random_seed() if args.reset_seed is None else None
         if args.robot is not None:
             if args.config is not None:
                 raise ValueError("--robot/--task and --config are mutually exclusive")
@@ -160,6 +174,8 @@ def _load_configuration(args: argparse.Namespace, run_id: str):
                 project_root=args.project_root,
                 seed=args.reset_seed,
             )
+            if fallback_seed is not None and isinstance(resolved.document.get("reset"), dict):
+                resolved.document["reset"]["seed"] = fallback_seed
             if args.robot_namespace is not None:
                 resolved.document["robot_namespace"] = args.robot_namespace
             return load_runtime_configuration_document(
@@ -176,6 +192,7 @@ def _load_configuration(args: argparse.Namespace, run_id: str):
             args.config,
             args.project_root,
             seed=args.reset_seed,
+            default_seed=fallback_seed,
             policy_endpoint=args.policy_endpoint,
         )
     except Exception as error:
@@ -591,7 +608,8 @@ def _print_configuration_summary(
     print(f"配置: {configuration.configuration_source}", flush=True)
     print(
         f"动作来源: {recipe.action_source} | 命名空间: {recipe.robot_namespace} | "
-        f"终止模式: {getattr(stream, 'termination_mode', '-')}",
+        f"终止模式: {getattr(stream, 'termination_mode', '-')} | "
+        f"seed: {recipe.reset.seed}",
         flush=True,
     )
     print(f"输出目录: {args.output}", flush=True)
@@ -599,18 +617,50 @@ def _print_configuration_summary(
 
 
 def _unique_run_id(output_dir: Path, runs_output: Path, base: str) -> str:
+    def _exists(name: str) -> bool:
+        return (
+            (output_dir / name).exists()
+            or (output_dir / f".partial-{name}").exists()
+            or (runs_output / name).exists()
+        )
+
     candidate = base
-    if (output_dir / candidate).exists() or (runs_output / candidate).exists():
+    if _exists(candidate):
         suffix = 2
-        while (output_dir / f"{base}_{suffix}").exists() or (
-            runs_output / f"{base}_{suffix}"
-        ).exists():
+        while _exists(f"{base}_{suffix}"):
             suffix += 1
         candidate = f"{base}_{suffix}"
     return candidate
 
 
-def _confirm_start(args: argparse.Namespace, run_id: str) -> None:
+def _safe_id_part(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", value.strip()).strip("._-")
+    return cleaned or "unknown"
+
+
+def _interactive_run_id_base(
+    args: argparse.Namespace, configuration: Any, stamp: str | None = None
+) -> str:
+    stamp = stamp or time.strftime("%Y%m%d_%H%M%S")
+    if args.robot is not None and args.task is not None:
+        robot_part = _safe_id_part(args.robot)
+        task_part = _safe_id_part(args.task)
+    else:
+        robot_part = _safe_id_part(configuration.profile.robot_id)
+        recipe = configuration.recipe
+        task_name = (
+            recipe.policy.task_id
+            if recipe.policy is not None
+            else recipe.teacher.task_id
+            if recipe.teacher is not None
+            else ""
+        )
+        task_part = _safe_id_part(task_name or args.config.stem)
+    head = f"client_interactive_{robot_part}_{task_part}"[:80].rstrip("._-")
+    return f"{head}_{stamp}"
+
+
+def _confirm_start(args: argparse.Namespace, configuration: Any, run_id: str) -> None:
     display = (
         f"scenario:{args.robot}/{args.task}/{args.role}"
         if args.robot is not None
@@ -620,10 +670,7 @@ def _confirm_start(args: argparse.Namespace, run_id: str) -> None:
     if args.policy_endpoint:
         print(f"策略服务: {args.policy_endpoint}", flush=True)
     print(f"run_id: {run_id}", flush=True)
-    print(
-        f"seed: {args.reset_seed if args.reset_seed is not None else '<runtime reset.seed>'}",
-        flush=True,
-    )
+    print(f"seed: {configuration.recipe.reset.seed}", flush=True)
     print("输入 y 复原环境并开始本次任务，其他键取消: ", end="", flush=True)
     try:
         answer = input().strip()
@@ -636,6 +683,7 @@ def _confirm_start(args: argparse.Namespace, run_id: str) -> None:
 
 def main() -> None:
     args, ros_args = _parse_arguments()
+    configuration = _load_configuration(args)
     try:
         if args.output is None:
             args.output = recordings_root(args.robot, args.task)
@@ -644,22 +692,31 @@ def main() -> None:
             if args.runs_output is not None
             else runs_root(args.robot, args.task)
         )
-        if args.run_id is None:
-            prefix = "interactive" if args.confirm else (args.role or "policy")
-            run_id = _unique_run_id(
-                args.output, runs_output, f"{prefix}_{time.strftime('%Y%m%d_%H%M%S')}"
+        if args.confirm:
+            run_id = validate_run_id(
+                _unique_run_id(
+                    args.output,
+                    runs_output,
+                    _interactive_run_id_base(args, configuration),
+                )
             )
-        else:
-            run_id = validate_run_id(args.run_id)
-        if args.episode_id:
-            validate_run_id(args.episode_id)
-        elif args.once:
             args.episode_id = run_id
+        else:
+            if args.run_id is None:
+                prefix = args.role or "policy"
+                run_id = _unique_run_id(
+                    args.output, runs_output, f"{prefix}_{time.strftime('%Y%m%d_%H%M%S')}"
+                )
+            else:
+                run_id = validate_run_id(args.run_id)
+            if args.episode_id:
+                validate_run_id(args.episode_id)
+            elif args.once:
+                args.episode_id = run_id
     except ValueError as error:
         raise SystemExit(f"invalid run/episode id: {error}") from error
     if args.confirm:
-        _confirm_start(args, run_id)
-    configuration = _load_configuration(args, run_id)
+        _confirm_start(args, configuration, run_id)
     try:
         session = initialize_run(
             configuration, run_id=run_id, runs_output=runs_output, output=args.output

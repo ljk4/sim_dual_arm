@@ -135,7 +135,7 @@ def test_marvin_binding_declares_learning_and_policy_recipes():
         (SCENARIO / recipes["dataset"]).read_text(encoding="utf-8")
     )
     assert dataset["validation_percent"] == 10
-    assert dataset["expected"] == {"formal_episodes": 50}
+    assert "expected" not in dataset
     assert document["interfaces"]["policy_api"] == "bimanual.policy"
     policy_service = yaml.safe_load(
         (SCENARIO / recipes["policy_service"]).read_text(encoding="utf-8")

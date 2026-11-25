@@ -18,7 +18,7 @@ options:
   --robot <id>          robot id under shared/scenarios/<robot>/<task>/
   --task <id>           task id under shared/scenarios/<robot>/<task>/
   --role <role>         teacher | policy (scenario mode default: teacher)
-  --seed <int>          initial simulation seed (override run.seed)
+  --seed <int>          initial simulation seed (default: random)
   --run-id <id>         backend run id prefix
   --run-root <path>     override backend run root
   --shared-root <path>  override shared scenarios root

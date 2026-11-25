@@ -9,6 +9,7 @@ import json
 import math
 import random
 import re
+import secrets
 import signal
 import subprocess
 import sys
@@ -35,7 +36,9 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument(
         "--count", type=positive_int, default=10, help="number of episodes (default: 10)"
     )
-    result.add_argument("--seed-start", type=int, default=20000, help="first reset seed")
+    result.add_argument(
+        "--seed-start", type=int, default=None, help="first reset seed (default: random)"
+    )
     result.add_argument("--workers", default="auto", help="1..16 or auto (default: auto)")
     result.add_argument("--max-consecutive-failures", type=positive_int, default=None)
     result.add_argument("--project-root", type=Path, default=ROOT)
@@ -251,8 +254,10 @@ def main(argv: list[str] | None = None) -> int:
             cli.error(
                 "one of --robot/--task or --runtime-config/--backend-template is required"
             )
-    if args.seed_start < 0:
-        cli.error("--seed-start must be non-negative")
+    if args.seed_start is None:
+        args.seed_start = secrets.randbelow(max(1, 2**31 - args.count))
+    if args.seed_start < 0 or args.seed_start + args.count - 1 > 2**63 - 1:
+        cli.error("--seed-start must keep episode seeds within [0, 2^63-1]")
     if args.robot and args.task:
         segment = f"{args.robot}/{args.task}"
     else:

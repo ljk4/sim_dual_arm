@@ -61,6 +61,8 @@ def test_business_scripts_still_refuse_host_execution():
     scripts.extend(
         [
             ROOT / "simulation/mujoco/scripts/backend.sh",
+            ROOT / "simulation/mujoco/scripts/inference_backend.sh",
+            ROOT / "simulation/mujoco/scripts/teacher_backend.sh",
             ROOT / "simulation/mujoco/scripts/viewer.sh",
             ROOT / "runtime/ros2/scripts/record.sh",
         ]

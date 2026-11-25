@@ -144,14 +144,15 @@ def make_export(
     return {"attempt_id": episode_id, "seed": seed, "attempt_dir": str(attempt_dir)}
 
 
-def make_select(root: Path, config: DatasetConfig, *, first_frames: int = 61) -> Path:
+def make_select(
+    root: Path, config: DatasetConfig, *, first_frames: int = 61, episodes: int = 50
+) -> Path:
+    _, validation_count = config.split_counts(episodes)
     validation_positions = set(
-        Random(0).sample(
-            range(config.expected_formal_episodes), config.expected_validation_episodes
-        )
+        Random(0).sample(range(episodes), validation_count)
     )
     selected: list[dict[str, Any]] = []
-    for index in range(config.expected_formal_episodes):
+    for index in range(episodes):
         episode_id = f"synthetic-{index:03d}"
         frames = first_frames if index == 0 else 2
         value = 1.01 if index in validation_positions else 0.01
@@ -170,7 +171,7 @@ def make_select(root: Path, config: DatasetConfig, *, first_frames: int = 61) ->
         select,
         {
             "status": "SELECTED",
-            "qualified": config.expected_formal_episodes,
+            "qualified": episodes,
             "selected": selected,
         },
     )

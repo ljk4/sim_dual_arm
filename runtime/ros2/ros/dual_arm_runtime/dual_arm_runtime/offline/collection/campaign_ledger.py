@@ -137,14 +137,7 @@ def finished(records: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return result
 
 
-def seed_range(config: dict[str, Any], purpose: str) -> range:
-    budget = config["budget"]
-    first = int(budget[f"{purpose}_seed_first"])
-    last = int(budget[f"{purpose}_seed_last"])
-    return range(first, last + 1)
-
-
-def used_seeds(records: list[dict[str, Any]], purpose: str) -> set[int]:
+def used_seeds(records: list[dict[str, Any]], purpose: str | None = None) -> set[int]:
     return {
         int(record["seed"])
         for record in attempts(records, purpose)
@@ -152,11 +145,22 @@ def used_seeds(records: list[dict[str, Any]], purpose: str) -> set[int]:
     }
 
 
+def next_seed(config: dict[str, Any], records: list[dict[str, Any]], purpose: str) -> int:
+    first = int(config["budget"][f"{purpose}_seed_first"])
+    if first < 0:
+        raise CampaignError(f"{purpose}_seed_first must be non-negative")
+    used = used_seeds(records)
+    seed = first
+    while seed in used:
+        seed += 1
+    return seed
+
+
 def measure(directory: Path) -> int:
     return sum(path.stat().st_size for path in directory.rglob("*") if path.is_file())
 
 
-def raw_consumed(records: list[dict[str, Any]], estimated: int, root: Path | None = None) -> int:
+def raw_consumed(records: list[dict[str, Any]], root: Path | None = None) -> int:
     terminal = finished(records)
     total = 0
     for record in attempts(records):
@@ -164,8 +168,8 @@ def raw_consumed(records: list[dict[str, Any]], estimated: int, root: Path | Non
         terminal_record = terminal.get(attempt_id)
         directory = Path(str(record.get("attempt_dir", "")))
         if terminal_record is None:
-            total += estimated
-        elif root is not None and directory.is_dir() and directory.is_relative_to(root):
+            continue
+        if root is not None and directory.is_dir() and directory.is_relative_to(root):
             total += measure(directory)
         else:
             total += int(terminal_record.get("raw_bytes", 0))
@@ -199,46 +203,25 @@ def allocate(
     requested_seed: int | None,
     root: Path,
 ) -> tuple[int, str]:
+    del root
     if purpose not in PURPOSES:
         raise CampaignError(f"unsupported campaign purpose: {purpose!r}")
     if kind != "rollout":
         raise CampaignError(f"unsupported attempt kind: {kind!r}")
     if mode != "teacher":
         raise CampaignError(f"{purpose} data must come from teacher rollouts, not {mode!r}")
-    budget = config["budget"]
-    reserved = attempts(records, purpose)
-    terminal = finished(records)
-    if purpose == "formal":
-        qualified = sum(
-            1
-            for record in reserved
-            if (terminal.get(str(record["attempt_id"])) or {}).get("qualified")
-        )
-        if qualified >= int(budget["formal_target_qualified"]):
-            raise CampaignError("formal qualified target is already met")
-    raw_limit = int(budget["max_raw_bytes"])
-    consumed = raw_consumed(records, int(budget["estimated_attempt_bytes"]), root)
-    if consumed + int(budget["estimated_attempt_bytes"]) + int(budget["reserve_bytes"]) > raw_limit:
+    seed = next_seed(config, records, purpose)
+    if requested_seed is not None and requested_seed != seed:
         raise CampaignError(
-            f"raw-byte budget would be exceeded: consumed {consumed}, limit {raw_limit}"
+            f"explicit rollout seed {requested_seed} would skip the next seed {seed}"
         )
-    maximum = int(budget[f"{purpose}_max_attempts"])
-    if len(reserved) >= maximum:
-        raise CampaignError(f"{purpose} attempt budget is exhausted")
-    used = used_seeds(records, purpose)
-    for seed in seed_range(config, purpose):
-        if seed not in used:
-            if requested_seed is not None and requested_seed != seed:
-                raise CampaignError(
-                    f"explicit rollout seed {requested_seed} would skip the next seed {seed}"
-                )
-            return seed, mode
-    raise CampaignError(f"no unused {purpose} seed remains")
+    return seed, mode
 
 
 def summarize(
     records: list[dict[str, Any]], config: dict[str, Any], root: Path | None = None
 ) -> dict[str, Any]:
+    del config
     terminal = finished(records)
     summary: dict[str, Any] = {"purposes": {}, "raw_bytes": 0, "ledger_records": len(records)}
     for purpose in sorted(PURPOSES):
@@ -251,10 +234,7 @@ def summarize(
             "running_or_crashed": sum(1 for item in terminal_records if item is None),
             "qualified": qualified,
         }
-    summary["raw_bytes"] = raw_consumed(
-        records, int(config["budget"]["estimated_attempt_bytes"]), root
-    )
-    summary["raw_limit_bytes"] = int(config["budget"]["max_raw_bytes"])
+    summary["raw_bytes"] = raw_consumed(records, root)
     return summary
 
 
@@ -272,11 +252,11 @@ __all__ = [
     "finished",
     "load",
     "measure",
+    "next_seed",
     "now_ns",
     "raw_consumed",
     "read_records",
     "safe_component",
-    "seed_range",
     "summarize",
     "used_seeds",
 ]

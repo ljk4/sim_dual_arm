@@ -63,21 +63,18 @@ def _manifest_splits(
     expected = manifest.get("expected")
     if not isinstance(expected, dict):
         raise TrainingError("manifest.expected must be an object")
-    recorded_counts = tuple(
-        expected.get(key)
-        for key in ("formal_episodes", "training_episodes", "validation_episodes")
-    )
-    configured_counts = (
-        config.dataset.expected_formal_episodes,
-        config.dataset.expected_training_episodes,
-        config.dataset.expected_validation_episodes,
-    )
+    expected_formal = expected.get("formal_episodes")
+    if type(expected_formal) is not int or expected_formal < 2:
+        raise TrainingError("manifest.expected.formal_episodes must be an integer >= 2")
+    if expected.get("validation_percent") != config.dataset.validation_percent:
+        raise TrainingError("manifest.expected.validation_percent does not match the dataset recipe")
+    expected_training, expected_validation = config.dataset.split_counts(expected_formal)
+    recorded_split = (expected.get("training_episodes"), expected.get("validation_episodes"))
     if (
-        any(type(count) is not int for count in recorded_counts)
-        or recorded_counts != configured_counts
+        any(type(count) is not int for count in recorded_split)
+        or recorded_split != (expected_training, expected_validation)
     ):
         raise TrainingError("manifest.expected episode counts do not match the dataset recipe")
-    expected_formal, expected_training, expected_validation = configured_counts
     if training.get("episode_count") != expected_training:
         raise TrainingError(
             f"training split does not contain exactly {expected_training} episodes"

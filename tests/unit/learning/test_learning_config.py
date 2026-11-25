@@ -15,7 +15,7 @@ def test_real_learning_configs_load():
     assert dataset.camera_names == ("global", "left_wrist", "right_wrist")
     assert dataset.chunk_size == 60
     assert dataset.validation_percent == 10
-    assert (dataset.expected_training_episodes, dataset.expected_validation_episodes) == (45, 5)
+    assert dataset.split_counts(50) == (45, 5)
     assert training.mode == "smoke"
     assert training.modes["smoke"].steps == 128
     assert training.modes["overfit"].steps == 500
@@ -105,14 +105,15 @@ def test_shard_sizes_are_not_recipe_parameters(tmp_path, key):
 
 
 @pytest.mark.parametrize(
-    "split_key", ["training_episodes", "validation_episodes", "validation_positions"]
+    "split_key",
+    ["formal_episodes", "training_episodes", "validation_episodes", "validation_positions"],
 )
 def test_split_rejects_counts_and_positions_in_recipe(tmp_path, split_key):
     document = yaml.safe_load((SCENARIO / "configs/learning/act_dataset.yaml").read_text())
-    document["expected"][split_key] = 1
+    document["expected"] = {split_key: 1}
     bad = tmp_path / "bad-dataset.yaml"
     bad.write_text(yaml.safe_dump(document))
-    with pytest.raises(ConfigError, match=rf"expected\.{split_key}"):
+    with pytest.raises(ConfigError, match="expected: Extra inputs are not permitted"):
         load_dataset_config(bad, ROOT)
 
 
@@ -135,28 +136,35 @@ def test_validation_percent_requires_number_between_zero_and_hundred(tmp_path, p
         (50, 99.9, 49),
         (2, 10, 1),
         (4, 62.5, 3),
+        (60, 10, 6),
     ],
 )
 def test_split_rounds_half_up_and_keeps_both_groups_non_empty(
     tmp_path, count, percent, expected_validation
 ):
     document = yaml.safe_load((SCENARIO / "configs/learning/act_dataset.yaml").read_text())
-    document["expected"]["formal_episodes"] = count
     document["validation_percent"] = percent
     path = tmp_path / "dataset.yaml"
     path.write_text(yaml.safe_dump(document))
     config = load_dataset_config(path, ROOT)
     assert config.validation_percent == percent
-    assert config.expected_validation_episodes == expected_validation
-    assert config.expected_training_episodes == count - expected_validation
+    train_count, val_count = config.split_counts(count)
+    assert val_count == expected_validation
+    assert train_count == count - expected_validation
 
 
-def test_split_requires_at_least_two_episodes(tmp_path):
+def test_split_requires_at_least_two_episodes():
+    config = load_dataset_config(SCENARIO / "configs/learning/act_dataset.yaml", ROOT)
+    with pytest.raises(ValueError, match="at least 2 episodes"):
+        config.split_counts(1)
+
+
+def test_dataset_recipe_rejects_removed_expected_field(tmp_path):
     document = yaml.safe_load((SCENARIO / "configs/learning/act_dataset.yaml").read_text())
-    document["expected"]["formal_episodes"] = 1
+    document["expected"] = {"formal_episodes": 50}
     path = tmp_path / "dataset.yaml"
     path.write_text(yaml.safe_dump(document))
-    with pytest.raises(ConfigError, match="formal_episodes"):
+    with pytest.raises(ConfigError, match="expected: Extra inputs are not permitted"):
         load_dataset_config(path, ROOT)
 
 

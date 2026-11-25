@@ -92,9 +92,7 @@ def _summary(root):
 
 
 def test_workers_overlap_and_share_sequential_seeds_without_overshooting(pool):
-    root, config, _, run = pool
-    config["budget"]["formal_target_qualified"] = 2
-    (root / "campaign.yaml").write_text(yaml.safe_dump(config))
+    root, _, _, run = pool
     assert run([["qualified", 0.3]] * 3, "--count", "2") == 0
     records = _records(root)
     reserved = [item for item in records if item["event"] == "RESERVED"]
@@ -145,23 +143,14 @@ def test_failure_threshold_cancels_running_attempt_and_preserves_reservation(poo
             os.kill(json.loads(path.read_text())["pid"], 0)
 
 
-def test_budget_exhaustion_drains_already_reserved_attempts(pool):
+def test_disk_free_guard_stops_new_launches_and_drains_inflight(pool):
     root, config, _, run = pool
-    config["budget"]["formal_max_attempts"] = 2
+    config["budget"]["min_free_bytes"] = 10**18
     (root / "campaign.yaml").write_text(yaml.safe_dump(config))
     assert run([["failed", 0.1], ["qualified", 0.4]], "--count", "3") == 2
     summary = _summary(root)
-    assert summary["reason"] == "campaign_stopped"
-    assert summary["qualified"] == 1 and summary["attempted"] == 2
-    assert summary["cancelled"] == 0
-
-
-def test_global_qualified_target_includes_inflight_slots(pool):
-    root, config, _, run = pool
-    config["budget"]["formal_target_qualified"] = 1
-    (root / "campaign.yaml").write_text(yaml.safe_dump(config))
-    assert run([["qualified", 0.1]] * 2, "--count", "2") == 2
-    assert _summary(root)["qualified"] == _summary(root)["attempted"] == 1
+    assert summary["reason"] == "disk_full"
+    assert summary["attempted"] == 0
 
 
 def test_interrupt_cancels_other_workers(pool):
@@ -229,11 +218,15 @@ def test_total_target_already_reached_reserves_nothing(pool):
     assert len([item for item in _records(root) if item["event"] == "RESERVED"]) == 2
 
 
-def test_total_target_respects_campaign_cap_before_reserving(pool):
+def test_total_target_is_not_capped_by_campaign_recipe(pool):
     root, _, _, run = pool
-    assert run([], "--target-total", "6") == 2
-    assert not (root / "out/attempts.jsonl").exists()
-    assert not (root / "out/.run.lock").exists()
+    _existing_qualified(root, 4)
+    assert run([["qualified", 0.1]] * 6, "--target-total", "6") == 0
+    summary = _summary(root)
+    assert summary["requested"] == summary["qualified"] == summary["attempted"] == 2
+    assert summary["target_total"] == summary["campaign_qualified"] == 6
+    document = json.loads(Path(summary["formal_select"]).read_text())
+    assert document["qualified"] == 6
 
 
 def test_formal_total_target_excludes_pilot_trial(pool):

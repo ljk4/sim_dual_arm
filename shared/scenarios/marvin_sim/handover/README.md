@@ -111,7 +111,7 @@ scripts/backend.sh --robot marvin_sim --task handover --role policy \
 
 # runtime 容器：交互式一局或非交互式单局
 scripts/client_interactive.sh --robot marvin_sim --task handover \
-  --seed 5100 --run-id policy-interactive
+  --seed 5100
 scripts/client_policy.sh --robot marvin_sim --task handover \
   --reset-seed 5100 --run-id policy-run
 

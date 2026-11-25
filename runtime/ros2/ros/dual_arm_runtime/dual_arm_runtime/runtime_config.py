@@ -343,6 +343,7 @@ def load_runtime_configuration(
     project_root: Path,
     *,
     seed: int | None = None,
+    default_seed: int | None = None,
     policy_endpoint: str | None = None,
 ) -> RuntimeConfiguration:
     path = project_path(config_path, project_root).resolve()
@@ -352,6 +353,10 @@ def load_runtime_configuration(
         if not isinstance(reset, dict):
             raise _error(f"{path}.reset", "field is required")
         reset["seed"] = seed
+    elif default_seed is not None:
+        reset = document.get("reset")
+        if isinstance(reset, dict):
+            reset["seed"] = default_seed
     return load_runtime_configuration_document(
         document,
         source=str(path),

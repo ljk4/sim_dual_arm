@@ -84,7 +84,7 @@ scripts/backend.sh --robot <robot> --task <task> --role policy \
 scripts/build_sdk.sh
 scripts/record.sh --robot <robot> --task <task> \
   --purpose pilot --count 1 --max-consecutive-failures 1
-scripts/client_interactive.sh --robot <robot> --task <task> --seed 0 --run-id policy-interactive
+scripts/client_interactive.sh --robot <robot> --task <task> --seed 0
 scripts/client_policy.sh --robot <robot> --task <task> \
   --reset-seed 0 --run-id policy-run
 

@@ -82,32 +82,19 @@ def test_cleanup_honors_controller_stop_grace_before_stopping_backend(
     docker.controller.terminate.assert_not_called()
 
 
-@pytest.mark.parametrize("current,remaining", [(0, 50), (17, 33), (50, 0)])
-def test_target_total_counts_existing_formal_data(tmp_path, current, remaining):
+@pytest.mark.parametrize("current,target,remaining", [(0, 50, 50), (17, 50, 33), (50, 50, 0), (50, 60, 10)])
+def test_target_total_counts_existing_formal_data(tmp_path, current, target, remaining):
     args = SimpleNamespace(
-        target_total=50,
+        target_total=target,
         purpose="formal",
         config="campaign.yaml",
         count=None,
     )
     docker = record_parallel.DockerWorkers(args, tmp_path)
-    status = {"formal_target_qualified": 50, "purposes": {"formal": {"qualified": current}}}
+    status = {"purposes": {"formal": {"qualified": current}}}
 
     assert docker.resolve_target({"campaign_status": status}) is (remaining == 0)
     assert args.count == remaining
-
-
-def test_target_total_cannot_exceed_formal_campaign_target(tmp_path):
-    args = SimpleNamespace(
-        target_total=51,
-        purpose="formal",
-        config="campaign.yaml",
-        count=None,
-    )
-    docker = record_parallel.DockerWorkers(args, tmp_path)
-    status = {"formal_target_qualified": 50, "purposes": {"formal": {"qualified": 0}}}
-    with pytest.raises(RuntimeError, match="exceeds"):
-        docker.resolve_target({"campaign_status": status})
 
 
 def test_already_reached_target_does_not_start_simulation_workers(tmp_path, monkeypatch):
@@ -344,3 +331,70 @@ def test_pool_and_inference_progress_include_eta_and_timestamp(tmp_path, capsys)
     pool._render_progress(force=True)
     out = capsys.readouterr().out
     assert "用时 00:00:12 | 剩余 00:00:00" in out
+
+
+def test_inference_parallel_defaults_to_random_seed_start(tmp_path, monkeypatch):
+    from host import inference_parallel
+
+    parsed = inference_parallel.parser().parse_args(
+        ["--robot", "marvin_sim", "--task", "stack"]
+    )
+    assert parsed.seed_start is None
+
+    seen_seed_starts: list[int] = []
+    monkeypatch.setattr(inference_parallel.secrets, "randbelow", lambda upper: 987654)
+
+    class _FakeInferenceDocker:
+        def __init__(self, args, directory, batch_id):
+            seen_seed_starts.append(args.seed_start)
+
+        def preflight(self):
+            return {"selection": {"mode": "scenario", "robot": "marvin_sim", "task": "stack"}}
+
+        def prepare(self, plan):
+            return [{"id": "worker-01"}]
+
+        def wait_ready(self, workers):
+            pass
+
+        def start_backend(self, worker):
+            pass
+
+        def run(self):
+            return 0
+
+        def cleanup(self):
+            pass
+
+    monkeypatch.setattr(inference_parallel, "DockerWorkers", _FakeInferenceDocker)
+    assert (
+        inference_parallel.main(
+            [
+                "--project-root",
+                str(tmp_path),
+                "--robot",
+                "marvin_sim",
+                "--task",
+                "stack",
+                "--workers",
+                "1",
+            ]
+        )
+        == 0
+    )
+    assert seen_seed_starts == [987654]
+
+    with pytest.raises(SystemExit) as error:
+        inference_parallel.main(
+            [
+                "--project-root",
+                str(tmp_path),
+                "--robot",
+                "marvin_sim",
+                "--task",
+                "stack",
+                "--seed-start",
+                "-1",
+            ]
+        )
+    assert error.value.code == 2

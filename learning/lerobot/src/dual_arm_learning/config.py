@@ -192,9 +192,6 @@ class DatasetConfig(StrictMappingModel):
     verify_png_pixels: bool
     require_quality: bool
     validation_percent: Annotated[StrictFloat, Field(gt=0.0, lt=100.0)]
-    expected_formal_episodes: Annotated[int, Field(strict=True, ge=2, le=9999)] = Field(
-        validation_alias=AliasPath("expected", "formal_episodes")
-    )
     lerobot_source_revision: NonEmptyStr = Field(
         validation_alias=AliasPath("lerobot", "source_revision")
     )
@@ -233,16 +230,13 @@ class DatasetConfig(StrictMappingModel):
         dataset_after(self)
         return self
 
-    @property
-    def expected_validation_episodes(self) -> int:
-        count = self.expected_formal_episodes
-        requested = Decimal(str(self.validation_percent)) * count / 100
+    def split_counts(self, total_episodes: int) -> tuple[int, int]:
+        if isinstance(total_episodes, bool) or not isinstance(total_episodes, int) or total_episodes < 2:
+            raise ValueError("at least 2 episodes are required to split training and validation")
+        requested = Decimal(str(self.validation_percent)) * total_episodes / 100
         rounded = int(requested.to_integral_value(rounding=ROUND_HALF_UP))
-        return min(count - 1, max(1, rounded))
-
-    @property
-    def expected_training_episodes(self) -> int:
-        return self.expected_formal_episodes - self.expected_validation_episodes
+        validation = min(total_episodes - 1, max(1, rounded))
+        return total_episodes - validation, validation
 
     rgb_encoder = property(
         lambda self: RGBEncoderSpec(
@@ -341,7 +335,6 @@ def dataset_before(data: object) -> object:
     for name in ("profile", "select", "output_root", "cache_root"):
         if name in data and not isinstance(data[name], Path):
             data[name] = project_path(data[name], root)
-    unknown(data.get("expected"), {"formal_episodes"}, "expected")
     lerobot = data.get("lerobot")
     unknown(
         lerobot,

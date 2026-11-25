@@ -40,8 +40,9 @@ def _resolve_episodes(
     progress: ConsoleProgress | None = None,
 ) -> tuple[list[SourceEpisode], list[SourceEpisode]]:
     entries = _select_entries(select, config)
+    _train_count, validation_count = config.split_counts(len(entries))
     validation_slots = set(
-        random.Random(0).sample(range(len(entries)), config.expected_validation_episodes)
+        random.Random(0).sample(range(len(entries)), validation_count)
     )
     train_eps: list[SourceEpisode] = []
     validation_eps: list[SourceEpisode] = []

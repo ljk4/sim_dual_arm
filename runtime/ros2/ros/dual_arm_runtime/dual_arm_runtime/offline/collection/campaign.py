@@ -97,12 +97,7 @@ def _reserve(
             episode_id=episode_id,
             directory=directory,
             config=args.runtime_config,
-            budget={
-                "max_raw_bytes": int(config["budget"]["max_raw_bytes"]),
-                "estimated_attempt_bytes": int(config["budget"]["estimated_attempt_bytes"]),
-                "reserve_bytes": int(config["budget"]["reserve_bytes"]),
-                "purpose_attempt_limit": int(config["budget"][f"{args.purpose}_max_attempts"]),
-            },
+            budget={"min_free_bytes": int(config["budget"]["min_free_bytes"])},
             reserved_at_ns=_now_ns(),
         )
         directory.mkdir(parents=True, exist_ok=False)
@@ -296,7 +291,6 @@ def command_status(args: argparse.Namespace) -> int:
     )
     output = (project_path(str(config["paths"]["attempts_root"]), project_root)).resolve()
     summary = _summarize(ledger.records(), config, output)
-    summary["formal_target_qualified"] = int(config["budget"]["formal_target_qualified"])
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0
 
@@ -321,16 +315,13 @@ def _formal_selection(
                     "raw_bytes": terminal_record.get("raw_bytes", 0),
                 }
             )
-    target = int(config["budget"]["formal_target_qualified"])
-    selected = ordered[:target]
     return {
         "campaign": config_name,
         "diagnostic": bool(config.get("diagnostic", False)),
-        "target": target,
-        "rule": f"first {target} qualified formal attempts in reservation order",
-        "status": "SELECTED" if len(selected) >= target else "INSUFFICIENT_QUALIFIED",
-        "qualified": len(selected),
-        "selected": selected,
+        "rule": "all qualified formal attempts in reservation order",
+        "status": "SELECTED" if ordered else "INSUFFICIENT_QUALIFIED",
+        "qualified": len(ordered),
+        "selected": ordered,
     }
 
 

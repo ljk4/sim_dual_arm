@@ -34,22 +34,7 @@ def campaign_document(repo: Path, recipe_paths: list[Path]) -> dict[str, Any]:
     return {
         "budget": {
             "pilot_seed_first": 1000,
-            "pilot_seed_last": 1009,
-            "pilot_max_attempts": 10,
-            "pilot_act_reserved_attempts": 2,
-            "pilot_teacher_seed_last": 1007,
-            "pilot_label_replay_max": 2,
             "formal_seed_first": 10000,
-            "formal_seed_last": 10099,
-            "formal_max_attempts": 100,
-            "formal_target_qualified": 50,
-            "test_seed_first": 20000,
-            "test_seed_last": 20019,
-            "test_max_attempts": 20,
-            "evaluation_max_attempts": 20,
-            "max_raw_bytes": 100_000_000,
-            "reserve_bytes": 1_000,
-            "estimated_attempt_bytes": 1_000,
             "min_free_bytes": 0,
         },
         "paths": {

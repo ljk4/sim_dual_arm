@@ -18,7 +18,7 @@ def _write(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
 
 
-def _manifest(config: TrainingConfig, root: Path) -> dict:
+def _manifest(config: TrainingConfig, root: Path, *, episodes: int = 50) -> dict:
     profile = json.loads(config.dataset.profile_path.read_text())
     semantic = hashlib.sha256(
         json.dumps(profile, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
@@ -47,20 +47,21 @@ def _manifest(config: TrainingConfig, root: Path) -> dict:
         }
 
     # Use a valid stored split independent of the converter's random draw.
-    validation_positions = list(range(1, config.dataset.expected_validation_episodes + 1))
+    _, expected_val = config.dataset.split_counts(episodes)
+    validation_positions = list(range(1, expected_val + 1))
     training_episodes = [
         episode(index)
-        for index in range(config.dataset.expected_formal_episodes)
+        for index in range(episodes)
         if index not in validation_positions
     ]
     validation_episodes = [episode(index) for index in validation_positions]
-    for split, episodes in (("train", training_episodes), ("validation", validation_episodes)):
+    for split, split_episodes in (("train", training_episodes), ("validation", validation_episodes)):
         split_root = root / split
         _write(
             split_root / "meta/info.json",
             {
-                "total_episodes": len(episodes),
-                "total_frames": len(episodes) * 60,
+                "total_episodes": len(split_episodes),
+                "total_frames": len(split_episodes) * 60,
                 "features": features,
             },
         )
@@ -69,7 +70,7 @@ def _manifest(config: TrainingConfig, root: Path) -> dict:
         "status": "complete",
         "synthetic": False,
         "expected": {
-            "formal_episodes": config.dataset.expected_formal_episodes,
+            "formal_episodes": episodes,
             "training_episodes": len(training_episodes),
             "validation_episodes": len(validation_episodes),
             "validation_positions": validation_positions,
@@ -150,13 +151,12 @@ def test_full_refuses_short_episode_and_synthetic_data(tmp_path):
         verify_dataset_manifest(config, allow_synthetic=True, require_full=True)
 
 
-def test_small_manifest_requires_matching_dataset_recipe(tmp_path):
+def test_variable_manifest_counts_validate_against_dataset_percent(tmp_path):
     dataset_document = yaml.safe_load(
         (SCENARIO / "configs/learning/act_dataset.yaml").read_text()
     )
-    dataset_document["expected"] = {"formal_episodes": 2}
     dataset_document["validation_percent"] = 50
-    dataset_path = tmp_path / "small_dataset.yaml"
+    dataset_path = tmp_path / "half_split_dataset.yaml"
     dataset_path.write_text(yaml.safe_dump(dataset_document))
 
     training_document = yaml.safe_load(
@@ -164,12 +164,12 @@ def test_small_manifest_requires_matching_dataset_recipe(tmp_path):
     )
     training_document["data"]["config"] = str(dataset_path)
     training_document["mode"] = "smoke"
-    training_path = tmp_path / "small_training.yaml"
+    training_path = tmp_path / "half_split_training.yaml"
     training_path.write_text(yaml.safe_dump(training_document))
 
     config = load_training_config(training_path, ROOT)
     config = replace(config, data_root=tmp_path)
-    _write(tmp_path / "manifest.json", _manifest(config, tmp_path))
+    _write(tmp_path / "manifest.json", _manifest(config, tmp_path, episodes=2))
     audit = verify_dataset_manifest(config, allow_synthetic=False, require_full=False)
     assert audit.training_global_indices == (0,)
     assert audit.validation_global_indices == (1,)
@@ -178,10 +178,18 @@ def test_small_manifest_requires_matching_dataset_recipe(tmp_path):
 
     standard = load_training_config(SCENARIO / "configs/learning/act_training.yaml", ROOT)
     standard = replace(standard, data_root=tmp_path, mode="smoke")
-    with pytest.raises(TrainingError, match="episode counts do not match"):
+    with pytest.raises(TrainingError, match="validation_percent"):
         verify_dataset_manifest(standard, allow_synthetic=False, require_full=False)
 
-    manifest = _manifest(config, tmp_path)
+    manifest_60 = tmp_path / "sixty"
+    manifest_60.mkdir()
+    standard_60 = replace(standard, data_root=manifest_60)
+    _write(manifest_60 / "manifest.json", _manifest(standard_60, manifest_60, episodes=60))
+    audit_60 = verify_dataset_manifest(standard_60, allow_synthetic=False, require_full=False)
+    assert len(audit_60.train_episodes) == 54
+    assert len(audit_60.validation_global_indices) == 6
+
+    manifest = _manifest(config, tmp_path, episodes=2)
     manifest["splits"]["validation"]["episodes"] = []
     manifest["splits"]["validation"]["episode_count"] = 0
     _write(tmp_path / "manifest.json", manifest)

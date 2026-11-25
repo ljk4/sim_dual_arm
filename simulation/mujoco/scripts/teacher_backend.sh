@@ -8,4 +8,4 @@ for arg in "$@"; do
     exec "$ROOT/scripts/backend.sh" --help
   fi
 done
-exec "$ROOT/scripts/backend.sh" --role teacher --seed 0 --run-id teacher-backend "$@"
+exec "$ROOT/scripts/backend.sh" --role teacher --run-id teacher-backend "$@"

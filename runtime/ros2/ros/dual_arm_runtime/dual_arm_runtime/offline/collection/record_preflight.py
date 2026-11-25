@@ -60,9 +60,7 @@ def _campaign_status(project_root: Path, config: dict[str, Any]) -> dict[str, An
     paths = config["paths"]
     output = (project_path(str(paths["attempts_root"]), project_root)).resolve()
     records = read_records(project_path(str(paths["ledger"]), project_root))
-    summary = summarize(records, config, output)
-    summary["formal_target_qualified"] = int(config["budget"]["formal_target_qualified"])
-    return summary
+    return summarize(records, config, output)
 
 
 def build_plan(args: argparse.Namespace) -> dict[str, Any]:
@@ -126,9 +124,8 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
     attempts_root = (project_path(str(paths["attempts_root"]), project_root)).resolve()
     check_environment(project_root, config, attempts_root)
     status = _campaign_status(project_root, config)
-    if args.target_total is not None:
-        if args.purpose == "formal" and args.target_total > int(status["formal_target_qualified"]):
-            raise CampaignError("target total exceeds the campaign formal qualified target")
+    if args.target_total is not None and args.target_total < 1:
+        raise CampaignError("--target-total must be positive")
     plan: dict[str, Any] = {
         "selection": selection,
         "campaign_config": str(campaign_path),

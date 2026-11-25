@@ -134,13 +134,7 @@ class RecordingPool:
         )
 
     def available_slots(self) -> int:
-        remaining = self.args.count - self.qualified
-        if self.args.purpose == "formal":
-            remaining = min(
-                remaining,
-                int(self.config["budget"]["formal_target_qualified"]) - self.campaign_qualified(),
-            )
-        return max(0, remaining - len(self.active))
+        return max(0, self.args.count - self.qualified - len(self.active))
 
     def launch(self, worker: dict[str, Any]) -> None:
         from dual_arm_runtime.offline.collection.record import _collector_command
@@ -446,10 +440,6 @@ def record_parallel(args: argparse.Namespace, config: dict[str, Any]) -> int:
     try:
         pool = RecordingPool(args, config, ledger, workers, selection)
         if args.target_total is not None:
-            if args.purpose == "formal" and args.target_total > int(
-                config["budget"]["formal_target_qualified"]
-            ):
-                raise CampaignError("target total exceeds the campaign formal qualified target")
             args.count = max(0, args.target_total - pool.campaign_qualified())
         return pool.run()
     finally:

@@ -22,12 +22,12 @@ def config(tmp_path):
 
 @pytest.mark.parametrize(
     ("count", "percent", "validation_positions"),
-    [(50, 10, [2, 16, 24, 26, 48]), (50, 6, [24, 26, 48]), (2, 10, [1])],
+    [(50, 10, [2, 16, 24, 26, 48]), (60, 10, [14, 16, 24, 30, 32, 38]), (50, 6, [24, 26, 48]), (2, 10, [1])],
 )
 def test_ordered_selection_is_partitioned_by_recipe(
     config, tmp_path, monkeypatch, count, percent, validation_positions
 ):
-    config = replace(config, expected_formal_episodes=count, validation_percent=percent)
+    config = replace(config, validation_percent=percent)
     entries = [
         {"attempt_id": f"episode-{seed}", "seed": seed, "attempt_dir": str(tmp_path / str(seed))}
         for seed in range(count, 0, -1)
@@ -45,21 +45,22 @@ def test_ordered_selection_is_partitioned_by_recipe(
     assert visited == [entry["attempt_id"] for entry in entries]
     assert dataset_mod._resolve_episodes(selection, config, "profile") == (train, validation)
     assert random.getstate() == global_rng_state
-    assert len(train) == config.expected_training_episodes
-    assert [episode.global_index for episode in validation] == validation_positions
-    assert [episode.seed for episode in validation] == [
-        count - index for index in validation_positions
-    ]
+    expected_train, expected_val = config.split_counts(count)
+    assert len(train) == expected_train
+    assert len(validation) == expected_val
+    if count != 60:
+        assert [episode.global_index for episode in validation] == validation_positions
+    assert len(validation) == len({episode.global_index for episode in validation})
+    validation_indices = {episode.global_index for episode in validation}
     assert [episode.global_index for episode in train] == [
-        index for index in range(count) if index not in validation_positions
+        index for index in range(count) if index not in validation_indices
     ]
 
 
 @pytest.mark.parametrize("count", [2, 50])
 def test_selection_requires_complete_unpartitioned_unique_entries(config, count):
-    config = replace(config, expected_formal_episodes=count)
     selection = {"status": "SELECTED", "qualified": count}
-    with pytest.raises(ExportError, match=rf"select\.qualified: expected {count}, got 1"):
+    with pytest.raises(ExportError, match=r"select\.qualified: expected at least 2 episodes, got 1"):
         dataset_mod._select_entries({**selection, "qualified": 1, "selected": []}, config)
     with pytest.raises(ExportError, match=r"select\.selected: expected an array"):
         dataset_mod._select_entries({**selection, "training": [], "validation": []}, config)

@@ -295,9 +295,9 @@ def _manifest_body(
             "rule": select.get("rule", ""),
         },
         "expected": {
-            "formal_episodes": config.expected_formal_episodes,
-            "training_episodes": config.expected_training_episodes,
-            "validation_episodes": config.expected_validation_episodes,
+            "formal_episodes": len(train_eps) + len(validation_eps),
+            "training_episodes": len(train_eps),
+            "validation_episodes": len(validation_eps),
             "validation_percent": config.validation_percent,
             "validation_positions": [episode.global_index for episode in validation_eps],
         },

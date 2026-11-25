@@ -1109,3 +1109,188 @@ def test_latency_matching_discards_inference_and_execution_latency_steps(tmp_pat
     assert lm_events[0]["fields"]["inference_skipped_steps"] == 5
     assert lm_events[0]["fields"]["execution_skipped_steps"] == 2
     assert lm_events[0]["fields"]["total_skipped_steps"] == 7
+
+
+def test_async_inference_bridges_from_cached_horizon_when_first_chunk_rpc_stalls(tmp_path):
+    value = yaml.safe_load(POLICY_CONFIG.read_text(encoding="utf-8"))
+    for field in (
+        "robot_profile",
+        "observation_schema",
+        "action_schema",
+        "control_constraints",
+    ):
+        value[field] = str((POLICY_CONFIG.parent / value[field]).resolve())
+    value["follower_config"] = str(
+        MARVIN_SHARED_PROFILES / "control/marvin_follower_inference.yaml"
+    )
+    value["policy"]["startup_settle_sim_ns"] = 0
+    value["policy"]["async_inference"] = True
+    value["policy"]["prefetch_lead_ns"] = 200_000_000
+    value["policy"]["max_chunks"] = 2
+    path = tmp_path / "policy_horizon_fallback.yaml"
+    path.write_text(yaml.safe_dump(value), encoding="utf-8")
+    configuration = load_runtime_configuration(path, ROOT)
+    profile = configuration.profile
+    base0 = profile.joints[0].initial
+
+    chunk2_rpc_entered = threading.Event()
+    release_chunk2_rpc = threading.Event()
+
+    class _AdvancingIO(_IO):
+        def robot_time_ns(self):
+            # Advance backend sim clock past chunk 2 fallback cutoff (2.25s - 0.10s = 2.15s)
+            # once chunk 2's speculative RPC stalls.
+            return 2_160_000_000 if chunk2_rpc_entered.is_set() else 1_000_000_000
+
+    class _OneSecControl(_Control):
+        def get_anchor(self, context, start_backend_time_ns=None):
+            self.anchors += 1
+            start = 1_250_000_000 + (self.anchors - 1) * 1_000_000_000
+            return ChunkAnchor(
+                "stream-1",
+                self.anchors - 1,
+                start,
+                ReferenceSample(
+                    tuple(joint.initial for joint in self.profile.joints),
+                    (0.0,) * 16,
+                    (0.0,) * 16,
+                ),
+                self.profile.digest,
+            )
+
+    class _StallingFirstChunk2Client(_Client):
+        def predict(self, context, session_id, request_id, observation, deadline_s=None):
+            if observation.observation_id > 1:
+                chunk2_rpc_entered.set()
+                release_chunk2_rpc.wait(timeout=2.0)
+            times = tuple((index + 1) * 50_000_000 for index in range(60))
+            positions = []
+            for time_ns in times:
+                t_abs = observation.reference_robot_time_ns + time_ns
+                row = list(observation.positions)
+                if t_abs >= 2_300_000_000:
+                    step = min(1.0, (t_abs - 2_250_000_000) / 1_000_000_000)
+                    row[0] = base0 + 0.08 * step
+                positions.append(tuple(row))
+            return PolicyPrediction(
+                session_id,
+                request_id,
+                context,
+                observation.observation_id,
+                MODEL_DIGEST,
+                self.profile.joint_names,
+                times,
+                tuple(positions),
+                1_000,
+            )
+
+    io = _AdvancingIO(profile)
+    log = _Log()
+    context = RunContext("marvin_stack", profile.digest, "backend", "sim", 1, "episode", 1)
+    io.context = context
+    runner = PolicyStreamRunner(
+        configuration,
+        context,
+        "episode",
+        "task",
+        io,
+        _OneSecControl(profile),
+        _StallingFirstChunk2Client(configuration.recipe.policy, profile),
+        follower_limits(configuration, [1.0] * 16),
+        stop_requested=threading.Event(),
+        log=log,
+        clock=lambda: 0.0,
+    )
+    try:
+        runner.run()
+    finally:
+        release_chunk2_rpc.set()
+
+    assert runner.chunks == 2
+    assert chunk2_rpc_entered.is_set()
+    chunk2_cmd = io.commands[1]
+    assert chunk2_cmd.trajectory.observation_id > 1
+    chunk2_selected = chunk2_cmd.window.selected_source_targets
+    assert chunk2_cmd.observation_time_ns + chunk2_selected[0].time_ns == 2_300_000_000
+    assert chunk2_cmd.observation_time_ns + chunk2_selected[-1].time_ns == 3_250_000_000
+    assert chunk2_selected[-1].positions[0] == pytest.approx(base0 + 0.08)
+    hf_events = [
+        fields for event, fields in log.events if event == "policy.horizon_fallback_applied"
+    ]
+    assert len(hf_events) == 1
+    assert hf_events[0]["fields"]["chunk_index"] == 2
+    assert hf_events[0]["fields"]["source_observation_id"] == 1
+    assert len(runner._prediction_history) == 1
+
+
+def test_async_inference_skips_second_rpc_when_speculative_finishes_after_fallback_cutoff(
+    tmp_path,
+):
+    value = yaml.safe_load(POLICY_CONFIG.read_text(encoding="utf-8"))
+    for field in (
+        "robot_profile",
+        "observation_schema",
+        "action_schema",
+        "control_constraints",
+        "follower_config",
+    ):
+        value[field] = str((POLICY_CONFIG.parent / value[field]).resolve())
+    value["policy"]["startup_settle_sim_ns"] = 0
+    value["policy"]["async_inference"] = True
+    value["policy"]["prefetch_lead_ns"] = 200_000_000
+    value["policy"]["max_chunks"] = 2
+    path = tmp_path / "policy_skip_second_rpc.yaml"
+    path.write_text(yaml.safe_dump(value), encoding="utf-8")
+    configuration = load_runtime_configuration(path, ROOT)
+    profile = configuration.profile
+
+    spec_started = threading.Event()
+    chunk2_calls = []
+
+    class _CutoffIO(_IO):
+        def robot_time_ns(self):
+            # Advance past fallback cutoff (2.15s) as soon as speculative chunk 2 RPC begins.
+            return 2_160_000_000 if spec_started.is_set() else 1_000_000_000
+
+    class _OneSecControl(_Control):
+        def get_anchor(self, context, start_backend_time_ns=None):
+            self.anchors += 1
+            start = 1_250_000_000 + (self.anchors - 1) * 1_000_000_000
+            return ChunkAnchor(
+                "stream-1",
+                self.anchors - 1,
+                start,
+                ReferenceSample(
+                    tuple(joint.initial for joint in self.profile.joints),
+                    (0.0,) * 16,
+                    (0.0,) * 16,
+                ),
+                self.profile.digest,
+            )
+
+    class _TrackingClient(_Client):
+        def predict(self, context, session_id, request_id, observation, deadline_s=None):
+            if observation.observation_id > 1:
+                spec_started.set()
+                chunk2_calls.append(observation.observation_id)
+            return super().predict(context, session_id, request_id, observation, deadline_s)
+
+    io = _CutoffIO(profile)
+    context = RunContext("marvin_stack", profile.digest, "backend", "sim", 1, "episode", 1)
+    io.context = context
+    runner = PolicyStreamRunner(
+        configuration,
+        context,
+        "episode",
+        "task",
+        io,
+        _OneSecControl(profile),
+        _TrackingClient(configuration.recipe.policy, profile),
+        follower_limits(configuration, [1.0] * 16),
+        stop_requested=threading.Event(),
+        clock=lambda: 0.0,
+    )
+    runner.run()
+
+    assert runner.chunks == 2
+    assert len(chunk2_calls) == 1

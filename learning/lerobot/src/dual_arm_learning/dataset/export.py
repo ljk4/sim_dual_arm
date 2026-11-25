@@ -70,10 +70,8 @@ def _select_entries(select: dict[str, Any], config: DatasetConfig) -> list[dict[
     if select.get("status") != "SELECTED":
         raise ExportError(f"select: expected status SELECTED, got {select.get('status')!r}")
     qualified = require_int(select.get("qualified"), "select.qualified")
-    if qualified != config.expected_formal_episodes:
-        raise ExportError(
-            f"select.qualified: expected {config.expected_formal_episodes}, got {qualified}"
-        )
+    if qualified < 2:
+        raise ExportError(f"select.qualified: expected at least 2 episodes, got {qualified}")
     selected = select.get("selected")
     if not isinstance(selected, list):
         raise ExportError("select.selected: expected an array")

@@ -1,4 +1,4 @@
-# Marvin 交接正式采集预算、种子与路径。
+# Marvin 交接正式采集种子与路径。
 #
 # pilot 与 formal 使用本方案独立种子与台账，严格隔离在 marvin_sim/handover 数据根下。
 
@@ -6,20 +6,7 @@ diagnostic: false
 
 budget:
   pilot_seed_first: 3100
-  pilot_seed_last: 3109
-  pilot_max_attempts: 10
-
-  # Fifty qualified demonstrations, at most one hundred attempts.
   formal_seed_first: 4100
-  formal_seed_last: 4199
-  formal_max_attempts: 100
-  formal_target_qualified: 50
-
-  # 60 GiB including failed attempts and every raw byte under the attempt
-  # root; the 50-qualified target is not capped below 50 GiB.
-  max_raw_bytes: 64424509440
-  reserve_bytes: 2147483648
-  estimated_attempt_bytes: 536870912
   min_free_bytes: 5368709120
 
 paths:

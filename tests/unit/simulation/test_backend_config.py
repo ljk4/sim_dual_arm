@@ -162,3 +162,113 @@ def test_namespace_must_be_a_non_empty_ros_name(tmp_path, namespace):
     document["robot"]["namespace"] = namespace
     with pytest.raises(BackendConfigError, match="robot.namespace"):
         load_backend_config(write_document(tmp_path, document))
+
+
+def test_inference_entry_removes_run_id_and_role_and_picks_random_seed(
+    tmp_path, monkeypatch, capsys
+):
+    from robot_backend_sim.common.ros import backend_cli
+
+    with pytest.raises(SystemExit) as caught:
+        backend_cli._parse_arguments(
+            [
+                "--inference-entry",
+                "--robot",
+                "marvin_sim",
+                "--task",
+                "stack",
+                "--run-id",
+                "manual-id",
+            ]
+        )
+    assert caught.value.code == 2
+
+    with pytest.raises(SystemExit) as caught:
+        backend_cli._parse_arguments(
+            [
+                "--inference-entry",
+                "--robot",
+                "marvin_sim",
+                "--task",
+                "stack",
+                "--role",
+                "teacher",
+            ]
+        )
+    assert caught.value.code == 2
+
+    with pytest.raises(SystemExit):
+        backend_cli._parse_arguments(["--inference-entry", "--help"])
+    help_output = capsys.readouterr().out
+    assert "--run-id" not in help_output
+    assert "--role" not in help_output
+
+    monkeypatch.setattr(backend_cli, "_default_run_suffix", lambda: "20261125_120000")
+    monkeypatch.setattr(backend_cli, "_random_seed", lambda: 123456)
+
+    run_root = tmp_path / "backend"
+    parsed_first = backend_cli._parse_arguments(
+        [
+            "--inference-entry",
+            "--robot",
+            "marvin_sim",
+            "--task",
+            "stack",
+            "--run-root",
+            str(run_root),
+        ]
+    )
+    config1, run_id1, _, logger1 = backend_cli._prepare_run(parsed_first)
+    logger1.close()
+    assert run_id1 == "inference_backend_marvin_sim_stack_20261125_120000"
+    assert config1.task_mode == "inference"
+    assert config1.seed == 123456
+
+    parsed_second = backend_cli._parse_arguments(
+        [
+            "--inference-entry",
+            "--robot",
+            "marvin_sim",
+            "--task",
+            "stack",
+            "--run-root",
+            str(run_root),
+        ]
+    )
+    config2, run_id2, _, logger2 = backend_cli._prepare_run(parsed_second)
+    logger2.close()
+    assert run_id2 == "inference_backend_marvin_sim_stack_20261125_120000_2"
+    assert config2.seed == 123456
+
+    parsed_teacher = backend_cli._parse_arguments(
+        [
+            "--robot",
+            "marvin_sim",
+            "--task",
+            "stack",
+            "--role",
+            "teacher",
+            "--run-root",
+            str(run_root),
+        ]
+    )
+    config_teacher, _, _, logger_teacher = backend_cli._prepare_run(parsed_teacher)
+    logger_teacher.close()
+    assert config_teacher.seed == 123456
+
+    parsed_explicit = backend_cli._parse_arguments(
+        [
+            "--inference-entry",
+            "--robot",
+            "marvin_sim",
+            "--task",
+            "stack",
+            "--seed",
+            "42",
+            "--run-root",
+            str(run_root),
+        ]
+    )
+    config_explicit, _, _, logger_explicit = backend_cli._prepare_run(parsed_explicit)
+    logger_explicit.close()
+    assert config_explicit.seed == 42

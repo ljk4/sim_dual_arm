@@ -14,10 +14,9 @@ from dual_arm_runtime.offline.collection import record
 def recording(tmp_path, monkeypatch):
     config = {
         "budget": {
-            "formal_seed_first": 10000, "formal_seed_last": 10099,
-            "formal_max_attempts": 10, "formal_target_qualified": 5,
-            "max_raw_bytes": 100_000, "reserve_bytes": 1_000,
-            "estimated_attempt_bytes": 1_000, "min_free_bytes": 0,
+            "formal_seed_first": 10000,
+            "pilot_seed_first": 1000,
+            "min_free_bytes": 0,
         },
         "paths": {
             "attempts_root": "out", "ledger": "out/attempts.jsonl",
@@ -160,30 +159,17 @@ def test_default_count_is_one_new_qualified_episode_per_invocation(recording, ca
     assert _seeds(root) == [10000, 10001]
 
 
-def test_campaign_budget_stops_batch_without_reserving_extra_seed(recording, capsys):
+def test_disk_free_guard_stops_batch_without_reserving_extra_seed(recording, capsys):
     root, config, _, run = recording
-    config["budget"]["formal_max_attempts"] = 2
+    config["budget"]["min_free_bytes"] = 10**18
     (root / "campaign.yaml").write_text(yaml.safe_dump(config))
 
-    assert run(["quality_failure"] * 3) == 2
+    assert run(["qualified"] * 2) == 2
 
     summary = _summary(capsys)
     assert summary["reason"] == "campaign_stopped"
-    assert summary["attempted"] == 2
-    assert _seeds(root) == [10000, 10001]
-
-
-def test_campaign_global_qualified_target_still_limits_batch(recording, capsys):
-    root, config, _, run = recording
-    config["budget"]["formal_target_qualified"] = 1
-    (root / "campaign.yaml").write_text(yaml.safe_dump(config))
-
-    assert run(["qualified", "qualified"], "--count", "2") == 2
-
-    summary = _summary(capsys)
-    assert summary["reason"] == "campaign_stopped"
-    assert summary["qualified"] == summary["attempted"] == 1
-    assert _seeds(root) == [10000]
+    assert summary["attempted"] == 0
+    assert not (root / "out/attempts.jsonl").exists()
 
 
 def test_interrupt_does_not_start_next_attempt(recording, capsys):
@@ -194,9 +180,7 @@ def test_interrupt_does_not_start_next_attempt(recording, capsys):
 
 
 def test_formal_target_reached_publishes_formal_select_atomically(recording, capsys):
-    root, config, _, run = recording
-    config["budget"]["formal_target_qualified"] = 2
-    (root / "campaign.yaml").write_text(yaml.safe_dump(config))
+    root, _, _, run = recording
 
     assert run(["qualified", "qualified"], "--count", "2") == 0
 
@@ -204,7 +188,7 @@ def test_formal_target_reached_publishes_formal_select_atomically(recording, cap
     assert _summary(capsys)["formal_select"] == str(destination)
     document = json.loads(destination.read_text())
     assert document["status"] == "SELECTED"
-    assert document["target"] == document["qualified"] == 2
+    assert document["qualified"] == 2
     assert [item["seed"] for item in document["selected"]] == [10000, 10001]
     assert not list(destination.parent.glob("*.tmp"))
 

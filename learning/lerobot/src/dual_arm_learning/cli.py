@@ -245,12 +245,22 @@ def _command_convert(args: argparse.Namespace, root: Path) -> int:
         overrides["synthetic"] = True
     if changes:
         config = config.model_copy(update=changes)
+    split_text = f"验证比例 {config.validation_percent}%"
+    try:
+        raw_select = json.loads(config.select_path.read_text(encoding="utf-8"))
+        qualified_count = raw_select.get("qualified")
+        if type(qualified_count) is int and qualified_count >= 2:
+            train_count, val_count = config.split_counts(qualified_count)
+            split_text = f"{split_text}（{train_count} 条训练 / {val_count} 条验证）"
+    except (OSError, ValueError):
+        pass
     settings = [
         f"清单：{config.select_path}",
         f"输出：{config.output_root}",
-        f"验证比例 {config.validation_percent}%（{config.expected_training_episodes} 条训练 / "
-        f"{config.expected_validation_episodes} 条验证）；{config.fps} Hz；"
-        f"{len(config.camera_names)} 路 {config.camera_width}×{config.camera_height} RGB",
+        (
+            f"{split_text}；{config.fps} Hz；"
+            f"{len(config.camera_names)} 路 {config.camera_width}×{config.camera_height} RGB"
+        ),
     ]
     if args.progress:
         _print_effective_config("数据转换配置与详细参数", config_path, selection, config)

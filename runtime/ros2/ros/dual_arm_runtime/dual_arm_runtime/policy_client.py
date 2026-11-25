@@ -222,8 +222,13 @@ class PolicyClient:
         options = [
             ("grpc.max_send_message_length", self.policy.max_message_bytes),
             ("grpc.max_receive_message_length", self.policy.max_message_bytes),
+            ("grpc.default_compression_level", 1),
         ]
-        self._channel = grpc.insecure_channel(self.policy.endpoint, options=options)
+        self._channel = grpc.insecure_channel(
+            self.policy.endpoint,
+            options=options,
+            compression=grpc.Compression.Deflate,
+        )
         try:
             grpc.channel_ready_future(self._channel).result(timeout=self.policy.connect_timeout_s)
         except Exception as error:

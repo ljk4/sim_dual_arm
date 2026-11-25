@@ -29,7 +29,6 @@ def test_public_act_training_writes_a_self_contained_model(tmp_path):
     dataset_document = yaml.safe_load(
         (SCENARIO / "configs/learning/act_dataset.yaml").read_text()
     )
-    dataset_document["expected"] = {"formal_episodes": 2}
     dataset_document["validation_percent"] = 50
     dataset_path = tmp_path / "dataset.yaml"
     dataset_path.write_text(yaml.safe_dump(dataset_document))
@@ -37,7 +36,7 @@ def test_public_act_training_writes_a_self_contained_model(tmp_path):
     dataset_config = replace(
         dataset_config, output_root=tmp_path / "data", cache_root=tmp_path / "cache"
     )
-    select = make_select(tmp_path / "sources", dataset_config)
+    select = make_select(tmp_path / "sources", dataset_config, episodes=2)
     convert(select_path=select, config=dataset_config, synthetic=True)
     document = yaml.safe_load((SCENARIO / "configs/learning/act_training.yaml").read_text())
     document["device"] = "cpu"

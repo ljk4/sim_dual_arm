@@ -1,19 +1,9 @@
-# Marvin stack campaign collection budget, seeds and export quality thresholds.
+# Marvin stack campaign collection seeds and export quality thresholds.
 diagnostic: false
 
 budget:
   pilot_seed_first: 1000
-  pilot_seed_last: 1009
-  pilot_max_attempts: 3
-
   formal_seed_first: 2000
-  formal_seed_last: 2099
-  formal_max_attempts: 100
-  formal_target_qualified: 50
-
-  max_raw_bytes: 64424509440
-  reserve_bytes: 2147483648
-  estimated_attempt_bytes: 536870912
   min_free_bytes: 5368709120
 
 paths:

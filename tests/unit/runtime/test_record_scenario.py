@@ -178,7 +178,7 @@ def test_preflight_plan_is_read_only(tmp_path):
     assert plan["campaign_config"] == str(tree.campaign_recipe.resolve())
     assert plan["runtime_config"] == str(tree.runtime_recipe.resolve())
     assert plan["simulation_template"] == str(tree.backend_recipe.resolve())
-    assert plan["campaign_status"]["formal_target_qualified"] == 50
+    assert "formal_target_qualified" not in plan["campaign_status"]
     assert plan["stop_grace_s"] == 45.0
     assert not (tree.repo / "var/synthetic_sim/stack").exists()
     assert not (tree.repo / "var/synthetic_sim/stack/logs/collection/record-pools").exists()
@@ -200,10 +200,12 @@ def test_preflight_rejects_unmounted_or_conflicting_selection(tmp_path):
     assert not (tree.repo / "var/synthetic_sim/stack").exists()
 
 
-def test_preflight_target_cannot_exceed_formal_target(tmp_path):
+def test_preflight_allows_arbitrary_positive_target_total(tmp_path):
     tree = build_collection_tree(tmp_path)
-    with pytest.raises(CampaignError, match="exceeds"):
-        record_preflight.build_plan(_preflight_args(tree, "--target-total", "51"))
+    plan = record_preflight.build_plan(_preflight_args(tree, "--target-total", "60"))
+    assert plan["selection"]["binding"]["sha256"] == sha(tree.scenario.binding_path)
+    with pytest.raises(CampaignError, match="positive"):
+        record_preflight.build_plan(_preflight_args(tree, "--target-total", "0"))
 
 
 def test_record_selection_uses_binding_recipes_for_runner_and_exporter(tmp_path):

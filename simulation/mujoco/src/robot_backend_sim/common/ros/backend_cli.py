@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import secrets
 import signal
 import sys
 import time
@@ -80,8 +81,22 @@ def _now_utc() -> str:
     return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
+def _random_seed() -> int:
+    return secrets.randbelow(2**31)
+
+
+def _safe_id_part(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", value.strip()).strip("._-")
+    return cleaned or "unknown"
+
+
+def _parser(argv: list[str] | None = None) -> argparse.ArgumentParser:
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    inference_entry = "--inference-entry" in raw_argv
+    parser = argparse.ArgumentParser(
+        prog="scripts/inference_backend.sh" if inference_entry else None,
+        description=__doc__,
+    )
     parser.add_argument("--config", type=Path, help="direct backend recipe path")
     parser.add_argument(
         "--robot", help="robot id under <shared-root>/scenarios/<robot>/<task>/"
@@ -89,9 +104,15 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--task", help="task id under <shared-root>/scenarios/<robot>/<task>/"
     )
-    parser.add_argument("--role", choices=("teacher", "policy"), default=None)
+    if not inference_entry:
+        parser.add_argument("--role", choices=("teacher", "policy"), default=None)
     parser.add_argument("--shared-root", type=Path, help="shared tree containing scenarios/")
-    parser.add_argument("--seed", type=int, default=None, help="override run.seed")
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="initial simulation seed (default: random)",
+    )
     parser.add_argument(
         "--realtime-speed", type=float, help="simulation seconds per wall-clock second"
     )
@@ -102,8 +123,20 @@ def _parser() -> argparse.ArgumentParser:
         help="disable MuJoCo state visualization topic",
     )
     parser.add_argument("--run-root", type=Path, default=None)
-    parser.add_argument("--run-id", default=None)
+    if not inference_entry:
+        parser.add_argument("--run-id", default=None)
+    parser.add_argument("--inference-entry", action="store_true", help=argparse.SUPPRESS)
     return parser
+
+
+def _parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
+    parsed = _parser(argv).parse_args(argv)
+    if getattr(parsed, "inference_entry", False):
+        parsed.run_id = None
+        parsed.role = None
+    if parsed.seed is not None and not 0 <= parsed.seed <= 2**63 - 1:
+        raise SystemExit("--seed must be within [0, 2^63-1]")
+    return parsed
 
 
 def _target(parsed: argparse.Namespace) -> tuple[str, str] | None:
@@ -134,19 +167,46 @@ def _unique_run_id(run_root: Path, base: str) -> str:
     return f"{base}_{suffix}"
 
 
-def _validate_arguments(parsed: argparse.Namespace, target: tuple[str, str] | None) -> str:
+def _inference_backend_run_id_base(
+    target: tuple[str, str] | None,
+    config: Any,
+    parsed: argparse.Namespace,
+    stamp: str | None = None,
+) -> str:
+    stamp = stamp or _default_run_suffix()
+    if target is not None:
+        robot_part = _safe_id_part(target[0])
+        task_part = _safe_id_part(target[1])
+    else:
+        scene_config = load_scene_config_for(config.scene_path)
+        robot_part = _safe_id_part(scene_config.robot.assembly)
+        task_env = getattr(scene_config.task, "environment", "") if hasattr(scene_config, "task") else ""
+        task_part = _safe_id_part(str(task_env) or parsed.config.stem)
+    head = f"inference_backend_{robot_part}_{task_part}"[:80].rstrip("._-")
+    return f"{head}_{stamp}"
+
+
+def _validate_selection_arguments(
+    parsed: argparse.Namespace, target: tuple[str, str] | None
+) -> None:
     if parsed.config is not None and target is not None:
         raise SystemExit("--config cannot be combined with --robot/--task")
     if target is not None:
-        parsed.role = parsed.role or "teacher"
-        robot, task = target
-        return parsed.run_id or f"{robot}-{task}-{parsed.role}_{_default_run_suffix()}"
+        return
     if parsed.role is not None:
         raise SystemExit("--role requires --robot/--task")
     if parsed.shared_root is not None:
         raise SystemExit("--shared-root requires --robot/--task")
     if parsed.config is None:
         raise SystemExit("either --robot/--task or --config is required")
+
+
+def _validate_arguments(parsed: argparse.Namespace, target: tuple[str, str] | None) -> str:
+    _validate_selection_arguments(parsed, target)
+    if target is not None:
+        parsed.role = parsed.role or "teacher"
+        robot, task = target
+        return parsed.run_id or f"{robot}-{task}-{parsed.role}_{_default_run_suffix()}"
     stem = re.sub(r"[^A-Za-z0-9._-]", "-", parsed.config.stem)
     return parsed.run_id or f"backend-{stem or 'run'}_{_default_run_suffix()}"
 
@@ -162,7 +222,7 @@ def _resolve_config_path(config: Path) -> Path:
     return project_path(config, _project_root()).resolve()
 
 
-def _direct_document(parsed: argparse.Namespace) -> dict[str, Any]:
+def _direct_document(parsed: argparse.Namespace, effective_seed: int) -> dict[str, Any]:
     path = _resolve_config_path(parsed.config)
     try:
         document = read_unique_yaml(path)
@@ -181,6 +241,8 @@ def _direct_document(parsed: argparse.Namespace) -> dict[str, Any]:
         if not isinstance(run, dict) or "seed" not in run:
             raise SystemExit("--seed requires an existing run.seed field")
         run["seed"] = parsed.seed
+    elif isinstance(run, dict) and "seed" in run:
+        run["seed"] = effective_seed
     if parsed.realtime_speed is not None:
         if not isinstance(run, dict) or "realtime_speed" not in run:
             raise SystemExit("--realtime-speed requires an existing run.realtime_speed field")
@@ -198,11 +260,15 @@ def _prepare_run(parsed: argparse.Namespace):
     target = _target(parsed)
     robot, task = target if target is not None else (None, None)
     run_root = (parsed.run_root or _default_run_root(robot, task)).resolve()
-    raw_run_id = _validate_run_id(_validate_arguments(parsed, target))
-    run_id = raw_run_id if parsed.run_id is not None else _unique_run_id(run_root, raw_run_id)
-    run_dir = (run_root / run_id).resolve()
-    if not _inside(run_dir, run_root) or run_dir == run_root:
-        raise SystemExit("run directory escapes run root")
+    inference_entry = bool(getattr(parsed, "inference_entry", False))
+    if inference_entry:
+        _validate_selection_arguments(parsed, target)
+        if target is not None:
+            parsed.role = "policy"
+        raw_run_id = None
+    else:
+        raw_run_id = _validate_run_id(_validate_arguments(parsed, target))
+    effective_seed = parsed.seed if parsed.seed is not None else _random_seed()
     selection: dict[str, Any]
     try:
         if target is not None:
@@ -211,12 +277,12 @@ def _prepare_run(parsed: argparse.Namespace):
                 task=task,
                 role=parsed.role or "teacher",
                 shared_root=parsed.shared_root,
-                seed=parsed.seed,
+                seed=effective_seed,
                 realtime_speed=parsed.realtime_speed,
             )
             document, selection = resolved.document, resolved.selection
         else:
-            document = _direct_document(parsed)
+            document = _direct_document(parsed, effective_seed)
             selection = {"mode": "direct", "robot": None, "task": None, "role": None}
         if parsed.namespace is not None or parsed.no_visualization:
             robot_section = document.get("robot")
@@ -231,6 +297,15 @@ def _prepare_run(parsed: argparse.Namespace):
         config = load_backend_document(document, parsed.config or "scenario:selection")
     except (ScenarioError, BackendConfigError) as error:
         raise SystemExit(str(error)) from error
+    if inference_entry:
+        base_run_id = _validate_run_id(_inference_backend_run_id_base(target, config, parsed))
+        run_id = _unique_run_id(run_root, base_run_id)
+    else:
+        assert raw_run_id is not None
+        run_id = raw_run_id if parsed.run_id is not None else _unique_run_id(run_root, raw_run_id)
+    run_dir = (run_root / run_id).resolve()
+    if not _inside(run_dir, run_root) or run_dir == run_root:
+        raise SystemExit("run directory escapes run root")
     try:
         run_dir.mkdir(parents=True, exist_ok=False)
     except FileExistsError as error:
@@ -239,7 +314,7 @@ def _prepare_run(parsed: argparse.Namespace):
     config = config.model_copy(update={"source": snapshot})
     if target is not None:
         print(
-            f"方案: {robot}/{task} | 角色: {parsed.role} | seed: {config.seed}\n"
+            f"方案: {robot}/{task} | 角色: {parsed.role} | run_id: {run_id} | seed: {config.seed}\n"
             f"Binding: {selection['binding']['path']}\n"
             f"后端配方: {selection['recipe']['path']}\n"
             f"运行日志: {run_dir / 'log'}\n"
@@ -414,7 +489,7 @@ def _teardown(executor, node, logger, previous, failure, exit_code) -> tuple[str
 
 
 def run(argv: list[str] | None = None) -> int:
-    parsed = _parser().parse_args(argv)
+    parsed = _parse_arguments(argv)
     config, run_id, run_dir, logger = _prepare_run(parsed)
     signals = _Signals()
     previous = {signum: signal.getsignal(signum) for signum in (signal.SIGINT, signal.SIGTERM)}

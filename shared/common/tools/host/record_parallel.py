@@ -134,10 +134,6 @@ class DockerWorkers(BaseDockerWorkers):
     def resolve_target(self, plan: dict) -> bool:
         """Read campaign progress before creating any simulation workers."""
         status = plan["campaign_status"]
-        if self.args.purpose == "formal" and self.args.target_total > int(
-            status["formal_target_qualified"]
-        ):
-            raise RuntimeError("target total exceeds the campaign formal qualified target")
         current = int(status["purposes"][self.args.purpose]["qualified"])
         self.args.count = max(0, self.args.target_total - current)
         print(
@@ -249,8 +245,7 @@ def _print_startup_info(
     if isinstance(status, dict):
         formal = (status.get("purposes") or {}).get("formal", {})
         print(
-            f"当前台账: 正式合格 {formal.get('qualified', 0)}/"
-            f"{status.get('formal_target_qualified', '-')}",
+            f"当前台账: 正式合格 {formal.get('qualified', 0)} 条",
             flush=True,
         )
 

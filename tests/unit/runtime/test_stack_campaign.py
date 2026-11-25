@@ -10,20 +10,7 @@ def _project(tmp_path):
     config = {
         "budget": {
             "pilot_seed_first": 1000,
-            "pilot_seed_last": 1009,
-            "pilot_max_attempts": 2,
-            "pilot_teacher_seed_last": 1007,
-            "pilot_label_replay_max": 1,
             "formal_seed_first": 10000,
-            "formal_seed_last": 10099,
-            "formal_max_attempts": 100,
-            "formal_target_qualified": 50,
-            "test_seed_first": 20000,
-            "test_seed_last": 20019,
-            "test_max_attempts": 20,
-            "max_raw_bytes": 100_000,
-            "reserve_bytes": 1_000,
-            "estimated_attempt_bytes": 1_000,
             "min_free_bytes": 0,
         },
         "paths": {
@@ -79,24 +66,27 @@ def test_campaign_reserves_sequential_seeds_and_counts_failures(tmp_path):
     root = _project(tmp_path)
     assert _run(root, "one") == 0
     assert _run(root, "two") == 0
+    assert _run(root, "three") == 0
     records = [
         json.loads(line)
         for line in (root / "build/campaign/attempts.jsonl").read_text().splitlines()
     ]
     seeds = [item["seed"] for item in records if item["event"] == "RESERVED"]
-    assert seeds == [1000, 1001]
+    assert seeds == [1000, 1001, 1002]
     assert campaign.main(
             ["--project-root", str(root), "--config", str(_campaign(root)), "status"]
         ) == 0
-    assert _run(root, "three") == 2
 
 
-def test_campaign_status_exposes_formal_target(tmp_path, capsys):
+def test_campaign_status_reports_purposes_and_raw_bytes_without_target_cap(tmp_path, capsys):
     root = _project(tmp_path)
     assert campaign.main(
             ["--project-root", str(root), "--config", str(_campaign(root)), "status"]
         ) == 0
-    assert json.loads(capsys.readouterr().out)["formal_target_qualified"] == 50
+    status = json.loads(capsys.readouterr().out)
+    assert "formal_target_qualified" not in status
+    assert "raw_limit_bytes" not in status
+    assert set(status["purposes"]) == {"formal", "pilot"}
 
 
 def test_reserved_without_finish_still_consumes_budget(tmp_path):
@@ -150,7 +140,7 @@ def test_only_formal_and_pilot_teacher_rollouts_are_accepted(tmp_path):
     assert caught.value.code == 2
 
 
-def test_formal_stops_after_fifty_qualified(tmp_path):
+def test_formal_continues_past_fifty_qualified(tmp_path):
     root = _project(tmp_path)
     ledger = root / "build/campaign/attempts.jsonl"
     ledger.parent.mkdir(parents=True)
@@ -195,17 +185,23 @@ def test_formal_stops_after_fifty_qualified(tmp_path):
                 "--mode",
                 "teacher",
                 "--run-id",
-                "after-target",
+                "fifty-first",
                 "--runtime-config",
                 "shared/scenarios/marvin_sim/stack/configs/runtime/teacher_collect.yaml",
                 "--",
                 sys.executable,
                 "-c",
-                "print('never')",
+                "print('ok')",
             ]
         )
-        == 2
+        == 0
     )
+    reserved = [
+        json.loads(line)
+        for line in ledger.read_text().splitlines()
+        if json.loads(line).get("event") == "RESERVED"
+    ]
+    assert reserved[-1]["seed"] == 10050
 
 
 def test_stale_run_lock_is_recovered_without_resetting_reserved_attempt(tmp_path):
@@ -223,9 +219,6 @@ def test_select_writes_generated_manifest_only_after_success(tmp_path, capsys):
         root
         / "shared/scenarios/marvin_sim/stack/configs/runtime/experiments/stack_campaign.yaml"
     )
-    config = yaml.safe_load(config_path.read_text())
-    config["budget"]["formal_target_qualified"] = 6
-    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
     out = root / "build/campaign/SELECTED.json"
 
     command = [
@@ -235,6 +228,12 @@ def test_select_writes_generated_manifest_only_after_success(tmp_path, capsys):
 
     ledger = root / "build/campaign/attempts.jsonl"
     ledger.parent.mkdir(parents=True, exist_ok=True)
+    assert campaign.main(command) == 1
+    empty = json.loads(capsys.readouterr().out)
+    assert empty["status"] == "INSUFFICIENT_QUALIFIED"
+    assert empty["qualified"] == 0
+    assert not out.exists()
+
     lines = []
     seeds = [10002, 10001, 10000, 10003, 10004, 10005, 10006]
     for index, seed in enumerate(seeds):
@@ -263,30 +262,16 @@ def test_select_writes_generated_manifest_only_after_success(tmp_path, capsys):
                 }
             )
         )
-    ledger.write_text("\n".join(lines[:2]) + "\n", encoding="utf-8")
-    assert campaign.main(command) == 1
-    partial = json.loads(capsys.readouterr().out)
-    assert partial["status"] == "INSUFFICIENT_QUALIFIED"
-    assert partial["target"] == 6
-    assert partial["qualified"] == 1
-    assert partial["selected"] == [{
-        "attempt_id": "formal:10002:run",
-        "seed": 10002,
-        "attempt_dir": str(root / "build/campaign/attempts/0"),
-        "raw_bytes": 1,
-    }]
-    assert not out.exists()
-
     ledger.write_text("\n".join(lines) + "\n", encoding="utf-8")
     assert campaign.main(command) == 0
     document = json.loads(out.read_text())
-    assert set(document) == set(partial) == {
-        "campaign", "diagnostic", "target", "rule", "status", "qualified", "selected",
+    assert set(document) == {
+        "campaign", "diagnostic", "rule", "status", "qualified", "selected",
     }
     assert document["status"] == "SELECTED"
-    assert document["rule"] == "first 6 qualified formal attempts in reservation order"
-    assert document["target"] == document["qualified"] == 6
-    assert [item["seed"] for item in document["selected"]] == seeds[:6]
+    assert document["rule"] == "all qualified formal attempts in reservation order"
+    assert document["qualified"] == 7
+    assert [item["seed"] for item in document["selected"]] == seeds
 
     # A later run atomically refreshes the same selection manifest.
     assert campaign.main(command) == 0
