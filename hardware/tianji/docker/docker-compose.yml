@@ -1,0 +1,34 @@
+# TianJi hardware: mounted source/configuration, host networking and device access.
+name: sim-dual-arm
+
+services:
+  hardware:
+    image: sim-dual-arm/hardware:current
+    build: .
+    container_name: sim-dual-arm-hardware
+    network_mode: host
+    user: "1000:1000"
+    group_add:
+      - "20"
+      - "44"
+      - "46"
+    working_dir: /app
+    init: true
+    restart: "no"
+    stop_grace_period: 20s
+    pull_policy: never
+    env_file: ../configs/container.env
+    device_cgroup_rules:
+      - "c 81:* rmw"
+      - "c 189:* rmw"
+      - "c 188:* rmw"
+      - "c 166:* rmw"
+    volumes:
+      - ../:/app:ro
+      - ../../../shared:/shared:ro
+      - ../../../var:/data
+      - ../../../build/ros-dev:/opt/ros-dev:ro
+      - /dev:/dev
+      - /sys:/sys:ro
+      - /run/udev:/run/udev:ro
+      - ../../../shared/common/tools/docker/container_bashrc.sh:/etc/bash.bashrc:ro

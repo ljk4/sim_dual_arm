@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dual-arm-hardware"
+version = "0.1.0"
+description = "TianJi dual-arm, gripper and camera device backend"
+requires-python = ">=3.12"
+dependencies = ["numpy>=1.24", "pydantic>=2", "PyYAML>=6"]
+
+[project.optional-dependencies]
+gripper = ["minimalmodbus>=2.1", "pyserial>=3.5"]
+realsense = ["pyrealsense2>=2.55"]
+v4l2 = ["opencv-python-headless>=4.8"]
+test = ["pytest>=8"]
+
+[project.scripts]
+tianji-check-config = "robot_backend_hardware.tianji.config:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

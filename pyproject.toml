@@ -14,6 +14,7 @@ pythonpath = [
   "shared/common/python/run_logging/src",
   "shared/common/python/trajectory/src",
   "simulation/mujoco/src",
+  "hardware/tianji/src",
   "runtime/ros2/ros/dual_arm_runtime",
   "learning/lerobot/src",
   "tests/fakes/policy",

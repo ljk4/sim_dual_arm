@@ -1,4 +1,4 @@
-"""The three Compose files are directly usable without a host wrapper."""
+"""The Compose files are directly usable without a host wrapper."""
 
 from __future__ import annotations
 
@@ -14,7 +14,30 @@ COMPOSES = {
     "simulation": ROOT / "simulation/mujoco/docker/docker-compose.yml",
     "runtime": ROOT / "runtime/ros2/docker/docker-compose.yml",
     "learning": ROOT / "learning/lerobot/docker/docker-compose.yml",
+    "hardware": ROOT / "hardware/tianji/docker/docker-compose.yml",
 }
+
+
+def test_environment_entry_lists_hardware_without_starting_docker():
+    result = subprocess.run(
+        ["bash", str(ROOT / "env.sh"), "list"],
+        capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == 0
+    assert "hardware" in result.stdout.split()
+
+
+def test_hardware_compose_exposes_usb_serial_and_camera_devices():
+    document = yaml.safe_load(COMPOSES["hardware"].read_text())
+    service = document["services"]["hardware"]
+    assert "/dev:/dev" in service["volumes"]
+    assert "/sys:/sys:ro" in service["volumes"]
+    assert "/run/udev:/run/udev:ro" in service["volumes"]
+    assert set(service["group_add"]) >= {"20", "44", "46"}
+    assert "c 189:* rmw" in service["device_cgroup_rules"]
+    assert "c 188:* rmw" in service["device_cgroup_rules"]
+    assert "c 81:* rmw" in service["device_cgroup_rules"]
+    assert (ROOT / "hardware/tianji/configs/devices.yaml").is_file()
 
 
 def test_standalone_compose_files_use_host_network():

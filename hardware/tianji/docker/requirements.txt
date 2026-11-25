@@ -1,0 +1,11 @@
+setuptools==75.8.0
+wheel==0.45.1
+numpy==1.26.4
+pydantic==2.10.6
+PyYAML==6.0.2
+jsonschema==4.23.0
+minimalmodbus==2.1.1
+pyserial==3.5
+pyrealsense2==2.58.4.10922
+opencv-python-headless==4.11.0.86
+pytest==8.3.5

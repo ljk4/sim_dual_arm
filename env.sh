@@ -27,6 +27,7 @@ usage() {
   runtime       ROS 2 运行端   (runtime/ros2/docker/docker-compose.yml)
   simulation    MuJoCo 仿真端  (simulation/mujoco/docker/docker-compose.yml)
   learning      LeRobot 学习端 (learning/lerobot/docker/docker-compose.yml)
+  hardware      天机硬件端     (hardware/tianji/docker/docker-compose.yml)
 
 构建镜像源环境变量 (用于 ./env.sh build <env>):
   DOCKER_MIRROR=<host>            跳过探测，直接使用指定镜像源 (如 docker.m.daocloud.io)
@@ -55,12 +56,18 @@ resolve_env() {
       BASE_IMAGE_DIRECT="huggingface/lerobot-gpu:latest"
       BASE_IMAGE_REPO="huggingface/lerobot-gpu:latest"
       ;;
+    hardware)
+      COMPOSE_FILE="$ROOT_DIR/hardware/tianji/docker/docker-compose.yml"
+      SERVICE="hardware"
+      BASE_IMAGE_DIRECT="ros:jazzy-ros-base-noble"
+      BASE_IMAGE_REPO="library/ros:jazzy-ros-base-noble"
+      ;;
     "")
       usage
       exit 1
       ;;
     *)
-      echo "错误: 未知环境 '$1'。可用环境: runtime, simulation, learning" >&2
+      echo "错误: 未知环境 '$1'。可用环境: runtime, simulation, learning, hardware" >&2
       exit 1
       ;;
   esac
@@ -238,7 +245,7 @@ main() {
       usage
       ;;
     list)
-      echo "runtime simulation learning"
+      echo "runtime simulation learning hardware"
       ;;
     ps)
       docker compose -p "$PROJECT_NAME" ps
@@ -271,7 +278,7 @@ main() {
       shift
       cmd_viewer "$@"
       ;;
-    runtime|simulation|learning)
+    runtime|simulation|learning|hardware)
       cmd_enter "$1"
       ;;
     *)

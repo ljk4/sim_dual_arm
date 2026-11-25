@@ -11,12 +11,12 @@ Stack 与 Handover 均按各自配方的固定物块位姿复位。采集和评�
 
 ## 架构概览
 
-仓库按职能划分为三个容器化运行端、真机边界与公共/方案层：
+仓库按职能划分为四个容器化运行端与公共/方案层：
 
 - **`simulation/mujoco/`**：MuJoCo 物理仿真后端，负责机器人动力学、三路 EGL 相机渲染、已提交轨迹的安全校验与执行、接触判定和程序示教。
 - **`runtime/ros2/`**：ROS 2 运行端，负责观测同步、控制租约、Policy 和 Teacher 的轨迹生成与提交、MCAP 录制与离线审计。仿真运行代码负责仿真任务和采集组织。
 - **`learning/lerobot/`**：ROS-free 学习与策略服务端，负责数据集转换、ACT 混合精度训练、模型（`model.safetensors` + `training_args.yaml`）写出与 gRPC Policy 推理服务。
-- **`hardware/`**：真机 Robot API 边界说明；当前没有可验证的真实驱动。
+- **`hardware/tianji/`**：天机双臂、夹爪与相机驱动、设备配置和独立 Docker 环境，以及真机 Robot API 接入边界。
 - **`shared/common/`**：公共层，只放跨端接口约束（Policy Protobuf、ROS 2 IDL、JSON Schema）、共享 Python 包与通用工具（含宿主机并行编排），不选择具体任务、机器人或算法。
 - **`shared/scenarios/<robot-id>/<task-id>/`**：两级方案绑定层，用 `binding.yaml` 选择档案、配方与方案专用接口（如 `shared/scenarios/marvin_sim/stack/`、`shared/scenarios/marvin_sim/handover/`）；[`_template`](shared/scenarios/_template/README.md) 说明新增方案的方法。
 
@@ -44,11 +44,13 @@ cd sim_dual_arm
 mkdir -p build var
 ```
 
-仓库根目录通过 [`env.sh`](env.sh) 统一管理 `runtime`、`simulation`、`learning` 三个 Docker 环境；`env.sh` 完整子命令以及全部宿主机与容器内脚本的参数说明和示例见 [脚本入口与使用指南](docs/features/脚本入口与使用指南.md)。
+仓库根目录通过 [`env.sh`](env.sh) 统一管理 `runtime`、`simulation`、`learning`、`hardware` 四个 Docker 环境；`env.sh` 完整子命令以及全部宿主机与容器内脚本的参数说明和示例见 [脚本入口与使用指南](docs/features/脚本入口与使用指南.md)。
 
 `build/` 仅存放运行时加载的生成 SDK，`var/` 存放运行日志、录制、数据集、模型与报告。各构建和运行命令按需创建子目录。首次启动前由宿主机用户创建这两个根目录，避免 Docker 自动创建后归 root 所有；UID/GID 应与 Compose 中的运行用户一致。
 
-三端容器统一将各自的实现目录只读挂载为 `/app`（`working_dir: /app`），公共目录 `shared/` 只读挂载为 `/shared`，运行输出 `var/` 挂载为 `/data`；runtime 将 `build/` 挂载为 `/build`，simulation 只读挂载 `build/ros-dev` 至 `/opt/ros-dev`，learning 只读挂载 `build/generated/policy-sdk` 至 `/opt/policy-sdk`。更新挂载配置后，重新执行 `./env.sh up <env>` 使配置生效。
+四端容器统一将各自的实现目录只读挂载为 `/app`（`working_dir: /app`），公共目录 `shared/` 只读挂载为 `/shared`，运行输出 `var/` 挂载为 `/data`；runtime 将 `build/` 挂载为 `/build`，simulation 只读挂载 `build/ros-dev` 至 `/opt/ros-dev`，learning 只读挂载 `build/generated/policy-sdk` 至 `/opt/policy-sdk`。更新挂载配置后，重新执行 `./env.sh up <env>` 使配置生效。
+
+天机硬件环境使用 `./env.sh build hardware`、`./env.sh up hardware`，默认读取 `hardware/tianji/configs/devices.yaml` 中已迁入的设备配置。目录和使用方法见 [天机硬件后端](hardware/tianji/README.md)。
 
 所有采集、训练、推理与运行日志产物按机器人/任务对归入 `var/<robot-id>/<task-id>/`（容器 `/data/<robot-id>/<task-id>/`，如 `var/marvin_sim/stack/`、`var/marvin_sim/handover/`），任务目录内严格分为四个平级目录：
 

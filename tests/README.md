@@ -9,7 +9,7 @@
 
 ## 执行方式
 
-从仓库根目录将当前检出的源码和测试送入容器内的临时目录，再用该端的 `scripts/test.sh` 执行。按用例依赖选择 `simulation`、`runtime` 或 `learning`。下面以仿真场景测试为例。
+从仓库根目录将当前检出的源码和测试送入容器内的临时目录，再用该端的 `scripts/test.sh` 执行。按用例依赖选择 `simulation`、`runtime`、`learning` 或 `hardware`。下面以仿真场景测试为例。
 
 ```bash
 test_env=simulation
@@ -39,5 +39,7 @@ git ls-files -z --cached --others --exclude-standard |
 ```
 
 需要 ROS 或 Policy gRPC 接口的用例使用挂载的 SDK。首次运行前在 Runtime 容器中执行 `scripts/build_sdk.sh`。将示例最后一行的路径替换成待验证的用例。运行场景或 ROS 集成测试时，选择空闲的 ROS 域 ID。
+
+天机设备层离线测试使用 `hardware/tianji/tests/`，在 `hardware` 容器执行其 `scripts/test.sh`；具体入口见 [天机后端](../hardware/tianji/README.md)。
 
 目录导航：[上级目录](../README.md)
