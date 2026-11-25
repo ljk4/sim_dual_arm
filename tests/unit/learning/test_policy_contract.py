@@ -17,7 +17,7 @@ from dual_arm_learning.training.bundle import deployment_summary  # noqa: E402
 from fake_provider import load_fake_config
 
 ROOT = Path(__file__).resolve().parents[3]
-CONFIG = ROOT / "shared/scenarios/marvin_sim/stack/configs/learning/policy.yaml"
+CONFIG = ROOT / "shared/scenarios/marvin/mujoco/stack/configs/learning/policy.yaml"
 FAKE = ROOT / "tests/fakes/policy/fake_policy.yaml"
 
 

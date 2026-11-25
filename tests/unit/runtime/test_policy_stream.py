@@ -19,7 +19,7 @@ from scenario_fixtures import MARVIN_SHARED_PROFILES
 
 ROOT = Path(__file__).resolve().parents[3]
 POLICY_CONFIG = ROOT / "tests/fixtures/simulation/policy_unit.yaml"
-TEACHER_CONFIG = ROOT / "shared/scenarios/marvin_sim/stack/configs/runtime/teacher_collect.yaml"
+TEACHER_CONFIG = ROOT / "shared/scenarios/marvin/mujoco/stack/configs/runtime/teacher_collect.yaml"
 MODEL_DIGEST = "a" * 64
 
 
@@ -224,7 +224,7 @@ def policy_configuration(tmp_path, *, settle_ns, startup_timeout_s=None):
 
 def _runner(configuration, io, control, log=None, *, stop=None, clock=None):
     profile = configuration.profile
-    context = RunContext("marvin_stack", profile.digest, "backend", "sim", 1, "episode", 1)
+    context = RunContext("marvin", profile.digest, "backend", "sim", 1, "episode", 1)
     io.context = context
     return PolicyStreamRunner(
         configuration,
@@ -270,7 +270,7 @@ def test_eight_chunks_use_fresh_captures_keep_raw_60_and_settle_only_last(tmp_pa
     configuration = policy_configuration(tmp_path, settle_ns=0)
     profile = configuration.profile
     policy = configuration.recipe.policy
-    context = RunContext("marvin_stack", profile.digest, "backend", "sim", 1, "episode", 1)
+    context = RunContext("marvin", profile.digest, "backend", "sim", 1, "episode", 1)
     io = _IO(profile)
     control = _Control(profile)
     runner = PolicyStreamRunner(
@@ -582,7 +582,7 @@ def test_gripper_transition_is_retimed_before_submission(tmp_path):
             )
 
     io = _IO(profile)
-    context = RunContext("marvin_stack", profile.digest, "backend", "sim", 1, "episode", 1)
+    context = RunContext("marvin", profile.digest, "backend", "sim", 1, "episode", 1)
     io.context = context
     log = _Log()
     runner = PolicyStreamRunner(
@@ -761,7 +761,7 @@ def test_startup_settle_warms_up_policy_before_source_begin(tmp_path, monkeypatc
             events.append(("reset", reset_id))
             return context
 
-    context = RunContext("marvin_stack", profile.digest, "backend", "sim", 1, "episode", 1)
+    context = RunContext("marvin", profile.digest, "backend", "sim", 1, "episode", 1)
     io.context = context
     runner = PolicyStreamRunner(
         configuration,
@@ -826,7 +826,7 @@ def test_async_inference_and_prefetch_lead_use_fresh_observation_and_worker_thre
             predict_threads.append(threading.get_ident())
             return super().predict(context, session_id, request_id, observation, deadline_s)
 
-    context = RunContext("marvin_stack", profile.digest, "backend", "sim", 1, "episode", 1)
+    context = RunContext("marvin", profile.digest, "backend", "sim", 1, "episode", 1)
     io.context = context
     runner = PolicyStreamRunner(
         configuration,
@@ -901,7 +901,7 @@ def test_async_inference_falls_back_to_speculative_backup_when_target_rpc_stalls
             return super().predict(context, session_id, request_id, observation, deadline_s)
 
     io = _AdvancingIO(profile)
-    context = RunContext("marvin_stack", profile.digest, "backend", "sim", 1, "episode", 1)
+    context = RunContext("marvin", profile.digest, "backend", "sim", 1, "episode", 1)
     io.context = context
     runner = PolicyStreamRunner(
         configuration,
@@ -998,7 +998,7 @@ def test_wait_advance_preserves_timestamps_and_prefers_newest_active_prediction(
                     1_000,
                 )
 
-        context = RunContext("marvin_stack", profile.digest, "backend", "sim", 1, "episode", 1)
+        context = RunContext("marvin", profile.digest, "backend", "sim", 1, "episode", 1)
         io.context = context
         runner = PolicyStreamRunner(
             configuration,
@@ -1084,7 +1084,7 @@ def test_latency_matching_discards_inference_and_execution_latency_steps(tmp_pat
 
     io = _IO(profile)
     log = _Log()
-    context = RunContext("marvin_stack", profile.digest, "backend", "sim", 1, "episode", 1)
+    context = RunContext("marvin", profile.digest, "backend", "sim", 1, "episode", 1)
     io.context = context
     runner = PolicyStreamRunner(
         configuration,
@@ -1186,7 +1186,7 @@ def test_async_inference_bridges_from_cached_horizon_when_first_chunk_rpc_stalls
 
     io = _AdvancingIO(profile)
     log = _Log()
-    context = RunContext("marvin_stack", profile.digest, "backend", "sim", 1, "episode", 1)
+    context = RunContext("marvin", profile.digest, "backend", "sim", 1, "episode", 1)
     io.context = context
     runner = PolicyStreamRunner(
         configuration,
@@ -1276,7 +1276,7 @@ def test_async_inference_skips_second_rpc_when_speculative_finishes_after_fallba
             return super().predict(context, session_id, request_id, observation, deadline_s)
 
     io = _CutoffIO(profile)
-    context = RunContext("marvin_stack", profile.digest, "backend", "sim", 1, "episode", 1)
+    context = RunContext("marvin", profile.digest, "backend", "sim", 1, "episode", 1)
     io.context = context
     runner = PolicyStreamRunner(
         configuration,

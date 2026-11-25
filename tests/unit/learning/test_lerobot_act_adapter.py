@@ -39,7 +39,7 @@ from dual_arm_learning.serving.types import (  # noqa: E402
 from dual_arm_learning.training.bundle import deployment_summary  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[3]
-CONFIG = ROOT / "shared/scenarios/marvin_sim/stack/configs/learning/policy.yaml"
+CONFIG = ROOT / "shared/scenarios/marvin/mujoco/stack/configs/learning/policy.yaml"
 
 
 @pytest.fixture(scope="module")
@@ -178,7 +178,7 @@ class BadWarmModel(ActModelAdapter):
 
 def context(config: PolicyServiceConfig, **changes) -> RunContext:
     values = {
-        "robot_id": "marvin_stack",
+        "robot_id": "marvin",
         "robot_profile_hash": config.robot_profile_hash,
         "backend_instance_id": "backend-1",
         "time_domain_id": "mujoco",

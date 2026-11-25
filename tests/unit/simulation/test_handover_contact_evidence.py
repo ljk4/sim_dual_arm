@@ -23,21 +23,21 @@ for source in (SIM_SRC, CONTRACTS):
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
 
-from robot_backend_sim.marvin_sim.handover.evaluator import (  # noqa: E402
+from robot_backend_sim.marvin.handover.evaluator import (  # noqa: E402
     HandoverTaskRuntime,
     evaluation_conditions,
 )
-from robot_backend_sim.marvin_sim.handover.observation import (  # noqa: E402
+from robot_backend_sim.marvin.handover.observation import (  # noqa: E402
     HandoverBinding,
     capture_handover_observation,
 )
-from robot_backend_sim.marvin_sim.handover.plan import HandoverLayout  # noqa: E402
-from robot_backend_sim.marvin_sim.handover.task_config import (  # noqa: E402
+from robot_backend_sim.marvin.handover.plan import HandoverLayout  # noqa: E402
+from robot_backend_sim.marvin.handover.task_config import (  # noqa: E402
     load_handover_task_config,
 )
 from robot_contracts.models import RunContext  # noqa: E402
 
-SCENARIO = ROOT / "shared/scenarios/marvin_sim/handover"
+SCENARIO = ROOT / "shared/scenarios/marvin/mujoco/handover"
 TASK = load_handover_task_config(
     SCENARIO / "configs/simulation/scene/marvin_handover_task.yaml"
 )

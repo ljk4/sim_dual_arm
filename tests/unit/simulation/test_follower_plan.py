@@ -16,7 +16,7 @@ from robot_trajectory.follower import PreparedFollowerPlan
 from robot_trajectory.spline_math import check_continuous_limits, compute_reference_extremes
 
 ROOT = Path(__file__).resolve().parents[3]
-PROFILES = ROOT / "shared/scenarios/marvin_sim/stack/profiles"
+PROFILES = ROOT / "shared/scenarios/marvin/mujoco/stack/profiles"
 SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))

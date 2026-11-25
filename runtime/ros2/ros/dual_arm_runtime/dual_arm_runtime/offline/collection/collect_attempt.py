@@ -31,6 +31,7 @@ def sdk_check_command(
     project_root: Path = ROOT,
     *,
     robot: str | None = None,
+    backend: str | None = None,
     task: str | None = None,
     shared_root: Path | None = None,
 ) -> list[str]:
@@ -46,10 +47,9 @@ def sdk_check_command(
         "--build-root",
         os.environ.get("ROS_SDK_ROOT", "/build/ros-dev"),
     ]
-    if robot is not None:
-        command += ["--robot", robot, "--task", task]
-        if shared_root is not None:
-            command += ["--shared-root", str(shared_root)]
+    del robot, backend, task
+    if shared_root is not None:
+        command += ["--shared-root", str(shared_root)]
     return command
 
 
@@ -57,10 +57,13 @@ def check_ros_sdk(
     project_root: Path = ROOT,
     *,
     robot: str | None = None,
+    backend: str | None = None,
     task: str | None = None,
     shared_root: Path | None = None,
 ) -> int:
-    command = sdk_check_command(project_root, robot=robot, task=task, shared_root=shared_root)
+    command = sdk_check_command(
+        project_root, robot=robot, backend=backend, task=task, shared_root=shared_root
+    )
     result = subprocess.run(command, check=False, capture_output=True, text=True)
     if result.returncode:
         print(result.stdout.strip(), file=sys.stderr)
@@ -78,34 +81,39 @@ def main(argv: list[str] | None = None) -> int:
         help="campaign recipe used for export quality rules",
     )
     parser.add_argument("--robot")
+    parser.add_argument("--backend")
     parser.add_argument("--task")
     parser.add_argument("--shared-root", type=Path)
     parser.add_argument("--runtime-config", type=Path)
     parser.add_argument("--robot-namespace", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
-    if args.robot is None and args.runtime_config is None:
-        parser.error("one of --robot/--task or --runtime-config is required")
-    if args.robot is not None and args.task is None:
-        parser.error("--robot requires --task")
-    if args.task is not None and args.robot is None:
-        parser.error("--task requires --robot")
-    if args.robot is not None and args.runtime_config is not None:
-        parser.error("--robot/--task and --runtime-config are mutually exclusive")
+    if args.robot is None and args.backend is None and args.task is None:
+        if args.runtime_config is None:
+            parser.error("one of --robot/--backend/--task or --runtime-config is required")
+    elif args.robot is None or args.backend is None or args.task is None:
+        parser.error("--robot, --backend, and --task must be passed together")
+    elif args.runtime_config is not None:
+        parser.error("--robot/--backend/--task and --runtime-config are mutually exclusive")
     attempt = Path(os.environ["CAMPAIGN_ATTEMPT_DIR"]).resolve()
     seed = int(os.environ["CAMPAIGN_SEED"])
     run_id = os.environ["CAMPAIGN_RUN_ID"]
     episode_id = os.environ["CAMPAIGN_EPISODE_ID"]
     robot = args.robot or os.environ.get("CAMPAIGN_ROBOT") or None
+    backend = args.backend or os.environ.get("CAMPAIGN_BACKEND") or None
     task = args.task or os.environ.get("CAMPAIGN_TASK") or None
     backend_log = (
-        args.backend_log if args.backend_log is not None else default_backend_log(robot, task)
+        args.backend_log
+        if args.backend_log is not None
+        else default_backend_log(robot, backend, task)
     ).resolve()
     if not backend_log.is_dir():
         raise FileNotFoundError(f"teacher backend log is missing: {backend_log}")
     shared_root = args.shared_root
     if shared_root is None and os.environ.get("SHARED_ROOT"):
         shared_root = Path(os.environ["SHARED_ROOT"])
-    code = check_ros_sdk(ROOT, robot=robot, task=task, shared_root=shared_root)
+    code = check_ros_sdk(
+        ROOT, robot=robot, backend=backend, task=task, shared_root=shared_root
+    )
     if code:
         return code
 
@@ -114,7 +122,16 @@ def main(argv: list[str] | None = None) -> int:
     logs.mkdir(parents=True, exist_ok=True)
     raw = attempt / "raw"
     if robot is not None:
-        runtime_arguments = ["--robot", robot, "--task", task, "--role", "teacher"]
+        runtime_arguments = [
+            "--robot",
+            robot,
+            "--backend",
+            backend,
+            "--task",
+            task,
+            "--role",
+            "teacher",
+        ]
         if shared_root is not None:
             runtime_arguments += ["--shared-root", str(shared_root)]
         if args.robot_namespace is not None:

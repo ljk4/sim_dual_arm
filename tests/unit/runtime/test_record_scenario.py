@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from collection_fixtures import ROBOT, SCENARIO_ID, TASK, build_collection_tree, sha
+from collection_fixtures import BACKEND, ROBOT, SCENARIO_ID, TASK, build_collection_tree, sha
 from dual_arm_runtime.offline.collection import campaign, record, record_preflight
 from dual_arm_runtime.offline.collection.campaign_ledger import CampaignError
 from dual_arm_runtime.offline.collection.scenario_selection import (
@@ -17,9 +17,10 @@ from dual_arm_runtime.offline.export import export_episode
 from scenario_fixtures import ROOT
 
 
-def _select(tree, *, require_parallel: bool = True, **kwargs):
+def _select(tree, *, backend: str = BACKEND, require_parallel: bool = True, **kwargs):
     return select_collection(
         robot=ROBOT,
+        backend=backend,
         task=TASK,
         shared_root=tree.shared,
         project_root=tree.repo,
@@ -73,18 +74,25 @@ def test_selection_returns_binding_recipes_profiles_and_capabilities(tmp_path):
 def test_unsupported_declared_capabilities_are_rejected(tmp_path, field, value, message):
     tree = build_collection_tree(tmp_path)
     document = tree.scenario.document
+    selected_backend = BACKEND
     if field == "backend_kind":
         document["backend"]["kind"] = value
         document["backend"]["implementation"] = "mujoco"
     elif field == "backend_implementation":
         document["backend"]["implementation"] = value
+        selected_backend = value
+        new_root = tree.shared / f"scenarios/{ROBOT}/{value}/{TASK}"
+        new_root.parent.mkdir(parents=True, exist_ok=True)
+        tree.scenario.root.rename(new_root)
+        tree.scenario.root = new_root
+        tree.scenario.binding_path = new_root / "binding.yaml"
     elif field == "runtime_implementation":
         document["runtime"]["implementation"] = value
     else:
         document["interfaces"]["common_ros"] = value
     tree.scenario.write()
     with pytest.raises(CampaignError, match=message):
-        _select(tree)
+        _select(tree, backend=selected_backend)
 
 
 def test_teacher_recipes_must_declare_teacher_mode(tmp_path):
@@ -158,6 +166,8 @@ def _preflight_args(tree, *extra):
             str(tree.repo),
             "--robot",
             ROBOT,
+            "--backend",
+            BACKEND,
             "--task",
             TASK,
             "--shared-root",
@@ -180,8 +190,8 @@ def test_preflight_plan_is_read_only(tmp_path):
     assert plan["simulation_template"] == str(tree.backend_recipe.resolve())
     assert "formal_target_qualified" not in plan["campaign_status"]
     assert plan["stop_grace_s"] == 45.0
-    assert not (tree.repo / "var/synthetic_sim/stack").exists()
-    assert not (tree.repo / "var/synthetic_sim/stack/logs/collection/record-pools").exists()
+    assert not (tree.repo / "output/synthetic_sim/mujoco/stack").exists()
+    assert not (tree.repo / "output/synthetic_sim/mujoco/stack/logs/collection/record-pools").exists()
 
 
 def test_preflight_rejects_unmounted_or_conflicting_selection(tmp_path):
@@ -197,7 +207,7 @@ def test_preflight_rejects_unmounted_or_conflicting_selection(tmp_path):
     tree.campaign_recipe.write_text(yaml.safe_dump(document, sort_keys=False))
     with pytest.raises(CampaignError, match="required path is missing"):
         record_preflight.build_plan(_preflight_args(tree))
-    assert not (tree.repo / "var/synthetic_sim/stack").exists()
+    assert not (tree.repo / "output/synthetic_sim/mujoco/stack").exists()
 
 
 def test_preflight_allows_arbitrary_positive_target_total(tmp_path):
@@ -217,6 +227,8 @@ def test_record_selection_uses_binding_recipes_for_runner_and_exporter(tmp_path)
             str(tree.repo),
             "--robot",
             ROBOT,
+            "--backend",
+            BACKEND,
             "--task",
             TASK,
             "--shared-root",
@@ -266,6 +278,8 @@ def test_record_scenario_conflicts_fail_before_any_ledger(tmp_path):
         str(tree.repo),
         "--robot",
         ROBOT,
+        "--backend",
+        BACKEND,
         "--task",
         TASK,
         "--shared-root",
@@ -281,7 +295,7 @@ def test_record_scenario_conflicts_fail_before_any_ledger(tmp_path):
     with pytest.raises(SystemExit) as error:
         record.main(["--project-root", str(tree.repo), "--shared-root", str(tree.shared)])
     assert error.value.code == 2
-    assert not (tree.repo / "var/synthetic_sim/stack").exists()
+    assert not (tree.repo / "output/synthetic_sim/mujoco/stack").exists()
 
 
 def test_campaign_scenario_uses_binding_and_rejects_conflicts(tmp_path, monkeypatch):
@@ -291,6 +305,8 @@ def test_campaign_scenario_uses_binding_and_rejects_conflicts(tmp_path, monkeypa
         str(tree.repo),
         "--robot",
         ROBOT,
+        "--backend",
+        BACKEND,
         "--task",
         TASK,
         "--shared-root",
@@ -308,7 +324,7 @@ def test_campaign_scenario_uses_binding_and_rejects_conflicts(tmp_path, monkeypa
     with pytest.raises(SystemExit) as error:
         campaign.main([*base, "run", "--purpose", "pilot", "--runtime-config", "explicit.yaml"])
     assert error.value.code == 2
-    assert not (tree.repo / "var/synthetic_sim/stack/logs/collection/attempts.jsonl").exists()
+    assert not (tree.repo / "output/synthetic_sim/mujoco/stack/logs/collection/attempts.jsonl").exists()
 
 
 def test_campaign_rejects_unsupported_binding_before_reserving(tmp_path, capsys):
@@ -321,6 +337,8 @@ def test_campaign_rejects_unsupported_binding_before_reserving(tmp_path, capsys)
             str(tree.repo),
             "--robot",
             ROBOT,
+            "--backend",
+            BACKEND,
             "--task",
             TASK,
             "--shared-root",
@@ -332,7 +350,7 @@ def test_campaign_rejects_unsupported_binding_before_reserving(tmp_path, capsys)
     )
     assert code == 2
     assert "unsupported Teacher capability" in capsys.readouterr().err
-    assert not (tree.repo / "var/synthetic_sim/stack").exists()
+    assert not (tree.repo / "output/synthetic_sim/mujoco/stack").exists()
 
 
 def test_export_campaign_config_selection_and_conflict(tmp_path):
@@ -340,6 +358,7 @@ def test_export_campaign_config_selection_and_conflict(tmp_path):
     path = campaign_config_path(
         campaign_config=None,
         robot=ROBOT,
+        backend=BACKEND,
         task=TASK,
         shared_root=tree.shared,
         project_root=tree.repo,
@@ -350,6 +369,7 @@ def test_export_campaign_config_selection_and_conflict(tmp_path):
         campaign_config_path(
             campaign_config=tree.campaign_recipe,
             robot=ROBOT,
+            backend=BACKEND,
             task=TASK,
             shared_root=tree.shared,
             project_root=tree.repo,
@@ -365,6 +385,8 @@ def test_export_campaign_config_selection_and_conflict(tmp_path):
             str(tmp_path / "export"),
             "--robot",
             ROBOT,
+            "--backend",
+            BACKEND,
             "--task",
             TASK,
             "--shared-root",
@@ -378,18 +400,18 @@ def test_export_campaign_config_selection_and_conflict(tmp_path):
 
 def test_real_campaign_required_paths_use_the_actual_teacher_package():
     path = (
-        ROOT / "shared/scenarios/marvin_sim/stack/configs/runtime/stack_campaign.yaml"
+        ROOT / "shared/scenarios/marvin/mujoco/stack/configs/runtime/stack_campaign.yaml"
     )
     document = yaml.safe_load(path.read_text())
     required = document["paths"]["required_paths"]
     teacher = [item for item in required if item.endswith("GetTeacherChunk.srv")]
     assert teacher == [
-        "shared/scenarios/marvin_sim/extensions/ros/marvin_teacher_api_msgs/srv/GetTeacherChunk.srv"
+        "shared/robots/marvin/extensions/ros/marvin_teacher_api_msgs/srv/GetTeacherChunk.srv"
     ]
     for item in required:
         assert (ROOT / item).exists(), item
     # The SDK marker is generated by build-ros-sdk, not shipped in a checkout.
-    assert document["paths"]["sdk_marker"] == "build/ros-dev/contracts.json"
+    assert document["paths"]["sdk_marker"] == "output/build/ros-dev/contracts.json"
 
 
 def test_direct_relative_recipes_reach_collector_as_mounted_paths(tmp_path, monkeypatch):

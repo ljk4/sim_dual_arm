@@ -136,10 +136,10 @@ def main() -> int:
     parser.add_argument("command", choices=("check", "build"))
     parser.add_argument("--project-root", type=Path, default=ROOT)
     parser.add_argument(
-        "--sdk-root", type=Path, help="default: <project-root>/build/generated/policy-sdk"
+        "--sdk-root", type=Path, help="default: <project-root>/output/build/generated/policy-sdk"
     )
     arguments = parser.parse_args()
-    sdk_root = arguments.sdk_root or arguments.project_root / "build/generated/policy-sdk"
+    sdk_root = arguments.sdk_root or arguments.project_root / "output/build/generated/policy-sdk"
     try:
         if arguments.command == "check":
             print(

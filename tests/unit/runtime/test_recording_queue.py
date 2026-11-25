@@ -16,7 +16,7 @@ from robot_contracts.models import ContractError
 
 TOPICS = {"/state": "RobotState", "/frame": "CameraFrame"}
 ROOT = Path(__file__).resolve().parents[3]
-BASE_CONFIG = ROOT / "shared/scenarios/marvin_sim/stack/configs/runtime/teacher_collect.yaml"
+BASE_CONFIG = ROOT / "shared/scenarios/marvin/mujoco/stack/configs/runtime/teacher_collect.yaml"
 
 
 def _resolve_paths(document, source: Path) -> None:

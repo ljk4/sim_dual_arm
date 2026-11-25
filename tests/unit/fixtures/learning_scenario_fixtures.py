@@ -36,7 +36,7 @@ class Tree:
 
 def write_dataset_recipe(scenario, tmp_path: Path, *, task_text: str) -> Path:
     document = yaml.safe_load(
-        (ROOT / "shared/scenarios/marvin_sim/stack/configs/learning/act_dataset.yaml").read_text()
+        (ROOT / "shared/scenarios/marvin/mujoco/stack/configs/learning/act_dataset.yaml").read_text()
     )
     document["profile"] = str(scenario.root / "profiles/robot.json")
     document["select"] = str(tmp_path / "select.json")
@@ -52,7 +52,7 @@ def write_training_recipe(
     scenario, tmp_path: Path, dataset_recipe: Path, *, mode: str = "smoke"
 ) -> Path:
     document = yaml.safe_load(
-        (ROOT / "shared/scenarios/marvin_sim/stack/configs/learning/act_training.yaml").read_text()
+        (ROOT / "shared/scenarios/marvin/mujoco/stack/configs/learning/act_training.yaml").read_text()
     )
     document["mode"] = mode
     document["cache_root"] = str(tmp_path / "cache")
@@ -73,7 +73,7 @@ def write_training_recipe(
 
 def write_service_recipe(scenario, *, task_text: str = "scenario service task") -> Path:
     document = yaml.safe_load(
-        (ROOT / "shared/scenarios/marvin_sim/stack/configs/learning/policy.yaml").read_text()
+        (ROOT / "shared/scenarios/marvin/mujoco/stack/configs/learning/policy.yaml").read_text()
     )
     document["service"]["task_text"] = task_text
     path = scenario.root / "configs/policy_service.yaml"
@@ -84,7 +84,7 @@ def write_service_recipe(scenario, *, task_text: str = "scenario service task") 
 def make_tree(tmp_path: Path, *, adapter: str = "act") -> Tree:
     repo = tmp_path / "repo"
     shared = repo / "shared"
-    scenario = build_scenario(shared / "scenarios/synthetic_sim/stack")
+    scenario = build_scenario(shared / "scenarios/synthetic_sim/mujoco/stack")
     shutil.copytree(
         ROOT / "shared/common/interfaces/schemas", shared / "common/interfaces/schemas"
     )
@@ -138,6 +138,8 @@ def scenario_args(tree: Tree, command: str, *extra: str) -> list[str]:
         command,
         "--robot",
         "synthetic_sim",
+        "--backend",
+        "mujoco",
         "--task",
         "stack",
         "--shared-root",

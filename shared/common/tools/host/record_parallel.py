@@ -46,6 +46,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--purpose", choices=("formal", "pilot"), default="formal")
     result.add_argument("--project-root", type=Path, default=ROOT)
     result.add_argument("--robot")
+    result.add_argument("--backend")
     result.add_argument("--task")
     result.add_argument(
         "--shared-root",
@@ -55,17 +56,17 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument(
         "--config",
         default=None,
-        help="direct campaign recipe (conflicts with --robot/--task)",
+        help="direct campaign recipe (conflicts with --robot/--backend/--task)",
     )
     result.add_argument(
         "--runtime-config",
         default=None,
-        help="direct runtime teacher recipe (conflicts with --robot/--task)",
+        help="direct runtime teacher recipe (conflicts with --robot/--backend/--task)",
     )
     result.add_argument(
         "--backend-template",
         default=None,
-        help="direct simulation teacher recipe (conflicts with --robot/--task)",
+        help="direct simulation teacher recipe (conflicts with --robot/--backend/--task)",
     )
     result.add_argument("--realtime-speed", type=float, default=1.0)
     result.add_argument("--domain-base", type=int)
@@ -91,6 +92,8 @@ class DockerWorkers(BaseDockerWorkers):
             command += [
                 "--robot",
                 self.args.robot,
+                "--backend",
+                self.args.backend,
                 "--task",
                 self.args.task,
                 "--shared-root",
@@ -222,7 +225,7 @@ def _print_startup_info(
     selection = plan.get("selection") or {}
     if selection.get("mode") == "scenario":
         print(
-            f"方案: {selection.get('robot')}/{selection.get('task')} | "
+            f"方案: {selection.get('robot')}/{selection.get('backend')}/{selection.get('task')} | "
             f"Binding: {(selection.get('binding') or {}).get('path', '-')}",
             flush=True,
         )
@@ -256,9 +259,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.count is None and args.target_total is None:
         args.count = 1
     try:
-        if args.robot is not None:
-            if args.task is None:
-                cli.error("--robot requires --task")
+        if any(value is not None for value in (args.robot, args.backend, args.task)):
+            if not (args.robot and args.backend and args.task):
+                cli.error("--robot, --backend, and --task must be passed together")
             explicit = [
                 name
                 for name in ("config", "runtime_config", "backend_template")
@@ -266,14 +269,12 @@ def main(argv: list[str] | None = None) -> int:
             ]
             if explicit:
                 cli.error(
-                    "--robot/--task cannot be combined with "
+                    "--robot/--backend/--task cannot be combined with "
                     + ", ".join("--" + name.replace("_", "-") for name in explicit)
                 )
         else:
-            if args.task is not None:
-                cli.error("--task requires --robot")
             if args.shared_root is not None:
-                cli.error("--shared-root requires --robot/--task")
+                cli.error("--shared-root requires --robot/--backend/--task")
             missing = [
                 name
                 for name in ("config", "runtime_config", "backend_template")
@@ -281,7 +282,7 @@ def main(argv: list[str] | None = None) -> int:
             ]
             if missing:
                 cli.error(
-                    "one of --robot/--task or all of --config/--runtime-config/"
+                    "one of --robot/--backend/--task or all of --config/--runtime-config/"
                     "--backend-template is required"
                 )
         args.workers = automatic_workers() if args.workers == "auto" else int(args.workers)
@@ -297,7 +298,7 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as error:
         cli.error(str(error))
     pools_root = (
-        scenario_root(args.project_root / "var", args.robot, args.task)
+        scenario_root(args.project_root / "output", args.robot, args.backend, args.task)
         / "logs"
         / "collection"
         / "record-pools"

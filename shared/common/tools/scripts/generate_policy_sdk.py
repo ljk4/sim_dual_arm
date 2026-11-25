@@ -49,7 +49,7 @@ def generate(source: Path, output: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", type=Path, default=Path("build/generated/policy-sdk"))
+    parser.add_argument("--output", type=Path, default=Path("output/build/generated/policy-sdk"))
     args = parser.parse_args()
     generate(_proto_source(), args.output.resolve())
 

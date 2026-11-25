@@ -21,22 +21,22 @@ from robot_contracts.profiles import load_profile  # noqa: E402
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "simulation/mujoco/src"))
 
-from robot_backend_sim.marvin_sim.handover.scene_config import load_marvin_scene_config  # noqa: E402
+from robot_backend_sim.marvin.handover.scene_config import load_marvin_scene_config  # noqa: E402
 from robot_backend_sim.common.config.motion_config import load_control_config  # noqa: E402
-from robot_backend_sim.marvin_sim.handover.scene import build_marvin_scene  # noqa: E402
-from robot_backend_sim.marvin_sim.handover.evaluator import HandoverTaskRuntime  # noqa: E402
-from robot_backend_sim.marvin_sim.handover.gate import HandoverFeedback  # noqa: E402
-from robot_backend_sim.marvin_sim.handover.observation import (  # noqa: E402
+from robot_backend_sim.marvin.handover.scene import build_marvin_scene  # noqa: E402
+from robot_backend_sim.marvin.handover.evaluator import HandoverTaskRuntime  # noqa: E402
+from robot_backend_sim.marvin.handover.gate import HandoverFeedback  # noqa: E402
+from robot_backend_sim.marvin.handover.observation import (  # noqa: E402
     FingerContact,
     HandoverBinding,
     HandoverObservation,
     SupportContact,
 )
-from robot_backend_sim.marvin_sim.handover.plan import HandoverLayout, layout_from_config  # noqa: E402
-from robot_backend_sim.marvin_sim.handover.task_config import (  # noqa: E402
+from robot_backend_sim.marvin.handover.plan import HandoverLayout, layout_from_config  # noqa: E402
+from robot_backend_sim.marvin.handover.task_config import (  # noqa: E402
     load_handover_task_config,
 )
-from robot_backend_sim.marvin_sim.handover.teacher import (  # noqa: E402
+from robot_backend_sim.marvin.handover.teacher import (  # noqa: E402
     HandoverPlan,
     HandoverSnapshot,
     HandoverStep,
@@ -44,7 +44,7 @@ from robot_backend_sim.marvin_sim.handover.teacher import (  # noqa: E402
     sample_handover_chunk,
 )
 
-SCENARIO = ROOT / "shared/scenarios/marvin_sim/handover"
+SCENARIO = ROOT / "shared/scenarios/marvin/mujoco/handover"
 OPEN = 0.0814
 CLOSE = 0.05
 AIRBORNE_CENTER = (0.55, 0.12, 0.93)
@@ -93,7 +93,7 @@ PROFILE = load_profile(
     ROOT / "shared/common/interfaces/schemas",
 )
 CONTROL = load_control_config(
-    ROOT / "shared/scenarios/marvin_sim/profiles/control/marvin_control.yaml"
+    ROOT / "shared/robots/marvin/profiles/control/marvin_control.yaml"
 )
 TASK = load_handover_task_config(
     SCENARIO / "configs/simulation/scene/marvin_handover_task.yaml"

@@ -1,0 +1,44 @@
+# Marvin stack ACT policy inference service configuration.
+
+model:
+  robot_profile_path: ../../profiles/robot/profile.json
+  observation_schema_path: ../../../../../../robots/marvin/profiles/observations/marvin_rgb_joint.json
+  action_schema_path: ../../../../../../robots/marvin/profiles/actions/marvin_joint_position.json
+  device: cuda
+  require_formal: true
+  max_prediction_corrections:
+    left_gripper_width: 0.015
+    right_gripper_width: 0.015
+  soft_prediction_corrections:
+    left_gripper_width: 0.03
+    right_gripper_width: 0.03
+    right_joint6: 0.02
+    right_joint7: 0.02
+  max_consecutive_soft_overruns: 2
+  temporal_ensemble_coeff: null
+
+service:
+  bind_address: 127.0.0.1
+  port: 50051
+  max_workers: 4
+  max_message_bytes: 16777216
+  max_sessions: 8
+  max_open_requests: 128
+  max_request_cache: 128
+  predict_deadline_s: 3.0
+  open_deadline_s: 5.0
+  close_deadline_s: 5.0
+  test_only: false
+  task_id: marvin-stack
+  task_text: >-
+    Pick up the red source cube with the right arm and stack it onto the blue
+    target cube.
+
+logging:
+  queue_capacity: 1024
+  max_event_bytes: 32768
+  max_file_bytes: 8388608
+  max_total_bytes: 268435456
+  close_timeout_s: 5.0
+  flush_interval_s: 0.2
+  console: false

@@ -51,8 +51,10 @@ def prepare_workers(
 ) -> Path:
     validate_worker_bounds(workers, domain_base, speed)
     project, directory = project.resolve(), directory.resolve()
-    if not directory.is_relative_to(project_path("var", project)):
-        raise CampaignError("worker directory must be below the mounted project var directory")
+    if not directory.is_relative_to(project_path("output", project)):
+        raise CampaignError(
+            "worker directory must be below the mounted project output directory"
+        )
     runtime_template, backend_template = (runtime_template.resolve(), backend_template.resolve())
     if selection is not None:
         _check_selection_paths(selection, runtime_template, backend_template)
@@ -71,8 +73,15 @@ def prepare_workers(
     for name in REFERENCES:
         if name in runtime:
             runtime[name] = str((runtime_template.parent / runtime[name]).resolve())
-    validate_backend_references(backend, backend_template, project)
-    backend_config_sim = backend_config_for_simulation(backend_template, project)
+    backend_impl = (
+        str(selection["backend"])
+        if selection is not None and selection.get("backend")
+        else None
+    )
+    validate_backend_references(backend, backend_template, project, backend_impl)
+    backend_config_sim = backend_config_for_simulation(
+        backend_template, project, backend_impl
+    )
     recipes = recipe_records(
         ("runtime_teacher", "simulation_teacher"), runtime_template, backend_template, selection
     )
@@ -102,7 +111,13 @@ def prepare_workers(
 
 def main() -> int:
     parser, args = parse_worker_prep_args(__doc__ or "", default_speed=1.0)
-    code = check_ros_sdk(ROOT, robot=args.robot, task=args.task, shared_root=args.shared_root)
+    code = check_ros_sdk(
+        ROOT,
+        robot=args.robot,
+        backend=args.backend,
+        task=args.task,
+        shared_root=args.shared_root,
+    )
     if code:
         return code
     try:
@@ -110,6 +125,7 @@ def main() -> int:
         if args.robot is not None:
             selection = select_collection(
                 robot=args.robot,
+                backend=args.backend,
                 task=args.task,
                 shared_root=args.shared_root,
                 project_root=ROOT,

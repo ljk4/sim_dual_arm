@@ -21,16 +21,16 @@ from robot_backend_sim.common.config.scenario_config import (
 from scenario_fixtures import ROOT, build_scenario
 
 SIM_RECIPE = (
-    ROOT / "shared/scenarios/marvin_sim/stack/configs/simulation/backend/backend_stack_teacher.yaml"
+    ROOT / "shared/scenarios/marvin/mujoco/stack/configs/simulation/backend/backend_stack_teacher.yaml"
 )
-RUNTIME_TEACHER = ROOT / "shared/scenarios/marvin_sim/stack/configs/runtime/teacher_collect.yaml"
-RUNTIME_POLICY = ROOT / "shared/scenarios/marvin_sim/stack/configs/runtime/policy_rollout.yaml"
+RUNTIME_TEACHER = ROOT / "shared/scenarios/marvin/mujoco/stack/configs/runtime/teacher_collect.yaml"
+RUNTIME_POLICY = ROOT / "shared/scenarios/marvin/mujoco/stack/configs/runtime/policy_rollout.yaml"
 
 
 def _shared(tmp_path: Path):
     repo = tmp_path / "repo"
     shared = repo / "shared"
-    scenario = build_scenario(shared / "scenarios/synthetic_sim/stack")
+    scenario = build_scenario(shared / "scenarios/synthetic_sim/mujoco/stack")
     shutil.copytree(
         ROOT / "shared/common/interfaces/schemas", shared / "common/interfaces/schemas"
     )
@@ -109,13 +109,14 @@ def test_simulation_scenario_expands_paths_seed_and_realtime_speed(tmp_path):
     repo, shared, scenario = _shared(tmp_path)
     recipe = _simulation_recipe(scenario, shared)
     resolved = resolve_scenario_backend(
-        robot="synthetic_sim", task="stack",
+        robot="synthetic_sim", backend="mujoco", task="stack",
         role="teacher",
         shared_root=shared,
         seed=7,
         realtime_speed=0.4,
     )
     assert resolved.selection["robot"] == "synthetic_sim"
+    assert resolved.selection["backend"] == "mujoco"
     assert resolved.selection["task"] == "stack"
     assert resolved.selection["recipe"]["path"] == str(recipe.resolve())
     assert resolved.document["robot"]["profile"] == str(
@@ -138,7 +139,7 @@ def test_simulation_scenario_rejects_a_different_robot_profile(tmp_path):
     )
     with pytest.raises(ScenarioError, match="differs from binding profile"):
         resolve_scenario_backend(
-            robot="synthetic_sim", task="stack", role="teacher", shared_root=shared
+            robot="synthetic_sim", backend="mujoco", task="stack", role="teacher", shared_root=shared
         )
 
 
@@ -151,7 +152,7 @@ def test_runtime_teacher_scenario_injects_api_and_checks_budget(tmp_path):
     document["observation"]["max_age_ns"] = 250_000_000
     recipe.write_text(yaml.safe_dump(document))
     resolved = resolve_scenario_runtime(
-        robot="synthetic_sim", task="stack",
+        robot="synthetic_sim", backend="mujoco", task="stack",
         role="teacher",
         shared_root=shared,
         project_root=repo,
@@ -177,7 +178,7 @@ def test_runtime_teacher_scenario_rejects_budget_mismatch(tmp_path):
     _runtime_recipe(scenario, "teacher", budget_ns=31_000_000_000)
     with pytest.raises(ScenarioRuntimeError, match="task_sim_budget_ns"):
         resolve_scenario_runtime(
-            robot="synthetic_sim", task="stack",
+            robot="synthetic_sim", backend="mujoco", task="stack",
             role="teacher",
             shared_root=shared,
             project_root=repo,
@@ -188,7 +189,7 @@ def test_runtime_policy_scenario_needs_no_bundle_or_model_identity(tmp_path):
     repo, shared, scenario = _shared(tmp_path)
     _runtime_recipe(scenario, "policy")
     resolved = resolve_scenario_runtime(
-        robot="synthetic_sim", task="stack",
+        robot="synthetic_sim", backend="mujoco", task="stack",
         role="policy",
         shared_root=shared,
         project_root=repo,
@@ -216,7 +217,7 @@ def test_runtime_scenario_rejects_policy_endpoint_for_a_teacher_recipe(tmp_path)
     _teacher_task(scenario)
     _runtime_recipe(scenario, "teacher")
     resolved = resolve_scenario_runtime(
-        robot="synthetic_sim", task="stack",
+        robot="synthetic_sim", backend="mujoco", task="stack",
         role="teacher",
         shared_root=shared,
         project_root=repo,
@@ -233,7 +234,12 @@ def test_runtime_scenario_rejects_policy_endpoint_for_a_teacher_recipe(tmp_path)
 
 
 def test_hardware_binding_rejects_managed_task_and_accepts_basic_policy(tmp_path):
-    repo, shared, scenario = _shared(tmp_path)
+    repo = tmp_path / "repo"
+    shared = repo / "shared"
+    scenario = build_scenario(shared / "scenarios/synthetic_sim/robot_api/stack")
+    shutil.copytree(
+        ROOT / "shared/common/interfaces/schemas", shared / "common/interfaces/schemas"
+    )
     scenario.document["backend"] = {"kind": "hardware", "implementation": "robot_api"}
     for name in ("simulation_teacher", "simulation_policy", "runtime_teacher"):
         scenario.document["recipes"].pop(name)
@@ -245,7 +251,11 @@ def test_hardware_binding_rejects_managed_task_and_accepts_basic_policy(tmp_path
     document.pop("reset")
     recipe.write_text(yaml.safe_dump(document))
     selection = {
-        "robot": "synthetic_sim", "task": "stack", "project_root": repo, "shared_root": shared,
+        "robot": "synthetic_sim",
+        "backend": "robot_api",
+        "task": "stack",
+        "project_root": repo,
+        "shared_root": shared,
     }
     with pytest.raises(ScenarioRuntimeError, match="require a simulation binding"):
         resolve_scenario_runtime(**selection)

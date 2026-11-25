@@ -11,7 +11,7 @@ from robot_backend_sim.common.config.follower_config import load_follower_config
 from scenario_fixtures import MARVIN_SHARED_PROFILES
 
 ROOT = Path(__file__).resolve().parents[3]
-SCENARIO = ROOT / "shared/scenarios/marvin_sim/stack"
+SCENARIO = ROOT / "shared/scenarios/marvin/mujoco/stack"
 TEACHER_FOLLOWER = MARVIN_SHARED_PROFILES / "control/marvin_follower.yaml"
 INFERENCE_FOLLOWER = MARVIN_SHARED_PROFILES / "control/marvin_follower_inference.yaml"
 BACKEND_CHUNKED = SCENARIO / "configs/simulation/backend/backend_stack_policy.yaml"

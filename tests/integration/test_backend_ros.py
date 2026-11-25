@@ -51,7 +51,7 @@ except ImportError as error:  # pragma: no cover - host without ROS
     pytest.skip(f"ROS unavailable: {error}", allow_module_level=True)
 
 ROOT = Path(__file__).resolve().parents[2]
-SCENARIO = ROOT / "shared/scenarios/marvin_sim/stack"
+SCENARIO = ROOT / "shared/scenarios/marvin/mujoco/stack"
 PROFILES = SCENARIO / "profiles"
 SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:

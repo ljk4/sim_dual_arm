@@ -11,16 +11,16 @@ np = pytest.importorskip("numpy")
 pytest.importorskip("mink")
 
 ROOT = Path(__file__).resolve().parents[2]
-SCENARIO = ROOT / "shared/scenarios/marvin_sim/stack"
+SCENARIO = ROOT / "shared/scenarios/marvin/mujoco/stack"
 SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
 from robot_backend_sim.common.kinematics import common, kinematics_clearance  # noqa: E402
-from robot_backend_sim.marvin_sim.stack import plan as stack_plan  # noqa: E402
-from robot_backend_sim.marvin_sim.stack.kinematics_config import load_kinematics_config  # noqa: E402
-from robot_backend_sim.marvin_sim.stack.scene import build_marvin_stack_scene  # noqa: E402
-from robot_backend_sim.marvin_sim.stack.scene_config import load_marvin_stack_scene_config  # noqa: E402
+from robot_backend_sim.marvin.stack import plan as stack_plan  # noqa: E402
+from robot_backend_sim.marvin.stack.kinematics_config import load_kinematics_config  # noqa: E402
+from robot_backend_sim.marvin.stack.scene import build_marvin_stack_scene  # noqa: E402
+from robot_backend_sim.marvin.stack.scene_config import load_marvin_stack_scene_config  # noqa: E402
 
 CONFIG_PATH = SCENARIO / "configs/simulation/scene/marvin_stack.yaml"
 KINEMATICS_PATH = SCENARIO / "configs/simulation/scene/stack_paths.yaml"

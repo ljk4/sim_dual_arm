@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start the MuJoCo teacher backend for a robot/task inside the simulation container.
+# Start the MuJoCo teacher backend for a robot/backend/task inside the mujoco container.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

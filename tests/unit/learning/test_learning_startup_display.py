@@ -9,12 +9,16 @@ from dual_arm_learning.config import load_dataset_config, load_training_config
 from dual_arm_learning.scenario import select_scenario
 
 
-@pytest.mark.parametrize(("robot", "task"), [("marvin_sim", "stack"), ("marvin_sim", "handover")])
+@pytest.mark.parametrize(
+    ("robot", "backend", "task"),
+    [("marvin", "mujoco", "stack"), ("marvin", "mujoco", "handover")],
+)
 @pytest.mark.parametrize("field", ["dataset", "training"])
-def test_learning_startup_prints_real_loaded_selection(robot, task, field, capsys):
+def test_learning_startup_prints_real_loaded_selection(robot, backend, task, field, capsys):
     root = Path(os.environ.get("PROJECT_ROOT", Path(__file__).resolve().parents[3]))
     selection = select_scenario(
         robot=robot,
+        backend=backend,
         task=task,
         recipe_field=field,
         stage="learning",
@@ -24,7 +28,7 @@ def test_learning_startup_prints_real_loaded_selection(robot, task, field, capsy
     config = load(selection.recipe_path, root)
     _print_effective_config("配置", selection.recipe_path, selection, config)
     output = capsys.readouterr().out
-    assert f"{robot}/{task}" in output
+    assert f"{robot}/{backend}/{task}" in output
     assert str(selection.resolved.path) in output
     assert str(selection.recipe_path) in output
 
@@ -64,7 +68,8 @@ def test_training_data_root_override_uses_data_mount(monkeypatch):
     monkeypatch.setenv("PROJECT_CONTAINER", "1")
     monkeypatch.setenv("PROJECT_ROOT", str(root))
     selection = select_scenario(
-        robot="marvin_sim",
+        robot="marvin",
+        backend="mujoco",
         task="stack",
         recipe_field="training",
         stage="learning",
@@ -73,10 +78,10 @@ def test_training_data_root_override_uses_data_mount(monkeypatch):
     args = argparse.Namespace(
         project_root=root,
         mode=None,
-        data_root=Path("var/marvin_sim/stack/datasets/override"),
+        data_root=Path("output/marvin/mujoco/stack/datasets/override"),
     )
     config = cli._training_config(args, selection.recipe_path)
     assert (
         config.data_root
-        == Path(os.environ.get("DATA_ROOT", "/data")) / "marvin_sim/stack/datasets/override"
+        == Path(os.environ.get("DATA_ROOT", "/data")) / "marvin/mujoco/stack/datasets/override"
     )

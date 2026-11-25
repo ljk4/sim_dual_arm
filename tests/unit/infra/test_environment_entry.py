@@ -11,25 +11,25 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
 COMPOSES = {
-    "simulation": ROOT / "simulation/mujoco/docker/docker-compose.yml",
+    "mujoco": ROOT / "simulation/mujoco/docker/docker-compose.yml",
     "runtime": ROOT / "runtime/ros2/docker/docker-compose.yml",
-    "learning": ROOT / "learning/lerobot/docker/docker-compose.yml",
-    "hardware": ROOT / "hardware/tianji/docker/docker-compose.yml",
+    "lerobot": ROOT / "learning/lerobot/docker/docker-compose.yml",
+    "tianji": ROOT / "hardware/tianji/docker/docker-compose.yml",
 }
 
 
-def test_environment_entry_lists_hardware_without_starting_docker():
+def test_environment_entry_lists_tianji_without_starting_docker():
     result = subprocess.run(
         ["bash", str(ROOT / "env.sh"), "list"],
         capture_output=True, text=True, timeout=10,
     )
     assert result.returncode == 0
-    assert "hardware" in result.stdout.split()
+    assert {"runtime", "mujoco", "lerobot", "tianji"} <= set(result.stdout.split())
 
 
 def test_hardware_compose_exposes_usb_serial_and_camera_devices():
-    document = yaml.safe_load(COMPOSES["hardware"].read_text())
-    service = document["services"]["hardware"]
+    document = yaml.safe_load(COMPOSES["tianji"].read_text())
+    service = document["services"]["tianji"]
     assert "/dev:/dev" in service["volumes"]
     assert "/sys:/sys:ro" in service["volumes"]
     assert "/run/udev:/run/udev:ro" in service["volumes"]
@@ -61,7 +61,7 @@ def test_standalone_compose_files_use_host_network():
         assert (path.parent / "Dockerfile").is_file()
         assert (path.parent.parent / "scripts/test.sh").is_file()
         assert not (path.parent.parent / "scripts/run.sh").exists()
-    assert (COMPOSES["simulation"].parent / "../").resolve() == ROOT / "simulation/mujoco"
+    assert (COMPOSES["mujoco"].parent / "../").resolve() == ROOT / "simulation/mujoco"
 
     fastdds = ET.fromstring((ROOT / "shared/common/tools/docker/fastdds.xml").read_text())
     ns = {"fast": "http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles"}

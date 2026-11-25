@@ -7,7 +7,7 @@ import pytest
 from model_helpers import replace
 
 ROOT = Path(__file__).resolve().parents[3]
-SCENARIO = ROOT / "shared/scenarios/marvin_sim/stack"
+SCENARIO = ROOT / "shared/scenarios/marvin/mujoco/stack"
 PROFILES = SCENARIO / "profiles"
 SIM_SRC = ROOT / "simulation/mujoco/src"
 CONTRACTS = ROOT / "shared/common/python/contracts/src"
@@ -20,15 +20,15 @@ pytest.importorskip("mink")
 import numpy as np  # noqa: E402
 from robot_backend_sim.common.config.motion_config import load_control_config  # noqa: E402
 from robot_backend_sim.common.kinematics.common import extract_object_pose  # noqa: E402
-from robot_backend_sim.marvin_sim.stack.config import load_task_config  # noqa: E402
-from robot_backend_sim.marvin_sim.stack.gate import (  # noqa: E402
+from robot_backend_sim.marvin.stack.config import load_task_config  # noqa: E402
+from robot_backend_sim.marvin.stack.gate import (  # noqa: E402
     TeacherFeedback,
     TeacherProgress,
 )
-from robot_backend_sim.marvin_sim.stack.kinematics_config import load_kinematics_config  # noqa: E402
-from robot_backend_sim.marvin_sim.stack.scene import build_marvin_stack_scene  # noqa: E402
-from robot_backend_sim.marvin_sim.stack.scene_config import load_marvin_stack_scene_config  # noqa: E402
-from robot_backend_sim.marvin_sim.stack.teacher import (  # noqa: E402
+from robot_backend_sim.marvin.stack.kinematics_config import load_kinematics_config  # noqa: E402
+from robot_backend_sim.marvin.stack.scene import build_marvin_stack_scene  # noqa: E402
+from robot_backend_sim.marvin.stack.scene_config import load_marvin_stack_scene_config  # noqa: E402
+from robot_backend_sim.marvin.stack.teacher import (  # noqa: E402
     TeacherError,
     TeacherSnapshot,
     build_teacher_plan,

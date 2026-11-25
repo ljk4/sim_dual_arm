@@ -22,8 +22,8 @@ for source in (SIM_SRC, CONTRACTS):
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
 
-from robot_backend_sim.marvin_sim.stack.config import load_task_config  # noqa: E402
-from robot_backend_sim.marvin_sim.stack.evaluator import (  # noqa: E402
+from robot_backend_sim.marvin.stack.config import load_task_config  # noqa: E402
+from robot_backend_sim.marvin.stack.evaluator import (  # noqa: E402
     TaskBinding,
     _finger_contacts,
     _right_finger_source_evidence,
@@ -32,7 +32,7 @@ from robot_backend_sim.marvin_sim.stack.evaluator import (  # noqa: E402
 )
 
 TASK = load_task_config(
-    ROOT / "shared/scenarios/marvin_sim/stack/configs/simulation/scene/marvin_stack_task.yaml"
+    ROOT / "shared/scenarios/marvin/mujoco/stack/configs/simulation/scene/marvin_stack_task.yaml"
 )
 
 

@@ -21,7 +21,7 @@ SCHEMAS = ROOT / "shared/common/interfaces/schemas"
 
 STACK = {
     "profile": (
-        ROOT / "shared/scenarios/marvin_sim/stack/profiles/robot/profile.json"
+        ROOT / "shared/scenarios/marvin/mujoco/stack/profiles/robot/profile.json"
     ),
     "axis": "right_gripper_width",
     "anchor_position": 0.022205447806916776,
@@ -32,7 +32,7 @@ STACK = {
     "original_target_deviation": 0.05565938197175449,
 }
 HANDOVER = {
-    "profile": (ROOT / "shared/scenarios/marvin_sim/handover/profiles/robot/profile.json"),
+    "profile": (ROOT / "shared/scenarios/marvin/mujoco/handover/profiles/robot/profile.json"),
     "axis": "left_gripper_width",
     "anchor_position": 0.062495712249460864,
     "anchor_velocity": -0.02887703449999999,

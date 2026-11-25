@@ -6,7 +6,7 @@ import yaml
 from dual_arm_runtime.offline.collection.campaign_ledger import CampaignError  # noqa: E402
 from dual_arm_runtime.offline.collection.record_workers import prepare_workers  # noqa: E402
 
-PROFILE_REL = "shared/scenarios/marvin_sim/stack/profiles/profile.json"
+PROFILE_REL = "shared/scenarios/marvin/mujoco/stack/profiles/profile.json"
 
 
 @pytest.fixture
@@ -28,7 +28,7 @@ def templates(tmp_path):
 
 def test_prepared_workers_isolate_domains_configs_and_disable_visualization(templates):
     root, runtime, backend = templates
-    manifest = prepare_workers(root, root / "var/pool", 2, 70, runtime, backend, 1.0)
+    manifest = prepare_workers(root, root / "output/pool", 2, 70, runtime, backend, 1.0)
     workers = json.loads(manifest.read_text())["workers"]
     assert {item["domain_id"] for item in workers} == {70, 71}
     assert len({item["namespace"] for item in workers}) == 2
@@ -48,12 +48,12 @@ def test_prepared_workers_isolate_domains_configs_and_disable_visualization(temp
 def test_invalid_worker_options_do_not_create_output(templates, workers, domain, speed):
     root, runtime, backend = templates
     with pytest.raises(CampaignError):
-        prepare_workers(root, root / "var/pool", workers, domain, runtime, backend, speed)
-    assert not (root / "var/pool").exists()
+        prepare_workers(root, root / "output/pool", workers, domain, runtime, backend, speed)
+    assert not (root / "output/pool").exists()
 
 
 def test_preparation_refuses_to_overwrite_existing_pool(templates):
     root, runtime, backend = templates
-    prepare_workers(root, root / "var/pool", 2, 70, runtime, backend, 1.0)
+    prepare_workers(root, root / "output/pool", 2, 70, runtime, backend, 1.0)
     with pytest.raises(FileExistsError):
-        prepare_workers(root, root / "var/pool", 2, 70, runtime, backend, 1.0)
+        prepare_workers(root, root / "output/pool", 2, 70, runtime, backend, 1.0)

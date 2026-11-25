@@ -6,7 +6,7 @@ from dual_arm_runtime.runtime_config import load_runtime_configuration
 from robot_contracts.models import ContractError
 
 ROOT = Path(__file__).resolve().parents[3]
-TEACHER = ROOT / "shared/scenarios/marvin_sim/stack/configs/runtime/teacher_collect.yaml"
+TEACHER = ROOT / "shared/scenarios/marvin/mujoco/stack/configs/runtime/teacher_collect.yaml"
 
 
 def test_teacher_config_is_task_terminated_and_policy_free():

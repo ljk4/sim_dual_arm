@@ -2,10 +2,10 @@
 name: sim-dual-arm
 
 services:
-  hardware:
-    image: sim-dual-arm/hardware:current
+  tianji:
+    image: sim-dual-arm/tianji:current
     build: .
-    container_name: sim-dual-arm-hardware
+    container_name: sim-dual-arm-tianji
     network_mode: host
     user: "1000:1000"
     group_add:
@@ -26,8 +26,9 @@ services:
     volumes:
       - ../:/app:ro
       - ../../../shared:/shared:ro
-      - ../../../var:/data
-      - ../../../build/ros-dev:/opt/ros-dev:ro
+      - ../../../output:/data
+      - ../../../output/build:/data/build:ro
+      - ../../../output/build/ros-dev:/opt/ros-dev:ro
       - /dev:/dev
       - /sys:/sys:ro
       - /run/udev:/run/udev:ro

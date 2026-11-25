@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
-SCENARIO = ROOT / "shared/scenarios/marvin_sim/stack"
+SCENARIO = ROOT / "shared/scenarios/marvin/mujoco/stack"
 SIM_SRC = ROOT / "simulation/mujoco/src"
 CONTRACTS = ROOT / "shared/common/python/contracts/src"
 for source in (SIM_SRC, CONTRACTS):
@@ -15,15 +15,15 @@ for source in (SIM_SRC, CONTRACTS):
 
 pytest.importorskip("mujoco")
 import mujoco  # noqa: E402
-from robot_backend_sim.marvin_sim.stack.config import load_task_config  # noqa: E402
-from robot_backend_sim.marvin_sim.stack.evaluator import (  # noqa: E402
+from robot_backend_sim.marvin.stack.config import load_task_config  # noqa: E402
+from robot_backend_sim.marvin.stack.evaluator import (  # noqa: E402
     StackTaskRuntime,
     capture_task_observation,
     evaluate_task,
     make_task_binding,
 )
-from robot_backend_sim.marvin_sim.stack.scene import build_marvin_stack_scene  # noqa: E402
-from robot_backend_sim.marvin_sim.stack.scene_config import load_marvin_stack_scene_config  # noqa: E402
+from robot_backend_sim.marvin.stack.scene import build_marvin_stack_scene  # noqa: E402
+from robot_backend_sim.marvin.stack.scene_config import load_marvin_stack_scene_config  # noqa: E402
 from robot_contracts.models import RunContext  # noqa: E402
 
 

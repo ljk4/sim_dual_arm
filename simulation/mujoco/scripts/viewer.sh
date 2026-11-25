@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Open the live MuJoCo GUI viewer for a running backend inside the simulation container.
+# Open the live MuJoCo GUI viewer for a running backend inside the mujoco container.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

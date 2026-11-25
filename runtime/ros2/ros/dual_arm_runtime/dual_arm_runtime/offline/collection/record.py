@@ -56,6 +56,7 @@ def parser() -> argparse.ArgumentParser:
     )
     result.add_argument("--purpose", choices=("formal", "pilot"), default="formal")
     result.add_argument("--robot")
+    result.add_argument("--backend")
     result.add_argument("--task")
     result.add_argument("--shared-root", type=Path)
     result.add_argument(
@@ -78,13 +79,16 @@ def parser() -> argparse.ArgumentParser:
 
 def _resolve_selection(args: argparse.Namespace, cli: argparse.ArgumentParser) -> None:
     """Resolve scenario/direct inputs once, before any ledger or backend work."""
-    if args.robot is not None:
-        if args.task is None:
-            cli.error("--robot requires --task")
+    if any(value is not None for value in (args.robot, args.backend, args.task)):
+        if not (args.robot and args.backend and args.task):
+            cli.error("--robot, --backend, and --task must be passed together")
         if args.config is not None or args.runtime_config is not None:
-            cli.error("--robot/--task cannot be combined with --config or --runtime-config")
+            cli.error(
+                "--robot/--backend/--task cannot be combined with --config or --runtime-config"
+            )
         selection = select_collection(
             robot=args.robot,
+            backend=args.backend,
             task=args.task,
             shared_root=args.shared_root,
             project_root=args.project_root,
@@ -95,21 +99,19 @@ def _resolve_selection(args: argparse.Namespace, cli: argparse.ArgumentParser) -
         args.runtime_config = selection["recipes"]["runtime_teacher"]["path"]
         args.selection = selection
     else:
-        if args.task is not None:
-            cli.error("--task requires --robot")
         if args.shared_root is not None:
-            cli.error("--shared-root requires --robot/--task")
+            cli.error("--shared-root requires --robot/--backend/--task")
         if args.binding_sha256 is not None:
-            cli.error("--binding-sha256 requires --robot/--task")
+            cli.error("--binding-sha256 requires --robot/--backend/--task")
         if args.config is None:
-            cli.error("one of --robot/--task or --config is required")
+            cli.error("one of --robot/--backend/--task or --config is required")
         if args.runtime_config is None:
             cli.error("--runtime-config is required with --config")
         args.selection = None
     args.config = str(project_path(args.config, args.project_root))
     args.runtime_config = str(project_path(args.runtime_config, args.project_root))
     if args.backend_log is None:
-        args.backend_log = default_backend_log(args.robot, args.task)
+        args.backend_log = default_backend_log(args.robot, args.backend, args.task)
 
 
 def _collector_command(args: argparse.Namespace) -> list[str]:
@@ -123,7 +125,7 @@ def _collector_command(args: argparse.Namespace) -> list[str]:
         str(args.backend_log),
     ]
     if getattr(args, "robot", None) is not None:
-        command += ["--robot", args.robot, "--task", args.task]
+        command += ["--robot", args.robot, "--backend", args.backend, "--task", args.task]
         if getattr(args, "shared_root", None) is not None:
             command += ["--shared-root", str(args.shared_root)]
         if getattr(args, "robot_namespace", None) is not None:
@@ -141,6 +143,7 @@ def _preflight(args: argparse.Namespace) -> int:
     return check_ros_sdk(
         args.project_root,
         robot=getattr(args, "robot", None),
+        backend=getattr(args, "backend", None),
         task=getattr(args, "task", None),
         shared_root=getattr(args, "shared_root", None),
     )
@@ -364,21 +367,28 @@ def _status_command(argv: list[str]) -> int:
     )
     cli.add_argument("--project-root", type=Path, default=ROOT)
     cli.add_argument("--robot", default=None)
+    cli.add_argument("--backend", default=None)
     cli.add_argument("--task", default=None)
     cli.add_argument("--shared-root", type=Path)
     cli.add_argument("--config", help="direct campaign recipe (conflicts with --robot)")
     args = cli.parse_args(argv)
     args.project_root = args.project_root.resolve()
-    if args.robot is None and args.config is None:
-        cli.error("one of --robot/--task or --config is required")
+    if (
+        args.robot is None
+        and args.backend is None
+        and args.task is None
+        and args.config is None
+    ):
+        cli.error("one of --robot/--backend/--task or --config is required")
     try:
-        if args.robot is not None:
-            if args.task is None:
-                cli.error("--robot requires --task")
+        if any(value is not None for value in (args.robot, args.backend, args.task)):
+            if not (args.robot and args.backend and args.task):
+                cli.error("--robot, --backend, and --task must be passed together")
             if args.config is not None:
-                cli.error("--robot/--task cannot be combined with --config")
+                cli.error("--robot/--backend/--task cannot be combined with --config")
             selection = select_collection(
                 robot=args.robot,
+                backend=args.backend,
                 task=args.task,
                 shared_root=args.shared_root,
                 project_root=args.project_root,
@@ -387,10 +397,8 @@ def _status_command(argv: list[str]) -> int:
             args.config = selection["recipes"]["campaign"]["path"]
             args.selection = selection
         else:
-            if args.task is not None:
-                cli.error("--task requires --robot")
             if args.shared_root is not None:
-                cli.error("--shared-root requires --robot/--task")
+                cli.error("--shared-root requires --robot/--backend/--task")
             args.selection = None
         config = load(project_path(args.config, args.project_root))
         paths = config["paths"]
@@ -439,7 +447,7 @@ def main(argv: list[str] | None = None) -> int:
     except (CampaignError, OSError) as error:
         message = str(error)
         hint = (
-            "（请先在 simulation 容器启动 scripts/teacher_backend.sh，"
+            "（请先在仿真后端容器启动 scripts/teacher_backend.sh，"
             "或通过 --backend-log 指定后端 log 目录）"
             if "teacher backend log is missing" in message
             else ""

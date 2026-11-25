@@ -17,6 +17,6 @@ services:
     volumes:
       - ../:/app:ro
       - ../../../shared:/shared:ro
-      - ../../../build:/build
-      - ../../../var:/data
+      - ../../../output/build:/build
+      - ../../../output:/data
       - ../../../shared/common/tools/docker/container_bashrc.sh:/etc/bash.bashrc:ro

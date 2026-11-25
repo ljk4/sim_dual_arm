@@ -77,14 +77,16 @@ def ensure_rclone_installed() -> str:
     return installed
 
 
-def verify_and_prepare_remote(rclone_remote: str, robot: str, task: str) -> None:
+def verify_and_prepare_remote(
+    rclone_remote: str, robot: str, backend: str, task: str
+) -> None:
     """Verify connectivity to `rclone_remote` and ensure task and cache directories exist."""
     rclone_bin = ensure_rclone_installed()
     subprocess.run([rclone_bin, "lsd", rclone_remote], check=True)
     remote_root = rclone_remote.rstrip("/")
-    for subdir in (f"{remote_root}/_cache", f"{remote_root}/{robot}/{task}"):
+    for subdir in (f"{remote_root}/_cache", f"{remote_root}/{robot}/{backend}/{task}"):
         subprocess.run([rclone_bin, "mkdir", subdir], check=True)
-    print(f"[完成] rclone 远端连通性验证通过，已就绪目录: {remote_root}/{robot}/{task}")
+    print(f"[完成] rclone 远端连通性验证通过，已就绪目录: {remote_root}/{robot}/{backend}/{task}")
 
 
 def _print_gpu_status() -> None:
@@ -144,7 +146,9 @@ def _try_load_existing_conf(remote_name: str, use_colab_secrets: bool) -> Path |
     return None
 
 
-def _prompt_with_ipywidgets(*, remote_name: str, rclone_remote: str, robot: str, task: str) -> None:
+def _prompt_with_ipywidgets(
+    *, remote_name: str, rclone_remote: str, robot: str, backend: str, task: str
+) -> None:
     try:
         import ipywidgets as widgets  # type: ignore[import-not-found]
         from IPython.display import display  # type: ignore[import-not-found]
@@ -169,7 +173,7 @@ def _prompt_with_ipywidgets(*, remote_name: str, rclone_remote: str, robot: str,
                 decoded = decode_rclone_conf(password_box.value, remote_name)
                 _write_rclone_conf(decoded)
                 password_box.value = ""
-                verify_and_prepare_remote(rclone_remote, robot, task)
+                verify_and_prepare_remote(rclone_remote, robot, backend, task)
             except Exception as exc:  # noqa: BLE001
                 print(f"[错误] {exc}")
 
@@ -186,6 +190,7 @@ def setup_colab_rclone(
     *,
     rclone_remote: str,
     robot: str,
+    backend: str,
     task: str,
     use_colab_secrets: bool = False,
 ) -> None:
@@ -196,12 +201,13 @@ def setup_colab_rclone(
 
     loaded = _try_load_existing_conf(remote_name, use_colab_secrets=use_colab_secrets)
     if loaded is not None:
-        verify_and_prepare_remote(rclone_remote, robot, task)
+        verify_and_prepare_remote(rclone_remote, robot, backend, task)
         return
 
     _prompt_with_ipywidgets(
         remote_name=remote_name,
         rclone_remote=rclone_remote,
         robot=robot,
+        backend=backend,
         task=task,
     )

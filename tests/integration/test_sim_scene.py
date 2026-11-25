@@ -13,22 +13,22 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim.marvin_sim.assembly import gripper_opening  # noqa: E402
-from robot_backend_sim.marvin_sim.scene_base import (  # noqa: E402
+from robot_backend_sim.marvin.assembly import gripper_opening  # noqa: E402
+from robot_backend_sim.marvin.scene_base import (  # noqa: E402
     base_world_point,
     combined_yaw_quaternion,
 )
-from robot_backend_sim.marvin_sim.stack.kinematics_config import (  # noqa: E402
+from robot_backend_sim.marvin.stack.kinematics_config import (  # noqa: E402
     MARVIN_ARM_JOINT_RANGES,
 )
-from robot_backend_sim.marvin_sim.stack.scene import (  # noqa: E402
+from robot_backend_sim.marvin.stack.scene import (  # noqa: E402
     build_marvin_stack_scene,
 )
-from robot_backend_sim.marvin_sim.stack.scene_config import (  # noqa: E402
+from robot_backend_sim.marvin.stack.scene_config import (  # noqa: E402
     load_marvin_stack_scene_config,
 )
 
-CONFIG_PATH = ROOT / "shared/scenarios/marvin_sim/stack/configs/simulation/scene/marvin_stack.yaml"
+CONFIG_PATH = ROOT / "shared/scenarios/marvin/mujoco/stack/configs/simulation/scene/marvin_stack.yaml"
 
 
 @pytest.fixture(scope="module")

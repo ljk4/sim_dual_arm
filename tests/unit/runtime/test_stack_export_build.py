@@ -8,7 +8,7 @@ from robot_contracts.profiles import load_profile
 
 ROOT = Path(__file__).resolve().parents[3]
 PROFILE = load_profile(
-    ROOT / "shared/scenarios/marvin_sim/stack/profiles/robot/profile.json",
+    ROOT / "shared/scenarios/marvin/mujoco/stack/profiles/robot/profile.json",
     ROOT / "shared/common/interfaces/schemas",
 )
 

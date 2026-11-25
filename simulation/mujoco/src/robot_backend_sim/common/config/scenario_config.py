@@ -1,4 +1,4 @@
-"""Resolve a robot/task binding into one in-memory simulation backend document.
+"""Resolve a robot/backend/task binding into one in-memory simulation backend document.
 
 The selection is the same strict :mod:`robot_contracts.binding` load used by the
 other ends.  Paths are expanded against the selected recipe directory, the
@@ -30,7 +30,7 @@ ROLE_RECIPES = {
 
 
 class ScenarioError(ValueError):
-    """The robot/task selection cannot produce one valid backend document."""
+    """The robot/backend/task selection cannot produce one valid backend document."""
 
 
 @dataclass(frozen=True)
@@ -44,20 +44,25 @@ class ScenarioBackend:
     @property
     def source(self) -> str:
         selection = self.selection
-        return f"scenario:{selection['robot']}/{selection['task']}/{selection['role']}"
+        return (
+            f"scenario:{selection['robot']}/{selection['backend']}"
+            f"/{selection['task']}/{selection['role']}"
+        )
 
 
 def resolve_shared_root(explicit: Path | None) -> Path:
     return _contracts_shared_root(explicit=explicit)
 
 
-def _binding_path(shared_root: Path, robot: str, task: str) -> Path:
+def _binding_path(shared_root: Path, robot: str, backend: str, task: str) -> Path:
     try:
-        path = resolve_binding_path(shared_root, robot, task)
+        path = resolve_binding_path(shared_root, robot, backend, task)
     except BindingError as error:
         raise ScenarioError(str(error)) from error
     if not path.is_file():
-        raise ScenarioError(f"scenario {robot}/{task} has no binding file: {path}")
+        raise ScenarioError(
+            f"scenario {robot}/{backend}/{task} has no binding file: {path}"
+        )
     return path
 
 
@@ -66,31 +71,42 @@ def _load_recipe(path: Path) -> dict[str, Any]:
 
 
 def _load_scenario_binding(
-    robot: str, task: str, shared_root: Path | None
+    robot: str, backend: str, task: str, shared_root: Path | None
 ) -> tuple[Path, ResolvedBinding]:
     root = resolve_shared_root(shared_root)
-    binding_path = _binding_path(root, robot, task)
+    binding_path = _binding_path(root, robot, backend, task)
     try:
-        return root, load_binding(binding_path, shared_root=root)
+        resolved = load_binding(binding_path, shared_root=root)
     except (BindingError, ContractError, OSError) as error:
         raise ScenarioError(str(error)) from error
+    if (
+        resolved.binding.robot_id != robot
+        or resolved.binding.backend.implementation != backend
+        or resolved.binding.task_id != task
+    ):
+        raise ScenarioError(
+            f"binding {binding_path} declares {resolved.binding.scenario_id!r}, "
+            f"expected {robot}/{backend}/{task!r}"
+        )
+    return root, resolved
 
 
 def _select(
-    *, robot: str, task: str, role: str, shared_root: Path | None
+    *, robot: str, backend: str, task: str, role: str, shared_root: Path | None
 ) -> tuple[dict[str, Any], Path, dict[str, Any], ResolvedBinding]:
     if role not in ROLE_RECIPES:
         raise ScenarioError("role must be 'teacher' or 'policy'")
     recipe_field, stage = ROLE_RECIPES[role]
-    _root, resolved = _load_scenario_binding(robot, task, shared_root)
+    _root, resolved = _load_scenario_binding(robot, backend, task, shared_root)
     if getattr(resolved.binding.recipes, recipe_field) is None:
         raise ScenarioError(
-            f"scenario {robot}/{task} declares no recipes.{recipe_field}"
+            f"scenario {robot}/{backend}/{task} declares no recipes.{recipe_field}"
         )
     reference = resolved.references[f"recipes.{recipe_field}"]
     selection = {
         "mode": "scenario",
         "robot": robot,
+        "backend": backend,
         "task": task,
         "role": role,
         "stage": stage,
@@ -100,18 +116,21 @@ def _select(
     return _load_recipe(reference.path), reference.path.parent, selection, resolved
 
 
-def resolve_scenario_viewer(*, robot: str, task: str) -> ScenarioBackend:
+def resolve_scenario_viewer(*, robot: str, backend: str, task: str) -> ScenarioBackend:
     """Resolve the first declared simulation recipe for the live viewer."""
-    _root, resolved = _load_scenario_binding(robot, task, None)
+    _root, resolved = _load_scenario_binding(robot, backend, task, None)
     for role, (recipe_field, _) in ROLE_RECIPES.items():
         if getattr(resolved.binding.recipes, recipe_field) is not None:
-            return resolve_scenario_backend(robot=robot, task=task, role=role)
-    raise ScenarioError(f"scenario {robot}/{task} declares no simulation recipe")
+            return resolve_scenario_backend(
+                robot=robot, backend=backend, task=task, role=role
+            )
+    raise ScenarioError(f"scenario {robot}/{backend}/{task} declares no simulation recipe")
 
 
 def resolve_scenario_backend(
     *,
     robot: str | None = None,
+    backend: str | None = None,
     task: str | None = None,
     role: str = "teacher",
     shared_root: Path | None = None,
@@ -119,25 +138,26 @@ def resolve_scenario_backend(
     realtime_speed: float | None = None,
     scenario: str | None = None,
 ) -> ScenarioBackend:
-    """Load a robot/task recipe and return the effective backend document.
+    """Load a robot/backend/task recipe and return the effective backend document.
 
-    ``scenario`` is a convenience alternative to ``robot`` and ``task``: pass
-    ``"<robot>/<task>"`` instead of the two separate values.  Relative
-    ``robot.*`` references are expanded to absolute paths so the document can be
-    snapshot to the run directory and validated from there.
+    ``scenario`` is a convenience alternative to ``robot``, ``backend`` and ``task``:
+    pass ``"<robot>/<backend>/<task>"`` instead of the three separate values.
+    Relative ``robot.*`` references are expanded to absolute paths so the
+    document can be snapshot to the run directory and validated from there.
     """
     if scenario is not None:
-        if robot is not None or task is not None:
-            raise ScenarioError("scenario cannot be combined with robot/task")
-        robot, separator, task = scenario.partition("/")
-        if not separator or not robot or not task or "/" in task:
-            raise ScenarioError("scenario must be '<robot>/<task>'")
-    if robot is None or task is None:
-        raise ScenarioError("robot and task are required")
+        if robot is not None or backend is not None or task is not None:
+            raise ScenarioError("scenario cannot be combined with robot/backend/task")
+        parts = scenario.split("/")
+        if len(parts) != 3 or not all(parts):
+            raise ScenarioError("scenario must be '<robot>/<backend>/<task>'")
+        robot, backend, task = parts
+    if robot is None or backend is None or task is None:
+        raise ScenarioError("robot, backend, and task are required")
     if seed is not None and (not isinstance(seed, int) or isinstance(seed, bool)):
         raise ScenarioError("seed must be an integer")
     document, base_dir, selection, resolved = _select(
-        robot=robot, task=task, role=role, shared_root=shared_root
+        robot=robot, backend=backend, task=task, role=role, shared_root=shared_root
     )
     expected_profile = resolved.references["profiles.robot"].path
     _check_binding_profile(document, base_dir, expected_profile)

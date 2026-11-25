@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from collection_fixtures import ROBOT, SCENARIO_ID, TASK, build_collection_tree, sha
+from collection_fixtures import BACKEND, ROBOT, SCENARIO_ID, TASK, build_collection_tree, sha
 from dual_arm_runtime.offline.collection import record, record_pool
 from dual_arm_runtime.offline.collection.campaign_ledger import CampaignError
 from dual_arm_runtime.offline.collection.record_workers import prepare_workers
@@ -18,6 +18,7 @@ from dual_arm_runtime.offline.collection.scenario_selection import select_collec
 def _selection(tree):
     return select_collection(
         robot=ROBOT,
+        backend=BACKEND,
         task=TASK,
         shared_root=tree.shared,
         project_root=tree.repo,
@@ -30,7 +31,7 @@ def test_workers_receive_binding_recipes_independent_identity_and_overrides(tmp_
     selection = _selection(tree)
     manifest = prepare_workers(
         tree.repo,
-        tree.repo / "var/pool",
+        tree.repo / "output/pool",
         2,
         170,
         tree.runtime_recipe,
@@ -50,6 +51,7 @@ def test_workers_receive_binding_recipes_independent_identity_and_overrides(tmp_
             "path": selection["binding"]["path"],
             "sha256": selection["binding"]["sha256"],
             "robot": ROBOT,
+            "backend": BACKEND,
             "task": TASK,
             "scenario_id": SCENARIO_ID,
         }
@@ -67,10 +69,13 @@ def test_workers_receive_binding_recipes_independent_identity_and_overrides(tmp_
         }
         runtime = yaml.safe_load((manifest.parent / worker["id"] / "runtime.yaml").read_text())
         assert runtime["robot_namespace"] == worker["namespace"]
-        assert worker["backend_config"] == "/shared/scenarios/synthetic_sim/stack/configs/simulation_teacher.yaml"
+        assert (
+            worker["backend_config"]
+            == "/shared/scenarios/synthetic_sim/mujoco/stack/configs/simulation_teacher.yaml"
+        )
         assert worker["backend_ready"].endswith("backend-runs/backend/ready.json")
         assert worker["overrides"]["realtime_speed"] == 1.5
-        assert not (tree.repo / "var/pool" / worker["id"] / "backend.yaml").exists()
+        assert not (tree.repo / "output/pool" / worker["id"] / "backend.yaml").exists()
         assert runtime["robot_profile"] == str(
             (tree.scenario.root / "profiles/robot.json").resolve()
         )
@@ -80,7 +85,7 @@ def test_direct_worker_manifest_keeps_explicit_recipe_identity(tmp_path):
     tree = build_collection_tree(tmp_path)
     manifest = prepare_workers(
         tree.repo,
-        tree.repo / "var/pool-direct",
+        tree.repo / "output/pool-direct",
         1,
         180,
         tree.runtime_recipe,
@@ -101,7 +106,7 @@ def test_worker_plan_rejects_mixed_binding_identity(tmp_path):
     tree = build_collection_tree(tmp_path)
     manifest = prepare_workers(
         tree.repo,
-        tree.repo / "var/pool",
+        tree.repo / "output/pool",
         2,
         170,
         tree.runtime_recipe,
@@ -120,7 +125,7 @@ def test_worker_plan_rejects_tampered_recipe_identity(tmp_path):
     tree = build_collection_tree(tmp_path)
     manifest = prepare_workers(
         tree.repo,
-        tree.repo / "var/pool",
+        tree.repo / "output/pool",
         2,
         170,
         tree.runtime_recipe,
@@ -139,7 +144,7 @@ def test_worker_plan_rejects_tampered_teacher_capability(tmp_path):
     tree = build_collection_tree(tmp_path)
     manifest = prepare_workers(
         tree.repo,
-        tree.repo / "var/pool",
+        tree.repo / "output/pool",
         2,
         170,
         tree.runtime_recipe,
@@ -158,7 +163,7 @@ def test_worker_plan_rejects_duplicate_run_prefix_or_output_root(tmp_path):
     tree = build_collection_tree(tmp_path)
     manifest = prepare_workers(
         tree.repo,
-        tree.repo / "var/pool",
+        tree.repo / "output/pool",
         2,
         170,
         tree.runtime_recipe,
@@ -177,7 +182,7 @@ def test_record_worker_mode_passes_scenario_selection_to_pool(tmp_path, monkeypa
     tree = build_collection_tree(tmp_path)
     manifest = prepare_workers(
         tree.repo,
-        tree.repo / "var/pool",
+        tree.repo / "output/pool",
         1,
         170,
         tree.runtime_recipe,
@@ -197,6 +202,8 @@ def test_record_worker_mode_passes_scenario_selection_to_pool(tmp_path, monkeypa
             str(tree.repo),
             "--robot",
             ROBOT,
+            "--backend",
+            BACKEND,
             "--task",
             TASK,
             "--shared-root",
@@ -210,7 +217,7 @@ def test_record_worker_mode_passes_scenario_selection_to_pool(tmp_path, monkeypa
     assert captured["args"]["runtime_config"] == str(tree.runtime_recipe.resolve())
     assert captured["args"]["selection"]["binding"]["sha256"] == sha(tree.scenario.binding_path)
     assert captured["config"]["paths"]["ledger"] == (
-        "var/synthetic_sim/stack/logs/collection/attempts.jsonl"
+        "output/synthetic_sim/mujoco/stack/logs/collection/attempts.jsonl"
     )
 
 
@@ -218,7 +225,7 @@ def test_parallel_pool_passes_worker_identity_and_isolation(tmp_path, monkeypatc
     tree = build_collection_tree(tmp_path)
     manifest = prepare_workers(
         tree.repo,
-        tree.repo / "var/pool",
+        tree.repo / "output/pool",
         2,
         170,
         tree.runtime_recipe,
@@ -228,7 +235,7 @@ def test_parallel_pool_passes_worker_identity_and_isolation(tmp_path, monkeypatc
     )
     document = json.loads(manifest.read_text())
     for worker in document["workers"]:
-        log = tree.repo / "var/pool" / worker["id"] / "backend-runs/backend/log"
+        log = tree.repo / "output/pool" / worker["id"] / "backend-runs/backend/log"
         log.mkdir(parents=True)
     monkeypatch.setattr(record_pool, "check_ros_sdk", lambda *args, **kwargs: 0)
     script = tmp_path / "fake_parallel.py"
@@ -275,6 +282,8 @@ export.mkdir()
             str(tree.repo),
             "--robot",
             ROBOT,
+            "--backend",
+            BACKEND,
             "--task",
             TASK,
             "--shared-root",
@@ -295,7 +304,7 @@ export.mkdir()
     }
     records = [
         json.loads(line)
-        for line in (tree.repo / "var/synthetic_sim/stack/logs/collection/attempts.jsonl")
+        for line in (tree.repo / "output/synthetic_sim/mujoco/stack/logs/collection/attempts.jsonl")
         .read_text()
         .splitlines()
     ]

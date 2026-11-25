@@ -21,13 +21,14 @@ from typing import TextIO
 
 ROOT = Path(os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[4])
 DIRECT_SEGMENT = "_direct"
+RESERVED_ROBOT_SEGMENTS = frozenset({"build"})
 _SEGMENT_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 
 CONTAINER_MOUNTS = (
     ("/app", Path("runtime/ros2")),
     ("/shared", Path("shared")),
-    ("/data", Path("var")),
-    ("/build", Path("build")),
+    ("/build", Path("output/build")),
+    ("/data", Path("output")),
 )
 
 
@@ -36,31 +37,50 @@ def _safe_segment(segment: str, label: str) -> str:
         raise ValueError(
             f"{label} must contain 1..128 safe ASCII characters and no path traversal"
         )
+    if label == "robot" and segment in RESERVED_ROBOT_SEGMENTS:
+        raise ValueError(f"robot id {segment!r} is reserved")
     return segment
 
 
-def scenario_segment(robot: str | None, task: str | None = None) -> str:
+def scenario_segment(
+    robot: str | None, backend: str | None = None, task: str | None = None
+) -> str:
     if robot is None:
-        if task is not None:
-            raise ValueError("task requires a robot id")
+        if backend is not None or task is not None:
+            raise ValueError("backend and task require a robot id")
         return DIRECT_SEGMENT
-    if task is None:
+    if backend is None and task is None:
         if "/" not in robot:
-            raise ValueError("task is required unless robot is '<robot>/<task>'")
-        robot, task = robot.split("/", 1)
-    return f"{_safe_segment(robot, 'robot')}/{_safe_segment(task, 'task')}"
+            raise ValueError(
+                "backend and task are required unless robot is '<robot>/<backend>/<task>'"
+            )
+        parts = robot.split("/")
+        if len(parts) != 3:
+            raise ValueError("scenario string must be '<robot>/<backend>/<task>'")
+        robot, backend, task = parts
+    elif backend is None or task is None:
+        raise ValueError("robot, backend, and task must be passed together")
+    return (
+        f"{_safe_segment(robot, 'robot')}/"
+        f"{_safe_segment(backend, 'backend')}/"
+        f"{_safe_segment(task, 'task')}"
+    )
 
 
-def scenario_root(base: Path, robot: str | None, task: str | None = None) -> Path:
-    return Path(base) / scenario_segment(robot, task)
+def scenario_root(
+    base: Path, robot: str | None, backend: str | None = None, task: str | None = None
+) -> Path:
+    return Path(base) / scenario_segment(robot, backend, task)
 
 
 def container_data_root() -> Path:
     return Path(os.environ.get("DATA_ROOT", "/data"))
 
 
-def debug_root(base: Path, robot: str | None, task: str | None = None) -> Path:
-    return scenario_root(base, robot, task) / "debug"
+def debug_root(
+    base: Path, robot: str | None, backend: str | None = None, task: str | None = None
+) -> Path:
+    return scenario_root(base, robot, backend, task) / "debug"
 
 
 def _host_path(value: str | Path, project_root: Path) -> Path:
@@ -237,9 +257,53 @@ class BaseDockerWorkers:
         self.plan: dict | None = None
 
     def compose(self, service: str) -> list[str]:
-        section = "simulation/mujoco" if service == "simulation" else "runtime/ros2"
+        section = "runtime/ros2" if service == "runtime" else f"simulation/{service}"
         compose = self.args.project_root / section / "docker/docker-compose.yml"
         return ["docker", "compose", "-f", str(compose)]
+
+    def _backend_service(self) -> str:
+        selection = (self.plan or {}).get("selection") or {}
+        if isinstance(selection, dict) and selection.get("backend"):
+            return str(selection["backend"])
+        explicit = getattr(self.args, "backend", None)
+        if explicit:
+            return str(explicit)
+        template = getattr(self.args, "backend_template", None)
+        if template:
+            candidate = Path(template)
+            if not candidate.is_absolute():
+                candidate = (self.args.project_root / candidate).resolve()
+            else:
+                candidate = candidate.resolve()
+            sim_root = (self.args.project_root / "simulation").resolve()
+            if candidate.is_relative_to(sim_root):
+                parts = candidate.relative_to(sim_root).parts
+                if len(parts) >= 2:
+                    return parts[0]
+            shared_arg = getattr(self.args, "shared_root", None)
+            shared_root = (
+                Path(shared_arg).resolve()
+                if shared_arg
+                else (self.args.project_root / "shared").resolve()
+            )
+            scenarios_root = shared_root / "scenarios"
+            if candidate.is_relative_to(scenarios_root):
+                parts = candidate.relative_to(scenarios_root).parts
+                if len(parts) >= 3:
+                    return parts[1]
+        sim_dir = self.args.project_root / "simulation"
+        if sim_dir.is_dir():
+            backends = [
+                entry.name
+                for entry in sorted(sim_dir.iterdir())
+                if entry.is_dir() and (entry / "docker/docker-compose.yml").is_file()
+            ]
+            if len(backends) == 1:
+                return backends[0]
+        raise ValueError(
+            "cannot infer simulation backend in direct mode; place --backend-template "
+            "under simulation/<backend>/ or shared/scenarios/<robot>/<backend>/<task>/"
+        )
 
     def runtime_command(
         self, arguments: list[str], *, pid_file: str | None = None
@@ -280,6 +344,12 @@ class BaseDockerWorkers:
             timeout=20,
         ).stdout.strip()
         if not runtime:
+            (self.args.project_root / "output/build/ros-dev").mkdir(
+                parents=True, exist_ok=True
+            )
+            (self.args.project_root / "output/build/generated/policy-sdk").mkdir(
+                parents=True, exist_ok=True
+            )
             subprocess.run(
                 [
                     *self.compose("runtime"),
@@ -308,6 +378,8 @@ class BaseDockerWorkers:
         return [
             "--robot",
             plan["selection"]["robot"],
+            "--backend",
+            plan["selection"]["backend"],
             "--task",
             plan["selection"]["task"],
             "--shared-root",
@@ -334,10 +406,11 @@ class BaseDockerWorkers:
     def start_backend(self, worker: dict) -> str:
         name = f"sim-dual-arm-{self.batch_name}-{worker['id']}"
         self.created.append(name)
+        backend_service = self._backend_service()
         overrides = worker.get("overrides") or {}
         speed = overrides.get("realtime_speed", getattr(self.args, "realtime_speed", None))
         command = [
-            *self.compose("simulation"),
+            *self.compose(backend_service),
             "run",
             "--rm",
             "-d",
@@ -356,7 +429,7 @@ class BaseDockerWorkers:
             "DISPLAY=",
             "-e",
             "WAYLAND_DISPLAY=",
-            "simulation",
+            backend_service,
             "scripts/backend.sh",
             "--config",
             worker["backend_config"],

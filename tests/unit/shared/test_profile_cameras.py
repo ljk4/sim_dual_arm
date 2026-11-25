@@ -15,7 +15,7 @@ from robot_contracts.profiles import (
 from scenario_fixtures import MARVIN_SHARED_PROFILES
 
 ROOT = Path(__file__).resolve().parents[3]
-PROFILES = ROOT / "shared/scenarios/marvin_sim/stack/profiles"
+PROFILES = ROOT / "shared/scenarios/marvin/mujoco/stack/profiles"
 SCHEMAS = ROOT / "shared/common/interfaces/schemas"
 STACK_PROFILE = PROFILES / "robot/profile.json"
 STACK_OBSERVATION = MARVIN_SHARED_PROFILES / "observations/marvin_rgb_joint.json"
@@ -111,8 +111,8 @@ def test_duplicate_profile_field_is_rejected(tmp_path):
     raw = json.dumps(_stack_document())
     path = tmp_path / "duplicate.json"
     duplicate = raw.replace(
-        '"robot_id": "marvin_stack"',
-        '"robot_id": "marvin_stack", "robot_id": "other"',
+        '"robot_id": "marvin"',
+        '"robot_id": "marvin", "robot_id": "other"',
     )
     path.write_text(duplicate)
 
@@ -181,13 +181,31 @@ def test_binding_mismatch_is_rejected(change):
 
 def test_camera_digest_is_the_scene_description_semantic_hash():
     scene_path = (
-        ROOT / "shared/scenarios/marvin_sim/stack/configs/simulation/scene/marvin_stack.yaml"
+        ROOT / "shared/scenarios/marvin/mujoco/stack/configs/simulation/scene/marvin_stack.yaml"
     )
     raw_cameras = load_document(scene_path)["cameras"]
     profile = load_profile(STACK_PROFILE, SCHEMAS)
     for camera in profile.cameras:
         description = {"name": camera.name, **raw_cameras[camera.name]}
         assert camera.calibration_digest == semantic_hash(description)
+
+
+def test_interface_digest_ignores_profile_id_initial_and_calibration(tmp_path):
+    base = load_profile(STACK_PROFILE, SCHEMAS)
+    modified = _stack_document()
+    modified["profile_id"] = "marvin_tianji_stack"
+    modified["joints"][0]["initial"] = -0.25
+    modified["cameras"][0]["calibration_digest"] = "f" * 64
+    reloaded = load_profile(_write(tmp_path, modified), SCHEMAS)
+
+    assert reloaded.digest != base.digest
+    assert reloaded.interface_digest == base.interface_digest
+
+    changed_topology = _stack_document()
+    changed_topology["cameras"][0]["width"] = 640
+    assert load_profile(_write(tmp_path, changed_topology, "topo.json"), SCHEMAS).interface_digest != (
+        base.interface_digest
+    )
 
 
 @pytest.mark.parametrize("field", ["min", "max", "max_velocity", "initial"])

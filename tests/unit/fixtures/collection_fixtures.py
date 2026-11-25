@@ -15,8 +15,9 @@ import yaml
 from scenario_fixtures import ROOT, build_scenario, sha  # noqa: F401 - re-exported
 
 ROBOT = "synthetic_sim"
+BACKEND = "mujoco"
 TASK = "stack"
-SCENARIO_ID = f"{ROBOT}/{TASK}"
+SCENARIO_ID = f"{ROBOT}/{BACKEND}/{TASK}"
 
 
 @dataclass
@@ -38,13 +39,13 @@ def campaign_document(repo: Path, recipe_paths: list[Path]) -> dict[str, Any]:
             "min_free_bytes": 0,
         },
         "paths": {
-            "attempts_root": "var/synthetic_sim/stack/datasets/raw",
-            "ledger": "var/synthetic_sim/stack/logs/collection/attempts.jsonl",
-            "lock": "var/synthetic_sim/stack/logs/collection/.ledger.lock",
-            "run_lock": "var/synthetic_sim/stack/logs/collection/.run.lock",
-            "formal_select": "var/synthetic_sim/stack/datasets/raw/formal-select.json",
+            "attempts_root": "output/synthetic_sim/mujoco/stack/datasets/raw",
+            "ledger": "output/synthetic_sim/mujoco/stack/logs/collection/attempts.jsonl",
+            "lock": "output/synthetic_sim/mujoco/stack/logs/collection/.ledger.lock",
+            "run_lock": "output/synthetic_sim/mujoco/stack/logs/collection/.run.lock",
+            "formal_select": "output/synthetic_sim/mujoco/stack/datasets/raw/formal-select.json",
             "required_paths": [str(path.relative_to(repo)) for path in recipe_paths],
-            "sdk_marker": "build/ros-dev/contracts.json",
+            "sdk_marker": "output/build/ros-dev/contracts.json",
         },
         "launch": {"command": [], "timeout_s": 10.0},
         "quality": {"sidecar": "export/quality.json"},
@@ -77,7 +78,7 @@ def _write_backend_recipe(root: Path) -> Path:
         "robot": {
             "namespace": "/robot",
             "profile": "../profiles/robot.json",
-            "schemas": "../../../../common/interfaces/schemas",
+            "schemas": "../../../../../common/interfaces/schemas",
             "scene": "scene.yaml",
             "control": "control.yaml",
             "stream": "stream.yaml",
@@ -112,8 +113,8 @@ def build_collection_tree(tmp_path: Path) -> CollectionTree:
     ros = shared / "common/interfaces/ros"
     (ros / "robot_api_msgs/srv").mkdir(parents=True, exist_ok=True)
     (ros / "sim_api_msgs/srv").mkdir(parents=True, exist_ok=True)
-    (repo / "build/ros-dev").mkdir(parents=True, exist_ok=True)
-    (repo / "build/ros-dev/contracts.json").write_text("{}\n", encoding="utf-8")
+    (repo / "output/build/ros-dev").mkdir(parents=True, exist_ok=True)
+    (repo / "output/build/ros-dev/contracts.json").write_text("{}\n", encoding="utf-8")
     return CollectionTree(
         repo, shared, scenario, campaign_recipe, runtime_recipe, backend_recipe, campaign
     )

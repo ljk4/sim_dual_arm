@@ -13,10 +13,10 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from docs.colab.scripts import probe_colab_training
-from docs.colab.scripts.colab_workflow import compute_scaled_steps
-from docs.colab.scripts.loss_plot import load_metrics, render_loss_plot
-from docs.colab.scripts.rclone_auth import decode_rclone_conf
+from docs.colab.scripts import probe_colab_training  # noqa: E402
+from docs.colab.scripts.colab_workflow import compute_scaled_steps  # noqa: E402
+from docs.colab.scripts.loss_plot import load_metrics, render_loss_plot  # noqa: E402
+from docs.colab.scripts.rclone_auth import decode_rclone_conf  # noqa: E402
 
 
 @pytest.mark.parametrize(
@@ -59,7 +59,7 @@ def test_render_loss_plot_creates_valid_png(tmp_path: Path) -> None:
     assert len(train_rows) == 5
     assert len(val_rows) == 2
 
-    rendered = render_loss_plot(metrics_path, out_png, title="marvin_sim/handover (full)")
+    rendered = render_loss_plot(metrics_path, out_png, title="marvin/mujoco/handover (full)")
     assert rendered == out_png
     assert out_png.is_file()
     assert not out_png.with_suffix(".tmp.png").exists()

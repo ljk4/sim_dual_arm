@@ -18,7 +18,7 @@ def main(argv: list[str] | None = None) -> int:
         default=Path(__file__).with_name("fake_policy.yaml"),
     )
     parser.add_argument(
-        "--log-directory", type=Path, default=Path("var/_direct/logs/policy-service")
+        "--log-directory", type=Path, default=Path("output/_direct/logs/policy-service")
     )
     parser.add_argument("--run-id")
     args = parser.parse_args(argv)

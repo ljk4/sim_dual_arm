@@ -2,10 +2,10 @@
 name: sim-dual-arm
 
 services:
-  simulation:
-    image: sim-dual-arm/simulation:current
+  mujoco:
+    image: sim-dual-arm/mujoco:current
     build: .
-    container_name: sim-dual-arm-simulation
+    container_name: sim-dual-arm-mujoco
     network_mode: host
     user: "1000:1000"
     working_dir: /app
@@ -19,6 +19,7 @@ services:
     volumes:
       - ../:/app:ro
       - ../../../shared:/shared:ro
-      - ../../../var:/data
-      - ../../../build/ros-dev:/opt/ros-dev:ro
+      - ../../../output:/data
+      - ../../../output/build:/data/build:ro
+      - ../../../output/build/ros-dev:/opt/ros-dev:ro
       - ../../../shared/common/tools/docker/container_bashrc.sh:/etc/bash.bashrc:ro

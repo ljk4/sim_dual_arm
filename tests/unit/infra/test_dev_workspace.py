@@ -67,7 +67,11 @@ def add_common(shared: Path, name: str, **kwargs) -> Path:
 
 
 def add_extension(shared: Path, name: str, **kwargs) -> Path:
-    return write_package(shared / "scenarios/demo/sim/extensions/ros" / name, name, **kwargs)
+    return write_package(shared / "scenarios/demo/sim/task/extensions/ros" / name, name, **kwargs)
+
+
+def add_robot_extension(shared: Path, name: str, **kwargs) -> Path:
+    return write_package(shared / "robots/demo/extensions/ros" / name, name, **kwargs)
 
 
 def create_generated_install(build_root: Path, packages) -> None:
@@ -150,11 +154,18 @@ def test_full_build_covers_common_and_extension_packages(tmp_path):
     project, shared = project_tree(tmp_path)
     add_common(shared, "sim_api_msgs")
     add_extension(shared, "demo_api_msgs", service=True)
+    add_robot_extension(shared, "demo_robot_api_msgs", service=True)
     document = build(project, shared, project / "output")
 
-    assert set(document["packages"]) == {"robot_api_msgs", "sim_api_msgs", "demo_api_msgs"}
+    assert set(document["packages"]) == {
+        "robot_api_msgs",
+        "sim_api_msgs",
+        "demo_api_msgs",
+        "demo_robot_api_msgs",
+    }
     assert document["packages"]["sim_api_msgs"]["role"] == "common"
     assert document["packages"]["demo_api_msgs"]["role"] == "extension"
+    assert document["packages"]["demo_robot_api_msgs"]["role"] == "extension"
     assert verify(project, shared, project / "output") == document
 
 
@@ -221,7 +232,7 @@ def test_duplicate_packages_and_duplicate_modules_are_rejected(tmp_path):
 
     first = add_extension(shared, "demo_api_msgs", service=True)
     second = write_package(
-        shared / "scenarios/other/sim/extensions/ros/demo_api_msgs", "demo_api_msgs"
+        shared / "scenarios/other/sim/task/extensions/ros/demo_api_msgs", "demo_api_msgs"
     )
     assert first.is_dir() and second.is_dir()
     with pytest.raises(dev_workspace.DevWorkspaceError) as caught:

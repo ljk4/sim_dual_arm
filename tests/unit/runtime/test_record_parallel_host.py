@@ -124,9 +124,13 @@ def test_already_reached_target_does_not_start_simulation_workers(tmp_path, monk
 def test_host_container_path_mapping_is_explicit(tmp_path):
     root = tmp_path
     assert record_parallel.host_path_to_container("shared/x", root) == "/shared/x"
-    assert record_parallel.host_path_to_container(root / "var/y", root) == "/data/y"
+    assert record_parallel.host_path_to_container(root / "output/y", root) == "/data/y"
+    assert record_parallel.host_path_to_container(root / "output/build/ros-dev", root) == "/build/ros-dev"
     assert record_parallel.host_path_to_container(root / "runtime/ros2/z", root) == "/app/z"
-    assert record_parallel.container_path_to_host("/data/y", root) == (root / "var/y").resolve()
+    assert record_parallel.container_path_to_host("/data/y", root) == (root / "output/y").resolve()
+    assert record_parallel.container_path_to_host("/build/ros-dev", root) == (
+        root / "output/build/ros-dev"
+    ).resolve()
     assert record_parallel.container_path_to_host("/shared/z", root) == (
         root / "shared/z"
     ).resolve()
@@ -152,6 +156,7 @@ def test_scenario_conflicts_with_explicit_recipes_before_docker(tmp_path, monkey
             [
                 "--project-root", str(tmp_path),
                 "--robot", "synthetic_sim",
+                "--backend", "mujoco",
                 "--task", "stack",
                 "--config", "campaign.yaml",
             ]
@@ -207,11 +212,11 @@ def test_preflight_failure_starts_no_worker_or_pool_directory(tmp_path, monkeypa
     assert record_parallel.main(
         [
             "--project-root", str(tmp_path),
-            "--robot", "synthetic_sim", "--task", "stack",
+            "--robot", "synthetic_sim", "--backend", "mujoco", "--task", "stack",
         ]
     ) == 2
     assert events == ["preflight", "cleanup"]
-    assert not (tmp_path / "var/synthetic_sim/stack/logs/collection/record-pools").exists()
+    assert not (tmp_path / "output/synthetic_sim/mujoco/stack/logs/collection/record-pools").exists()
 
 
 def test_preflight_runs_before_worker_preparation_and_backends(tmp_path, monkeypatch):
@@ -224,7 +229,7 @@ def test_preflight_runs_before_worker_preparation_and_backends(tmp_path, monkeyp
     assert record_parallel.main(
         [
             "--project-root", str(tmp_path),
-            "--robot", "synthetic_sim", "--task", "stack", "--workers", "1",
+            "--robot", "synthetic_sim", "--backend", "mujoco", "--task", "stack", "--workers", "1",
         ]
     ) == 0
     assert events[:2] == ["preflight", "prepare"]
@@ -232,12 +237,13 @@ def test_preflight_runs_before_worker_preparation_and_backends(tmp_path, monkeyp
 
 
 def test_worker_preparation_receives_binding_identity(tmp_path, monkeypatch):
-    directory = tmp_path / "var/synthetic_sim/stack/logs/collection/record-pools/pool-test"
+    directory = tmp_path / "output/synthetic_sim/mujoco/stack/logs/collection/record-pools/pool-test"
     directory.mkdir(parents=True)
     (directory / "workers.json").write_text('{"workers": []}\n')
     args = SimpleNamespace(
         project_root=tmp_path,
         robot="synthetic_sim",
+        backend="mujoco",
         task="stack",
         shared_root=tmp_path / "shared",
         config=None,
@@ -260,14 +266,16 @@ def test_worker_preparation_receives_binding_identity(tmp_path, monkeypatch):
         "selection": {
             "mode": "scenario",
             "robot": "synthetic_sim",
+            "backend": "mujoco",
             "task": "stack",
-            "scenario_id": "synthetic_sim/stack",
+            "scenario_id": "synthetic_sim/mujoco/stack",
             "binding": {"sha256": "a" * 64, "path": "/shared/scenarios/x/binding.yaml"},
         }
     }
     docker.prepare(plan)
     command = calls[-1]
     assert "--robot" in command and "synthetic_sim" in command
+    assert "--backend" in command and "mujoco" in command
     assert "--task" in command and "stack" in command
     assert "--shared-root" in command and "/shared" in command
     assert "--binding-sha256" in command and "a" * 64 in command
@@ -279,6 +287,7 @@ def test_preflight_command_converts_host_paths(tmp_path):
     args = SimpleNamespace(
         project_root=tmp_path,
         robot=None,
+        backend=None,
         task=None,
         shared_root=None,
         config="shared/scenarios/x/campaign.yaml",
@@ -294,10 +303,12 @@ def test_preflight_command_converts_host_paths(tmp_path):
     assert "--parallel" in command
 
     args.robot = "synthetic_sim"
+    args.backend = "mujoco"
     args.task = "stack"
     args.shared_root = tmp_path / "shared"
     command = record_parallel.DockerWorkers(args, tmp_path / "pool").preflight_command()
     assert "--robot" in command and "synthetic_sim" in command
+    assert "--backend" in command and "mujoco" in command
     assert "--task" in command and "stack" in command
     assert "/shared" in command
     assert "--config" not in command
@@ -313,7 +324,7 @@ def test_pool_and_inference_progress_include_eta_and_timestamp(tmp_path, capsys)
     )
     pool = record_pool.RecordingPool(
         args,
-        {"paths": {"attempts_root": "var/x/y/datasets/raw"}, "launch": {}},
+        {"paths": {"attempts_root": "output/x/mujoco/y/datasets/raw"}, "launch": {}},
         None,  # type: ignore[arg-type]
         [{"id": "worker-01"}],
     )
@@ -349,7 +360,7 @@ def test_record_pool_tty_progress_is_single_line_and_fits_terminal_width(
     )
     pool = record_pool.RecordingPool(
         args,
-        {"paths": {"attempts_root": "var/x/y/datasets/raw"}, "launch": {}},
+        {"paths": {"attempts_root": "output/x/mujoco/y/datasets/raw"}, "launch": {}},
         None,  # type: ignore[arg-type]
         [{"id": "worker-01"}],
     )
@@ -384,7 +395,7 @@ def test_inference_parallel_defaults_to_random_seed_start(tmp_path, monkeypatch)
     from host import inference_parallel
 
     parsed = inference_parallel.parser().parse_args(
-        ["--robot", "marvin_sim", "--task", "stack"]
+        ["--robot", "marvin", "--backend", "mujoco", "--task", "stack"]
     )
     assert parsed.seed_start is None
 
@@ -396,7 +407,14 @@ def test_inference_parallel_defaults_to_random_seed_start(tmp_path, monkeypatch)
             seen_seed_starts.append(args.seed_start)
 
         def preflight(self):
-            return {"selection": {"mode": "scenario", "robot": "marvin_sim", "task": "stack"}}
+            return {
+                "selection": {
+                    "mode": "scenario",
+                    "robot": "marvin",
+                    "backend": "mujoco",
+                    "task": "stack",
+                }
+            }
 
         def prepare(self, plan):
             return [{"id": "worker-01"}]
@@ -420,7 +438,9 @@ def test_inference_parallel_defaults_to_random_seed_start(tmp_path, monkeypatch)
                 "--project-root",
                 str(tmp_path),
                 "--robot",
-                "marvin_sim",
+                "marvin",
+                "--backend",
+                "mujoco",
                 "--task",
                 "stack",
                 "--workers",
@@ -437,7 +457,9 @@ def test_inference_parallel_defaults_to_random_seed_start(tmp_path, monkeypatch)
                 "--project-root",
                 str(tmp_path),
                 "--robot",
-                "marvin_sim",
+                "marvin",
+                "--backend",
+                "mujoco",
                 "--task",
                 "stack",
                 "--seed-start",

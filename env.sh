@@ -19,15 +19,15 @@ usage() {
   ./env.sh exec <env> [cmd...]    进入已运行的容器执行命令 (默认 bash)
   ./env.sh stop <env>             停止指定环境容器
   ./env.sh rm <env>               删除指定环境容器 (先 stop 再 rm -f)
-  ./env.sh viewer <args...>       在宿主机启动 MuJoCo 实时可视化 (需传入 --robot <id> --task <id>)
+  ./env.sh viewer <args...>       在宿主机启动 MuJoCo 实时可视化 (需传入 --robot <id> --backend <id> --task <id>)
   ./env.sh ps                     查看当前项目所有容器状态
   ./env.sh list                   列出支持的 Docker 环境
 
 可用环境 (<env>):
   runtime       ROS 2 运行端   (runtime/ros2/docker/docker-compose.yml)
-  simulation    MuJoCo 仿真端  (simulation/mujoco/docker/docker-compose.yml)
-  learning      LeRobot 学习端 (learning/lerobot/docker/docker-compose.yml)
-  hardware      天机硬件端     (hardware/tianji/docker/docker-compose.yml)
+  mujoco        MuJoCo 仿真端  (simulation/mujoco/docker/docker-compose.yml)
+  lerobot       LeRobot 学习端 (learning/lerobot/docker/docker-compose.yml)
+  tianji        天机硬件端     (hardware/tianji/docker/docker-compose.yml)
 
 构建镜像源环境变量 (用于 ./env.sh build <env>):
   DOCKER_MIRROR=<host>            跳过探测，直接使用指定镜像源 (如 docker.m.daocloud.io)
@@ -44,21 +44,21 @@ resolve_env() {
       BASE_IMAGE_DIRECT="ros:jazzy-ros-base-noble"
       BASE_IMAGE_REPO="library/ros:jazzy-ros-base-noble"
       ;;
-    simulation)
+    mujoco)
       COMPOSE_FILE="$ROOT_DIR/simulation/mujoco/docker/docker-compose.yml"
-      SERVICE="simulation"
+      SERVICE="mujoco"
       BASE_IMAGE_DIRECT="ros:jazzy-ros-base-noble"
       BASE_IMAGE_REPO="library/ros:jazzy-ros-base-noble"
       ;;
-    learning)
+    lerobot)
       COMPOSE_FILE="$ROOT_DIR/learning/lerobot/docker/docker-compose.yml"
-      SERVICE="learning"
+      SERVICE="lerobot"
       BASE_IMAGE_DIRECT="huggingface/lerobot-gpu:latest"
       BASE_IMAGE_REPO="huggingface/lerobot-gpu:latest"
       ;;
-    hardware)
+    tianji)
       COMPOSE_FILE="$ROOT_DIR/hardware/tianji/docker/docker-compose.yml"
-      SERVICE="hardware"
+      SERVICE="tianji"
       BASE_IMAGE_DIRECT="ros:jazzy-ros-base-noble"
       BASE_IMAGE_REPO="library/ros:jazzy-ros-base-noble"
       ;;
@@ -67,7 +67,7 @@ resolve_env() {
       exit 1
       ;;
     *)
-      echo "错误: 未知环境 '$1'。可用环境: runtime, simulation, learning, hardware" >&2
+      echo "错误: 未知环境 '$1'。可用环境: runtime, mujoco, lerobot, tianji" >&2
       exit 1
       ;;
   esac
@@ -106,7 +106,7 @@ cleanup_probe() {
 cmd_up() {
   local env_name="${1:-}"
   resolve_env "$env_name"
-  mkdir -p "$ROOT_DIR/build/ros-dev" "$ROOT_DIR/build/generated/policy-sdk" "$ROOT_DIR/var"
+  mkdir -p "$ROOT_DIR/output/build/ros-dev" "$ROOT_DIR/output/build/generated/policy-sdk"
   docker compose -f "$COMPOSE_FILE" up -d --no-build --pull never "$SERVICE"
 }
 
@@ -217,13 +217,13 @@ cmd_rm() {
 }
 
 cmd_viewer() {
-  resolve_env "simulation"
+  resolve_env "mujoco"
   if [[ -z "${DISPLAY:-}" ]]; then
     echo "错误: DISPLAY 未设置，无法启动 MuJoCo X11 可视化" >&2
     exit 1
   fi
   if [[ $# -eq 0 ]]; then
-    echo "错误: viewer 必须显式传入 --robot <id> --task <id>" >&2
+    echo "错误: viewer 必须显式传入 --robot <id> --backend <id> --task <id>" >&2
     exit 2
   fi
   docker compose -f "$COMPOSE_FILE" run --rm \
@@ -245,7 +245,7 @@ main() {
       usage
       ;;
     list)
-      echo "runtime simulation learning hardware"
+      echo "runtime mujoco lerobot tianji"
       ;;
     ps)
       docker compose -p "$PROJECT_NAME" ps
@@ -278,7 +278,7 @@ main() {
       shift
       cmd_viewer "$@"
       ;;
-    runtime|simulation|learning|hardware)
+    runtime|mujoco|lerobot|tianji)
       cmd_enter "$1"
       ;;
     *)

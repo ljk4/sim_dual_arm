@@ -28,7 +28,7 @@ from robot_contracts.profiles import load_profile  # noqa: E402
 @pytest.fixture
 def profile():
     return load_profile(
-        ROOT / "shared/scenarios/marvin_sim/stack/profiles/robot/profile.json",
+        ROOT / "shared/scenarios/marvin/mujoco/stack/profiles/robot/profile.json",
         ROOT / "shared/common/interfaces/schemas",
     )
 

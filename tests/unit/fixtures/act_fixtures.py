@@ -23,7 +23,7 @@ from scenario_fixtures import MARVIN_SHARED_PROFILES
 
 ROOT = Path(__file__).resolve().parents[3]
 PROFILE = (
-    ROOT / "shared/scenarios/marvin_sim/stack/profiles/robot/profile.json"
+    ROOT / "shared/scenarios/marvin/mujoco/stack/profiles/robot/profile.json"
 )
 OBSERVATION = MARVIN_SHARED_PROFILES / "observations/marvin_rgb_joint.json"
 ACTION = MARVIN_SHARED_PROFILES / "actions/marvin_joint_position.json"

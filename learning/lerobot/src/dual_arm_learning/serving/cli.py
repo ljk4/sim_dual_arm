@@ -80,9 +80,12 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=None, help="direct ACT policy recipe path")
     parser.add_argument(
-        "--robot", help="robot id under <shared-root>/scenarios/<robot>/<task>/"
+        "--robot", help="robot id under <shared-root>/scenarios/<robot>/<backend>/<task>/"
     )
-    parser.add_argument("--task", help="task id for --robot")
+    parser.add_argument(
+        "--backend", help="backend id under <shared-root>/scenarios/<robot>/<backend>/<task>/"
+    )
+    parser.add_argument("--task", help="task id for --robot/--backend")
     parser.add_argument("--shared-root", type=Path, help="shared tree containing scenarios/")
     parser.add_argument(
         "--model",
@@ -208,20 +211,28 @@ def _fail(
     return 1
 
 
-def _target(args: argparse.Namespace, parser: argparse.ArgumentParser) -> tuple[str, str] | None:
-    if args.robot is None and args.task is None:
+def _target(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> tuple[str, str, str] | None:
+    if args.robot is None and args.backend is None and args.task is None:
         if args.config is None:
-            parser.error("either --robot/--task or --config is required")
+            parser.error("either --robot/--backend/--task or --config is required")
         return None
-    if args.robot is None or args.task is None:
-        parser.error("--robot and --task must be passed together")
+    if args.robot is None or args.backend is None or args.task is None:
+        parser.error("--robot, --backend, and --task must be passed together")
     if args.config is not None:
-        parser.error("--config cannot be combined with --robot/--task")
-    return args.robot, args.task
+        parser.error("--config cannot be combined with --robot/--backend/--task")
+    return args.robot, args.backend, args.task
 
 
-def _default_log_directory(robot: str | None, task: str | None, run_id: str) -> tuple[str, Path]:
-    segment = "_direct" if robot is None or task is None else f"{robot}/{task}"
+def _default_log_directory(
+    robot: str | None, backend: str | None, task: str | None, run_id: str
+) -> tuple[str, Path]:
+    segment = (
+        "_direct"
+        if robot is None or backend is None or task is None
+        else f"{robot}/{backend}/{task}"
+    )
     service_root = Path(os.environ.get("DATA_ROOT", "/data")) / segment / "logs" / "policy-service"
     if not os.environ.get("ACT_RUN_ID") and (service_root / run_id).exists():
         suffix = 2
@@ -237,7 +248,7 @@ def main(argv: list[str] | None = None) -> int:
     project_root = _project_root()
     target = _target(args, parser)
     if args.shared_root is not None and target is None:
-        parser.error("--shared-root requires --robot/--task")
+        parser.error("--shared-root requires --robot/--backend/--task")
     args.run_id = args.run_id or os.environ.get("ACT_RUN_ID") or _default_run_id()
     if args.log_directory is None:
         env_log_dir = os.environ.get("ACT_LOG_DIRECTORY")
@@ -245,7 +256,7 @@ def main(argv: list[str] | None = None) -> int:
             args.log_directory = Path(env_log_dir)
         else:
             args.run_id, args.log_directory = _default_log_directory(
-                *(target or (None, None)), args.run_id
+                *(target or (None, None, None)), args.run_id
             )
     if target is not None and any(
         value is not None
@@ -253,10 +264,10 @@ def main(argv: list[str] | None = None) -> int:
     ):
         parser.error(
             "--robot-profile/--observation-schema/--action-schema cannot be combined "
-            "with --robot/--task; the binding supplies the profile identity"
+            "with --robot/--backend/--task; the binding supplies the profile identity"
         )
     config_path = (
-        Path(f"scenario:{target[0]}/{target[1]}")
+        Path(f"scenario:{target[0]}/{target[1]}/{target[2]}")
         if target is not None
         else project_path(args.config, project_root)
     )
@@ -266,16 +277,18 @@ def main(argv: list[str] | None = None) -> int:
     stage = "config"
     try:
         if target is not None:
-            robot, task = target
-            model_path = args.model_path or latest_model(robot, task, project_root)
+            robot, backend, task = target
+            model_path = args.model_path or latest_model(robot, backend, task, project_root)
             if model_path is None:
                 raise ModelError(
-                    f"{artifact_paths(robot, task, project_root)['models']}: no act_* model found"
+                    f"{artifact_paths(robot, backend, task, project_root)['models']}: "
+                    "no act_* model found"
                 )
             model_path = project_path(model_path, project_root)
             model_root = model_path.parent if model_path.is_file() else model_path
             selection = select_scenario(
                 robot=robot,
+                backend=backend,
                 task=task,
                 recipe_field="policy_service",
                 stage="inference",
@@ -325,7 +338,7 @@ def main(argv: list[str] | None = None) -> int:
         print("=== 策略推理服务启动 ===", flush=True)
         if selection is not None:
             print(
-                f"机器人/任务: {selection.robot}/{selection.task} | "
+                f"方案: {selection.robot}/{selection.backend}/{selection.task} | "
                 f"Binding: {selection.resolved.path}",
                 flush=True,
             )

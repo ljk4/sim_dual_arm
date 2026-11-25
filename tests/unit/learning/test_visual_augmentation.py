@@ -162,7 +162,12 @@ def test_train_step_and_cli_visual_augmentation_wiring(monkeypatch, mode, enable
     assert len(calls) == expected_calls
 
     selection = select_scenario(
-        robot="marvin_sim", task="handover", recipe_field="training", stage="learning", project_root=ROOT
+        robot="marvin",
+        backend="mujoco",
+        task="handover",
+        recipe_field="training",
+        stage="learning",
+        project_root=ROOT,
     )
     cfg_default = load_training_config(selection.recipe_path, ROOT)
     assert cfg_default.visual_augmentation.enabled is True

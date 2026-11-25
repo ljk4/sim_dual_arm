@@ -11,12 +11,13 @@ from dual_arm_runtime.scenario_runtime import resolve_scenario_runtime
 
 
 @pytest.mark.parametrize(
-    ("robot", "task"), [("marvin_sim", "stack"), ("marvin_sim", "handover")]
+    ("robot", "backend", "task"),
+    [("marvin", "mujoco", "stack"), ("marvin", "mujoco", "handover")],
 )
-def test_teacher_startup_prints_real_loaded_configuration(robot, task, capsys):
+def test_teacher_startup_prints_real_loaded_configuration(robot, backend, task, capsys):
     root = Path(os.environ.get("PROJECT_ROOT", Path(__file__).resolve().parents[3]))
     resolved = resolve_scenario_runtime(
-        robot=robot, task=task, role="teacher", project_root=root
+        robot=robot, backend=backend, task=task, role="teacher", project_root=root
     )
     configuration = load_runtime_configuration_document(
         resolved.document,
@@ -44,16 +45,16 @@ def test_direct_runtime_config_uses_declared_shared_mount(monkeypatch):
     monkeypatch.setenv("PROJECT_CONTAINER", "1")
     monkeypatch.setenv("PROJECT_ROOT", str(root))
     resolved = resolve_scenario_runtime(
-        robot="marvin_sim", task="stack", role="teacher", project_root=root
+        robot="marvin", backend="mujoco", task="stack", role="teacher", project_root=root
     )
     config = load_runtime_configuration(
-        Path("shared/scenarios/marvin_sim/stack/configs/runtime/teacher_collect.yaml"), root
+        Path("shared/scenarios/marvin/mujoco/stack/configs/runtime/teacher_collect.yaml"), root
     )
     assert config.configuration_source == str(resolved.selection["recipe"]["path"])
     assert config.recipe.action_source == "teacher"
 
 
-def test_interactive_cli_removes_run_id_and_generates_robot_task_timestamp(
+def test_interactive_cli_removes_run_id_and_generates_robot_backend_task_timestamp(
     tmp_path, capsys
 ):
     from dual_arm_runtime.runtime_cli import (
@@ -66,7 +67,9 @@ def test_interactive_cli_removes_run_id_and_generates_robot_task_timestamp(
         _parse_arguments(
             [
                 "--robot",
-                "marvin_sim",
+                "marvin",
+                "--backend",
+                "mujoco",
                 "--task",
                 "stack",
                 "--once",
@@ -82,19 +85,29 @@ def test_interactive_cli_removes_run_id_and_generates_robot_task_timestamp(
     assert "--run-id" not in help_output
 
     args, _ = _parse_arguments(
-        ["--robot", "marvin_sim", "--task", "stack", "--once", "--confirm"]
+        ["--robot", "marvin", "--backend", "mujoco", "--task", "stack", "--once", "--confirm"]
     )
     assert args.run_id is None
     assert args.episode_id == ""
 
     policy_args, _ = _parse_arguments(
-        ["--robot", "marvin_sim", "--task", "stack", "--once", "--run-id", "custom-run"]
+        [
+            "--robot",
+            "marvin",
+            "--backend",
+            "mujoco",
+            "--task",
+            "stack",
+            "--once",
+            "--run-id",
+            "custom-run",
+        ]
     )
     assert policy_args.run_id == "custom-run"
 
     root = Path(os.environ.get("PROJECT_ROOT", Path(__file__).resolve().parents[3]))
     resolved = resolve_scenario_runtime(
-        robot="marvin_sim", task="stack", role="policy", project_root=root
+        robot="marvin", backend="mujoco", task="stack", role="policy", project_root=root
     )
     configuration = load_runtime_configuration_document(
         resolved.document,
@@ -104,12 +117,12 @@ def test_interactive_cli_removes_run_id_and_generates_robot_task_timestamp(
         selection=resolved.selection,
     )
     base = _interactive_run_id_base(args, configuration, stamp="20261125_120000")
-    assert base == "client_interactive_marvin_sim_stack_20261125_120000"
+    assert base == "client_interactive_marvin_mujoco_stack_20261125_120000"
 
     direct_args, _ = _parse_arguments(
         [
             "--config",
-            "shared/scenarios/marvin_sim/stack/configs/runtime/policy_rollout.yaml",
+            "shared/scenarios/marvin/mujoco/stack/configs/runtime/policy_rollout.yaml",
             "--once",
             "--confirm",
         ]
@@ -117,7 +130,7 @@ def test_interactive_cli_removes_run_id_and_generates_robot_task_timestamp(
     direct_base = _interactive_run_id_base(
         direct_args, configuration, stamp="20261125_120000"
     )
-    assert direct_base == "client_interactive_marvin_stack_marvin-stack_20261125_120000"
+    assert direct_base == "client_interactive_marvin_marvin-stack_20261125_120000"
 
     out_dir = tmp_path / "recordings"
     runs_dir = tmp_path / "runs"
@@ -137,7 +150,9 @@ def test_runtime_cli_random_default_seed_and_explicit_override(monkeypatch, caps
             "--project-root",
             str(root),
             "--robot",
-            "marvin_sim",
+            "marvin",
+            "--backend",
+            "mujoco",
             "--task",
             "stack",
             "--once",
@@ -151,7 +166,9 @@ def test_runtime_cli_random_default_seed_and_explicit_override(monkeypatch, caps
             "--project-root",
             str(root),
             "--robot",
-            "marvin_sim",
+            "marvin",
+            "--backend",
+            "mujoco",
             "--task",
             "stack",
             "--once",

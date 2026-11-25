@@ -16,8 +16,10 @@ from robot_contracts.project_paths import container_data_root, logs_root, projec
 from dual_arm_runtime.offline.collection.campaign_ledger import Attempt, CampaignError
 
 
-def default_backend_log(robot: str | None, task: str | None = None) -> Path:
-    backend_root = logs_root(container_data_root(), robot, task) / "backend"
+def default_backend_log(
+    robot: str | None, backend: str | None = None, task: str | None = None
+) -> Path:
+    backend_root = logs_root(container_data_root(), robot, backend, task) / "backend"
     if backend_root.is_dir():
         candidates = [
             child / "log"

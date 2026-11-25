@@ -1,0 +1,158 @@
+{
+  "test_only": false,
+  "robot_id": "marvin",
+  "profile_id": "marvin_mujoco_handover",
+  "joints": [
+    {
+      "name": "left_joint1",
+      "unit": "rad",
+      "min": -3.1067,
+      "max": 3.1067,
+      "max_velocity": 0.8,
+      "initial": 0.5
+    },
+    {
+      "name": "left_joint2",
+      "unit": "rad",
+      "min": -2.0944,
+      "max": 2.0944,
+      "max_velocity": 0.8,
+      "initial": -0.8
+    },
+    {
+      "name": "left_joint3",
+      "unit": "rad",
+      "min": -3.1067,
+      "max": 3.1067,
+      "max_velocity": 0.8,
+      "initial": 0.6
+    },
+    {
+      "name": "left_joint4",
+      "unit": "rad",
+      "min": -2.5307,
+      "max": 1.0472,
+      "max_velocity": 0.8,
+      "initial": -1.45
+    },
+    {
+      "name": "left_joint5",
+      "unit": "rad",
+      "min": -3.1067,
+      "max": 3.1067,
+      "max_velocity": 0.8,
+      "initial": 0.45
+    },
+    {
+      "name": "left_joint6",
+      "unit": "rad",
+      "min": -1.0472,
+      "max": 1.0472,
+      "max_velocity": 0.8,
+      "initial": -0.25
+    },
+    {
+      "name": "left_joint7",
+      "unit": "rad",
+      "min": -1.5708,
+      "max": 1.5708,
+      "max_velocity": 0.8,
+      "initial": -0.15
+    },
+    {
+      "name": "left_gripper_width",
+      "unit": "m",
+      "min": 0.0014,
+      "max": 0.0814,
+      "max_velocity": 0.04,
+      "initial": 0.0814
+    },
+    {
+      "name": "right_joint1",
+      "unit": "rad",
+      "min": -3.1067,
+      "max": 3.1067,
+      "max_velocity": 0.8,
+      "initial": -0.5
+    },
+    {
+      "name": "right_joint2",
+      "unit": "rad",
+      "min": -2.0944,
+      "max": 2.0944,
+      "max_velocity": 0.8,
+      "initial": -0.8
+    },
+    {
+      "name": "right_joint3",
+      "unit": "rad",
+      "min": -3.1067,
+      "max": 3.1067,
+      "max_velocity": 0.8,
+      "initial": -0.6
+    },
+    {
+      "name": "right_joint4",
+      "unit": "rad",
+      "min": -2.5307,
+      "max": 1.0472,
+      "max_velocity": 0.8,
+      "initial": -1.45
+    },
+    {
+      "name": "right_joint5",
+      "unit": "rad",
+      "min": -3.1067,
+      "max": 3.1067,
+      "max_velocity": 0.8,
+      "initial": 0.45
+    },
+    {
+      "name": "right_joint6",
+      "unit": "rad",
+      "min": -1.0472,
+      "max": 1.0472,
+      "max_velocity": 0.8,
+      "initial": 0.25
+    },
+    {
+      "name": "right_joint7",
+      "unit": "rad",
+      "min": -1.5708,
+      "max": 1.5708,
+      "max_velocity": 0.8,
+      "initial": 0.15
+    },
+    {
+      "name": "right_gripper_width",
+      "unit": "m",
+      "min": 0.0014,
+      "max": 0.0814,
+      "max_velocity": 0.04,
+      "initial": 0.0814
+    }
+  ],
+  "cameras": [
+    {
+      "name": "global",
+      "width": 320,
+      "height": 240,
+      "frame_id": "global_optical_frame",
+      "calibration_digest": "c7af8f72bbf2c86640804f13a8e037328d299f847496b2ca9cc3d83c2ef5872e"
+    },
+    {
+      "name": "left_wrist",
+      "width": 320,
+      "height": 240,
+      "frame_id": "left_wrist_optical_frame",
+      "calibration_digest": "afa2783a0e9e894d7e1197da3955403516bdc4da4225c9241813841164fc7176"
+    },
+    {
+      "name": "right_wrist",
+      "width": 320,
+      "height": 240,
+      "frame_id": "right_wrist_optical_frame",
+      "calibration_digest": "8e2fda4100a3e778530bb8544fa8d893d10bb33d11be6f9bee2b475455320ee2"
+    }
+  ]
+}

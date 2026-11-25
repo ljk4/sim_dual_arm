@@ -17,7 +17,7 @@ from robot_backend_sim.common.config.backend_config import (  # noqa: E402
     load_backend_config,
 )
 
-CONFIG_PATH = ROOT / "shared/scenarios/marvin_sim/stack/configs/simulation/backend/backend_stack_teacher.yaml"
+CONFIG_PATH = ROOT / "shared/scenarios/marvin/mujoco/stack/configs/simulation/backend/backend_stack_teacher.yaml"
 DEFAULT_DOCUMENT = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
 
 
@@ -174,7 +174,9 @@ def test_inference_entry_removes_run_id_and_role_and_picks_random_seed(
             [
                 "--inference-entry",
                 "--robot",
-                "marvin_sim",
+                "marvin",
+                "--backend",
+                "mujoco",
                 "--task",
                 "stack",
                 "--run-id",
@@ -188,7 +190,9 @@ def test_inference_entry_removes_run_id_and_role_and_picks_random_seed(
             [
                 "--inference-entry",
                 "--robot",
-                "marvin_sim",
+                "marvin",
+                "--backend",
+                "mujoco",
                 "--task",
                 "stack",
                 "--role",
@@ -211,7 +215,9 @@ def test_inference_entry_removes_run_id_and_role_and_picks_random_seed(
         [
             "--inference-entry",
             "--robot",
-            "marvin_sim",
+            "marvin",
+            "--backend",
+            "mujoco",
             "--task",
             "stack",
             "--run-root",
@@ -220,7 +226,7 @@ def test_inference_entry_removes_run_id_and_role_and_picks_random_seed(
     )
     config1, run_id1, _, logger1 = backend_cli._prepare_run(parsed_first)
     logger1.close()
-    assert run_id1 == "inference_backend_marvin_sim_stack_20261125_120000"
+    assert run_id1 == "inference_backend_marvin_mujoco_stack_20261125_120000"
     assert config1.task_mode == "inference"
     assert config1.seed == 123456
 
@@ -228,7 +234,9 @@ def test_inference_entry_removes_run_id_and_role_and_picks_random_seed(
         [
             "--inference-entry",
             "--robot",
-            "marvin_sim",
+            "marvin",
+            "--backend",
+            "mujoco",
             "--task",
             "stack",
             "--run-root",
@@ -237,13 +245,15 @@ def test_inference_entry_removes_run_id_and_role_and_picks_random_seed(
     )
     config2, run_id2, _, logger2 = backend_cli._prepare_run(parsed_second)
     logger2.close()
-    assert run_id2 == "inference_backend_marvin_sim_stack_20261125_120000_2"
+    assert run_id2 == "inference_backend_marvin_mujoco_stack_20261125_120000_2"
     assert config2.seed == 123456
 
     parsed_teacher = backend_cli._parse_arguments(
         [
             "--robot",
-            "marvin_sim",
+            "marvin",
+            "--backend",
+            "mujoco",
             "--task",
             "stack",
             "--role",
@@ -260,7 +270,9 @@ def test_inference_entry_removes_run_id_and_role_and_picks_random_seed(
         [
             "--inference-entry",
             "--robot",
-            "marvin_sim",
+            "marvin",
+            "--backend",
+            "mujoco",
             "--task",
             "stack",
             "--seed",

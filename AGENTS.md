@@ -49,7 +49,7 @@ Agent 必须严格区分当前处于**开发阶段**还是**规范阶段**，严
 │  • 核心目标：在不破坏已验证功能的前提下，对照本文 §2～§4     │
 │    彻底去除和修正开发阶段遗留的不符合规范之处               │
 │  • 必做清理：删除临时探针/备份/无用校验、消除硬编码与多余    │
-│    中间层、归正 var/ 与 build/ 产物、按 §3.4～§3.5 验收门禁 │
+│    中间层、归正 output/ 与 output/build/ 产物、按 §3.4～§3.5 验收门禁 │
 └──────────────────────────────────────────────────────────┘
        │
        ▼  4. 按 §3.4～§3.5 完成增量/合入前审查并请示确认 → commit → squash 合并回 main
@@ -60,7 +60,7 @@ Agent 必须严格区分当前处于**开发阶段**还是**规范阶段**，严
 1. **分支起点**：开始修 Bug、排查问题或添加新功能时，**先从最近提交新建独立的开发分支**（如 `git checkout -b dev/<topic>` 或 `fix/<topic>`）。
 2. **结果导向，允许大改大修**：
    - 开发阶段以**实际解决问题、跑通闭环、达成任务指标**为唯一最高优先级。
-   - 允许跨模块大改大修、直接修改核心链路、编写临时诊断脚本或快速实验，不在代码形式规范、抽象约束、目录洁癖或防御性校验上浪费时间，**但仍必须严守 `§0` 全局红线**；临时探针脚本统一放在 `/tmp/` 或 `var/<robot-id>/<task-id>/debug/`（系统级放 `var/_system/debug/`），严禁散落在受版本控制的源码目录中。
+   - 允许跨模块大改大修、直接修改核心链路、编写临时诊断脚本或快速实验，不在代码形式规范、抽象约束、目录洁癖或防御性校验上浪费时间，**但仍必须严守 `§0` 全局红线**；临时探针脚本统一放在 `/tmp/` 或 `output/<robot-id>/<backend-id>/<task-id>/debug/`（系统级放 `output/_system/debug/`），严禁散落在受版本控制的源码目录中。
 3. **遵循快捷高效的排查与开发步骤**（详见 [`docs/experiments/closed-loop-triage.md`](docs/experiments/closed-loop-triage.md)）：
    - **自底向上、从易到难逐环排除**：面对长链路问题（如“采集 → 训练 → 推理 → 仿真”），严禁在末端盲目调参或在错误假设下设计复杂协议；先用最小离线脚本验证底层数据与物理回放，再核对模型离线输入输出，随后隔离推理执行侧窗口与规划，最后对齐仿真物理接触与评价器边界。
    - **最小探针、证据先行**：用几十行聚焦探针直接打印关键物理量/张量/拒绝原因，一锤定音定位真实根因，排除干扰假说后再动手修改。
@@ -83,7 +83,7 @@ Agent 必须严格区分当前处于**开发阶段**还是**规范阶段**，严
 ### 2.1 个人自用、零历史包袱
 - **MUST**：协议、配置、接口或目录演进时，直接修改当前实现并同步更新所有调用方与测试。
 - **MUST NOT**：保留旧版兼容分支（`legacy_*`）、迁移框架、废弃字段别名、re-export shims 或旧产物回退逻辑。
-- **`build/` 与 `var/`**：视为可随时重建的运行/构建产物，不做跨版本兼容。
+- **`build/` 与 `var/`**：属于历史运行/构建遗留目录（不得删除或覆盖既有宿主机资产）；新架构统一产物根目录为 `output/`（含 `output/build/`），同样视为可随时重建的运行/构建产物，不做跨版本兼容。
 - **面向用户的文档无历史包袱**：面向用户的说明文档（`README.md`、`docs/`）只直接说明当前应如何配置与使用，不保留历史演进、废弃对比或“不要/无需做某事”等冗余提示；本文件（`AGENTS.md`）作为 Agent 行为约束规范，允许使用明确的禁止条款。
 
 ### 2.2 禁止过度设计与过度防御（Anti-HERO）
@@ -96,16 +96,17 @@ Agent 必须严格区分当前处于**开发阶段**还是**规范阶段**，严
 - **SSOT（单一可信源）**：同一参数禁止在多份配置中重复维护。
 
 ### 2.3 架构隔离与端内对称化
-- **通用端 100% 方案无关**：`shared/common/`、`runtime/ros2/`、`learning/lerobot/` 的业务代码与默认配置中，**严禁硬编码 `marvin_sim/stack`、`marvin_sim/handover` 等方案/机器人/任务名**，也严禁隐式回退到某一默认方案。
-- **方案按两级目录集中存放**：具体方案只存在于 `shared/scenarios/<robot-id>/<task-id>/`（如 `shared/scenarios/marvin_sim/stack/`、`shared/scenarios/marvin_sim/handover/`），内含 `binding.yaml`、`profiles/`、`configs/`、`extensions/`；必须以机器人 id 与任务 id 分两级目录组织，禁止使用单层 `<scenario-id>` 扁平命名。
-- **三端统一选择入口**：所有端的 CLI 一律通过 `--robot <robot-id> --task <task-id>` 选择方案（与直接 `--config <recipe>` 互斥）；运行期产物路径也按同一对 `<robot-id>/<task-id>` 展开，确保配置与产物一一对应。
-- **端内插件平级对称（Symmetry）**：在 `simulation/mujoco/` 等包含具体机器人/任务的端内，通用机制必须统一收敛到 `robot_backend_sim/common/`（含 `control/`、`motion/`、`follower/`、`render/`、`ros/`、`runtime/`、`kinematics/`、`physics/`、`config/`、`tasks/` 中方案无关的部分），与具体插件彻底分离；具体机器人/任务按场景 id 平级对称存放为 `robot_backend_sim/<robot-id>/<task-id>/`（如 `marvin_sim/stack/`、`marvin_sim/handover/`）。机器人级、任务无关的代码（robot assembly、robot kinematics、robot io、robot_config）直接放在 `<robot-id>/` 下；任务级代码（environment、evaluator、teacher、gate、task config、scene 编排）放在 `<robot-id>/<task-id>/` 下。调度注册表（`common/config/scene_loader.py`、`common/physics/robot_adapters.py`、`common/tasks/registry.py`）只按 assembly/task 名解析场景目录，新增机器人/任务只需新建 `<robot-id>/<task-id>/` 目录树并放入插件文件，严禁把先接入的机器人写在顶层公用目录，也严禁在 `common/` 内硬编码任何机器人/任务名。
+- **通用端 100% 方案无关**：`shared/common/`、`runtime/ros2/`、`learning/lerobot/` 的业务代码与默认配置中，**严禁硬编码 `marvin`、`mujoco`、`stack`、`handover` 等具体机器人/后端/任务名**，也严禁隐式回退到某一默认方案。
+- **本体资产与三层方案集中存放**：跨后端/跨任务的机器人公共资产（URDF、meshes、共享档案与机器人级扩展）统一收归 `shared/robots/<robot-id>/`；具体方案只存在于 `shared/scenarios/<robot-id>/<backend-id>/<task-id>/`（如 `shared/scenarios/marvin/mujoco/stack/`、`shared/scenarios/marvin/mujoco/handover/`），内含 `binding.yaml`、`profiles/`、`configs/`、`extensions/`；必须以机器人、后端、任务三级目录组织，禁止扁平合并命名。
+- **三端统一选择入口**：所有端的 CLI 一律通过 `--robot <robot-id> --backend <backend-id> --task <task-id>` 选择方案（与直接 `--config <recipe>` 互斥）；运行期产物路径也按同一三元组 `<robot-id>/<backend-id>/<task-id>` 展开，确保配置与产物一一对应。
+- **端内插件平级对称（Symmetry）**：在 `simulation/mujoco/` 等包含具体机器人/任务的端内，通用机制必须统一收敛到 `robot_backend_sim/common/`（含 `control/`、`motion/`、`follower/`、`render/`、`ros/`、`runtime/`、`kinematics/`、`physics/`、`config/`、`tasks/` 中方案无关的部分），与具体插件彻底分离；具体机器人/任务按场景 id 平级对称存放为 `robot_backend_sim/<robot-id>/<task-id>/`（如 `marvin/stack/`、`marvin/handover/`）。机器人级、任务无关的代码（robot assembly、robot kinematics、robot io、robot_config）直接放在 `<robot-id>/` 下；任务级代码（environment、evaluator、teacher、gate、task config、scene 编排）放在 `<robot-id>/<task-id>/` 下。调度注册表（`common/config/scene_loader.py`、`common/physics/robot_adapters.py`、`common/tasks/registry.py`）只按 assembly/task 名解析场景目录，新增机器人/任务只需新建 `<robot-id>/<task-id>/` 目录树并放入插件文件，严禁把先接入的机器人写在顶层公用目录，也严禁在 `common/` 内硬编码任何机器人/任务名。
 
 ### 2.4 改动/新增代码归属判断准则
 - **第一级判断：与端无关（`shared/`） vs 与四端有关（`simulation` / `runtime` / `learning` / `hardware`）**
   - **与具体运行端无关**（跨端接口契约、通用数学/轨迹工具、方案绑定与配方）：统一归属 `shared/`。
     - 与机器人和任务均无关 → 归属 `shared/common/`（严禁出现任何机器人名、任务名或场景特定阈值/魔数）；
-    - 与机器人或任务有关 → 归属 `shared/scenarios/<robot-id>/`（跨任务共享的机器人级契约档案与扩展置于 `profiles/`、`extensions/`）及 `shared/scenarios/<robot-id>/<task-id>/`（任务级档案置于 `profiles/{robot,control}/`，任务级配方置于 `configs/`）。
+    - 与机器人或后端无关的本体资产 → 归属 `shared/robots/<robot-id>/`（跨后端共享 URDF、网格、档案与扩展置于 `urdf/`、`meshes/`、`profiles/`、`extensions/`）；
+    - 与特定机器人、后端及任务绑定 → 归属 `shared/scenarios/<robot-id>/<backend-id>/<task-id>/`（任务级档案置于 `profiles/robot/`，任务级配方置于 `configs/`）。
   - **与四端之一有关**（属于 `simulation/mujoco/`、`runtime/ros2/`、`learning/lerobot/`、`hardware/` 某一端的具体实现）：先确定归属哪一端，再按第二级判断端内归属。
 - **第二级判断：端内机器人/任务无关（`common/`） vs 机器人专属（`<robot-id>/`） vs 任务专属（`<robot-id>/<task-id>/`）**
   - **与机器人和任务均无关**（通用控制、运动规划、跟随器、渲染、ROS 通信、训练与推理管线等通用机制） → 归属该端的 `common/`（或完全方案无关的端主包，严禁硬编码 `<robot-id>` 或 `<task-id>`）；
@@ -128,10 +129,11 @@ Agent 必须严格区分当前处于**开发阶段**还是**规范阶段**，严
 
 | 执行环境 | 只读挂载（禁止容器内写入） | 可写挂载 | 负责执行的脚本与入口 |
 | :--- | :--- | :--- | :--- |
-| **宿主机（仓库根目录）** | — | 全部工作区源码、`build/`、`var/` | `./env.sh`、`./record_parallel.sh`、`./inference_parallel.sh`、`./env.sh viewer ...` |
-| **`simulation` 容器** | `/app`（`simulation/mujoco/`）、`/shared`（`shared/`）、`/opt/ros-dev`（`build/ros-dev/`） | `/data`（`var/`） | `scripts/teacher_backend.sh`、`scripts/inference_backend.sh`、`scripts/backend.sh`、`scripts/test.sh` |
-| **`runtime` 容器** | `/app`（`runtime/ros2/`）、`/shared`（`shared/`） | `/build`（`build/`）、`/data`（`var/`） | `scripts/build_sdk.sh`、`scripts/record.sh`、`scripts/client_interactive.sh`、`scripts/client_policy.sh`、`scripts/test.sh` |
-| **`learning` 容器** | `/app`（`learning/lerobot/`）、`/shared`（`shared/`）、`/third_party`（`third_party/`）、`/opt/policy-sdk`（`build/generated/policy-sdk/`） | `/data`（`var/`） | `scripts/convert.sh`、`scripts/train.sh`、`scripts/server_policy.sh`、`scripts/test.sh` |
+| **宿主机（仓库根目录）** | — | 全部工作区源码、`output/` | `./env.sh`、`./record_parallel.sh`、`./inference_parallel.sh`、`./env.sh viewer ...` |
+| **`mujoco` 容器** | `/app`（`simulation/mujoco/`）、`/shared`（`shared/`）、`/opt/ros-dev`（`output/build/ros-dev/`）、`/data/build`（`output/build/`） | `/data`（`output/`） | `scripts/teacher_backend.sh`、`scripts/inference_backend.sh`、`scripts/backend.sh`、`scripts/test.sh` |
+| **`runtime` 容器** | `/app`（`runtime/ros2/`）、`/shared`（`shared/`） | `/build`（`output/build/`）、`/data`（`output/`） | `scripts/build_sdk.sh`、`scripts/record.sh`、`scripts/client_interactive.sh`、`scripts/client_policy.sh`、`scripts/test.sh` |
+| **`lerobot` 容器** | `/app`（`learning/lerobot/`）、`/shared`（`shared/`）、`/third_party`（`third_party/`）、`/opt/policy-sdk`（`output/build/generated/policy-sdk/`）、`/data/build`（`output/build/`） | `/data`（`output/`） | `scripts/convert.sh`、`scripts/train.sh`、`scripts/server_policy.sh`、`scripts/test.sh` |
+| **`tianji` 容器** | `/app`（`hardware/tianji/`）、`/shared`（`shared/`）、`/opt/ros-dev`（`output/build/ros-dev/`）、`/data/build`（`output/build/`） | `/data`（`output/`） | `scripts/check_config.sh`、`scripts/test.sh` |
 
 > 容器内测试（`tests/`）统一按 [`tests/README.md`](tests/README.md) 方式将工作区源码打包送入容器 `/tmp` 临时目录，并调用对应端的 `/app/scripts/test.sh` 执行。
 
@@ -148,30 +150,30 @@ Agent 必须严格区分当前处于**开发阶段**还是**规范阶段**，严
 | 改动范围 | 必跑验证命令与通过判据 |
 | :--- | :--- |
 | **`shared/common/` 下 Protobuf 或 ROS 2 IDL** | 在 `runtime` 容器重跑 `./env.sh exec runtime scripts/build_sdk.sh`，并通过对应 `pytest` 用例 |
-| **采集、录制或导出链路**（`runtime` 采集 / Teacher / 导出逻辑） | 启动对应 `scripts/teacher_backend.sh`，在 `runtime` 容器跑通一次试采：`scripts/record.sh --robot <robot-id> --task <task-id> --purpose pilot --count 1 --max-consecutive-failures 1`（退出码为 0 且 `qualified` 为 1） |
-| **`simulation/mujoco/`**（仿真后端、场景、运动学或评价器） | 按 [`tests/README.md`](tests/README.md) 在 `simulation` 容器执行对应 `scripts/test.sh`（如 `tests/integration/test_sim_scene.py`）；涉及闭环语义时补跑一次 `pilot` 试采或单局推理 |
-| **`learning/lerobot/`**（转换、训练或 Policy 服务） | 按 [`tests/README.md`](tests/README.md) 在 `learning` 容器执行对应 `scripts/test.sh`；涉及推理服务或协议时，启动 `scripts/server_policy.sh` 与 `scripts/inference_backend.sh`，并在 `runtime` 容器跑通 `scripts/client_policy.sh`（或宿主机 `./inference_parallel.sh --robot <robot-id> --task <task-id> --count 1 --workers 1`，可按需传 `--seed-start`）至少一局 |
+| **采集、录制或导出链路**（`runtime` 采集 / Teacher / 导出逻辑） | 启动对应 `scripts/teacher_backend.sh`，在 `runtime` 容器跑通一次试采：`scripts/record.sh --robot <robot-id> --backend <backend-id> --task <task-id> --purpose pilot --count 1 --max-consecutive-failures 1`（退出码为 0 且 `qualified` 为 1） |
+| **`simulation/mujoco/`**（仿真后端、场景、运动学或评价器） | 按 [`tests/README.md`](tests/README.md) 在 `mujoco` 容器执行对应 `scripts/test.sh`（如 `tests/integration/test_sim_scene.py`）；涉及闭环语义时补跑一次 `pilot` 试采或单局推理 |
+| **`learning/lerobot/`**（转换、训练或 Policy 服务） | 按 [`tests/README.md`](tests/README.md) 在 `lerobot` 容器执行对应 `scripts/test.sh`；涉及推理服务或协议时，启动 `scripts/server_policy.sh` 与 `scripts/inference_backend.sh`，并在 `runtime` 容器跑通 `scripts/client_policy.sh`（或宿主机 `./inference_parallel.sh --robot <robot-id> --backend <backend-id> --task <task-id> --count 1 --workers 1`，可按需传 `--seed-start`）至少一局 |
 | **`runtime/ros2/`**（控制、轨迹或流式客户端） | 按 [`tests/README.md`](tests/README.md) 在 `runtime` 容器执行对应 `scripts/test.sh`，并按影响面补跑一次 `pilot` 试采或单局 `scripts/client_policy.sh` |
 | **Docker Compose 挂载/环境或 Dockerfile 依赖** | 执行 `./env.sh up <env>` 或 `./env.sh build <env>`，并确认对应容器内入口脚本可正常运行 |
 
 > **验收防污染与进程回收**：Agent 自测严禁使用 `--purpose formal` 污染正式台账；验收期间启动的临时后端或 Policy 服务在测试结束后必须立即停止清理，避免残留进程占用 `50051` 端口、ROS 2 话题或显存。
 
 ### 3.5 合并主分支前全任务闭环审查门禁（`norm/*` → `main` 必检）
-除符合 `§1` 轻量改动豁免（纯文档、单文件参数微调等低风险小改）外，任何改动从 `norm/*` 合并回 `main` 前，**必须确保项目中全部现有任务**（当前为 `marvin_sim/stack` 与 `marvin_sim/handover`；后续新增任务同步纳入）均已跑通以下 4 步全链路实测审查，并将结果汇报用户。**增量复验规则**：若阶段一（开发阶段）已对对应任务跑通完整四步审查且阶段二（规范阶段）无大改动（仅做文档、静态检查、未用导入/死代码清理等局部整理），不必重测重验开发阶段已通过的步骤，仅对阶段二实际修改涉及的环节或任务执行增量重测重验即可；若阶段二进行了较大重构或触及核心采集/训练/推理/仿真链路，则须重跑受影响环节直至覆盖完整四步审查：
+除符合 `§1` 轻量改动豁免（纯文档、单文件参数微调等低风险小改）外，任何改动从 `norm/*` 合并回 `main` 前，**必须确保项目中全部现有任务**（当前为 `marvin/mujoco/stack` 与 `marvin/mujoco/handover`；后续新增任务同步纳入）均已跑通以下 4 步全链路实测审查，并将结果汇报用户。**增量复验规则**：若阶段一（开发阶段）已对对应任务跑通完整四步审查且阶段二（规范阶段）无大改动（仅做文档、静态检查、未用导入/死代码清理等局部整理），不必重测重验开发阶段已通过的步骤，仅对阶段二实际修改涉及的环节或任务执行增量重测重验即可；若阶段二进行了较大重构或触及核心采集/训练/推理/仿真链路，则须重跑受影响环节直至覆盖完整四步审查：
 
-- **执行原则（优先模拟真实用户入口）**：每一步尽量直接调用各端 `README.md` 与 [`tests/README.md`](tests/README.md) 文档化的标准脚本入口（如 `simulation/mujoco/scripts/teacher_backend.sh`、`simulation/mujoco/scripts/inference_backend.sh`、`./env.sh exec runtime scripts/*.sh`、`./env.sh exec learning scripts/*.sh`）；若个别步骤因小样本转换/回放需求不易直接复用生产默认配方，允许在 `var/<robot-id>/<task-id>/debug/` 下生成临时 `--config` 配方或使用 [`tests/fakes/policy/run_fake.py`](tests/fakes/policy/run_fake.py)，不必为了凑参数而强行修改生产脚本或正式配方。
-1. **试采（Pilot 采集）**：启动对应任务的 `teacher_backend.sh --robot <robot-id> --task <task-id>`（等待 `ready.json` 就绪），在 `runtime` 容器执行 `scripts/record.sh --robot <robot-id> --task <task-id> --purpose pilot --count 2 --max-consecutive-failures 2`（至少 2 局以满足 train/validation 划分），确认退出码为 `0` 且 `qualified` 为 `2`，并记录合格录制目录、对应 `seed` 与 `export/labels.json` 路径。
-2. **试训（数据转换 + Smoke 训练）**：基于第 1 步生成的 pilot 录制，在 `learning` 容器依次执行 `scripts/convert.sh` 与 `scripts/train.sh --mode smoke`（小样本试采可使用 `var/<robot-id>/<task-id>/debug/` 下的临时 `--config` 配方并配合 `--max-steps`），确认退出码为 `0` 且输出可用于推理加载的模型产物（含 `model.safetensors`）。
-3. **试推（真实模型闭环推理，不要求任务成功）**：基于第 2 步产出的 smoke 模型，启动 `learning` 端 `scripts/server_policy.sh`（指向 smoke 模型目录）与 `simulation` 端 `scripts/inference_backend.sh --robot <robot-id> --task <task-id>`，在 `runtime` 容器运行 `scripts/client_policy.sh` 执行单局闭环推理，确认三端 gRPC / ROS 2 控制与观测流转无报错、正常退出并完成录制（**不要求**少步数 smoke 模型完成任务成功）。
+- **执行原则（优先模拟真实用户入口）**：每一步尽量直接调用各端 `README.md` 与 [`tests/README.md`](tests/README.md) 文档化的标准脚本入口（如 `simulation/mujoco/scripts/teacher_backend.sh`、`simulation/mujoco/scripts/inference_backend.sh`、`./env.sh exec runtime scripts/*.sh`、`./env.sh exec lerobot scripts/*.sh`）；若个别步骤因小样本转换/回放需求不易直接复用生产默认配方，允许在 `output/<robot-id>/<backend-id>/<task-id>/debug/` 下生成临时 `--config` 配方或使用 [`tests/fakes/policy/run_fake.py`](tests/fakes/policy/run_fake.py)，不必为了凑参数而强行修改生产脚本或正式配方。
+1. **试采（Pilot 采集）**：启动对应任务的 `teacher_backend.sh --robot <robot-id> --backend <backend-id> --task <task-id>`（等待 `ready.json` 就绪），在 `runtime` 容器执行 `scripts/record.sh --robot <robot-id> --backend <backend-id> --task <task-id> --purpose pilot --count 2 --max-consecutive-failures 2`（至少 2 局以满足 train/validation 划分），确认退出码为 `0` 且 `qualified` 为 `2`，并记录合格录制目录、对应 `seed` 与 `export/labels.json` 路径。
+2. **试训（数据转换 + Smoke 训练）**：基于第 1 步生成的 pilot 录制，在 `lerobot` 容器依次执行 `scripts/convert.sh` 与 `scripts/train.sh --mode smoke`（小样本试采可使用 `output/<robot-id>/<backend-id>/<task-id>/debug/` 下的临时 `--config` 配方并配合 `--max-steps`），确认退出码为 `0` 且输出可用于推理加载的模型产物（含 `model.safetensors`）。
+3. **试推（真实模型闭环推理，不要求任务成功）**：基于第 2 步产出的 smoke 模型，启动 `lerobot` 端 `scripts/server_policy.sh`（指向 smoke 模型目录）与 `mujoco` 端 `scripts/inference_backend.sh --robot <robot-id> --backend <backend-id> --task <task-id>`，在 `runtime` 容器运行 `scripts/client_policy.sh` 执行单局闭环推理，确认三端 gRPC / ROS 2 控制与观测流转无报错、正常退出并完成录制（**不要求**少步数 smoke 模型完成任务成功）。
 4. **采集数据推理源成功判定与完整推理链路验证**：使用第 1 步真实 pilot 录制导出的 `export/labels.json` 作为推理源（通过 [`tests/fakes/policy/run_fake.py`](tests/fakes/policy/run_fake.py) 启动真实 gRPC `PolicyService` 回放录制标签），以与该 pilot 录制一致的 `--seed` 启动 `scripts/inference_backend.sh`，在 `runtime` 容器通过 `scripts/client_policy.sh --config <debug_replay_yaml> --reset-seed <pilot_seed>` 运行单局闭环测试（临时配置允许测试策略并对齐首帧时序），确认最终评价返回 `TASK_SUCCEEDED`（`action_source` 为 `policy`、`evaluated` 为 `true`、`conditions_passed` 为 `true` 且 `recording.complete` 为 `true`）。
-- **审查后清理边界**：四步全流程严禁使用 `--purpose formal` 污染正式台账；完成后必须立即停止全部临时后台进程并清理本次审查产生的临时 pilot 录制、debug 配方、smoke 模型、日志与试采台账，待确认工作区与 `var/` 洁净后再请示用户合并 `main`。
+- **审查后清理边界**：四步全流程严禁使用 `--purpose formal` 污染正式台账；完成后必须立即停止全部临时后台进程并清理本次审查产生的临时 pilot 录制、debug 配方、smoke 模型、日志与试采台账，待确认工作区与 `output/` 洁净后再请示用户合并 `main`。
 
 ---
 
 ## 4. 目录与产物隔离规范
 
-### 4.1 `var/`（容器 `/data`）四分法（强制隔离）
-所有按方案运行的产物必须归入 `var/<robot-id>/<task-id>/`（容器内 `/data/<robot-id>/<task-id>/`，如 `var/marvin_sim/stack/`、`var/marvin_sim/handover/`），任务目录下严格分为**四个一级平级目录**（`datasets/`、`models/`、`logs/`、`debug/`；其中 `datasets/` 下再分 `raw/` 与 `lerobot/`），**绝对禁止混放或私自在 `var/` 根下新建未授权目录**：
+### 4.1 `output/`（容器 `/data`）四分法与 `output/build/`（强制隔离）
+所有按方案运行的产物必须归入 `output/<robot-id>/<backend-id>/<task-id>/`（容器内 `/data/<robot-id>/<backend-id>/<task-id>/`，如 `output/marvin/mujoco/stack/`、`output/marvin/mujoco/handover/`），任务目录下严格分为**四个一级平级目录**（`datasets/`、`models/`、`logs/`、`debug/`；其中 `datasets/` 下再分 `raw/` 与 `lerobot/`），**绝对禁止混放或私自在 `output/` 根下新建未授权目录**：
 
 | 目录 | 允许存放 | 严禁混入 |
 | :--- | :--- | :--- |
@@ -181,13 +183,13 @@ Agent 必须严格区分当前处于**开发阶段**还是**规范阶段**，严
 | `logs/` | 三端运行事件日志、后端日志（`backend/<run-id>/`）、采集台账与尝试日志（`collection/`）、转换日志（`convert/`）、训练过程指标（`training/`）、策略服务日志（`policy-service/`）、单局推理录制（`recordings/`）及批量推理逐局记录（`batch-policy/<batch-id>/`） | 正式 LeRobot 数据集、模型权重、离线诊断报告 |
 | `debug/` | 环境探针、场景/运动学检查、离线评估报告（如 `batch-policy/<batch-id>/report.json`）、集成/冒烟测试临时产物 | 正式采集录制、正式训练数据集、正式模型包 |
 
-> **合法保留段边界**：直接配置模式（无 `<robot-id>/<task-id>` 对）统一使用 `var/_direct/`；与具体方案无关的系统级调试产物统一放入 `var/_system/debug/`。严禁在 `var/` 根下新建其他目录。
+> **合法保留段边界**：直接配置模式（无 `<robot-id>/<backend-id>/<task-id>` 三元组）统一使用 `output/_direct/`；与具体方案无关的系统级调试产物统一放入 `output/_system/debug/`；`build` 为保留 `robot-id`。严禁在 `output/` 根下新建其他目录。
 > **新产物准入铁律**：规范阶段保留的新功能若产生新的正式文件/目录类型，**必须先向用户说明其性质与消费者，经确认归属后再定型**。
 
-### 4.2 `build/`（容器 `/build`）精简规范
-`build/` 仅存放运行时直接加载的生成 SDK，禁止存放评估报告、缓存或临时编译目录：
-- `build/ros-dev/`：仅保留 `install/` 与 `contracts.json`；`colcon` 的 `build/`、`log/`、`COLCON_HOME` 必须在 `/tmp` 执行并在结束后清理。
-- `build/generated/policy-sdk/`：仅保留 `dual_arm_policy/` 与 `source.sha256`。
+### 4.2 `output/build/`（`runtime` 容器 `/build`）精简规范
+`output/build/` 仅存放运行时直接加载的生成 SDK，禁止存放评估报告、缓存或临时编译目录：
+- `output/build/ros-dev/`：仅保留 `install/` 与 `contracts.json`；`colcon` 的 `build/`、`log/`、`COLCON_HOME` 必须在 `/tmp` 执行并在结束后清理。
+- `output/build/generated/policy-sdk/`：仅保留 `dual_arm_policy/` 与 `source.sha256`。
 
 ---
 

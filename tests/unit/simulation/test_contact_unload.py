@@ -11,7 +11,7 @@ from model_helpers import replace
 from robot_contracts.trajectory.spline import ReferenceSample
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "simulation/mujoco/src"))
-from robot_backend_sim.marvin_sim.robot_config import MARVIN_CONTROL_JOINT_NAMES as CONTROL_JOINT_NAMES
+from robot_backend_sim.marvin.robot_config import MARVIN_CONTROL_JOINT_NAMES as CONTROL_JOINT_NAMES
 from robot_backend_sim.common.config.stream_config import StreamConfig, StreamConfigError
 from robot_backend_sim.common.physics.contacts import FingerContactEvidence, GripperContactEvidence
 from robot_backend_sim.common.physics.gripper_contact import ContactUnloader, GripperContactTracker

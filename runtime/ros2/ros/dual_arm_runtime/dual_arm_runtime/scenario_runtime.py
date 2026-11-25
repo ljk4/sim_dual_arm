@@ -1,4 +1,4 @@
-"""Resolve a ``(robot, task)`` binding into one in-memory runtime configuration."""
+"""Resolve a ``(robot, backend, task)`` binding into one in-memory runtime configuration."""
 
 from __future__ import annotations
 
@@ -42,8 +42,8 @@ class ScenarioRuntime:
     @property
     def source(self) -> str:
         return (
-            f"scenario:{self.selection['robot']}/{self.selection['task']}"
-            f"/{self.selection['role']}"
+            f"scenario:{self.selection['robot']}/{self.selection['backend']}"
+            f"/{self.selection['task']}/{self.selection['role']}"
         )
 
 
@@ -51,13 +51,15 @@ def resolve_shared_root(explicit: Path | None, project_root: Path) -> Path:
     return _contracts_shared_root(explicit, project_root)
 
 
-def _binding_path(shared_root: Path, robot: str, task: str) -> Path:
+def _binding_path(shared_root: Path, robot: str, backend: str, task: str) -> Path:
     try:
-        path = resolve_binding_path(shared_root, robot, task)
+        path = resolve_binding_path(shared_root, robot, backend, task)
     except BindingError as error:
         raise ScenarioRuntimeError(str(error)) from error
     if not path.is_file():
-        raise ScenarioRuntimeError(f"scenario {robot}/{task} has no binding file: {path}")
+        raise ScenarioRuntimeError(
+            f"scenario {robot}/{backend}/{task} has no binding file: {path}"
+        )
     return path
 
 
@@ -75,6 +77,7 @@ def _override_profile_paths(document: dict[str, Any], resolved: ResolvedBinding)
 def resolve_scenario_runtime(
     *,
     robot: str,
+    backend: str,
     task: str,
     role: str = "policy",
     shared_root: Path | None = None,
@@ -88,11 +91,20 @@ def resolve_scenario_runtime(
     if seed is not None and (not isinstance(seed, int) or isinstance(seed, bool)):
         raise ScenarioRuntimeError("seed must be an integer")
     root = resolve_shared_root(shared_root, project_root)
-    binding_path = _binding_path(root, robot, task)
+    binding_path = _binding_path(root, robot, backend, task)
     try:
         resolved = load_binding(binding_path, shared_root=root)
     except (BindingError, ContractError, OSError) as error:
         raise ScenarioRuntimeError(str(error)) from error
+    if (
+        resolved.binding.robot_id != robot
+        or resolved.binding.backend.implementation != backend
+        or resolved.binding.task_id != task
+    ):
+        raise ScenarioRuntimeError(
+            f"binding {binding_path} declares {resolved.binding.scenario_id!r}, "
+            f"expected {robot}/{backend}/{task!r}"
+        )
     if getattr(resolved.binding.recipes, recipe_field) is None:
         raise ScenarioRuntimeError(
             f"scenario {resolved.binding.scenario_id!r} declares no recipes.{recipe_field}"
@@ -106,6 +118,7 @@ def resolve_scenario_runtime(
     selection: dict[str, Any] = {
         "mode": "scenario",
         "robot": robot,
+        "backend": backend,
         "task": task,
         "scenario_id": resolved.binding.scenario_id,
         "role": role,

@@ -33,26 +33,26 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project-root", type=Path, default=ROOT)
     parser.add_argument("--robot")
+    parser.add_argument("--backend")
     parser.add_argument("--task")
     parser.add_argument("--shared-root", type=Path)
     parser.add_argument("--runtime-config", type=Path)
     parser.add_argument("--backend-template", type=Path)
     args = parser.parse_args(argv)
-    if args.robot is not None:
-        if args.task is None:
-            parser.error("--robot requires --task")
+    if any(value is not None for value in (args.robot, args.backend, args.task)):
+        if not (args.robot and args.backend and args.task):
+            parser.error("--robot, --backend, and --task must be passed together")
         if args.runtime_config is not None or args.backend_template is not None:
-            parser.error("--robot/--task cannot be combined with direct recipes")
+            parser.error("--robot/--backend/--task cannot be combined with direct recipes")
     else:
-        if args.task is not None:
-            parser.error("--task requires --robot")
         if args.shared_root is not None:
-            parser.error("--shared-root requires --robot/--task")
+            parser.error("--shared-root requires --robot/--backend/--task")
         if args.runtime_config is None or args.backend_template is None:
             parser.error("direct mode requires --runtime-config and --backend-template")
     code = check_ros_sdk(
         args.project_root,
         robot=args.robot,
+        backend=args.backend,
         task=args.task,
         shared_root=args.shared_root,
     )
@@ -62,6 +62,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.robot is not None:
             selection = select_inference(
                 robot=args.robot,
+                backend=args.backend,
                 task=args.task,
                 shared_root=args.shared_root,
                 project_root=args.project_root,
@@ -70,6 +71,7 @@ def main(argv: list[str] | None = None) -> int:
             selection = {
                 "mode": "direct",
                 "robot": None,
+                "backend": None,
                 "task": None,
                 "scenario_id": None,
                 "binding": None,

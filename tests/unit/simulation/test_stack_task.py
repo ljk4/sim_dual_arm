@@ -12,8 +12,8 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim.marvin_sim.stack.config import load_task_config  # noqa: E402
-from robot_backend_sim.marvin_sim.stack.evaluator import (  # noqa: E402
+from robot_backend_sim.marvin.stack.config import load_task_config  # noqa: E402
+from robot_backend_sim.marvin.stack.evaluator import (  # noqa: E402
     ObjectState,
     StackTaskRuntime,
     TaskBinding,
@@ -23,7 +23,7 @@ from robot_backend_sim.marvin_sim.stack.evaluator import (  # noqa: E402
 from robot_contracts.models import ContractError, RunContext  # noqa: E402
 
 CONFIG_PATH = (
-    ROOT / "shared/scenarios/marvin_sim/stack/configs/simulation/scene/marvin_stack_task.yaml"
+    ROOT / "shared/scenarios/marvin/mujoco/stack/configs/simulation/scene/marvin_stack_task.yaml"
 )
 TABLE_TOP = 0.78
 TARGET_Z = TABLE_TOP + 0.03

@@ -14,12 +14,12 @@ np = pytest.importorskip("numpy")
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "simulation/mujoco/src"))
 
-from robot_backend_sim.marvin_sim.handover.scene_config import load_marvin_scene_config  # noqa: E402
-from robot_backend_sim.marvin_sim.kinematics import relative_block_pose  # noqa: E402
-from robot_backend_sim.marvin_sim.handover.scene import build_marvin_scene  # noqa: E402
+from robot_backend_sim.marvin.handover.scene_config import load_marvin_scene_config  # noqa: E402
+from robot_backend_sim.marvin.kinematics import relative_block_pose  # noqa: E402
+from robot_backend_sim.marvin.handover.scene import build_marvin_scene  # noqa: E402
 from robot_backend_sim.common.physics.robot_geometry import ArmChain  # noqa: E402
-from robot_backend_sim.marvin_sim.handover.config import load_handover_plan_config  # noqa: E402
-from robot_backend_sim.marvin_sim.handover.plan import (  # noqa: E402
+from robot_backend_sim.marvin.handover.config import load_handover_plan_config  # noqa: E402
+from robot_backend_sim.marvin.handover.plan import (  # noqa: E402
     HandoverLayout,
     build_handover_targets,
     layout_from_scene,
@@ -40,7 +40,7 @@ def _yaw(angle):
 
 def test_layout_block_yaw_includes_the_robot_base_yaw():
     config = load_marvin_scene_config(
-        ROOT / "shared/scenarios/marvin_sim/handover/configs/simulation/scene/marvin_handover.yaml"
+        ROOT / "shared/scenarios/marvin/mujoco/handover/configs/simulation/scene/marvin_handover.yaml"
     )
     config = config.model_copy(update={
         "robot": config.robot.model_copy(update={"base_yaw_deg": 45.0}),
@@ -84,7 +84,7 @@ def test_relative_block_pose_preserves_full_world_rotation():
 
 def test_handover_and_place_keep_the_edge_grasp_and_distinct_lift_height():
     config = load_handover_plan_config(
-        ROOT / "shared/scenarios/marvin_sim/handover/configs/simulation/scene/handover_paths.yaml"
+        ROOT / "shared/scenarios/marvin/mujoco/handover/configs/simulation/scene/handover_paths.yaml"
     )
     config = config.model_copy(update={"grasp": config.grasp.model_copy(update={
         "right_cohold": config.grasp.right_cohold.model_copy(update={"approach_yaw_deg": 12.0})

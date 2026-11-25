@@ -22,7 +22,7 @@ from model_helpers import replace
 pa = pytest.importorskip("pyarrow")
 pq = pytest.importorskip("pyarrow.parquet")
 ROOT = Path(__file__).resolve().parents[3]
-SCENARIO = ROOT / "shared/scenarios/marvin_sim/stack"
+SCENARIO = ROOT / "shared/scenarios/marvin/mujoco/stack"
 RULE = SCENARIO / "configs/learning/act_sample_filter.yaml"
 PROFILE = "a" * 64
 LEAD_NS = 50_000_000

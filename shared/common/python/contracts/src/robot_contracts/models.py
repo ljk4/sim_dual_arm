@@ -106,6 +106,36 @@ class RobotProfile(StrictContractModel):
         """Group revolute manipulator joints by side prefix; linear axes stay independent."""
         return coordinated_axis_groups(self.joints)
 
+    @property
+    def interface_digest(self) -> str:
+        """Hash backend-independent robot interface fields for Sim2Sim/Sim2Real checks."""
+        from .io import canonical_sha256
+
+        return canonical_sha256(
+            {
+                "robot_id": self.robot_id,
+                "test_only": self.test_only,
+                "joints": [
+                    {
+                        "name": joint.name,
+                        "unit": joint.unit,
+                        "min": joint.minimum,
+                        "max": joint.maximum,
+                        "max_velocity": joint.max_velocity,
+                    }
+                    for joint in self.joints
+                ],
+                "cameras": [
+                    {
+                        "name": camera.name,
+                        "width": camera.width,
+                        "height": camera.height,
+                    }
+                    for camera in self.cameras
+                ],
+            }
+        )
+
 
 def coordinated_axis_groups(joints: Sequence[JointSpec]) -> tuple[tuple[int, ...], ...]:
     """Derive per-limb revolute joint index groups from canonical ``<prefix>_joint*`` names."""

@@ -17,14 +17,14 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim.marvin_sim.handover.scene_config import load_marvin_scene_config  # noqa: E402
+from robot_backend_sim.marvin.handover.scene_config import load_marvin_scene_config  # noqa: E402
 from robot_backend_sim.common.physics.contacts import resolve_contact_binding  # noqa: E402
-from robot_backend_sim.marvin_sim.io import MarvinIO  # noqa: E402
-from robot_backend_sim.marvin_sim.handover.scene import build_marvin_scene  # noqa: E402
+from robot_backend_sim.marvin.io import MarvinIO  # noqa: E402
+from robot_backend_sim.marvin.handover.scene import build_marvin_scene  # noqa: E402
 from robot_contracts.models import ContractError  # noqa: E402
 from robot_contracts.profiles import load_profile  # noqa: E402
 
-SCENARIO = ROOT / "shared/scenarios/marvin_sim/handover"
+SCENARIO = ROOT / "shared/scenarios/marvin/mujoco/handover"
 CONFIG_PATH = SCENARIO / "configs/simulation/scene/marvin_handover.yaml"
 PROFILE_PATH = SCENARIO / "profiles/robot/profile.json"
 SCHEMAS = ROOT / "shared/common/interfaces/schemas"

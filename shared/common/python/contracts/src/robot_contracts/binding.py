@@ -21,7 +21,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Annotated, Any, Literal
 
-from pydantic import BeforeValidator, Field
+from pydantic import BeforeValidator, Field, model_validator
 
 from .io import sha256_file
 from .models import ContractError
@@ -64,6 +64,7 @@ ScenarioId = Annotated[
     ),
 ]
 _SCENARIO_ID_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.:-]{0,127}$")
+RESERVED_ROBOT_IDS = frozenset({"build"})
 BackendKind = Literal["simulation", "hardware"]
 ReferenceKind = Literal["file", "directory"]
 
@@ -153,10 +154,10 @@ class InterfacesSpec(StrictContractModel):
 class ScenarioBinding(StrictContractModel):
     """A strictly validated scenario binding.
 
-    A scenario is the ``(robot_id, task_id)`` pair that owns
-    ``<shared>/scenarios/<robot_id>/<task_id>/binding.yaml``.  ``scenario_id``
-    remains a derived display identifier (``"<robot_id>/<task_id>"``) so
-    summaries and logs keep a single canonical name.
+    A scenario is the ``(robot_id, backend_id, task_id)`` triple that owns
+    ``<shared>/scenarios/<robot_id>/<backend_id>/<task_id>/binding.yaml``.
+    ``scenario_id`` is the canonical ``"<robot_id>/<backend_id>/<task_id>"``
+    display identifier for summaries and logs.
     """
 
     robot_id: ScenarioId
@@ -171,9 +172,18 @@ class ScenarioBinding(StrictContractModel):
     source_roots: PathList = ()
     artifact_roots: PathList = ()
 
+    @model_validator(mode="after")
+    def _validate_robot_id(self) -> ScenarioBinding:
+        if self.robot_id in RESERVED_ROBOT_IDS:
+            raise BindingError(
+                "BINDING_SCHEMA",
+                f"robot_id: {self.robot_id!r} is reserved and cannot be used as a scenario root",
+            )
+        return self
+
     @property
     def scenario_id(self) -> str:
-        return f"{self.robot_id}/{self.task_id}"
+        return f"{self.robot_id}/{self.backend.implementation}/{self.task_id}"
 
 
 @dataclass(frozen=True)
@@ -480,20 +490,29 @@ def _load(
 
 
 def resolve_binding_path(
-    shared_root: Path | str, robot_id: str, task_id: str
+    shared_root: Path | str, robot_id: str, backend_id: str, task_id: str
 ) -> Path:
-    """Return ``<shared_root>/scenarios/<robot_id>/<task_id>/binding.yaml``.
+    """Return ``<shared_root>/scenarios/<robot_id>/<backend_id>/<task_id>/binding.yaml``.
 
-    Both ids are validated before any path is built, so a caller cannot escape
-    the scenarios tree with a crafted robot or task name.
+    All three ids are validated before any path is built, so a caller cannot
+    escape the scenarios tree with a crafted robot, backend, or task name.
     """
-    for field, value in (("robot_id", robot_id), ("task_id", task_id)):
+    for field, value in (
+        ("robot_id", robot_id),
+        ("backend_id", backend_id),
+        ("task_id", task_id),
+    ):
         if not isinstance(value, str) or _SCENARIO_ID_PATTERN.fullmatch(value) is None:
             raise BindingError(
                 "BINDING_REFERENCE",
                 f"{field}: invalid scenario id {value!r}; expected 1..128 safe characters",
             )
-    return Path(shared_root) / "scenarios" / robot_id / task_id / "binding.yaml"
+    if robot_id in RESERVED_ROBOT_IDS:
+        raise BindingError(
+            "BINDING_REFERENCE",
+            f"robot_id: {robot_id!r} is reserved and cannot be used as a scenario root",
+        )
+    return Path(shared_root) / "scenarios" / robot_id / backend_id / task_id / "binding.yaml"
 
 
 def load_binding(

@@ -99,10 +99,13 @@ def _parser(argv: list[str] | None = None) -> argparse.ArgumentParser:
     )
     parser.add_argument("--config", type=Path, help="direct backend recipe path")
     parser.add_argument(
-        "--robot", help="robot id under <shared-root>/scenarios/<robot>/<task>/"
+        "--robot", help="robot id under <shared-root>/scenarios/<robot>/<backend>/<task>/"
     )
     parser.add_argument(
-        "--task", help="task id under <shared-root>/scenarios/<robot>/<task>/"
+        "--backend", help="backend id under <shared-root>/scenarios/<robot>/<backend>/<task>/"
+    )
+    parser.add_argument(
+        "--task", help="task id under <shared-root>/scenarios/<robot>/<backend>/<task>/"
     )
     if not inference_entry:
         parser.add_argument("--role", choices=("teacher", "policy"), default=None)
@@ -139,19 +142,21 @@ def _parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     return parsed
 
 
-def _target(parsed: argparse.Namespace) -> tuple[str, str] | None:
-    if parsed.robot is not None or parsed.task is not None:
-        if parsed.robot is None or parsed.task is None:
-            raise SystemExit("--robot and --task must be passed together")
-        return parsed.robot, parsed.task
+def _target(parsed: argparse.Namespace) -> tuple[str, str, str] | None:
+    if any(value is not None for value in (parsed.robot, parsed.backend, parsed.task)):
+        if not (parsed.robot and parsed.backend and parsed.task):
+            raise SystemExit("--robot, --backend, and --task must be passed together")
+        return parsed.robot, parsed.backend, parsed.task
     return None
 
 
-def _default_run_root(robot: str | None, task: str | None) -> Path:
+def _default_run_root(robot: str | None, backend: str | None, task: str | None) -> Path:
     try:
-        return logs_root(container_data_root(), robot, task) / "backend"
+        return logs_root(container_data_root(), robot, backend, task) / "backend"
     except ValueError as error:
-        raise SystemExit(f"robot/task id is not a safe artifact directory: {error}") from error
+        raise SystemExit(
+            f"robot/backend/task id is not a safe artifact directory: {error}"
+        ) from error
 
 
 def _default_run_suffix() -> str:
@@ -168,7 +173,7 @@ def _unique_run_id(run_root: Path, base: str) -> str:
 
 
 def _inference_backend_run_id_base(
-    target: tuple[str, str] | None,
+    target: tuple[str, str, str] | None,
     config: Any,
     parsed: argparse.Namespace,
     stamp: str | None = None,
@@ -176,37 +181,41 @@ def _inference_backend_run_id_base(
     stamp = stamp or _default_run_suffix()
     if target is not None:
         robot_part = _safe_id_part(target[0])
-        task_part = _safe_id_part(target[1])
+        backend_part = _safe_id_part(target[1])
+        task_part = _safe_id_part(target[2])
+        head = f"inference_backend_{robot_part}_{backend_part}_{task_part}"[:80].rstrip("._-")
     else:
         scene_config = load_scene_config_for(config.scene_path)
         robot_part = _safe_id_part(scene_config.robot.assembly)
         task_env = getattr(scene_config.task, "environment", "") if hasattr(scene_config, "task") else ""
         task_part = _safe_id_part(str(task_env) or parsed.config.stem)
-    head = f"inference_backend_{robot_part}_{task_part}"[:80].rstrip("._-")
+        head = f"inference_backend_{robot_part}_{task_part}"[:80].rstrip("._-")
     return f"{head}_{stamp}"
 
 
 def _validate_selection_arguments(
-    parsed: argparse.Namespace, target: tuple[str, str] | None
+    parsed: argparse.Namespace, target: tuple[str, str, str] | None
 ) -> None:
     if parsed.config is not None and target is not None:
-        raise SystemExit("--config cannot be combined with --robot/--task")
+        raise SystemExit("--config cannot be combined with --robot/--backend/--task")
     if target is not None:
         return
     if parsed.role is not None:
-        raise SystemExit("--role requires --robot/--task")
+        raise SystemExit("--role requires --robot/--backend/--task")
     if parsed.shared_root is not None:
-        raise SystemExit("--shared-root requires --robot/--task")
+        raise SystemExit("--shared-root requires --robot/--backend/--task")
     if parsed.config is None:
-        raise SystemExit("either --robot/--task or --config is required")
+        raise SystemExit("either --robot/--backend/--task or --config is required")
 
 
-def _validate_arguments(parsed: argparse.Namespace, target: tuple[str, str] | None) -> str:
+def _validate_arguments(
+    parsed: argparse.Namespace, target: tuple[str, str, str] | None
+) -> str:
     _validate_selection_arguments(parsed, target)
     if target is not None:
         parsed.role = parsed.role or "teacher"
-        robot, task = target
-        return parsed.run_id or f"{robot}-{task}-{parsed.role}_{_default_run_suffix()}"
+        robot, backend, task = target
+        return parsed.run_id or f"{robot}-{backend}-{task}-{parsed.role}_{_default_run_suffix()}"
     stem = re.sub(r"[^A-Za-z0-9._-]", "-", parsed.config.stem)
     return parsed.run_id or f"backend-{stem or 'run'}_{_default_run_suffix()}"
 
@@ -258,8 +267,8 @@ def _write_snapshot(run_dir: Path, document: dict[str, Any]) -> Path:
 
 def _prepare_run(parsed: argparse.Namespace):
     target = _target(parsed)
-    robot, task = target if target is not None else (None, None)
-    run_root = (parsed.run_root or _default_run_root(robot, task)).resolve()
+    robot, backend, task = target if target is not None else (None, None, None)
+    run_root = (parsed.run_root or _default_run_root(robot, backend, task)).resolve()
     inference_entry = bool(getattr(parsed, "inference_entry", False))
     if inference_entry:
         _validate_selection_arguments(parsed, target)
@@ -274,6 +283,7 @@ def _prepare_run(parsed: argparse.Namespace):
         if target is not None:
             resolved = resolve_scenario_backend(
                 robot=robot,
+                backend=backend,
                 task=task,
                 role=parsed.role or "teacher",
                 shared_root=parsed.shared_root,
@@ -283,7 +293,7 @@ def _prepare_run(parsed: argparse.Namespace):
             document, selection = resolved.document, resolved.selection
         else:
             document = _direct_document(parsed, effective_seed)
-            selection = {"mode": "direct", "robot": None, "task": None, "role": None}
+            selection = {"mode": "direct", "robot": None, "backend": None, "task": None, "role": None}
         if parsed.namespace is not None or parsed.no_visualization:
             robot_section = document.get("robot")
             if not isinstance(robot_section, dict):
@@ -315,7 +325,7 @@ def _prepare_run(parsed: argparse.Namespace):
     if target is not None:
         print(
             "=== 仿真后端启动 ===\n"
-            f"方案: {robot}/{task} | 角色: {parsed.role} | run_id: {run_id} | seed: {config.seed}\n"
+            f"方案: {robot}/{backend}/{task} | 角色: {parsed.role} | run_id: {run_id} | seed: {config.seed}\n"
             f"Binding: {selection['binding']['path']}\n"
             f"后端配方: {selection['recipe']['path']}\n"
             f"命名空间: {config.namespace} | 倍速: {config.realtime_speed}x | "

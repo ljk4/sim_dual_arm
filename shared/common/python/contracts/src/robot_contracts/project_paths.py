@@ -1,4 +1,4 @@
-"""Resolve repository-relative inputs and ``var/<robot>/<task>`` artifact roots."""
+"""Resolve repository-relative inputs and ``output/<robot>/<backend>/<task>`` artifact roots."""
 
 from __future__ import annotations
 
@@ -7,10 +7,12 @@ import re
 from pathlib import Path
 
 DIRECT_SEGMENT = "_direct"
+RESERVED_ROBOT_SEGMENTS = frozenset({"build"})
 SEGMENT_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 
 __all__ = [
     "DIRECT_SEGMENT",
+    "RESERVED_ROBOT_SEGMENTS",
     "SEGMENT_PATTERN",
     "container_data_root",
     "debug_root",
@@ -29,55 +31,82 @@ def _safe(segment: str, label: str) -> str:
         raise ValueError(
             f"{label} must contain 1..128 safe ASCII characters and no path traversal"
         )
+    if label == "robot" and segment in RESERVED_ROBOT_SEGMENTS:
+        raise ValueError(f"robot id {segment!r} is reserved")
     return segment
 
 
-def _pair(robot: str | None, task: str | None) -> tuple[str, str | None]:
+def _triple(
+    robot: str | None, backend: str | None, task: str | None
+) -> tuple[str, str | None, str | None]:
     if robot is None:
-        if task is not None:
-            raise ValueError("task requires a robot id")
-        return DIRECT_SEGMENT, None
-    if task is None:
+        if backend is not None or task is not None:
+            raise ValueError("backend and task require a robot id")
+        return DIRECT_SEGMENT, None, None
+    if backend is None and task is None:
         if "/" not in robot:
-            raise ValueError("task is required unless robot is '<robot>/<task>'")
-        robot, task = robot.split("/", 1)
-    return _safe(robot, "robot"), _safe(task, "task")
+            raise ValueError(
+                "backend and task are required unless robot is '<robot>/<backend>/<task>'"
+            )
+        parts = robot.split("/")
+        if len(parts) != 3:
+            raise ValueError("scenario string must be '<robot>/<backend>/<task>'")
+        robot, backend, task = parts
+    elif backend is None or task is None:
+        raise ValueError("robot, backend, and task must be passed together")
+    return _safe(robot, "robot"), _safe(backend, "backend"), _safe(task, "task")
 
 
-def scenario_segment(robot: str | None, task: str | None = None) -> str:
-    """Return the safe ``<robot>/<task>`` directory segment, or ``_direct``."""
-    head, tail = _pair(robot, task)
-    return head if tail is None else f"{head}/{tail}"
+def scenario_segment(
+    robot: str | None, backend: str | None = None, task: str | None = None
+) -> str:
+    """Return the safe ``<robot>/<backend>/<task>`` directory segment, or ``_direct``."""
+    head, middle, tail = _triple(robot, backend, task)
+    if middle is None or tail is None:
+        return head
+    return f"{head}/{middle}/{tail}"
 
 
 def container_data_root() -> Path:
     return Path(os.environ.get("DATA_ROOT", "/data"))
 
 
-def scenario_root(base: Path, robot: str | None, task: str | None = None) -> Path:
-    return Path(base) / scenario_segment(robot, task)
+def scenario_root(
+    base: Path, robot: str | None, backend: str | None = None, task: str | None = None
+) -> Path:
+    return Path(base) / scenario_segment(robot, backend, task)
 
 
-def logs_root(base: Path, robot: str | None, task: str | None = None) -> Path:
-    return scenario_root(base, robot, task) / "logs"
+def logs_root(
+    base: Path, robot: str | None, backend: str | None = None, task: str | None = None
+) -> Path:
+    return scenario_root(base, robot, backend, task) / "logs"
 
 
-def debug_root(base: Path, robot: str | None, task: str | None = None) -> Path:
-    return scenario_root(base, robot, task) / "debug"
+def debug_root(
+    base: Path, robot: str | None, backend: str | None = None, task: str | None = None
+) -> Path:
+    return scenario_root(base, robot, backend, task) / "debug"
 
 
 def runs_root(
-    robot: str | None, task: str | None = None, base: Path | None = None
+    robot: str | None,
+    backend: str | None = None,
+    task: str | None = None,
+    base: Path | None = None,
 ) -> Path:
     root = container_data_root() if base is None else Path(base)
-    return logs_root(root, robot, task) / "runs"
+    return logs_root(root, robot, backend, task) / "runs"
 
 
 def recordings_root(
-    robot: str | None, task: str | None = None, base: Path | None = None
+    robot: str | None,
+    backend: str | None = None,
+    task: str | None = None,
+    base: Path | None = None,
 ) -> Path:
     root = container_data_root() if base is None else Path(base)
-    return logs_root(root, robot, task) / "recordings"
+    return logs_root(root, robot, backend, task) / "recordings"
 
 
 def resolve_shared_root(
@@ -113,10 +142,12 @@ def project_path(value: str | Path, project_root: Path) -> Path:
         and container_root
         and (root == Path(container_root).resolve())
     ):
+        if path.parts[:2] == ("output", "build"):
+            build_root = Path(os.environ.get("BUILD_ROOT", "/build"))
+            return (build_root / Path(*path.parts[2:])).resolve()
         mounts = {
             "shared": Path(os.environ.get("SHARED_ROOT", "/shared")),
-            "var": Path(os.environ.get("DATA_ROOT", "/data")),
-            "build": Path(os.environ.get("BUILD_ROOT", "/build")),
+            "output": Path(os.environ.get("DATA_ROOT", "/data")),
             "third_party": Path(os.environ.get("THIRD_PARTY_ROOT", "/third_party")),
         }
         if path.parts and path.parts[0] in mounts:

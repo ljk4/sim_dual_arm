@@ -150,6 +150,7 @@ def test_collect_attempt_forwards_worker_namespace(tmp_path, monkeypatch):
         [
             "--campaign-config", str(campaign),
             "--robot", "synthetic_sim",
+            "--backend", "mujoco",
             "--task", "stack",
             "--shared-root", str(tmp_path),
             "--robot-namespace", "/record_pool_1",
@@ -159,6 +160,7 @@ def test_collect_attempt_forwards_worker_namespace(tmp_path, monkeypatch):
 
     runtime_command = commands[0]
     assert runtime_command[runtime_command.index("--robot") + 1] == "synthetic_sim"
+    assert runtime_command[runtime_command.index("--backend") + 1] == "mujoco"
     assert runtime_command[runtime_command.index("--task") + 1] == "stack"
     assert runtime_command[runtime_command.index("--robot-namespace") + 1] == "/record_pool_1"
     assert runtime_command[runtime_command.index("--reset-seed") + 1] == "10000"

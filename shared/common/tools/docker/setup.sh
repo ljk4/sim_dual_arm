@@ -12,7 +12,7 @@ if [[ "${PROJECT_CONTAINER:-}" == "0" || ( "${PROJECT_CONTAINER:-}" != "1" && ! 
   cat >&2 <<'EOF'
 错误 (must run inside a project container): 该脚本只能在对应项目容器内执行。
 请先在宿主机项目根目录启动或进入容器，或通过 ./env.sh exec 转发：
-  ./env.sh <env>                  # 启动并进入容器 (runtime | simulation | learning | hardware)
+  ./env.sh <env>                  # 启动并进入容器 (runtime | mujoco | lerobot | tianji)
   ./env.sh exec <env> scripts/... # 在宿主机直接向容器转发执行一条命令
 EOF
   exit 2

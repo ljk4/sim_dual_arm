@@ -107,10 +107,12 @@ def test_train_uses_selected_training_recipe_and_canonical_roots(tmp_path, monke
     assert config.source == tree.training_recipe.resolve()
     assert config.dataset_config_path == tree.dataset_recipe.resolve()
     assert config.dataset.task_text == "scenario dataset task"
-    assert config.data_root == (tree.repo / "var/synthetic_sim/stack/datasets/lerobot").resolve()
-    assert config.checkpoint.root == (tree.repo / "var/synthetic_sim/stack/models").resolve()
+    assert config.data_root == (
+        tree.repo / "output/synthetic_sim/mujoco/stack/datasets/lerobot"
+    ).resolve()
+    assert config.checkpoint.root == (tree.repo / "output/synthetic_sim/mujoco/stack/models").resolve()
     assert config.logging.root == (
-        tree.repo / "var/synthetic_sim/stack/logs/training"
+        tree.repo / "output/synthetic_sim/mujoco/stack/logs/training"
     ).resolve()
     selection = captured["kwargs"]["selection"]
     assert selection["recipe"]["field"] == "recipes.training"
@@ -184,6 +186,8 @@ def test_selection_conflicts_and_missing_arguments_are_explicit(tmp_path, monkey
                 "train",
                 "--robot",
                 "missing",
+                "--backend",
+                "mujoco",
                 "--task",
                 "stack",
                 "--shared-root",
@@ -208,12 +212,17 @@ def test_selection_is_cwd_independent(tmp_path, monkeypatch):
 
 
 def test_help_and_parse_do_not_load_selection(tmp_path):
-    assert cli.main(["convert", "--robot", "missing", "--task", "stack", "--help"]) == 0
+    assert (
+        cli.main(["convert", "--robot", "missing", "--backend", "mujoco", "--task", "stack", "--help"])
+        == 0
+    )
     with pytest.raises(SystemExit) as error:
         policy_service_cli.main(
             [
                 "--robot",
                 "missing",
+                "--backend",
+                "mujoco",
                 "--task",
                 "stack",
                 "--shared-root",
@@ -228,6 +237,8 @@ def test_scripts_forward_selection_without_implicit_defaults(tmp_path):
     selection = [
         "--robot",
         "synthetic_sim",
+        "--backend",
+        "mujoco",
         "--task",
         "stack",
         "--shared-root",
@@ -235,6 +246,7 @@ def test_scripts_forward_selection_without_implicit_defaults(tmp_path):
     ]
     arguments = _run_dispatcher(tmp_path, "convert.sh", *selection)
     assert "--robot" in arguments
+    assert "--backend" in arguments
     assert "--task" in arguments
     assert "--config" not in arguments
 
@@ -247,12 +259,15 @@ def test_scripts_forward_selection_without_implicit_defaults(tmp_path):
         "server_policy.sh",
         "--robot",
         "synthetic_sim",
+        "--backend",
+        "mujoco",
         "--task",
         "stack",
         "--shared-root",
         str(tmp_path / "shared"),
     )
     assert "--robot" in arguments
+    assert "--backend" in arguments
     assert "--config" not in arguments
 
 
@@ -303,6 +318,8 @@ def test_policy_service_uses_recipe_and_explicit_model(
         [
             "--robot",
             "synthetic_sim",
+            "--backend",
+            "mujoco",
             "--task",
             "stack",
             "--shared-root",
@@ -332,8 +349,8 @@ def test_policy_service_auto_picks_latest_model(
 ):
     tree = _make_tree(tmp_path)
     monkeypatch.setenv("PROJECT_ROOT", str(tree.repo))
-    monkeypatch.setenv("DATA_ROOT", str(tree.repo / "var"))
-    models = tree.repo / "var/synthetic_sim/stack/models"
+    monkeypatch.setenv("DATA_ROOT", str(tree.repo / "output"))
+    models = tree.repo / "output/synthetic_sim/mujoco/stack/models"
     older = model_fixtures(models / "act_20260101_000000", synthetic=False)
     latest = model_fixtures(models / "act_20260102_000000", synthetic=False)
     assert older.is_dir()
@@ -343,6 +360,8 @@ def test_policy_service_auto_picks_latest_model(
         [
             "--robot",
             "synthetic_sim",
+            "--backend",
+            "mujoco",
             "--task",
             "stack",
             "--shared-root",
@@ -369,6 +388,8 @@ def test_policy_service_missing_model_fails_before_serving(tmp_path, monkeypatch
         [
             "--robot",
             "synthetic_sim",
+            "--backend",
+            "mujoco",
             "--task",
             "stack",
             "--shared-root",
@@ -393,6 +414,8 @@ def test_policy_service_rejects_direct_profile_inputs(tmp_path):
             [
                 "--robot",
                 "synthetic_sim",
+                "--backend",
+                "mujoco",
                 "--task",
                 "stack",
                 "--shared-root",
@@ -422,7 +445,7 @@ def test_learning_entries_reject_generic_overrides(tmp_path):
     with pytest.raises(SystemExit) as error:
         policy_service_cli.main(
             [
-                "--robot", "synthetic_sim", "--task", "stack",
+                "--robot", "synthetic_sim", "--backend", "mujoco", "--task", "stack",
                 "--shared-root", str(tree.shared), "--set", "service.task_text=changed",
             ]
         )

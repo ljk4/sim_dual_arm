@@ -11,10 +11,11 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class SyncContext:
-    """Resolved local and Google Drive paths for a specific robot/task scenario."""
+    """Resolved local and Google Drive paths for a specific robot/backend/task scenario."""
 
     repo_root: Path
     robot: str
+    backend: str
     task: str
     rclone_remote: str
     dataset_archive: str
@@ -34,6 +35,7 @@ def find_repo_root(start: Path | None = None) -> Path:
 def create_context(
     *,
     robot: str,
+    backend: str,
     task: str,
     rclone_remote: str = "gdrive:sim_dual_arm",
     dataset_archive: str = "lerobot.tar",
@@ -41,7 +43,7 @@ def create_context(
 ) -> SyncContext:
     """Validate scenario binding, check local rclone connectivity, and build a SyncContext."""
     root = Path(repo_root).resolve() if repo_root is not None else find_repo_root()
-    binding_file = root / "shared" / "scenarios" / robot / task / "binding.yaml"
+    binding_file = root / "shared" / "scenarios" / robot / backend / task / "binding.yaml"
     if not binding_file.is_file():
         raise FileNotFoundError(f"方案不存在: {binding_file}")
 
@@ -56,11 +58,12 @@ def create_context(
     ctx = SyncContext(
         repo_root=root,
         robot=robot,
+        backend=backend,
         task=task,
         rclone_remote=remote_root,
         dataset_archive=dataset_archive,
-        local_task_dir=root / "var" / robot / task,
-        remote_task_dir=f"{remote_root}/{robot}/{task}",
+        local_task_dir=root / "output" / robot / backend / task,
+        remote_task_dir=f"{remote_root}/{robot}/{backend}/{task}",
     )
     print(f"仓库根目录: {ctx.repo_root}")
     print(f"本地任务目录: {ctx.local_task_dir}")
@@ -156,7 +159,7 @@ def upload_dataset(ctx: SyncContext) -> None:
     if not (local_lerobot / "manifest.json").is_file():
         raise FileNotFoundError(f"未找到转换后的数据集: {local_lerobot / 'manifest.json'}")
 
-    tmp_tar = Path("/tmp") / f"{ctx.robot}_{ctx.task}_{ctx.dataset_archive}"
+    tmp_tar = Path("/tmp") / f"{ctx.robot}_{ctx.backend}_{ctx.task}_{ctx.dataset_archive}"
     remote_archive = f"{ctx.remote_task_dir}/datasets/{ctx.dataset_archive}"
 
     try:
@@ -186,7 +189,7 @@ def download_dataset(ctx: SyncContext, *, overwrite_local: bool = False) -> Path
     if staging_dir.exists():
         shutil.rmtree(staging_dir)
     staging_dir.mkdir(parents=True, exist_ok=True)
-    tmp_tar = Path("/tmp") / f"{ctx.robot}_{ctx.task}_{ctx.dataset_archive}"
+    tmp_tar = Path("/tmp") / f"{ctx.robot}_{ctx.backend}_{ctx.task}_{ctx.dataset_archive}"
     remote_datasets = f"{ctx.remote_task_dir}/datasets"
 
     try:

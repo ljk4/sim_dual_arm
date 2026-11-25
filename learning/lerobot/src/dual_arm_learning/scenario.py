@@ -1,4 +1,4 @@
-"""Robot/task binding selection for the learning entry points."""
+"""Robot/backend/task binding selection for the learning entry points."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ class ScenarioSelectionError(ValueError):
 
 @dataclass(frozen=True)
 class LearningScenario:
-    """One validated robot/task selection with its real recipe reference."""
+    """One validated robot/backend/task selection with its real recipe reference."""
 
     resolved: ResolvedBinding
     recipe_field: str
@@ -40,6 +40,10 @@ class LearningScenario:
     @property
     def robot(self) -> str:
         return self.resolved.binding.robot_id
+
+    @property
+    def backend(self) -> str:
+        return self.resolved.binding.backend.implementation
 
     @property
     def task(self) -> str:
@@ -79,6 +83,7 @@ class LearningScenario:
         record: dict[str, Any] = {
             "mode": "scenario",
             "robot": self.robot,
+            "backend": self.backend,
             "task": self.task,
             "scenario_id": self.scenario_id,
             "stage": self.stage.value,
@@ -98,9 +103,11 @@ def resolve_shared_root(explicit: Path | None, project_root: Path) -> Path:
     return _resolve_shared_root(explicit, project_root=project_root)
 
 
-def artifact_paths(robot: str, task: str, project_root: Path) -> dict[str, Path]:
-    """Canonical runtime artifact roots for one robot/task pair."""
-    base = project_path(Path("var") / robot / task, project_root)
+def artifact_paths(
+    robot: str, backend: str, task: str, project_root: Path
+) -> dict[str, Path]:
+    """Canonical runtime artifact roots for one robot/backend/task triple."""
+    base = project_path(Path("output") / robot / backend / task, project_root)
     return {
         "select": base / "datasets" / "raw" / "formal-select.json",
         "dataset": base / "datasets" / "lerobot",
@@ -111,9 +118,11 @@ def artifact_paths(robot: str, task: str, project_root: Path) -> dict[str, Path]
     }
 
 
-def latest_model(robot: str, task: str, project_root: Path) -> Path | None:
+def latest_model(
+    robot: str, backend: str, task: str, project_root: Path
+) -> Path | None:
     """Return the newest ``act_<timestamp>`` model directory, if any."""
-    models = artifact_paths(robot, task, project_root)["models"]
+    models = artifact_paths(robot, backend, task, project_root)["models"]
     if not models.is_dir():
         return None
     candidates = sorted(
@@ -127,6 +136,7 @@ def latest_model(robot: str, task: str, project_root: Path) -> Path | None:
 def select_scenario(
     *,
     robot: str,
+    backend: str,
     task: str,
     recipe_field: str,
     stage: BindingStage | str,
@@ -137,12 +147,12 @@ def select_scenario(
     """Load one binding, verify this end supports it and select a recipe."""
     root = resolve_shared_root(shared_root, project_root)
     try:
-        binding_path = resolve_binding_path(root, robot, task)
+        binding_path = resolve_binding_path(root, robot, backend, task)
     except BindingError as error:
         raise ScenarioSelectionError(str(error)) from error
     if not binding_path.is_file():
         raise ScenarioSelectionError(
-            f"scenario {robot}/{task} has no binding file: {binding_path}"
+            f"scenario {robot}/{backend}/{task} has no binding file: {binding_path}"
         )
     stage_value = BindingStage(stage)
     del model
@@ -150,6 +160,15 @@ def select_scenario(
         resolved = load_binding(binding_path, shared_root=root)
     except (BindingError, ContractError, OSError) as error:
         raise ScenarioSelectionError(str(error)) from error
+    if (
+        resolved.binding.robot_id != robot
+        or resolved.binding.backend.implementation != backend
+        or resolved.binding.task_id != task
+    ):
+        raise ScenarioSelectionError(
+            f"binding {binding_path} declares {resolved.binding.scenario_id!r}, "
+            f"expected {robot}/{backend}/{task!r}"
+        )
 
     implementation = resolved.binding.learning.implementation
     if implementation != SUPPORTED_IMPLEMENTATION:

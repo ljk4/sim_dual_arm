@@ -23,7 +23,7 @@ def test_source_proto_has_fixed_observation_time_and_policy_metadata():
         "right_gripper_width",
     ):
         assert name not in text
-    scenario = (ROOT / "shared/scenarios/marvin_sim/stack/README.md").read_text()
+    scenario = (ROOT / "shared/scenarios/marvin/mujoco/stack/README.md").read_text()
     for name in (
         "left_joint1",
         "left_joint7",

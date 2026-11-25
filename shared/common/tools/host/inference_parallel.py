@@ -43,6 +43,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--max-consecutive-failures", type=positive_int, default=None)
     result.add_argument("--project-root", type=Path, default=ROOT)
     result.add_argument("--robot")
+    result.add_argument("--backend")
     result.add_argument("--task")
     result.add_argument(
         "--shared-root",
@@ -79,6 +80,8 @@ class DockerWorkers(BaseDockerWorkers):
             return [
                 "--robot",
                 self.args.robot,
+                "--backend",
+                self.args.backend,
                 "--task",
                 self.args.task,
                 "--shared-root",
@@ -182,7 +185,12 @@ class DockerWorkers(BaseDockerWorkers):
                 str(relative / "runs"),
                 "--report",
                 str(
-                    debug_root(container_data_root(), self.args.robot, self.args.task)
+                    debug_root(
+                        container_data_root(),
+                        self.args.robot,
+                        self.args.backend,
+                        self.args.task,
+                    )
                     / "batch-policy"
                     / self.batch_id
                     / "report.json"
@@ -226,7 +234,7 @@ def _print_startup_info(args: argparse.Namespace, plan: dict, directory: Path) -
     selection = plan.get("selection") or {}
     if selection.get("mode") == "scenario":
         print(
-            f"方案: {selection.get('robot')}/{selection.get('task')} | "
+            f"方案: {selection.get('robot')}/{selection.get('backend')}/{selection.get('task')} | "
             f"Binding: {(selection.get('binding') or {}).get('path', '-')}",
             flush=True,
         )
@@ -248,26 +256,24 @@ def _print_startup_info(args: argparse.Namespace, plan: dict, directory: Path) -
 def main(argv: list[str] | None = None) -> int:
     cli = parser()
     args = cli.parse_args(argv)
-    if args.robot is not None:
-        if args.task is None:
-            cli.error("--robot requires --task")
+    if any(value is not None for value in (args.robot, args.backend, args.task)):
+        if not (args.robot and args.backend and args.task):
+            cli.error("--robot, --backend, and --task must be passed together")
         if args.runtime_config is not None or args.backend_template is not None:
-            cli.error("--robot/--task cannot be combined with direct recipes")
+            cli.error("--robot/--backend/--task cannot be combined with direct recipes")
     else:
-        if args.task is not None:
-            cli.error("--task requires --robot")
         if args.shared_root is not None:
-            cli.error("--shared-root requires --robot/--task")
+            cli.error("--shared-root requires --robot/--backend/--task")
         if args.runtime_config is None or args.backend_template is None:
             cli.error(
-                "one of --robot/--task or --runtime-config/--backend-template is required"
+                "one of --robot/--backend/--task or --runtime-config/--backend-template is required"
             )
     if args.seed_start is None:
         args.seed_start = secrets.randbelow(max(1, 2**31 - args.count))
     if args.seed_start < 0 or args.seed_start + args.count - 1 > 2**63 - 1:
         cli.error("--seed-start must keep episode seeds within [0, 2^63-1]")
-    if args.robot and args.task:
-        segment = f"{args.robot}/{args.task}"
+    if args.robot and args.backend and args.task:
+        segment = f"{args.robot}/{args.backend}/{args.task}"
     else:
         segment = "_direct"
     args.workers = automatic_workers() if args.workers == "auto" else int(args.workers)
@@ -287,7 +293,7 @@ def main(argv: list[str] | None = None) -> int:
     ):
         cli.error("--batch-id must be 1..100 letters, digits, '.', '_' or '-'")
     args.project_root = args.project_root.resolve()
-    root = scenario_root(args.project_root / "var", args.robot, args.task)
+    root = scenario_root(args.project_root / "output", args.robot, args.backend, args.task)
     batch_id = args.batch_id
     if not batch_id:
         stamp = time.strftime("%Y%m%d_%H%M%S")
@@ -301,7 +307,7 @@ def main(argv: list[str] | None = None) -> int:
     directory = root / "logs" / "batch-policy" / batch_id / "workers"
     report_path = (
         args.project_root
-        / "var"
+        / "output"
         / segment
         / "debug"
         / "batch-policy"

@@ -11,7 +11,7 @@ from learning_fixtures import make_export, profile_hash
 from model_helpers import replace
 
 ROOT = Path(__file__).resolve().parents[3]
-SCENARIO = ROOT / "shared/scenarios/marvin_sim/stack"
+SCENARIO = ROOT / "shared/scenarios/marvin/mujoco/stack"
 
 
 @pytest.fixture

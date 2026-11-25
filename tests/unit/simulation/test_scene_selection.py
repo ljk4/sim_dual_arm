@@ -13,15 +13,15 @@ if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
 from robot_backend_sim.common.config.scene_loader import load_scene_config_for  # noqa: E402
-from robot_backend_sim.marvin_sim.handover.scene_config import MarvinSceneConfig  # noqa: E402
-from robot_backend_sim.marvin_sim.stack.scene_config import MarvinStackSceneConfig  # noqa: E402
+from robot_backend_sim.marvin.handover.scene_config import MarvinSceneConfig  # noqa: E402
+from robot_backend_sim.marvin.stack.scene_config import MarvinStackSceneConfig  # noqa: E402
 from robot_contracts.validation import StrictMappingError  # noqa: E402
 
 STACK_SCENE = (
-    ROOT / "shared/scenarios/marvin_sim/stack/configs/simulation/scene/marvin_stack.yaml"
+    ROOT / "shared/scenarios/marvin/mujoco/stack/configs/simulation/scene/marvin_stack.yaml"
 )
 MARVIN_SCENE = (
-    ROOT / "shared/scenarios/marvin_sim/handover/configs/simulation/scene/marvin_handover.yaml"
+    ROOT / "shared/scenarios/marvin/mujoco/handover/configs/simulation/scene/marvin_handover.yaml"
 )
 
 

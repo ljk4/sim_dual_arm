@@ -31,8 +31,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="repository root (default: PROJECT_ROOT or inferred from script path)",
     )
     parser.add_argument("--config", type=Path, default=None, help="direct ACT training YAML path")
-    parser.add_argument("--robot", help="robot id under <shared-root>/scenarios/<robot>/<task>/")
-    parser.add_argument("--task", help="task id for --robot")
+    parser.add_argument(
+        "--robot", help="robot id under <shared-root>/scenarios/<robot>/<backend>/<task>/"
+    )
+    parser.add_argument(
+        "--backend", help="backend id under <shared-root>/scenarios/<robot>/<backend>/<task>/"
+    )
+    parser.add_argument("--task", help="task id for --robot/--backend")
     parser.add_argument("--shared-root", type=Path, default=None, help="shared scenarios root")
     parser.add_argument(
         "--mode",
@@ -63,15 +68,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output", type=Path, default=None, help="optional JSON output path")
     args = parser.parse_args(argv)
 
-    if args.robot is None and args.task is None:
+    if args.robot is None and args.backend is None and args.task is None:
         if args.config is None:
-            parser.error("either --robot/--task or --config is required")
-    elif args.robot is None or args.task is None:
-        parser.error("--robot and --task must be passed together")
+            parser.error("either --robot/--backend/--task or --config is required")
+    elif args.robot is None or args.backend is None or args.task is None:
+        parser.error("--robot, --backend, and --task must be passed together")
     elif args.config is not None:
-        parser.error("--config cannot be combined with --robot/--task")
+        parser.error("--config cannot be combined with --robot/--backend/--task")
     if args.shared_root is not None and args.robot is None:
-        parser.error("--shared-root requires --robot/--task")
+        parser.error("--shared-root requires --robot/--backend/--task")
     if not 1 <= args.max_batch_size <= 256:
         parser.error("--max-batch-size must be in 1..256")
     if not 0.1 <= args.vram_target <= 0.98:
@@ -179,6 +184,7 @@ def _resolve_config(args: argparse.Namespace) -> tuple[Any, Any | None]:
     if args.robot is not None:
         selection = select_scenario(
             robot=args.robot,
+            backend=args.backend,
             task=args.task,
             recipe_field="training",
             stage="learning",
@@ -192,7 +198,7 @@ def _resolve_config(args: argparse.Namespace) -> tuple[Any, Any | None]:
     config = load_training_config(config_path, root)
     updates: dict[str, Any] = {"mode": args.mode}
     if selection is not None:
-        paths = artifact_paths(selection.robot, selection.task, root)
+        paths = artifact_paths(selection.robot, selection.backend, selection.task, root)
         updates["data_root"] = paths["dataset"]
         updates["cache_root"] = paths["cache"]
         updates["checkpoint"] = config.checkpoint.model_copy(update={"root": paths["models"]})
@@ -528,7 +534,8 @@ def _run_pipeline_trial(
         rss_bytes = _process_tree_rss_bytes(os.getpid())
         peak_alloc_bytes = torch.cuda.max_memory_allocated()
     finally:
-        del it, dl
+        it = None
+        dl = None
         optimizer.zero_grad(set_to_none=True)
         _clear_cuda()
 
@@ -766,7 +773,11 @@ def main(argv: list[str] | None = None) -> int:
 
     print("=== 服务器硬件与训练吞吐探测 ===", flush=True)
     if selection is not None:
-        print(f"方案: {selection.robot}/{selection.task} | Binding: {selection.resolved.path}", flush=True)
+        print(
+            f"方案: {selection.robot}/{selection.backend}/{selection.task} | "
+            f"Binding: {selection.resolved.path}",
+            flush=True,
+        )
     print(f"配方: {config.source} | 模式: {config.mode}", flush=True)
     print(
         f"硬件: {hardware['gpu_name']} ({hardware['vram_gb']} GiB, CC {hardware['compute_capability']}, "

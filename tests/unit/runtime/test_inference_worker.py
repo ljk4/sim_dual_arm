@@ -16,7 +16,7 @@ from dual_arm_runtime.offline.evaluation.inference_workers import prepare_worker
 
 _STACK_EVALUATION = (
     Path(os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[3])
-    / "shared/scenarios/marvin_sim/stack/configs/runtime/evaluation.yaml"
+    / "shared/scenarios/marvin/mujoco/stack/configs/runtime/evaluation.yaml"
 )
 CONFIG = load_classification(_STACK_EVALUATION)
 
@@ -112,7 +112,7 @@ def _write(path: Path, document: dict) -> Path:
 
 def test_prepare_workers_uses_recipe_speed_when_unspecified(tmp_path):
     project = tmp_path / "project"
-    (project / "var").mkdir(parents=True)
+    (project / "output").mkdir(parents=True)
     runtime = _write(
         project / "runtime.yaml",
         {"action_source": "policy", "robot_namespace": "/robot"},
@@ -124,7 +124,7 @@ def test_prepare_workers_uses_recipe_speed_when_unspecified(tmp_path):
             "run": {"realtime_speed": 0.5},
         },
     )
-    directory = project / "var" / "robot" / "task" / "pool"
+    directory = project / "output" / "robot" / "mujoco" / "task" / "pool"
     manifest = prepare_workers(project, directory, 1, 120, runtime, backend, None)
     worker = json.loads(manifest.read_text())["workers"][0]
     assert worker["overrides"]["realtime_speed"] == 0.5
@@ -135,7 +135,7 @@ def test_prepare_workers_uses_recipe_speed_when_unspecified(tmp_path):
 
 def test_prepare_workers_isolates_namespaces_and_domains(tmp_path):
     project = tmp_path / "project"
-    (project / "var").mkdir(parents=True)
+    (project / "output").mkdir(parents=True)
     runtime = _write(
         project / "runtime.yaml",
         {
@@ -150,7 +150,7 @@ def test_prepare_workers_isolates_namespaces_and_domains(tmp_path):
             "run": {"realtime_speed": 1.0},
         },
     )
-    directory = project / "var" / "marvin_sim" / "stack" / "pool"
+    directory = project / "output" / "marvin" / "mujoco" / "stack" / "pool"
     manifest = prepare_workers(
         project, directory, 2, 120, runtime, backend, 0.5
     )

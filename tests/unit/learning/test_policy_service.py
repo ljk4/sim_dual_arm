@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
-PROFILES = ROOT / "shared/scenarios/marvin_sim/stack/profiles"
+PROFILES = ROOT / "shared/scenarios/marvin/mujoco/stack/profiles"
 pytest.importorskip("grpc")
 pb2 = pytest.importorskip("dual_arm_policy.policy_pb2")
 from dual_arm_learning.serving.service import PolicyService  # noqa: E402
@@ -25,7 +25,7 @@ def documents():
 
 def context(config, **changes):
     values = {
-        "robot_id": "marvin_stack",
+        "robot_id": "marvin",
         "robot_profile_hash": config.robot_profile_hash,
         "backend_instance_id": "backend-1",
         "time_domain_id": "mujoco",

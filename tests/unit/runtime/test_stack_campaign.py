@@ -26,7 +26,7 @@ def _project(tmp_path):
         "quality": {"sidecar": "export/quality.json", "max_blackout_s": 0.35},
     }
     root = tmp_path / "project"
-    experiments = root / "shared/scenarios/marvin_sim/stack/configs/runtime/experiments"
+    experiments = root / "shared/scenarios/marvin/mujoco/stack/configs/runtime/experiments"
     experiments.mkdir(parents=True)
     (experiments / "stack_campaign.yaml").write_text(
         yaml.safe_dump(config), encoding="utf-8"
@@ -36,7 +36,7 @@ def _project(tmp_path):
 
 def _campaign(root):
     return (
-        root / "shared/scenarios/marvin_sim/stack/configs/runtime/experiments/stack_campaign.yaml"
+        root / "shared/scenarios/marvin/mujoco/stack/configs/runtime/experiments/stack_campaign.yaml"
     )
 
 
@@ -53,7 +53,7 @@ def _run(root, run_id):
             "--run-id",
             run_id,
             "--runtime-config",
-            "shared/scenarios/marvin_sim/stack/configs/runtime/teacher_collect.yaml",
+            "shared/scenarios/marvin/mujoco/stack/configs/runtime/teacher_collect.yaml",
             "--",
             sys.executable,
             "-c",
@@ -126,7 +126,7 @@ def test_only_formal_and_pilot_teacher_rollouts_are_accepted(tmp_path):
         "--run-id",
         "guard",
         "--runtime-config",
-        "shared/scenarios/marvin_sim/stack/configs/runtime/teacher_collect.yaml",
+        "shared/scenarios/marvin/mujoco/stack/configs/runtime/teacher_collect.yaml",
     ]
     with pytest.raises(SystemExit) as caught:
         campaign.main(
@@ -187,7 +187,7 @@ def test_formal_continues_past_fifty_qualified(tmp_path):
                 "--run-id",
                 "fifty-first",
                 "--runtime-config",
-                "shared/scenarios/marvin_sim/stack/configs/runtime/teacher_collect.yaml",
+                "shared/scenarios/marvin/mujoco/stack/configs/runtime/teacher_collect.yaml",
                 "--",
                 sys.executable,
                 "-c",
@@ -217,7 +217,7 @@ def test_select_writes_generated_manifest_only_after_success(tmp_path, capsys):
     root = _project(tmp_path)
     config_path = (
         root
-        / "shared/scenarios/marvin_sim/stack/configs/runtime/experiments/stack_campaign.yaml"
+        / "shared/scenarios/marvin/mujoco/stack/configs/runtime/experiments/stack_campaign.yaml"
     )
     out = root / "build/campaign/SELECTED.json"
 

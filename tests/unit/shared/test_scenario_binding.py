@@ -33,7 +33,7 @@ def _write(tree: ScenarioTree, document: dict) -> Path:
 def test_valid_binding_resolves_every_declared_reference(scenario):
     resolved = _load(scenario)
 
-    assert resolved.binding.scenario_id == "synthetic_sim/stack"
+    assert resolved.binding.scenario_id == "synthetic_sim/mujoco/stack"
     assert resolved.path == scenario.binding_path.resolve()
     assert resolved.root == scenario.root.resolve()
     assert len(resolved.sha256) == 64
@@ -264,7 +264,7 @@ def test_reference_outside_declared_source_roots_is_rejected(scenario):
 
 def test_relative_source_roots_cover_end_and_shared_configs(tmp_path):
     repository = tmp_path / "repo"
-    scenario = build_scenario(repository / "shared/scenarios/marvin_sim/stack")
+    scenario = build_scenario(repository / "shared/scenarios/marvin/mujoco/stack")
     end_config = repository / "runtime/ros2/configs/existing.yaml"
     end_config.parent.mkdir(parents=True)
     end_config.write_text("{}\n", encoding="utf-8")
@@ -274,11 +274,11 @@ def test_relative_source_roots_cover_end_and_shared_configs(tmp_path):
 
     document = scenario.copy()
     document["source_roots"] = [
-        "../../../../runtime/ros2/configs",
-        "../../..",
+        "../../../../../runtime/ros2/configs",
+        "../../../..",
     ]
-    document["recipes"]["runtime_teacher"] = "../../../../runtime/ros2/configs/existing.yaml"
-    document["recipes"]["dataset"] = "../../../common/configs/shared.yaml"
+    document["recipes"]["runtime_teacher"] = "../../../../../runtime/ros2/configs/existing.yaml"
+    document["recipes"]["dataset"] = "../../../../common/configs/shared.yaml"
     _write(scenario, document)
 
     resolved = _load(scenario)
@@ -399,7 +399,7 @@ def test_template_robot_and_task_are_structurally_accepted(scenario):
     document["robot_id"] = "_template"
     _write(scenario, document)
 
-    assert _load(scenario).binding.scenario_id == "_template/stack"
+    assert _load(scenario).binding.scenario_id == "_template/mujoco/stack"
 
 
 def test_template_example_is_unfilled_and_not_runnable():

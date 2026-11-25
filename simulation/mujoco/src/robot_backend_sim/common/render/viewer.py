@@ -42,18 +42,23 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--robot",
         required=True,
-        help="robot id under shared/scenarios/<robot>/<task>/",
+        help="robot id under shared/scenarios/<robot>/<backend>/<task>/",
+    )
+    parser.add_argument(
+        "--backend",
+        required=True,
+        help="backend id under shared/scenarios/<robot>/<backend>/<task>/",
     )
     parser.add_argument(
         "--task",
         required=True,
-        help="task id under shared/scenarios/<robot>/<task>/",
+        help="task id under shared/scenarios/<robot>/<backend>/<task>/",
     )
     return parser
 
 
-def _load_backend(robot: str, task: str):
-    resolved = resolve_scenario_viewer(robot=robot, task=task)
+def _load_backend(robot: str, backend: str, task: str):
+    resolved = resolve_scenario_viewer(robot=robot, backend=backend, task=task)
     return load_backend_document(resolved.document, resolved.source)
 
 
@@ -88,7 +93,7 @@ def main() -> int:
     args = _parser().parse_args()
 
     try:
-        backend = _load_backend(args.robot, args.task)
+        backend = _load_backend(args.robot, args.backend, args.task)
     except (ScenarioError, OSError, ValueError) as error:
         print(f"错误: 无法加载可视化配置: {error}", file=sys.stderr)
         return 2
@@ -117,7 +122,7 @@ def main() -> int:
     del subscription
     print(
         "=== MuJoCo 实时可视化 ===\n"
-        f"方案: {args.robot}/{args.task} | 场景: {backend.scene_path}\n"
+        f"方案: {args.robot}/{args.backend}/{args.task} | 场景: {backend.scene_path}\n"
         f"订阅话题: {topic} | 刷新率: {int(_POLL_HZ)} Hz\n"
         "正在等待后端物理快照（关闭窗口或按 Ctrl-C 退出）...",
         flush=True,

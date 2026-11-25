@@ -14,16 +14,16 @@ SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim.marvin_sim.stack.scene_config import (  # noqa: E402
+from robot_backend_sim.marvin.stack.scene_config import (  # noqa: E402
     StackSceneConfigError,
     camera_declared_description,
     load_marvin_stack_scene_config,
 )
 from robot_contracts.profiles import load_profile, semantic_hash  # noqa: E402
 
-CONFIG_PATH = ROOT / "shared/scenarios/marvin_sim/stack/configs/simulation/scene/marvin_stack.yaml"
+CONFIG_PATH = ROOT / "shared/scenarios/marvin/mujoco/stack/configs/simulation/scene/marvin_stack.yaml"
 PROFILE_PATH = (
-    ROOT / "shared/scenarios/marvin_sim/stack/profiles/robot/profile.json"
+    ROOT / "shared/scenarios/marvin/mujoco/stack/profiles/robot/profile.json"
 )
 SCHEMAS = ROOT / "shared/common/interfaces/schemas"
 DEFAULT_DOCUMENT = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))

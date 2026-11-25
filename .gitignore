@@ -4,6 +4,9 @@
 # Reproducible build and generated SDK outputs.
 /build/
 
+# Unified runtime, dataset, model, log, and SDK outputs for the new architecture.
+/output/
+
 # Machine-specific deployment bindings and downloaded external checkouts.
 /shared/common/tools/local/
 /third_party/src/

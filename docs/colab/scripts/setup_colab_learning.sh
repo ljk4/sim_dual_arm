@@ -167,8 +167,8 @@ atomic_cache_copy() {
 
 # 2. Prepare third_party/ assets (idempotent, non-destructive)
 mkdir -p \
-  "$REPO_ROOT/build" \
-  "$REPO_ROOT/var" \
+  "$REPO_ROOT/output/build" \
+  "$REPO_ROOT/output/_system" \
   "$REPO_ROOT/third_party/src" \
   "$REPO_ROOT/third_party/weights"
 
@@ -238,9 +238,9 @@ fi
 
 # 3. Install uv, Python, .venv, and learning dependencies
 echo "[3/5] 配置 uv、Python $PYTHON_VERSION 虚拟环境与依赖..."
-export UV_INSTALL_DIR="$REPO_ROOT/var/_system/uv/bin"
-export UV_PYTHON_INSTALL_DIR="$REPO_ROOT/var/_system/uv/python"
-export UV_CACHE_DIR="$REPO_ROOT/var/_system/uv/cache"
+export UV_INSTALL_DIR="$REPO_ROOT/output/_system/uv/bin"
+export UV_PYTHON_INSTALL_DIR="$REPO_ROOT/output/_system/uv/python"
+export UV_CACHE_DIR="$REPO_ROOT/output/_system/uv/cache"
 export PATH="$UV_INSTALL_DIR:$PATH"
 mkdir -p "$UV_INSTALL_DIR" "$UV_PYTHON_INSTALL_DIR" "$UV_CACHE_DIR"
 
@@ -274,10 +274,10 @@ uv pip install --python "$VENV_PYTHON" \
 
 # 4. Generate Policy SDK and write .env.learning
 echo "[4/5] 生成 Policy gRPC SDK 并写入 .env.learning..."
-SDK_OUTPUT="$REPO_ROOT/build/generated/policy-sdk"
+SDK_OUTPUT="$REPO_ROOT/output/build/generated/policy-sdk"
 "$VENV_PYTHON" "$REPO_ROOT/shared/common/tools/scripts/generate_policy_sdk.py" --output "$SDK_OUTPUT"
 
-HF_CACHE_DIR="$REPO_ROOT/var/_system/hf-cache"
+HF_CACHE_DIR="$REPO_ROOT/output/_system/hf-cache"
 mkdir -p "$HF_CACHE_DIR"
 
 ENV_FILE="$REPO_ROOT/.env.learning"
@@ -286,8 +286,8 @@ source "$VENV_DIR/bin/activate"
 export PROJECT_CONTAINER=1
 export PROJECT_ROOT="$REPO_ROOT"
 export SHARED_ROOT="$REPO_ROOT/shared"
-export DATA_ROOT="$REPO_ROOT/var"
-export BUILD_ROOT="$REPO_ROOT/build"
+export DATA_ROOT="$REPO_ROOT/output"
+export BUILD_ROOT="$REPO_ROOT/output/build"
 export THIRD_PARTY_ROOT="$REPO_ROOT/third_party"
 export POLICY_SDK_ROOT="$SDK_OUTPUT"
 export RESNET18_WEIGHTS="$RESNET_PATH"

@@ -39,9 +39,9 @@ from robot_backend_sim.common.control.control import ControlSession  # noqa: E40
 from robot_backend_sim.common.control.control_state import PreparedControlCommand  # noqa: E402
 from robot_backend_sim.common.motion.motion_controller import MotionController, Phase  # noqa: E402
 from robot_backend_sim.common.motion.stream_schedule import next_grid_time  # noqa: E402
-from robot_backend_sim.marvin_sim.io import MarvinIO  # noqa: E402
-from robot_backend_sim.marvin_sim.stack.scene import build_marvin_stack_scene  # noqa: E402
-from robot_backend_sim.marvin_sim.stack.scene_config import (  # noqa: E402
+from robot_backend_sim.marvin.io import MarvinIO  # noqa: E402
+from robot_backend_sim.marvin.stack.scene import build_marvin_stack_scene  # noqa: E402
+from robot_backend_sim.marvin.stack.scene_config import (  # noqa: E402
     load_marvin_stack_scene_config,
 )
 from robot_contracts.action_chunks import ActionWindow  # noqa: E402
@@ -61,7 +61,7 @@ def replace(value, **changes):
     return _dataclass_replace(value, **changes)
 
 
-SCENARIO = ROOT / "shared/scenarios/marvin_sim/stack"
+SCENARIO = ROOT / "shared/scenarios/marvin/mujoco/stack"
 BACKEND = load_backend_config(SCENARIO / "configs/simulation/backend/backend_stack_teacher.yaml")
 DT_NS = 2_000_000
 LEASE_NS = 10_000_000_000
@@ -69,7 +69,7 @@ FIRST_START_NS = 250_000_000
 FINAL_CHUNK_SEQ = 11
 TERMINAL = frozenset({"COMPLETED", "CANCELED", "FAILED"})
 REPORT_DIR = Path(
-    os.environ.get("FOLLOWER_REPORT_DIR", ROOT / "var/marvin_sim/stack/debug/follower-execution")
+    os.environ.get("FOLLOWER_REPORT_DIR", ROOT / "output/marvin/mujoco/stack/debug/follower-execution")
 )
 PROFILE = load_profile(BACKEND.profile_path, BACKEND.schemas_path)
 BASE_POSITIONS = PROFILE.initial_positions

@@ -23,6 +23,6 @@ ENV PATH="/opt/venv/bin:${PATH}"
 COPY requirements.lock /opt/dependencies/requirements.lock
 RUN pip install --no-cache-dir --require-hashes -r /opt/dependencies/requirements.lock
 
-# The container stays idle until entered with `./env.sh exec simulation` or an entrypoint script.
+# The container stays idle until entered with `./env.sh exec mujoco` or an entrypoint script.
 ENTRYPOINT []
 CMD ["sleep", "infinity"]

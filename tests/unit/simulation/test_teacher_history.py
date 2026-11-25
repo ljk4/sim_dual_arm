@@ -10,16 +10,16 @@ import yaml
 pytest.importorskip("mujoco")
 
 from robot_backend_sim.common.tasks.base import CAPTURE_HISTORY_LIMIT, TaskChunkView  # noqa: E402
-from robot_backend_sim.marvin_sim.handover import plugin as handover_plugin  # noqa: E402
-from robot_backend_sim.marvin_sim.handover.task_config import (  # noqa: E402
+from robot_backend_sim.marvin.handover import plugin as handover_plugin  # noqa: E402
+from robot_backend_sim.marvin.handover.task_config import (  # noqa: E402
     load_handover_task_config,
 )
-from robot_backend_sim.marvin_sim.stack import plugin as stack_plugin  # noqa: E402
-from robot_backend_sim.marvin_sim.stack.config import load_task_config  # noqa: E402
+from robot_backend_sim.marvin.stack import plugin as stack_plugin  # noqa: E402
+from robot_backend_sim.marvin.stack.config import load_task_config  # noqa: E402
 from robot_contracts.models import ContractError, RunContext  # noqa: E402
 from robot_contracts.task_state import TaskState  # noqa: E402
 
-SCENARIOS = Path(__file__).resolve().parents[3] / "shared/scenarios/marvin_sim"
+SCENARIOS = Path(__file__).resolve().parents[3] / "shared/scenarios/marvin/mujoco"
 CONTEXT = RunContext("marvin", "profile", "backend", "time", 1, "episode", 1)
 PERIOD_NS = 50_000_000
 

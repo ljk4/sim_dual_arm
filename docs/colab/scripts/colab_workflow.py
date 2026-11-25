@@ -127,20 +127,22 @@ def fetch_dataset(
     work_dir: Path | str,
     rclone_remote: str,
     robot: str,
+    backend: str,
     task: str,
     dataset_archive: str = "lerobot.tar",
 ) -> Path:
-    """Fetch and unpack the LeRobot dataset into `var/<robot>/<task>/datasets/lerobot`."""
+    """Fetch and unpack the LeRobot dataset into `output/<robot>/<backend>/<task>/datasets/lerobot`."""
     work = Path(work_dir).resolve()
     remote_root = rclone_remote.rstrip("/")
     ctx = SyncContext(
         repo_root=work,
         robot=robot,
+        backend=backend,
         task=task,
         rclone_remote=remote_root,
         dataset_archive=dataset_archive,
-        local_task_dir=work / "var" / robot / task,
-        remote_task_dir=f"{remote_root}/{robot}/{task}",
+        local_task_dir=work / "output" / robot / backend / task,
+        remote_task_dir=f"{remote_root}/{robot}/{backend}/{task}",
     )
     return download_dataset(ctx, overwrite_local=True)
 
@@ -149,6 +151,7 @@ def probe_hardware(
     *,
     work_dir: Path | str,
     robot: str,
+    backend: str,
     task: str,
     mode: str = "full",
     auto_probe: bool = True,
@@ -163,12 +166,14 @@ def probe_hardware(
 
     work = Path(work_dir).resolve()
     probe_script = work / "docs" / "colab" / "scripts" / "probe_colab_training.py"
-    probe_output = work / "var" / robot / task / "debug" / "colab_probe_result.json"
+    probe_output = work / "output" / robot / backend / task / "debug" / "colab_probe_result.json"
     probe_args = [
         "python3",
         str(probe_script),
         "--robot",
         robot,
+        "--backend",
+        backend,
         "--task",
         task,
         "--mode",
@@ -256,6 +261,7 @@ def run_training(
     *,
     work_dir: Path | str,
     robot: str,
+    backend: str,
     task: str,
     mode: str = "full",
     base_steps: int | None = 20000,
@@ -275,8 +281,8 @@ def run_training(
     """Launch ACT training with batch-based step scaling and periodic loss-curve rendering."""
     work = Path(work_dir).resolve()
     venv_python = work / ".venv" / "bin" / "python"
-    src_cfg = work / "shared" / "scenarios" / robot / task / "configs" / "learning" / "act_training.yaml"
-    probe_output = work / "var" / robot / task / "debug" / "colab_probe_result.json"
+    src_cfg = work / "shared" / "scenarios" / robot / backend / task / "configs" / "learning" / "act_training.yaml"
+    probe_output = work / "output" / robot / backend / task / "debug" / "colab_probe_result.json"
 
     base_info = _read_base_training_config(venv_python, src_cfg, mode)
     base_amp_dtype = base_info["amp_dtype"]
@@ -385,7 +391,7 @@ def run_training(
 
     train_args = ["bash", "learning/lerobot/scripts/train.sh"]
     if needs_temp_cfg:
-        debug_dir = work / "var" / robot / task / "debug"
+        debug_dir = work / "output" / robot / backend / task / "debug"
         debug_dir.mkdir(parents=True, exist_ok=True)
         temp_cfg = debug_dir / "act_training_colab.yaml"
         overrides = {
@@ -404,11 +410,11 @@ def run_training(
         train_args.extend(["--config", str(temp_cfg)])
     else:
         print("使用方案默认训练配方。")
-        train_args.extend(["--robot", robot, "--task", task])
+        train_args.extend(["--robot", robot, "--backend", backend, "--task", task])
 
     train_args.extend(["--mode", mode, "--max-steps", str(target_steps)])
 
-    logs_root = work / "var" / robot / task / "logs" / "training"
+    logs_root = work / "output" / robot / backend / task / "logs" / "training"
     existing_runs = (
         {p.name for p in logs_root.iterdir() if p.is_dir() and p.name.startswith("act_")}
         if logs_root.is_dir()
@@ -418,7 +424,7 @@ def run_training(
     stop_event = threading.Event()
     io_lock = threading.Lock()
     state: dict[str, Any] = {"metrics_path": None, "plot_path": None, "display_id": None}
-    plot_title = f"{robot}/{task} ({mode}, batch={target_batch_size}, steps={target_steps})"
+    plot_title = f"{robot}/{backend}/{task} ({mode}, batch={target_batch_size}, steps={target_steps})"
 
     def _find_active_metrics() -> Path | None:
         if state["metrics_path"] is not None:
@@ -545,11 +551,12 @@ def sync_results_to_drive(
     work_dir: Path | str,
     rclone_remote: str,
     robot: str,
+    backend: str,
     task: str,
 ) -> Path:
     """Upload the newest trained ACT model, training logs (including loss_curve.png), and probe files."""
-    local_var = Path(work_dir) / "var" / robot / task
-    models_dir = local_var / "models"
+    local_out = Path(work_dir) / "output" / robot / backend / task
+    models_dir = local_out / "models"
     candidates = sorted(
         (p for p in models_dir.iterdir() if p.is_dir() and p.name.startswith("act_")),
         key=lambda p: p.name,
@@ -562,26 +569,30 @@ def sync_results_to_drive(
     if not (latest_model / "model.safetensors").is_file():
         raise FileNotFoundError(f"模型目录缺少 model.safetensors: {latest_model}")
 
-    remote_task_root = f"{rclone_remote.rstrip('/')}/{robot}/{task}"
+    remote_task_root = f"{rclone_remote.rstrip('/')}/{robot}/{backend}/{task}"
     remote_model = f"{remote_task_root}/models/{latest_model.name}"
     subprocess.run(
         ["rclone", "copy", str(latest_model), remote_model, "--transfers", "4", "--progress"],
         check=True,
     )
 
-    src_log = local_var / "logs" / "training" / latest_model.name
+    src_log = local_out / "logs" / "training" / latest_model.name
     remote_log = f"{remote_task_root}/logs/training/{latest_model.name}"
     if src_log.is_dir():
         metrics_file = src_log / "metrics.jsonl"
         loss_png = src_log / "loss_curve.png"
         if metrics_file.is_file() and not loss_png.is_file():
-            render_loss_plot(metrics_file, loss_png, title=f"{robot}/{task} ({latest_model.name})")
+            render_loss_plot(
+                metrics_file,
+                loss_png,
+                title=f"{robot}/{backend}/{task} ({latest_model.name})",
+            )
         subprocess.run(
             ["rclone", "copy", str(src_log), remote_log, "--transfers", "4", "--progress"],
             check=True,
         )
 
-    debug_dir = local_var / "debug"
+    debug_dir = local_out / "debug"
     for extra_name in ("colab_probe_result.json", "act_training_colab.yaml"):
         extra_file = debug_dir / extra_name
         if extra_file.is_file():
@@ -597,5 +608,5 @@ def sync_results_to_drive(
             print(f"  - {item.name}: {size_mb:.2f} MiB")
     print(f"训练日志与探测记录已同步至 Google Drive: {remote_log}")
     print("\n在本机运行 docs/colab/sync_drive_rclone.ipynb 第 5 节即可一键下载模型至:")
-    print(f"  var/{robot}/{task}/models/{latest_model.name}/")
+    print(f"  output/{robot}/{backend}/{task}/models/{latest_model.name}/")
     return latest_model

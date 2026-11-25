@@ -51,9 +51,12 @@ def _add_selection_arguments(parser: argparse.ArgumentParser) -> None:
     """Every command needs one explicit recipe source; there is no default."""
     parser.add_argument("--config", type=Path, default=None, help="direct recipe path")
     parser.add_argument(
-        "--robot", help="robot id under <shared-root>/scenarios/<robot>/<task>/"
+        "--robot", help="robot id under <shared-root>/scenarios/<robot>/<backend>/<task>/"
     )
-    parser.add_argument("--task", help="task id for --robot")
+    parser.add_argument(
+        "--backend", help="backend id under <shared-root>/scenarios/<robot>/<backend>/<task>/"
+    )
+    parser.add_argument("--task", help="task id for --robot/--backend")
     parser.add_argument(
         "--shared-root", type=Path, default=None, help="shared tree containing scenarios/"
     )
@@ -105,14 +108,14 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _target(args: argparse.Namespace) -> tuple[str, str] | None:
-    if args.robot is None and args.task is None:
+def _target(args: argparse.Namespace) -> tuple[str, str, str] | None:
+    if args.robot is None and args.backend is None and args.task is None:
         return None
-    if args.robot is None or args.task is None:
-        raise ScenarioSelectionError("--robot and --task must be passed together")
+    if args.robot is None or args.backend is None or args.task is None:
+        raise ScenarioSelectionError("--robot, --backend, and --task must be passed together")
     if args.config is not None:
-        raise ScenarioSelectionError("--config cannot be combined with --robot/--task")
-    return args.robot, args.task
+        raise ScenarioSelectionError("--config cannot be combined with --robot/--backend/--task")
+    return args.robot, args.backend, args.task
 
 
 def _training_config(
@@ -125,7 +128,9 @@ def _training_config(
     if getattr(args, "data_root", None):
         updates["data_root"] = project_path(args.data_root, args.project_root)
     elif selection is not None:
-        paths = artifact_paths(selection.robot, selection.task, args.project_root)
+        paths = artifact_paths(
+            selection.robot, selection.backend, selection.task, args.project_root
+        )
         updates["data_root"] = paths["dataset"]
         updates["cache_root"] = paths["cache"]
         updates["checkpoint"] = config.checkpoint.model_copy(update={"root": paths["models"]})
@@ -142,12 +147,13 @@ def _resolve(path: Path, root: Path) -> Path:
 
 
 def _learning_selection(args: argparse.Namespace, root: Path, *, recipe_field: str):
-    """Return the real recipe path and the robot/task provenance (or None)."""
+    """Return the real recipe path and the robot/backend/task provenance (or None)."""
     target = _target(args)
     if target is not None:
         selection = select_scenario(
             robot=target[0],
-            task=target[1],
+            backend=target[1],
+            task=target[2],
             recipe_field=recipe_field,
             stage="learning",
             project_root=root,
@@ -155,9 +161,9 @@ def _learning_selection(args: argparse.Namespace, root: Path, *, recipe_field: s
         )
         return selection.recipe_path, selection
     if args.shared_root is not None:
-        raise ScenarioSelectionError("--shared-root requires --robot/--task")
+        raise ScenarioSelectionError("--shared-root requires --robot/--backend/--task")
     if args.config is None:
-        raise ScenarioSelectionError("either --robot/--task or --config is required")
+        raise ScenarioSelectionError("either --robot/--backend/--task or --config is required")
     return _resolve(args.config, root), None
 
 
@@ -208,7 +214,10 @@ def _print_effective_config(
     del config
     print(f"=== {title} ===", flush=True)
     if selection is not None:
-        print(f"机器人/任务:     {selection.robot}/{selection.task}", flush=True)
+        print(
+            f"方案:            {selection.robot}/{selection.backend}/{selection.task}",
+            flush=True,
+        )
         print(f"Binding 文件:    {selection.resolved.path}", flush=True)
     print(f"配置文件路径:    {config_path}", flush=True)
     print("=" * (len(title) + 8), flush=True)
@@ -226,8 +235,8 @@ def _write_effective_config_log(log_path: Path, config: object) -> None:
 def _logs_root(args: argparse.Namespace, root: Path) -> Path:
     target = _target(args)
     if target is not None:
-        return artifact_paths(target[0], target[1], root)["logs"]
-    return project_path(Path("var") / "_direct" / "logs", root)
+        return artifact_paths(target[0], target[1], target[2], root)["logs"]
+    return project_path(Path("output") / "_direct" / "logs", root)
 
 
 def _command_convert(args: argparse.Namespace, root: Path) -> int:
@@ -237,7 +246,7 @@ def _command_convert(args: argparse.Namespace, root: Path) -> int:
     changes: dict[str, object] = {}
     overrides: dict[str, object] = {}
     if selection is not None:
-        paths = artifact_paths(selection.robot, selection.task, root)
+        paths = artifact_paths(selection.robot, selection.backend, selection.task, root)
         changes.update(
             select_path=paths["select"], output_root=paths["dataset"], cache_root=paths["cache"]
         )

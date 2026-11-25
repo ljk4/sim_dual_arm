@@ -17,7 +17,7 @@ from learning_fixtures import make_select
 from model_helpers import replace
 
 ROOT = Path(__file__).resolve().parents[3]
-SCENARIO = ROOT / "shared/scenarios/marvin_sim/stack"
+SCENARIO = ROOT / "shared/scenarios/marvin/mujoco/stack"
 pytestmark = pytest.mark.skipif(
     os.environ.get("DSH035_HEAVY") != "1",
     reason="set DSH035_HEAVY=1 for the 50-episode synthetic conversion",

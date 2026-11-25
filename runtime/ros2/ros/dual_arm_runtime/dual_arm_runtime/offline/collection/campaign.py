@@ -397,6 +397,7 @@ def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     result.add_argument("--project-root", type=Path, default=Path.cwd())
     result.add_argument("--robot")
+    result.add_argument("--backend")
     result.add_argument("--task")
     result.add_argument("--shared-root", type=Path)
     result.add_argument(
@@ -432,17 +433,18 @@ def parser() -> argparse.ArgumentParser:
 
 
 def _resolve_selection(args: argparse.Namespace, cli: argparse.ArgumentParser) -> None:
-    if args.robot is not None:
-        if args.task is None:
-            cli.error("--robot requires --task")
+    if any(value is not None for value in (args.robot, args.backend, args.task)):
+        if not (args.robot and args.backend and args.task):
+            cli.error("--robot, --backend, and --task must be passed together")
         if args.config is not None:
-            cli.error("--robot/--task cannot be combined with --config")
+            cli.error("--robot/--backend/--task cannot be combined with --config")
         if args.action == "run" and args.runtime_config is not None:
-            cli.error("--robot/--task cannot be combined with --runtime-config")
+            cli.error("--robot/--backend/--task cannot be combined with --runtime-config")
         from dual_arm_runtime.offline.collection.scenario_selection import select_collection
 
         selection = select_collection(
             robot=args.robot,
+            backend=args.backend,
             task=args.task,
             shared_root=args.shared_root,
             project_root=args.project_root.resolve(),
@@ -452,12 +454,10 @@ def _resolve_selection(args: argparse.Namespace, cli: argparse.ArgumentParser) -
         if args.action == "run":
             args.runtime_config = selection["recipes"]["runtime_teacher"]["path"]
     else:
-        if args.task is not None:
-            cli.error("--task requires --robot")
         if args.shared_root is not None:
-            cli.error("--shared-root requires --robot/--task")
+            cli.error("--shared-root requires --robot/--backend/--task")
         if args.config is None:
-            cli.error("one of --robot/--task or --config is required")
+            cli.error("one of --robot/--backend/--task or --config is required")
         if args.action == "run" and args.runtime_config is None:
             cli.error("--runtime-config is required for a direct run")
 

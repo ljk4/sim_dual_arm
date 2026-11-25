@@ -111,8 +111,8 @@ def discover_episodes(input_dir: Path) -> list[tuple[Path, Path]]:
     if not found:
         raise FileNotFoundError(
             f"目录 {root} 下未发现有效录制（未找到 recording/metadata.yaml）。\n"
-            "请传入单局录制目录（如 var/marvin_sim/stack/logs/recordings/<run-id>）"
-            "或批量录制目录（如 var/marvin_sim/stack/logs/batch-policy/<batch-id>）。"
+            "请传入单局录制目录（如 output/<robot>/<backend>/<task>/logs/recordings/<run-id>）"
+            "或批量录制目录（如 output/<robot>/<backend>/<task>/logs/batch-policy/<batch-id>）。"
         )
     return found
 
@@ -146,7 +146,7 @@ class _RuntimeVideoRunner(BaseDockerWorkers):
     def __init__(self, project_root: Path) -> None:
         super().__init__(
             argparse.Namespace(project_root=project_root),
-            project_root / "var" / "_system",
+            project_root / "output" / "_system",
             batch_name="video",
         )
 

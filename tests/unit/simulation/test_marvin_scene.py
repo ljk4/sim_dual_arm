@@ -16,9 +16,9 @@ if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
 from robot_backend_sim.common.config.camera_config import camera_declared_description  # noqa: E402
-from robot_backend_sim.marvin_sim.handover.scene_config import load_marvin_scene_config  # noqa: E402
-from robot_backend_sim.marvin_sim.handover.scene import build_marvin_scene  # noqa: E402
-from robot_backend_sim.marvin_sim.assembly import gripper_opening  # noqa: E402
+from robot_backend_sim.marvin.handover.scene_config import load_marvin_scene_config  # noqa: E402
+from robot_backend_sim.marvin.handover.scene import build_marvin_scene  # noqa: E402
+from robot_backend_sim.marvin.assembly import gripper_opening  # noqa: E402
 from robot_contracts.models import ContractError  # noqa: E402
 from robot_contracts.profiles import (  # noqa: E402
     load_document,
@@ -27,7 +27,7 @@ from robot_contracts.profiles import (  # noqa: E402
     validate_bindings,
 )
 
-SCENARIO = ROOT / "shared/scenarios/marvin_sim/handover"
+SCENARIO = ROOT / "shared/scenarios/marvin/mujoco/handover"
 CONFIG_PATH = SCENARIO / "configs/simulation/scene/marvin_handover.yaml"
 PROFILE_PATH = SCENARIO / "profiles/robot/profile.json"
 SCHEMAS = ROOT / "shared/common/interfaces/schemas"
@@ -48,7 +48,7 @@ def test_robot_and_task_are_selected_independently(config):
     assert config.task.environment == "handover"
     assert config.urdf_path == (
         ROOT
-        / "simulation/mujoco/assets/marvin/urdf/Marvin_Stand_M6_2026.4.8.urdf"
+        / "shared/robots/marvin/urdf/Marvin_Stand_M6_2026.4.8.urdf"
     )
     assert config.urdf_path.is_file()
     assert config.robot.gripper_closed_total < config.robot.gripper_open_total
@@ -56,7 +56,7 @@ def test_robot_and_task_are_selected_independently(config):
 
 def test_profile_order_cameras_and_calibrations_match_the_scene(config):
     profile = load_profile(PROFILE_PATH, SCHEMAS)
-    shared_profiles = ROOT / "shared/scenarios/marvin_sim/profiles"
+    shared_profiles = ROOT / "shared/robots/marvin/profiles"
     observations = load_document(shared_profiles / "observations/marvin_rgb_joint.json")
     actions = load_document(shared_profiles / "actions/marvin_joint_position.json")
     validate_bindings(profile, observations, actions, SCHEMAS)
@@ -183,7 +183,7 @@ def test_box_is_open_at_the_centre_and_contains_the_block(scene, config):
 
 def test_profile_and_scene_reject_mismatched_selection(config):
     assert config.robot.assembly == "marvin"
-    shared_profiles = ROOT / "shared/scenarios/marvin_sim/profiles"
+    shared_profiles = ROOT / "shared/robots/marvin/profiles"
     with pytest.raises(ContractError, match="Joint ordering"):
         profile = load_profile(PROFILE_PATH, SCHEMAS)
         observations = load_document(

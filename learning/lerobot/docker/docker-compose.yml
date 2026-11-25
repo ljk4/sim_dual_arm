@@ -2,10 +2,10 @@
 name: sim-dual-arm
 
 services:
-  learning:
-    image: sim-dual-arm/learning:current
+  lerobot:
+    image: sim-dual-arm/lerobot:current
     build: .
-    container_name: sim-dual-arm-learning
+    container_name: sim-dual-arm-lerobot
     network_mode: host
     user: "1000:1000"
     working_dir: /app
@@ -20,7 +20,8 @@ services:
     volumes:
       - ../:/app:ro
       - ../../../shared:/shared:ro
-      - ../../../build/generated/policy-sdk:/opt/policy-sdk:ro
-      - ../../../var:/data
+      - ../../../output/build/generated/policy-sdk:/opt/policy-sdk:ro
+      - ../../../output:/data
+      - ../../../output/build:/data/build:ro
       - ../../../third_party:/third_party:ro
       - ../../../shared/common/tools/docker/container_bashrc.sh:/etc/bash.bashrc:ro

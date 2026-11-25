@@ -16,8 +16,8 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
 SHARED = ROOT / "shared"
-MARVIN_STACK_PROFILES = SHARED / "scenarios/marvin_sim/stack/profiles"
-MARVIN_SHARED_PROFILES = SHARED / "scenarios/marvin_sim/profiles"
+MARVIN_STACK_PROFILES = SHARED / "scenarios/marvin/mujoco/stack/profiles"
+MARVIN_SHARED_PROFILES = SHARED / "robots/marvin/profiles"
 
 
 def sha(path: Path) -> str:

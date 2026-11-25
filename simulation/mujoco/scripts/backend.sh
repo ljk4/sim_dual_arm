@@ -12,11 +12,12 @@ usage() {
   cat <<'EOF'
 usage: scripts/backend.sh [options]
 
-Start the MuJoCo Robot API backend inside the simulation container.
+Start the MuJoCo Robot API backend inside the mujoco container.
 
 options:
-  --robot <id>          robot id under shared/scenarios/<robot>/<task>/
-  --task <id>           task id under shared/scenarios/<robot>/<task>/
+  --robot <id>          robot id under shared/scenarios/<robot>/<backend>/<task>/
+  --backend <id>        backend id under shared/scenarios/<robot>/<backend>/<task>/
+  --task <id>           task id under shared/scenarios/<robot>/<backend>/<task>/
   --role <role>         teacher | policy (scenario mode default: teacher)
   --seed <int>          initial simulation seed (default: random)
   --run-id <id>         backend run id prefix
@@ -25,12 +26,13 @@ options:
   --realtime-speed <n>  simulation seconds per wall-clock second
   --namespace <ns>      override robot.namespace
   --no-visualization    disable MuJoCo state visualization topic
-  --config <path>       direct backend YAML recipe (mutually exclusive with --robot/--task)
+  --config <path>       direct backend YAML recipe (mutually exclusive with --robot/--backend/--task)
   -h, --help            show this help message
 EOF
 }
 
 robot=""
+backend=""
 task=""
 role=""
 seed=""
@@ -46,6 +48,8 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --robot) robot="${2:?missing value for --robot}"; shift 2 ;;
     --robot=*) robot="${1#*=}"; shift ;;
+    --backend) backend="${2:?missing value for --backend}"; shift 2 ;;
+    --backend=*) backend="${1#*=}"; shift ;;
     --task) task="${2:?missing value for --task}"; shift 2 ;;
     --task=*) task="${1#*=}"; shift ;;
     --role) role="${2:?missing value for --role}"; shift 2 ;;
@@ -82,8 +86,8 @@ python3 "${SHARED_ROOT:-/shared}/common/tools/scripts/dev_workspace.py" check \
   --build-root "$ROS_SDK" >/dev/null
 
 if [[ -n "$direct_config" ]]; then
-  if [[ -n "$robot" || -n "$task" ]]; then
-    printf 'scripts/backend.sh: --config cannot be combined with --robot/--task\n' >&2
+  if [[ -n "$robot" || -n "$backend" || -n "$task" ]]; then
+    printf 'scripts/backend.sh: --config cannot be combined with --robot/--backend/--task\n' >&2
     exit 2
   fi
   target_root="${run_root:-$DATA_ROOT/_direct/logs/backend}"
@@ -96,13 +100,13 @@ if [[ -n "$direct_config" ]]; then
   exec "${cmd[@]}"
 fi
 
-if [[ -z "$robot" || -z "$task" ]]; then
-  printf 'scripts/backend.sh: --robot and --task are required (unless using --config)\n' >&2
+if [[ -z "$robot" || -z "$backend" || -z "$task" ]]; then
+  printf 'scripts/backend.sh: --robot, --backend, and --task are required (unless using --config)\n' >&2
   exit 2
 fi
 
 role="${role:-teacher}"
-run_root="${run_root:-$DATA_ROOT/$robot/$task/logs/backend}"
+run_root="${run_root:-$DATA_ROOT/$robot/$backend/$task/logs/backend}"
 
 ts="$(date +%Y%m%d_%H%M%S)"
 base="${run_id:-${role}-backend}"
@@ -122,6 +126,7 @@ fi
 cmd=(
   python3 -m robot_backend_sim.common.ros.node
   --robot "$robot"
+  --backend "$backend"
   --task "$task"
   --role "$role"
   --run-id "$run_id"

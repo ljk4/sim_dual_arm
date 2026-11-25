@@ -57,13 +57,17 @@ def shared_root_path(explicit: Path | None, project_root: Path) -> Path:
     return resolve_shared_root(explicit, project_root=project_root)
 
 
-def scenario_binding_path(shared_root: Path, robot: str, task: str) -> Path:
+def scenario_binding_path(
+    shared_root: Path, robot: str, backend: str, task: str
+) -> Path:
     try:
-        path = resolve_binding_path(shared_root, robot, task)
+        path = resolve_binding_path(shared_root, robot, backend, task)
     except BindingError as error:
         raise CampaignError(str(error)) from error
     if not path.is_file():
-        raise CampaignError(f"scenario {robot}/{task} has no binding file: {path}")
+        raise CampaignError(
+            f"scenario {robot}/{backend}/{task} has no binding file: {path}"
+        )
     return path
 
 
@@ -313,6 +317,7 @@ def _profile_records(resolved: ResolvedBinding) -> dict[str, dict[str, Any]]:
 def select_collection(
     *,
     robot: str,
+    backend: str,
     task: str,
     shared_root: Path | None,
     project_root: Path,
@@ -321,11 +326,20 @@ def select_collection(
 ) -> dict[str, Any]:
     """Resolve the collection recipes, profiles and capabilities from a binding."""
     root = shared_root_path(shared_root, project_root)
-    binding_path = scenario_binding_path(root, robot, task)
+    binding_path = scenario_binding_path(root, robot, backend, task)
     try:
         resolved = load_binding(binding_path, shared_root=root)
     except (BindingError, ContractError, OSError) as error:
         raise CampaignError(str(error)) from error
+    if (
+        resolved.binding.robot_id != robot
+        or resolved.binding.backend.implementation != backend
+        or resolved.binding.task_id != task
+    ):
+        raise CampaignError(
+            f"binding {binding_path} declares {resolved.binding.scenario_id!r}, "
+            f"expected {robot}/{backend}/{task!r}"
+        )
     if binding_sha256 is not None and resolved.sha256 != binding_sha256:
         raise CampaignError(
             f"binding changed after preflight: {resolved.path} "
@@ -368,6 +382,7 @@ def select_collection(
     return {
         "mode": "scenario",
         "robot": robot,
+        "backend": backend,
         "task": task,
         "scenario_id": resolved.binding.scenario_id,
         "binding": {"path": str(resolved.path), "sha256": resolved.sha256},
@@ -391,6 +406,7 @@ def select_collection(
 def select_inference(
     *,
     robot: str,
+    backend: str,
     task: str,
     shared_root: Path | None,
     project_root: Path,
@@ -398,11 +414,20 @@ def select_inference(
 ) -> dict[str, Any]:
     """Resolve the inference recipes and profiles from a binding."""
     root = shared_root_path(shared_root, project_root)
-    binding_path = scenario_binding_path(root, robot, task)
+    binding_path = scenario_binding_path(root, robot, backend, task)
     try:
         resolved = load_binding(binding_path, shared_root=root)
     except (BindingError, ContractError, OSError) as error:
         raise CampaignError(str(error)) from error
+    if (
+        resolved.binding.robot_id != robot
+        or resolved.binding.backend.implementation != backend
+        or resolved.binding.task_id != task
+    ):
+        raise CampaignError(
+            f"binding {binding_path} declares {resolved.binding.scenario_id!r}, "
+            f"expected {robot}/{backend}/{task!r}"
+        )
     if binding_sha256 is not None and resolved.sha256 != binding_sha256:
         raise CampaignError(
             f"binding changed after preflight: {resolved.path} "
@@ -449,6 +474,7 @@ def select_inference(
     return {
         "mode": "scenario",
         "robot": robot,
+        "backend": backend,
         "task": task,
         "scenario_id": resolved.binding.scenario_id,
         "binding": {"path": str(resolved.path), "sha256": resolved.sha256},
@@ -492,6 +518,7 @@ def direct_selection(
     return {
         "mode": "direct",
         "robot": None,
+        "backend": None,
         "task": None,
         "scenario_id": None,
         "binding": None,
@@ -507,26 +534,28 @@ def campaign_config_path(
     *,
     campaign_config: Path | None,
     robot: str | None,
-    task: str | None,
+    backend: str | None = None,
+    task: str | None = None,
     shared_root: Path | None,
     project_root: Path,
     default: Path | None = None,
 ) -> Path:
     """Resolve the campaign recipe for export, evaluation and campaign commands."""
-    if robot is not None:
-        if task is None:
-            raise CampaignError("--robot requires --task")
+    if any(value is not None for value in (robot, backend, task)):
+        if not (robot and backend and task):
+            raise CampaignError("--robot, --backend, and --task must be passed together")
         if campaign_config is not None:
-            raise CampaignError("--robot/--task cannot be combined with --campaign-config")
+            raise CampaignError(
+                "--robot/--backend/--task cannot be combined with --campaign-config"
+            )
         selection = select_collection(
             robot=robot,
+            backend=backend,
             task=task,
             shared_root=shared_root,
             project_root=project_root,
         )
         return Path(selection["recipes"]["campaign"]["path"])
-    if task is not None:
-        raise CampaignError("--task requires --robot")
     if campaign_config is None:
         if default is None:
             raise CampaignError("a campaign recipe is required")

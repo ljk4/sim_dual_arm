@@ -15,20 +15,20 @@
 | `tests/` | 使用测试替身的驱动、协议与配置回归测试 |
 | `docs/` | SDK 协议与源码归属 |
 
-机器人和任务无关的实现归入 `common/`，机器人专属实现归入 `tianji/`。跨端 Robot Profile、观测/动作档案和任务配方的归属为 `shared/scenarios/<robot-id>/`。当前包提供设备 I/O 层；ROS 2 Robot API、轨迹执行调度、时间同步和 Runtime 接入由后续适配实现。
+机器人和任务无关的实现归入 `common/`，机器人专属实现归入 `tianji/`。跨后端复用资产位于 `shared/robots/<robot-id>/`，三层任务绑定位于 `shared/scenarios/<robot-id>/tianji/<task-id>/`。当前包提供设备 I/O 层；ROS 2 Robot API、轨迹执行调度、时间同步和 Runtime 接入按[架构扩展与演进指南](../../docs/features/架构扩展与演进指南.md)逐步实现。
 
 ## 启动环境
 
 从仓库根目录执行：
 
 ```bash
-./env.sh build hardware
-./env.sh up hardware
-./env.sh exec hardware scripts/check_config.sh
-./env.sh hardware
+./env.sh build tianji
+./env.sh up tianji
+./env.sh exec tianji scripts/check_config.sh
+./env.sh tianji
 ```
 
-镜像提供 ROS 2 Jazzy、Python 3.12、NumPy、Pydantic、PyYAML、MinimalModbus、PySerial、RealSense、OpenCV、FFmpeg 和 V4L2 工具。源码与配置只读挂载为 `/app`，公共代码挂载为 `/shared`，运行输出挂载为 `/data`。容器使用宿主机网络并挂载 `/dev`、`/sys` 和 `/run/udev`，可访问 USB、串口和相机节点。容器启动后保持空闲，设备启动由驱动调用者管理。
+镜像提供 ROS 2 Jazzy、Python 3.12、NumPy、Pydantic、PyYAML、MinimalModbus、PySerial、RealSense、OpenCV、FFmpeg 和 V4L2 工具。源码与配置只读挂载为 `/app`，公共代码挂载为 `/shared`，运行输出（`output/`）挂载为 `/data`，`output/build/` 只读挂载为 `/data/build`，`output/build/ros-dev/` 只读挂载为 `/opt/ros-dev`。容器使用宿主机网络并挂载 `/dev`、`/sys` 和 `/run/udev`，可访问 USB、串口和相机节点。容器启动后保持空闲，设备启动由驱动调用者管理。
 
 ## 设备配置
 
@@ -75,7 +75,7 @@ APEX 在线目标由控制器 OnlinePlanner 平滑。配置中的 `poll_hz` 用�
 
 ```bash
 tar -cf - hardware shared/common/tools |
-  ./env.sh exec hardware bash -ec '
+  ./env.sh exec tianji bash -ec '
     test_root=$(mktemp -d /tmp/tianji-device-tests.XXXXXXXX)
     trap '\''rm -rf -- "$test_root"'\'' EXIT
     tar -xf - -C "$test_root"

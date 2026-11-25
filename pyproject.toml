@@ -2,7 +2,7 @@
 target-version = "py312"
 line-length = 100
 cache-dir = "/tmp/ruff-cache"
-exclude = ["build", "var"]
+exclude = ["build", "var", "output"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]

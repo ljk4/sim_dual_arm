@@ -19,7 +19,7 @@ from robot_backend_sim.common.config.motion_config import (  # noqa: E402
     load_control_config,
     parse_control_config,
 )
-from robot_backend_sim.marvin_sim.robot_config import (  # noqa: E402
+from robot_backend_sim.marvin.robot_config import (  # noqa: E402
     MARVIN_CONTROL_JOINT_NAMES as CONTROL_JOINT_NAMES,
 )
 from robot_contracts.models import ContractError  # noqa: E402

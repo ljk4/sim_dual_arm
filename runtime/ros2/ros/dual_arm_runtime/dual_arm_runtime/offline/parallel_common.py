@@ -25,26 +25,35 @@ SIMULATION_REFERENCE_FIELDS = (
 )
 
 
-def simulation_path(path: Path, project: Path) -> str:
+def simulation_path(path: Path, project: Path, backend_impl: str | None = None) -> str:
     """Map a host/runtime path to the simulation container mount."""
     for container in ("/shared", "/data", "/app"):
         root = Path(container)
         if path == root or path.is_relative_to(root):
             return str(path)
-    for source, destination in (
-        (project / "simulation/mujoco", Path("/app")),
+    mounts: list[tuple[Path, Path]] = [
         (project / "shared", Path("/shared")),
-        (project / "var", Path("/data")),
-    ):
+        (project / "output", Path("/data")),
+    ]
+    if backend_impl:
+        mounts.insert(0, (project / "simulation" / backend_impl, Path("/app")))
+    for source, destination in mounts:
         if path == source or path.is_relative_to(source):
             return str(destination / path.relative_to(source))
+    sim_root = project / "simulation"
+    if backend_impl is None and path.is_relative_to(sim_root):
+        rel = path.relative_to(sim_root)
+        if rel.parts:
+            return str(Path("/app").joinpath(*rel.parts[1:]))
     raise CampaignError(f"path is not mounted in simulation: {path}")
 
 
-def backend_config_for_simulation(backend_template: Path, project: Path) -> str:
+def backend_config_for_simulation(
+    backend_template: Path, project: Path, backend_impl: str | None = None
+) -> str:
     """Return the simulation container path for the read-only backend template."""
     try:
-        return simulation_path(backend_template, project)
+        return simulation_path(backend_template, project, backend_impl)
     except CampaignError:
         if backend_template.is_relative_to(project):
             return str(backend_template)
@@ -52,7 +61,10 @@ def backend_config_for_simulation(backend_template: Path, project: Path) -> str:
 
 
 def validate_backend_references(
-    backend_document: dict, backend_template: Path, project: Path
+    backend_document: dict,
+    backend_template: Path,
+    project: Path,
+    backend_impl: str | None = None,
 ) -> dict[str, str]:
     """Validate that all robot.* references inside backend_template map into simulation."""
     robot = backend_document.get("robot")
@@ -63,7 +75,7 @@ def validate_backend_references(
         value = robot.get(name)
         if value:
             source = (backend_template.parent / str(value)).resolve()
-            resolved[name] = simulation_path(source, project)
+            resolved[name] = simulation_path(source, project, backend_impl)
     return resolved
 
 
@@ -126,9 +138,15 @@ def write_worker_manifest(
         else {
             **selection.get("binding", {}),
             "robot": selection.get("robot"),
+            "backend": selection.get("backend"),
             "task": selection.get("task"),
             "scenario_id": selection.get("scenario_id"),
         }
+    )
+    backend_impl = (
+        str(selection["backend"])
+        if selection is not None and selection.get("backend")
+        else None
     )
     for index in range(workers):
         domain_id = domain_base + index
@@ -149,7 +167,7 @@ def write_worker_manifest(
             "backend_config": backend_config,
             "backend_log": str(worker_dir / "backend-runs/backend/log"),
             "backend_ready": str(worker_dir / "backend-runs/backend/ready.json"),
-            "run_root": simulation_path(worker_dir / "backend-runs", project),
+            "run_root": simulation_path(worker_dir / "backend-runs", project, backend_impl),
             "binding": binding,
             "recipes": recipes,
             **(extra_entry() if extra_entry is not None else {}),
@@ -159,6 +177,7 @@ def write_worker_manifest(
     manifest_selection = selection or {
         "mode": "direct",
         "robot": None,
+        "backend": None,
         "task": None,
         "scenario_id": None,
         "binding": None,
@@ -183,26 +202,25 @@ def parse_worker_prep_args(
     parser.add_argument("--domain-base", type=int, required=True)
     parser.add_argument("--realtime-speed", type=float, default=default_speed)
     parser.add_argument("--robot")
+    parser.add_argument("--backend")
     parser.add_argument("--task")
     parser.add_argument("--shared-root", type=Path)
     parser.add_argument("--binding-sha256")
     parser.add_argument("--runtime-config", type=Path)
     parser.add_argument("--backend-template", type=Path)
     args = parser.parse_args()
-    if args.robot is not None:
-        if args.task is None:
-            parser.error("--robot requires --task")
+    if any(value is not None for value in (args.robot, args.backend, args.task)):
+        if not (args.robot and args.backend and args.task):
+            parser.error("--robot, --backend, and --task must be passed together")
         if args.runtime_config is not None or args.backend_template is not None:
             parser.error(
-                "--robot/--task cannot be combined with --runtime-config or --backend-template"
+                "--robot/--backend/--task cannot be combined with --runtime-config or --backend-template"
             )
     else:
-        if args.task is not None:
-            parser.error("--task requires --robot")
         if args.shared_root is not None:
-            parser.error("--shared-root requires --robot/--task")
+            parser.error("--shared-root requires --robot/--backend/--task")
         if args.binding_sha256 is not None:
-            parser.error("--binding-sha256 requires --robot/--task")
+            parser.error("--binding-sha256 requires --robot/--backend/--task")
         if args.runtime_config is None or args.backend_template is None:
             parser.error("direct mode requires --runtime-config and --backend-template")
     return parser, args

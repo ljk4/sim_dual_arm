@@ -5,12 +5,12 @@
 # file.  SI time units are seconds unless a field says otherwise.
 robot:
   namespace: /robot
-  profile: ../../../shared/scenarios/marvin_sim/stack/profiles/robot/profile.json
+  profile: ../../../shared/scenarios/marvin/mujoco/stack/profiles/robot/profile.json
   schemas: ../../../shared/common/interfaces/schemas
-  scene: ../../../shared/scenarios/marvin_sim/stack/configs/simulation/scene/marvin_stack.yaml
-  control: ../../../shared/scenarios/marvin_sim/profiles/control/marvin_control.yaml
-  stream: ../../../shared/scenarios/marvin_sim/stack/profiles/control/marvin_stream.yaml
-  follower: ../../../shared/scenarios/marvin_sim/profiles/control/marvin_follower.yaml
+  scene: ../../../shared/scenarios/marvin/mujoco/stack/configs/simulation/scene/marvin_stack.yaml
+  control: ../../../shared/robots/marvin/profiles/control/marvin_control.yaml
+  stream: ../../../shared/scenarios/marvin/mujoco/stack/profiles/control/marvin_stream.yaml
+  follower: ../../../shared/robots/marvin/profiles/control/marvin_follower.yaml
 
 run:
   seed: 0

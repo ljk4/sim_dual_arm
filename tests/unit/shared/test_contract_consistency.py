@@ -162,7 +162,12 @@ def test_episode_result_schema_matches_models(model, section, optional):
 
 
 def test_all_profile_documents_validate():
-    documents = sorted((ROOT / "shared/scenarios/marvin_sim").glob("*/profiles/**/*.json"))
+    documents = sorted(
+        [
+            *(ROOT / "shared/robots/marvin/profiles").glob("**/*.json"),
+            *(ROOT / "shared/scenarios/marvin/mujoco").glob("*/profiles/**/*.json"),
+        ]
+    )
     assert documents
     for path in documents:
         document = json.loads(path.read_text())
@@ -208,7 +213,7 @@ def test_teacher_service_is_a_scenario_extension_not_a_common_package():
     common = ROOT / "shared/common/interfaces/ros/sim_api_msgs"
     extension = (
         ROOT
-        / "shared/scenarios/marvin_sim/extensions/ros/marvin_teacher_api_msgs"
+        / "shared/robots/marvin/extensions/ros/marvin_teacher_api_msgs"
     )
     assert not (common / "srv/GetTeacherChunk.srv").exists()
     assert "GetTeacherChunk" not in (common / "CMakeLists.txt").read_text()

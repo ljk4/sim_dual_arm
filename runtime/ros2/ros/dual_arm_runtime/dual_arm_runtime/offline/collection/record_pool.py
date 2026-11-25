@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import json
-import os
 import signal
 import subprocess
 import sys
@@ -210,6 +209,7 @@ class RecordingPool:
         if binding:
             environment["CAMPAIGN_SCENARIO_ID"] = str(binding.get("scenario_id") or "")
             environment["CAMPAIGN_ROBOT"] = str(binding.get("robot") or "")
+            environment["CAMPAIGN_BACKEND"] = str(binding.get("backend") or "")
             environment["CAMPAIGN_TASK"] = str(binding.get("task") or "")
             environment["CAMPAIGN_BINDING_PATH"] = str(binding.get("path") or "")
             environment["CAMPAIGN_BINDING_SHA256"] = str(binding.get("sha256") or "")
@@ -426,6 +426,7 @@ def record_parallel(args: argparse.Namespace, config: dict[str, Any]) -> int:
     code = check_ros_sdk(
         args.project_root,
         robot=args.robot,
+        backend=getattr(args, "backend", None),
         task=args.task,
         shared_root=args.shared_root,
     )

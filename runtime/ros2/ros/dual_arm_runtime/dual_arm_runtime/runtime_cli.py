@@ -83,8 +83,9 @@ def _parse_arguments(argv: list[str] | None = None) -> tuple[argparse.Namespace,
     selection = parser.add_mutually_exclusive_group(required=True)
     selection.add_argument("--config", type=Path, help="direct runtime recipe path")
     selection.add_argument(
-        "--robot", help="robot id under <shared-root>/scenarios/<robot>/<task>/binding.yaml"
+        "--robot", help="robot id under <shared-root>/scenarios/<robot>/<backend>/<task>/binding.yaml"
     )
+    parser.add_argument("--backend", help="backend id for --robot")
     parser.add_argument("--task", help="task id for --robot")
     parser.add_argument("--role", choices=("policy", "teacher"), default="policy")
     parser.add_argument("--shared-root", type=Path)
@@ -134,12 +135,12 @@ def _parse_arguments(argv: list[str] | None = None) -> tuple[argparse.Namespace,
         args.episode_id = ""
     if ros_args and ros_args[0] != "--ros-args":
         parser.error(f"unrecognized arguments: {' '.join(ros_args)}")
-    if args.robot is not None and args.task is None:
-        parser.error("--robot requires --task")
-    if args.task is not None and args.robot is None:
-        parser.error("--task requires --robot")
+    if args.robot is not None and (args.backend is None or args.task is None):
+        parser.error("--robot requires --backend and --task")
+    if (args.backend is not None or args.task is not None) and args.robot is None:
+        parser.error("--backend and --task require --robot")
     if args.robot_namespace is not None and args.robot is None:
-        parser.error("--robot-namespace requires --robot/--task")
+        parser.error("--robot-namespace requires --robot/--backend/--task")
     if args.hold_after_episode and not args.once:
         parser.error("--hold-after-episode requires --once")
     if args.reset_seed is not None and not 0 <= args.reset_seed <= 2**63 - 1:
@@ -165,9 +166,10 @@ def _load_configuration(args: argparse.Namespace):
         fallback_seed = _random_seed() if args.reset_seed is None else None
         if args.robot is not None:
             if args.config is not None:
-                raise ValueError("--robot/--task and --config are mutually exclusive")
+                raise ValueError("--robot/--backend/--task and --config are mutually exclusive")
             resolved = resolve_scenario_runtime(
                 robot=args.robot,
+                backend=args.backend,
                 task=args.task,
                 role=args.role,
                 shared_root=args.shared_root,
@@ -187,7 +189,7 @@ def _load_configuration(args: argparse.Namespace):
                 selection=resolved.selection,
             )
         if args.shared_root is not None:
-            raise ValueError("--shared-root requires --robot/--task")
+            raise ValueError("--shared-root requires --robot/--backend/--task")
         return load_runtime_configuration(
             args.config,
             args.project_root,
@@ -602,7 +604,7 @@ def _print_configuration_summary(
     selection = getattr(configuration, "selection", None)
     if isinstance(selection, dict) and selection.get("mode") == "scenario":
         print(
-            f"方案: {selection.get('robot')}/{selection.get('task')} "
+            f"方案: {selection.get('robot')}/{selection.get('backend')}/{selection.get('task')} "
             f"({selection.get('role')})",
             flush=True,
         )
@@ -648,9 +650,12 @@ def _interactive_run_id_base(
     args: argparse.Namespace, configuration: Any, stamp: str | None = None
 ) -> str:
     stamp = stamp or time.strftime("%Y%m%d_%H%M%S")
-    if args.robot is not None and args.task is not None:
+    if args.robot is not None and args.backend is not None and args.task is not None:
         robot_part = _safe_id_part(args.robot)
+        backend_part = _safe_id_part(args.backend)
         task_part = _safe_id_part(args.task)
+        head = f"client_interactive_{robot_part}_{backend_part}_{task_part}"[:80].rstrip("._-")
+        return f"{head}_{stamp}"
     else:
         robot_part = _safe_id_part(configuration.profile.robot_id)
         recipe = configuration.recipe
@@ -668,7 +673,7 @@ def _interactive_run_id_base(
 
 def _confirm_start(args: argparse.Namespace, configuration: Any, run_id: str) -> None:
     display = (
-        f"scenario:{args.robot}/{args.task}/{args.role}"
+        f"scenario:{args.robot}/{args.backend}/{args.task}/{args.role}"
         if args.robot is not None
         else str(args.config)
     )
@@ -712,11 +717,11 @@ def main() -> None:
     configuration = _load_configuration(args)
     try:
         if args.output is None:
-            args.output = recordings_root(args.robot, args.task)
+            args.output = recordings_root(args.robot, args.backend, args.task)
         runs_output = (
             args.runs_output
             if args.runs_output is not None
-            else runs_root(args.robot, args.task)
+            else runs_root(args.robot, args.backend, args.task)
         )
         if args.confirm:
             run_id = validate_run_id(

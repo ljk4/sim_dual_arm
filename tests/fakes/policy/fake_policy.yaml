@@ -38,7 +38,7 @@ service:
   processor_digest: 1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809
   observation_schema_hash: 2e6a0da228b94e75eaf3bd9206589402abdd677ef3ce30bfe9d0572f24b5b678
   action_schema_hash: d2509712bf248f859b8298d622bb1a9e7e9e28f42180ae22425f120faf41fe54
-  robot_profile_hash: a86b98fb6496165e6a4e97251a9046c38a1a9bc491c6b4625da1ce35f5256603
+  robot_profile_hash: 38c00b01d12b1d425c076df9e4c89ca1433dfa875e489d3f2e504e8f208e0dfb
   joint_names: [left_joint1, left_joint2, left_joint3, left_joint4, left_joint5, left_joint6, left_joint7, left_gripper_width, right_joint1, right_joint2, right_joint3, right_joint4, right_joint5, right_joint6, right_joint7, right_gripper_width]
   joint_lower_bounds: [-3.1067, -2.0944, -3.1067, -2.5307, -3.1067, -1.0472, -1.5708, 0.0014, -3.1067, -2.0944, -3.1067, -2.5307, -3.1067, -1.0472, -1.5708, 0.0014]
   joint_upper_bounds: [3.1067, 2.0944, 3.1067, 1.0472, 3.1067, 1.0472, 1.5708, 0.0814, 3.1067, 2.0944, 3.1067, 1.0472, 3.1067, 1.0472, 1.5708, 0.0814]

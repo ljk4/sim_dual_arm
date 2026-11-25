@@ -83,7 +83,10 @@ def discover_packages(shared_root: Path) -> tuple[PackageSource, ...]:
                     directory.resolve().relative_to(shared).as_posix(),
                 )
             )
-    for pattern in ("scenarios/*/extensions/ros/*", "scenarios/*/*/extensions/ros/*"):
+    for pattern in (
+        "robots/*/extensions/ros/*",
+        "scenarios/*/*/*/extensions/ros/*",
+    ):
         for directory in sorted(shared.glob(pattern)):
             if (directory / "package.xml").is_file():
                 packages.append(
@@ -288,10 +291,6 @@ def main(argv: list[str] | None = None) -> int:
         sub.add_argument("--project-root", type=Path, default=ROOT)
         sub.add_argument("--shared-root", type=Path)
         sub.add_argument("--build-root", type=Path, required=True)
-        # Accepted for caller compatibility; SDK always covers every package.
-        sub.add_argument("--scenario")
-        sub.add_argument("--robot")
-        sub.add_argument("--task")
     args = parser.parse_args(argv)
     try:
         if args.command == "build":

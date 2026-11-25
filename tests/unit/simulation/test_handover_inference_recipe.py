@@ -8,7 +8,7 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
-SCENARIO = ROOT / "shared/scenarios/marvin_sim/handover"
+SCENARIO = ROOT / "shared/scenarios/marvin/mujoco/handover"
 TASK = SCENARIO / "configs/simulation/scene/marvin_handover_task.yaml"
 INFERENCE_TASK = SCENARIO / "configs/simulation/scene/marvin_handover_task_inference.yaml"
 RUNTIME_POLICY = SCENARIO / "configs/runtime/policy_eval.yaml"
@@ -16,7 +16,7 @@ RUNTIME_POLICY = SCENARIO / "configs/runtime/policy_eval.yaml"
 
 def _load_task(path: Path):
     pytest.importorskip("mujoco")
-    from robot_backend_sim.marvin_sim.handover.task_config import load_handover_task_config
+    from robot_backend_sim.marvin.handover.task_config import load_handover_task_config
 
     return load_handover_task_config(path)
 
@@ -97,7 +97,7 @@ def test_runtime_and_task_evaluation_budgets_agree(tmp_path):
 
 
 def test_inference_following_budget_covers_measured_model_output_only():
-    profiles = ROOT / "shared/scenarios/marvin_sim/profiles"
+    profiles = ROOT / "shared/robots/marvin/profiles"
     inference = yaml.safe_load(
         (
             profiles / "control/marvin_follower_inference.yaml"

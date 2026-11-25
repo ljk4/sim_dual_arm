@@ -1,6 +1,6 @@
-"""Paths to the robot models shipped with this simulation project.
+"""Paths to the shared robot models under ``shared/robots/``.
 
-Every robot model is resolved from this end's own ``assets/`` root through the
+Every robot model is resolved from the shared ``robots/`` tree through the
 robot plugin registry, so ``common/`` never hardcodes any robot model path.
 """
 
@@ -8,13 +8,22 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from robot_contracts.project_paths import resolve_shared_root
+
 from robot_backend_sim.common.plugins import get_robot_plugin
 
-__all__ = ["ASSET_ROOT", "robot_model_path"]
+__all__ = ["ASSET_ROOT", "robot_model_path", "robots_asset_root"]
 
-ASSET_ROOT = Path(__file__).resolve().parents[4] / "assets"
+
+def robots_asset_root() -> Path:
+    """Return the shared ``robots/`` root containing canonical robot URDFs/meshes."""
+    return resolve_shared_root() / "robots"
+
+
+ASSET_ROOT = robots_asset_root()
 
 
 def robot_model_path(assembly: str) -> Path:
     """Resolve the model selected by ``robot.assembly``."""
-    return get_robot_plugin(assembly).model_path
+    path = Path(get_robot_plugin(assembly).model_path)
+    return path if path.is_absolute() else robots_asset_root() / path

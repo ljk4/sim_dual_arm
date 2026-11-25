@@ -1,22 +1,24 @@
 # 方案 binding 示例。本文件不是可运行方案。
 #
-# 使用方式：复制到 shared/scenarios/<robot-id>/<task-id>/binding.yaml，替换
-# 所有 REPLACE_ME / replace_me 占位值。入口只读取 binding.yaml；本文件名为
+# 使用方式：复制到 shared/scenarios/<robot-id>/<backend-id>/<task-id>/binding.yaml，
+# 替换所有 REPLACE_ME / replace_me 占位值。入口只读取 binding.yaml；本文件名为
 # binding.example.yaml，不会被方案选择选中，也不会回退到任何已有方案。
 #
 # 路径规则：
 #   - 本文件内的所有路径相对本文件所在目录解析，与调用者 cwd 无关。
 #   - source_roots 必须写成相对本文件目录的路径；profiles、recipes 与
 #     extension_ros 必须位于本文件目录或某个 source_root 之内。
+#     （若引用 shared/robots/<robot-id>/ 下的公共资产，需包含 "../../../../robots/<robot-id>"）
 #   - artifact_roots 可写绝对路径（容器内通常是 /data），也可写相对路径。
-#   - 学习端 Policy 服务从 models/ 选择最新模型，也可用 --model 指定模型目录。
+#   - 学习端 Policy 服务从 output/<robot-id>/<backend-id>/<task-id>/models/ 选择最新模型，
+#     也可用 --model 指定模型目录。
 #   - 数值配方不写进 binding；这里只记录被选中文件的路径。
 robot_id: replace_me
 task_id: replace_me
 description: "REPLACE_ME: one-line task description"
 
 backend:
-  # 当前只实现了 simulation/mujoco；hardware 没有已验证的真实驱动。
+  # 当前已接入闭环的是 simulation / mujoco；hardware（如 tianji）待适配 ROS 2 Robot API。
   kind: simulation
   implementation: REPLACE_ME
   task_type: REPLACE_ME
@@ -32,14 +34,13 @@ learning:
 
 profiles:
   # 公共档案的唯一权威来源。可引用本方案目录内的文件，也可通过
-  # source_roots 引用另一个方案目录中的既有档案；不要复制数值。
+  # source_roots 引用 shared/robots/<robot-id>/profiles/ 中的既有档案。
   robot: profiles/REPLACE_ME/profile.json
-  observation: profiles/REPLACE_ME/observation.json
-  action: profiles/REPLACE_ME/action.json
+  observation: ../../../../robots/REPLACE_ME/profiles/observations/REPLACE_ME.json
+  action: ../../../../robots/REPLACE_ME/profiles/actions/REPLACE_ME.json
 
 recipes:
-  # 各端拥有的数值配方。角色需要哪一份就显式选择哪一份；同一方案保留
-  # 两组配方时新增第二个文件并在这里分别引用，不使用继承或 defaults。
+  # 各端拥有的数值配方。角色需要哪一份就显式选择哪一份；不使用继承或 defaults。
   simulation_teacher: configs/REPLACE_ME/backend_teacher.yaml
   simulation_policy: configs/REPLACE_ME/backend_policy.yaml
   runtime_teacher: configs/REPLACE_ME/runtime_teacher.yaml

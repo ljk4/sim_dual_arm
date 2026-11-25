@@ -8,17 +8,17 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
-SCENARIO = ROOT / "shared/scenarios/marvin_sim/stack"
+SCENARIO = ROOT / "shared/scenarios/marvin/mujoco/stack"
 SIM_SRC = ROOT / "simulation/mujoco/src"
 if str(SIM_SRC) not in sys.path:
     sys.path.insert(0, str(SIM_SRC))
 
-from robot_backend_sim.marvin_sim.stack.config import (  # noqa: E402
+from robot_backend_sim.marvin.stack.config import (  # noqa: E402
     StackTaskConfigError,
     load_task_config,
     validate_scene_geometry,
 )
-from robot_backend_sim.marvin_sim.stack.scene_config import (  # noqa: E402
+from robot_backend_sim.marvin.stack.scene_config import (  # noqa: E402
     load_marvin_stack_scene_config,
 )
 

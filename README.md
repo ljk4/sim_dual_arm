@@ -1,34 +1,35 @@
 # sim_dual_arm
 
-面向双臂机器人的仿真数据采集、ACT 策略训练与流式控制闭环系统。当前提供两个可直接运行的方案：
+面向双臂机器人的仿真与真机采集、策略训练及流式控制闭环系统。系统按 **机器人本体（Robot）× 执行后端（Backend）× 运行编排（Runtime）× 学习范式（Learning）** 四维正交组织，当前提供两个完整闭环方案：
 
-- [`marvin_sim/stack`](shared/scenarios/marvin_sim/stack/README.md)：Marvin 固定基座双臂单臂堆叠；
-- [`marvin_sim/handover`](shared/scenarios/marvin_sim/handover/README.md)：Marvin 抓取—空中交接—入箱。
+- [`marvin/mujoco/stack`](shared/scenarios/marvin/mujoco/stack/README.md)：Marvin × MuJoCo 双臂桌面单臂堆叠；
+- [`marvin/mujoco/handover`](shared/scenarios/marvin/mujoco/handover/README.md)：Marvin × MuJoCo 抓取—空中交接—入箱。
 
-两个方案共用同一套通用实现：仿真端负责物理步进、三路相机渲染与程序示教（Teacher），运行端负责观测同步、流式动作块调度与 MCAP 录制，学习端负责数据集转换、ACT 训练与 gRPC Policy 服务。
+两个方案共用同一套通用实现与 Marvin 公共本体资产（`shared/robots/marvin/`）：MuJoCo 后端负责物理步进、三路相机渲染与程序示教（Teacher），运行端负责观测同步、流式动作块调度与 MCAP 录制，学习端负责数据集转换、ACT 训练与 gRPC Policy 服务。
 
 Stack 与 Handover 均按各自配方的固定物块位姿复位。采集和评估的种子用于区分运行。
 
 ## 架构概览
 
-仓库按职能划分为四个容器化运行端与公共/方案层：
+仓库按职能划分为运行端与可扩展执行/学习端、公共与本体资产层及三层方案绑定层：
 
-- **`simulation/mujoco/`**：MuJoCo 物理仿真后端，负责机器人动力学、三路 EGL 相机渲染、已提交轨迹的安全校验与执行、接触判定和程序示教。
-- **`runtime/ros2/`**：ROS 2 运行端，负责观测同步、控制租约、Policy 和 Teacher 的轨迹生成与提交、MCAP 录制与离线审计。仿真运行代码负责仿真任务和采集组织。
-- **`learning/lerobot/`**：ROS-free 学习与策略服务端，负责数据集转换、ACT 混合精度训练、模型（`model.safetensors` + `training_args.yaml`）写出与 gRPC Policy 推理服务。
-- **`hardware/tianji/`**：天机双臂、夹爪与相机驱动、设备配置和独立 Docker 环境，以及真机 Robot API 接入边界。
-- **`shared/common/`**：公共层，只放跨端接口约束（Policy Protobuf、ROS 2 IDL、JSON Schema）、共享 Python 包与通用工具（含宿主机并行编排），不选择具体任务、机器人或算法。
-- **`shared/scenarios/<robot-id>/<task-id>/`**：两级方案绑定层，用 `binding.yaml` 选择档案、配方与方案专用接口（如 `shared/scenarios/marvin_sim/stack/`、`shared/scenarios/marvin_sim/handover/`）；[`_template`](shared/scenarios/_template/README.md) 说明新增方案的方法。
+- **`simulation/mujoco/`**：MuJoCo 物理仿真后端（容器名 `mujoco`），负责机器人动力学、三路 EGL 相机渲染、已提交轨迹的安全校验与执行、接触判定和程序示教。
+- **`runtime/ros2/`**：ROS 2 运行中枢（容器名 `runtime`），负责观测同步、控制租约、Policy 和 Teacher 的轨迹生成与提交、MCAP 录制与离线审计。
+- **`learning/lerobot/`**：ROS-free 学习与策略服务端（容器名 `lerobot`），负责数据集转换、ACT 混合精度训练、模型（`model.safetensors` + `training_args.yaml`）写出与 gRPC Policy 推理服务。
+- **`hardware/tianji/`**：天机双臂、90C 夹爪与相机驱动、设备配置与独立 Docker 环境（容器名 `tianji`）；真机 ROS 2 接入与 Sim2Real 路线详见 [架构扩展与演进指南](docs/features/架构扩展与演进指南.md)。
+- **`shared/common/`**：公共层，存放跨端接口契约（Policy Protobuf、ROS 2 IDL、JSON Schema）、共享 Python 包与通用工具（含宿主机并行编排），与具体机器人、后端、任务或算法无关。
+- **`shared/robots/<robot-id>/`**：机器人本体公共资产（URDF、STL 网格、跨后端共享档案与机器人级 ROS 扩展，如 `shared/robots/marvin/`）。
+- **`shared/scenarios/<robot-id>/<backend-id>/<task-id>/`**：三层方案绑定层，用 `binding.yaml` 选择档案、配方与扩展接口（如 `shared/scenarios/marvin/mujoco/stack/`、`shared/scenarios/marvin/mujoco/handover/`）；[`_template`](shared/scenarios/_template/README.md) 说明新增方案的方法。
 
-使用 `--robot <robot-id> --task <task-id>` 时，该方案的 `binding.yaml` 在内存中选择并展开配方。条数、并发数和仿真倍速等运行参数使用专用选项，其余参数在对应配方中修改。直接配置模式使用各命令帮助列出的配置路径参数。
+使用 `--robot <robot-id> --backend <backend-id> --task <task-id>` 时，对应方案的 `binding.yaml` 在内存中选择并展开配方。条数、并发数和仿真倍速等运行参数使用专用选项，其余参数在对应配方中修改。直接配置模式使用各命令帮助列出的配置路径参数。
 
 ```text
-simulation backend ──ROS 2──▶ runtime ──gRPC──▶ learning policy service
-        ▲                        │
-        └──── 观测 / 执行反馈 ─────┘
+mujoco (or hardware) backend ──ROS 2──▶ runtime ──gRPC──▶ lerobot policy service
+             ▲                              │
+             └──────── 观测 / 执行反馈 ───────┘
 ```
 
-各端的详细职责分工、ROS 2 / gRPC 通信契约、两条核心协作闭环以及当前实现的架构审查与解耦规划，见 [跨端架构分工与解耦审查](docs/features/跨端架构分工与解耦审查.md)。
+各端职责分工、通信契约与未来扩展设计见 [跨端架构分工与解耦审查](docs/features/跨端架构分工与解耦审查.md) 与 [架构扩展与演进指南](docs/features/架构扩展与演进指南.md)。
 
 ---
 
@@ -40,56 +41,58 @@ simulation backend ──ROS 2──▶ runtime ──gRPC──▶ learning pol
 git clone https://github.com/ljk4/sim_dual_arm.git
 cd sim_dual_arm
 
-# 首次启动容器前，以当前宿主机用户创建输出根目录（使用 ./env.sh 启动时会自动创建）
-mkdir -p build var
+# 首次启动容器前，以当前宿主机用户创建输出根目录（使用 ./env.sh 启动时也会自动创建）
+mkdir -p output/build/ros-dev output/build/generated/policy-sdk
 ```
 
-仓库根目录通过 [`env.sh`](env.sh) 统一管理 `runtime`、`simulation`、`learning`、`hardware` 四个 Docker 环境；`env.sh` 完整子命令以及全部宿主机与容器内脚本的参数说明和示例见 [脚本入口与使用指南](docs/features/脚本入口与使用指南.md)。
+仓库根目录通过 [`env.sh`](env.sh) 统一管理 `runtime`、`mujoco`、`lerobot`、`tianji` 四个 Docker 环境；`env.sh` 完整子命令以及全部宿主机与容器内脚本的参数说明和示例见 [脚本入口与使用指南](docs/features/脚本入口与使用指南.md)。
 
-`build/` 仅存放运行时加载的生成 SDK，`var/` 存放运行日志、录制、数据集、模型与报告。各构建和运行命令按需创建子目录。首次启动前由宿主机用户创建这两个根目录，避免 Docker 自动创建后归 root 所有；UID/GID 应与 Compose 中的运行用户一致。
+所有运行与构建产物统一存放在 `output/`（不纳入 Git）：
+- `output/build/`：存放 `runtime` 构建的生成 SDK（`ros-dev/` 与 `generated/policy-sdk/`）。
+- `output/<robot-id>/<backend-id>/<task-id>/`（容器内 `/data/<robot-id>/<backend-id>/<task-id>/`）：按三层坐标隔离的运行产物，每个方案目录严格分为四个平级目录（`datasets/`、`models/`、`logs/`、`debug/`）。
 
-四端容器统一将各自的实现目录只读挂载为 `/app`（`working_dir: /app`），公共目录 `shared/` 只读挂载为 `/shared`，运行输出 `var/` 挂载为 `/data`；runtime 将 `build/` 挂载为 `/build`，simulation 只读挂载 `build/ros-dev` 至 `/opt/ros-dev`，learning 只读挂载 `build/generated/policy-sdk` 至 `/opt/policy-sdk`。更新挂载配置后，重新执行 `./env.sh up <env>` 使配置生效。
+容器统一将各自的实现目录只读挂载为 `/app`（`working_dir: /app`），公共目录 `shared/` 只读挂载为 `/shared`，运行输出 `output/` 挂载为 `/data`；`runtime` 将 `output/build/` 读写挂载为 `/build`，`mujoco` 与 `tianji` 只读挂载 `output/build/ros-dev` 至 `/opt/ros-dev` 与 `output/build` 至 `/data/build`，`lerobot` 只读挂载 `output/build/generated/policy-sdk` 至 `/opt/policy-sdk`。更新挂载配置后，重新执行 `./env.sh up <env>` 使配置生效。
 
-天机硬件环境使用 `./env.sh build hardware`、`./env.sh up hardware`，默认读取 `hardware/tianji/configs/devices.yaml` 中已迁入的设备配置。目录和使用方法见 [天机硬件后端](hardware/tianji/README.md)。
-
-所有采集、训练、推理与运行日志产物按机器人/任务对归入 `var/<robot-id>/<task-id>/`（容器 `/data/<robot-id>/<task-id>/`，如 `var/marvin_sim/stack/`、`var/marvin_sim/handover/`），任务目录内严格分为四个平级目录：
+天机硬件环境使用 `./env.sh build tianji`、`./env.sh up tianji`，默认读取 `hardware/tianji/configs/devices.yaml` 中已迁入的设备配置。目录和使用方法见 [天机硬件后端](hardware/tianji/README.md)。
 
 ```text
-var/<robot-id>/<task-id>/
-├── datasets/
-│   ├── raw/
-│   │   ├── formal-select.json               # 正式达标时发布的有序合格局清单
-│   │   └── <purpose>-<seed>-<run_id>/       # 每次合格采集尝试
-│   │       ├── raw/                         # manifest.json、task_result.json、recording/（rosbag2 MCAP）
-│   │       └── export/                      # labels.json、raw_predictions.json、quality.json、rgb/<frame>/<camera>.png
-│   └── lerobot/                             # 转换后的 train/、validation/、processors/、manifest.json
-├── models/
-│   └── act_<YYYYMMDD_HHMMSS>/
-│       ├── model.safetensors                # 网络权重与归一化统计量，推理直接加载
-│       └── training_args.yaml               # 训练参数备忘，仅记录不消费
-├── logs/
-│   ├── backend/<run-id>/                    # 后端就绪标记（ready.json）、快照（backend.yaml）、status.json 与事件日志
-│   ├── collection/
-│   │   ├── attempts.jsonl                   # 追加式采集台账：预算、种子、终态
-│   │   ├── attempts/<attempt>/              # 每次采集尝试的运行日志
-│   │   └── record-pools/pool_*/             # 并行采集批次配置、worker 日志与汇总
-│   ├── convert/                             # 数据集转换详细日志
-│   ├── training/act_<YYYYMMDD_HHMMSS>/      # 训练事件、指标与终态摘要
-│   ├── policy-service/                      # 策略服务日志与预测记录
-│   ├── recordings/<run-id>/                 # 交互/单局推理录制
-│   ├── runs/                                # 运行端会话日志
-│   └── batch-policy/<batch-id>/             # 并行批量推理逐局记录与日志
-└── debug/
-    └── batch-policy/<batch-id>/report.json  # 并行批量推理评估报告
+output/
+├── build/
+│   ├── ros-dev/                             # 编译生成的 ROS 2 接口工作空间
+│   └── generated/policy-sdk/                # 编译生成的 Policy gRPC/Protobuf Python SDK
+└── <robot-id>/<backend-id>/<task-id>/       # 如 output/marvin/mujoco/stack/
+    ├── datasets/
+    │   ├── raw/
+    │   │   ├── formal-select.json           # 正式达标时发布的有序合格局清单
+    │   │   └── <purpose>-<seed>-<run_id>/   # 每次合格采集尝试
+    │   │       ├── raw/                     # manifest.json、task_result.json、recording/（MCAP）
+    │   │       └── export/                  # labels.json、raw_predictions.json、quality.json、rgb/<frame>/<camera>.png
+    │   └── lerobot/                         # 转换后的 train/、validation/、processors/、manifest.json
+    ├── models/
+    │   └── act_<YYYYMMDD_HHMMSS>/
+    │       ├── model.safetensors            # 网络权重与归一化统计量，推理直接加载
+    │       └── training_args.yaml           # 训练参数备忘，仅记录不消费
+    ├── logs/
+    │   ├── backend/<run-id>/                # 后端就绪标记（ready.json）、快照（backend.yaml）、status.json 与日志
+    │   ├── collection/
+    │   │   ├── attempts.jsonl               # 追加式采集台账：预算、种子、终态
+    │   │   ├── attempts/<attempt>/          # 每次采集尝试的运行日志
+    │   │   └── record-pools/pool_*/         # 并行采集批次配置、worker 日志与汇总
+    │   ├── convert/                         # 数据集转换详细日志
+    │   ├── training/act_<YYYYMMDD_HHMMSS>/  # 训练事件、指标与终态摘要
+    │   ├── policy-service/                  # 策略服务日志与预测记录
+    │   ├── recordings/<run-id>/             # 交互/单局推理录制
+    │   ├── runs/                            # 运行端会话日志
+    │   └── batch-policy/<batch-id>/         # 并行批量推理逐局记录与日志
+    └── debug/
+        └── batch-policy/<batch-id>/report.json  # 并行批量推理评估报告
 ```
 
-直接配置模式没有机器人/任务对，统一使用保留段 `var/_direct/`；与方案无关的系统级调试产物写入 `var/_system/debug/`。
+直接配置模式没有 `<robot-id>/<backend-id>/<task-id>` 三元组，统一使用保留段 `output/_direct/`；与方案无关的系统级调试产物写入 `output/_system/debug/`（`build` 为保留 `robot-id`）。
 
-仓库不附带已生成的 SDK、采集数据、训练权重或模型包。下文的输出路径用于生成和使用本机产物；历史实验记录不代表当前机器已有这些文件。
+学习端另外使用固定版本的 LeRobot 源码与离线权重，首次使用须按[第三方源码说明](third_party/README.md)准备；容器镜像不会代为恢复宿主机已清理的源码目录。
 
-学习端另外使用固定版本的 LeRobot 源码，首次使用须按[第三方源码说明](third_party/README.md)准备；容器镜像不会代为恢复宿主机已清理的源码目录。
-
-也可以只用 uv 在云服务器上搭建学习端，并让本机的运行端/仿真端通过 SSH 隧道连接云端策略服务，完整步骤见 [`learning/lerobot/README.md`](learning/lerobot/README.md)。
+也可以只用 `uv` 在云服务器上搭建学习端，并让本机的运行端/仿真端通过 SSH 隧道连接云端策略服务，完整步骤见 [`learning/lerobot/README.md`](learning/lerobot/README.md)。
 
 ---
 
@@ -112,51 +115,50 @@ var/<robot-id>/<task-id>/
 scripts/build_sdk.sh
 ```
 
-### 2.2 启动 Simulation 容器与试采示教后端
+### 2.2 启动 MuJoCo 容器与试采示教后端
 
-在宿主机新终端中构建并进入 `simulation` 容器：
+在宿主机新终端中构建并进入 `mujoco` 容器：
 
 ```bash
-./env.sh simulation
+./env.sh build mujoco
+./env.sh mujoco
 ```
 
-在 `simulation` 容器内直接以方案启动示教后端（显式指定机器人/任务；`--seed` 未传时随机，`--run-id` 默认 `teacher-backend`，启动时会打印所用配置文件路径与完整生效参数）：
+在 `mujoco` 容器内直接以方案启动示教后端（显式指定机器人/后端/任务；`--seed` 未传时随机，`--run-id` 默认 `teacher-backend`，启动时会打印所用配置文件路径与完整生效参数）：
 
 ```bash
-scripts/teacher_backend.sh --robot marvin_sim --task stack
+scripts/teacher_backend.sh --robot marvin --backend mujoco --task stack
 ```
 
 降低仿真速度时使用 `--realtime-speed`。其他仿真参数在方案的 Teacher 后端配方中修改。
 
 ```bash
-scripts/teacher_backend.sh --robot marvin_sim --task stack --seed 0 --run-id teacher-backend --realtime-speed 0.4
+scripts/teacher_backend.sh --robot marvin --backend mujoco --task stack --seed 0 --run-id teacher-backend --realtime-speed 0.4
 ```
 
 ### 2.3 试采时开启实时 MuJoCo 可视化（可选）
 
-`viewer` 独立订阅后端发布的只读物理状态快照，不参与物理步进与控制，仅需指定 `--robot` 与 `--task`。在宿主机桌面环境下（若报 X11 权限错误，先在宿主机执行 `xhost +SI:localuser:$(id -un)`）：
+`viewer` 独立订阅后端发布的只读物理状态快照，不参与物理步进与控制。在宿主机桌面环境下（若报 X11 权限错误，先在宿主机执行 `xhost +SI:localuser:$(id -un)`）：
 
 ```bash
-./env.sh viewer --robot marvin_sim --task stack
+./env.sh viewer --robot marvin --backend mujoco --task stack
 ```
 
 ### 2.4 单路试采一次，确认完整链路
 
-回到 `runtime` 容器终端，使用刚启动的手动 teacher backend 试采一次。试采指定 `pilot`，不占正式采集名额（`scripts/record.sh` 会在目录不存在时自动创建、已有台账时默认增量追加，并在启动后自动打印所用配置文件路径、详细参数与当前采集状态）：
+回到 `runtime` 容器终端，使用刚启动的手动 teacher backend 试采一次。试采指定 `pilot`，不占正式采集名额：
 
 ```bash
 # 只试一次：合格即结束，失败也立即结束
 scripts/record.sh \
-  --robot marvin_sim --task stack --purpose pilot --count 1 --max-consecutive-failures 1
+  --robot marvin --backend mujoco --task stack --purpose pilot --count 1 --max-consecutive-failures 1
 ```
 
-确认试采命令退出码为 0，末尾 `采集结束：目标达成 | 合格 1/1`；本局应同时满足任务成功、录制完整、导出质量合格。若失败，先检查日志并修复，再重新执行本节的试采命令。
-
-`--count` 统计本次新增合格条数；`--max-consecutive-failures 1` 让试采最多尝试一次。每次试采继续记录在原台账并占用 pilot 预算，种子自动递增。正式清单只收录合格的 formal 采集局。
+确认试采命令退出码为 0，末尾 `采集结束：目标达成 | 合格 1/1`；本局应同时满足任务成功、录制完整、导出质量合格。
 
 ### 2.5 停止试采后端和 viewer
 
-试采合格后，在 viewer 终端（若已开启）和手动 teacher backend 终端分别按 `Ctrl-C`，释放计算资源。保留 runtime 容器运行；simulation 容器可保持空闲，后续第 3.4 节仍会使用它启动推理后端。
+试采合格后，在 viewer 终端（若已开启）和手动 teacher backend 终端分别按 `Ctrl-C`，释放计算资源。保留 `runtime` 容器运行；`mujoco` 容器可保持空闲，后续第 3.4 节仍会使用它启动推理后端。
 
 ### 2.6 宿主机并行采集，补足 50 条合格正式数据
 
@@ -164,20 +166,18 @@ scripts/record.sh \
 
 ```bash
 ./record_parallel.sh \
-  --robot marvin_sim --task stack --purpose formal --target-total 50 \
+  --robot marvin --backend mujoco --task stack --purpose formal --target-total 50 \
   --workers auto --max-consecutive-failures 3
 ```
 
-`--target-total 50` 表示正式台账累计达到 50 条合格数据（可按需改为任意正整数，配方不限制数量上限）：已有正式数据时只补足差额；已经达到目标则直接成功退出。若中断或连续失败提前结束，修复原因后再次执行相同命令即可续采，不需要手动计算剩余条数或清空台账。
-
-并行 worker 禁用 viewer 状态发布、预览 PNG 和 GIF，保留训练 RGB、标签及质量门禁。连续失败按各 worker 进程独立计数，合格一次清零，终端只显示当前最大连败数；任一 worker 连续 3 次不合格会取消在途任务并提前退出，取消项仍保留在台账中。剩余磁盘低于配方 `min_free_bytes` 时也会停止。按 `Ctrl-C` 可中断本批次；命令结束时自动清理本批次后台实例。配置、backend 日志和性能汇总保存到 `var/marvin_sim/stack/logs/collection/record-pools/pool_*/`。
+`--target-total 50` 表示正式台账累计达到 50 条合格数据：已有正式数据时只补足差额；已经达到目标则直接成功退出。配置、backend 日志和性能汇总保存到 `output/marvin/mujoco/stack/logs/collection/record-pools/pool_*/`。
 
 ### 2.7 查看采集与正式清单状态
 
 在 **runtime 容器终端**查看合格条数、磁盘占用与正式清单状态：
 
 ```bash
-scripts/record.sh status --robot marvin_sim --task stack
+scripts/record.sh status --robot marvin --backend mujoco --task stack
 ```
 
 确认清单状态显示为 `SELECTED` 后，即可进入第 3 节的转换与训练。
@@ -186,137 +186,125 @@ scripts/record.sh status --robot marvin_sim --task stack
 
 ## 3. 训练与策略推理流程
 
-### 3.1 启动 Learning 容器
+### 3.1 启动 LeRobot 容器
 
-在宿主机新终端中构建并进入 `learning` 容器：
+在宿主机新终端中启动并进入 `lerobot` 容器：
 
 ```bash
-./env.sh learning
+./env.sh lerobot
 ```
 
 ### 3.2 转换数据集与训练 ACT 模型
 
-在 `learning` 容器内读取 `/data/marvin_sim/stack/datasets/raw/formal-select.json`。转换器按 `act_dataset.yaml` 的 `validation_percent` 随机抽取整局作为验证集，其余局进入训练集。正式配方使用 10%，50 条合格局划分为 45 条训练和 5 条验证。划分结果写入 `/data/marvin_sim/stack/datasets/lerobot/manifest.json`。
+在 `lerobot` 容器内读取 `/data/marvin/mujoco/stack/datasets/raw/formal-select.json`。转换器按 `act_dataset.yaml` 的 `validation_percent` 随机抽取整局作为验证集（默认 10%，50 条合格局划分为 45 条训练和 5 条验证），划分结果写入 `/data/marvin/mujoco/stack/datasets/lerobot/manifest.json`。
 
 ```bash
-scripts/convert.sh --robot marvin_sim --task stack
+scripts/convert.sh --robot marvin --backend mujoco --task stack
 ```
 
-训练使用共享官方 ResNet18 权重文件 `third_party/weights/resnet18-f37072fd.pth`（两方案共用，长期保留，不属于 `build/` 生成产物）；也可在 learning 容器内用 `RESNET18_WEIGHTS` 指定现有权重文件。训练按离线方式运行，缺少权重时会报错，不会自动下载。
+训练使用共享官方 ResNet18 权重文件 `third_party/weights/resnet18-f37072fd.pth`（按离线方式运行）；也可在容器内用 `RESNET18_WEIGHTS` 指定现有权重文件。
 
 启动完整模式训练（默认 5000 步，启用 PyAV 视频解码、张量批处理、多进程预取与 CUDA bfloat16 混合精度）：
 
 ```bash
-scripts/train.sh --robot marvin_sim --task stack --mode full
+scripts/train.sh --robot marvin --backend mujoco --task stack --mode full
 ```
 
-训练直接写出可部署模型目录 `var/marvin_sim/stack/models/act_<YYYYMMDD_HHMMSS>/`（包含 `model.safetensors` 与 `training_args.yaml`），训练事件、指标和终态摘要保存在 `var/marvin_sim/stack/logs/training/act_<YYYYMMDD_HHMMSS>/`（完整产物目录结构见上文 [1. 环境准备](#1-环境准备)）。
+训练直接写出可部署模型目录 `output/marvin/mujoco/stack/models/act_<YYYYMMDD_HHMMSS>/`（包含 `model.safetensors` 与 `training_args.yaml`），训练事件、指标和终态摘要保存在 `output/marvin/mujoco/stack/logs/training/act_<YYYYMMDD_HHMMSS>/`。
 
 ### 3.3 直接启动 Policy 推理服务
 
-在 `learning` 容器内启动 gRPC Policy 服务；`--robot/--task` 读取方案绑定的 `policy_service` 配方、机器人档案与模型。省略 `--model` 时自动选择 `/data/marvin_sim/stack/models/` 下最新的 `act_*` 模型目录；也可显式指定模型目录或 `model.safetensors`：
+在 `lerobot` 容器内启动 gRPC Policy 服务；省略 `--model` 时自动选择 `/data/marvin/mujoco/stack/models/` 下最新的 `act_*` 模型目录，也可显式指定模型目录或 `model.safetensors`：
 
 ```bash
-scripts/server_policy.sh --robot marvin_sim --task stack
+scripts/server_policy.sh --robot marvin --backend mujoco --task stack
 # 或显式指定模型
-scripts/server_policy.sh --robot marvin_sim --task stack \
-  --model /data/marvin_sim/stack/models/act_<YYYYMMDD_HHMMSS>
+scripts/server_policy.sh --robot marvin --backend mujoco --task stack \
+  --model /data/marvin/mujoco/stack/models/act_<YYYYMMDD_HHMMSS>
 ```
 
-服务默认监听 `50051`，日志目录为 `/data/marvin_sim/stack/logs/policy-service`（可用 `--log-directory` 或环境变量 `ACT_LOG_DIRECTORY` 修改）。保持该终端运行。
+服务默认监听 `50051`，日志目录为 `/data/marvin/mujoco/stack/logs/policy-service`。保持该终端运行。
 
 ### 3.4 直接启动推理仿真后端
 
-回到 `simulation` 容器，以 policy 角色启动后端（自动生成 `inference_backend_<robot>_<task>_<YYYYMMDD_HHMMSS>` 作为 `run_id`，`--seed` 未传时随机）：
+回到 `mujoco` 容器，以 policy 角色启动后端（自动生成 `inference_backend_<robot>_<backend>_<task>_<YYYYMMDD_HHMMSS>` 作为 `run_id`，`--seed` 未传时随机）：
 
 ```bash
 scripts/inference_backend.sh \
-  --robot marvin_sim --task stack
+  --robot marvin --backend mujoco --task stack
 ```
 
-就绪标记、运行快照与日志分别位于 `/data/marvin_sim/stack/logs/backend/inference_backend_marvin_sim_stack_<YYYYMMDD_HHMMSS>/ready.json`、`backend.yaml` 与 `log`。后端与第 3.3 节的 Policy 服务、第 3.5 节的 runtime 需同时在线。
+就绪标记、运行快照与日志分别位于 `/data/marvin/mujoco/stack/logs/backend/inference_backend_marvin_mujoco_stack_<YYYYMMDD_HHMMSS>/ready.json`、`backend.yaml` 与 `log`。后端与第 3.3 节的 Policy 服务、第 3.5 节的 runtime 需同时在线。
 
 ### 3.5 直接运行推理或交互闭环
 
-回到 `runtime` 容器，直接以方案启动一局交互式闭环（自动生成 `client_interactive_<robot>_<task>_<YYYYMMDD_HHMMSS>` 作为 `run_id`，`--seed` 未传时随机；输入 `y` 复位环境并执行一局，结束后保持 IDLE 直至 `Ctrl-C` 退出）：
+回到 `runtime` 容器，启动一局交互式闭环（输入 `y` 复位环境并执行一局，结束后保持 `IDLE` 直至 `Ctrl-C` 退出）：
 
 ```bash
 scripts/client_interactive.sh \
-  --robot marvin_sim --task stack \
+  --robot marvin --backend mujoco --task stack \
   --seed 6000
 ```
 
-非交互式单局执行使用 `scripts/client_policy.sh`，录制默认落到 `/data/marvin_sim/stack/logs/recordings/<run-id>`；需要另选位置时再显式传 `--output`：
+非交互式单局执行使用 `scripts/client_policy.sh`，录制默认落到 `/data/marvin/mujoco/stack/logs/recordings/<run-id>`：
 
 ```bash
 scripts/client_policy.sh \
-  --robot marvin_sim --task stack \
+  --robot marvin --backend mujoco --task stack \
   --reset-seed 6000 --run-id policy-run
 ```
 
-再次执行同一固定布局时，可以用新的种子区分运行：
-
-```bash
-scripts/client_interactive.sh \
-  --robot marvin_sim --task stack \
-  --seed 6001
-```
-
-如需无人工干预的**并行**批量仿真推理测试，在**本机项目根目录**执行（仅支持 MuJoCo 仿真后端且禁止可视化；只需保持第 3.3 节 `learning` 容器的 `scripts/server_policy.sh` 在线，入口会自动启动多路隔离的仿真后端与运行时，结束时清理）：
+如需无人工干预的**并行**批量仿真推理测试，在**本机项目根目录**执行（需保持第 3.3 节 `lerobot` 容器的 `scripts/server_policy.sh` 在线）：
 
 ```bash
 ./inference_parallel.sh \
-  --robot marvin_sim --task stack \
+  --robot marvin --backend mujoco --task stack \
   --count 10 --seed-start 6000 --workers auto
 ```
-
-`--workers auto` 按 CPU、内存与显存选择至多 4 路；也可固定并发（`--workers 4`）。`--max-consecutive-failures` 可选；任一 worker 连续失败达到上限即停止并清理在途任务。验收要求每个方案至少一次真实任务成功。
 
 如需将录制的单局或批量推理 MCAP 合成为多视角可视化 MP4（默认保存到同目录下的 `<目录名>.mp4`），可在宿主机项目根目录运行：
 
 ```bash
-./recording_to_video.sh var/marvin_sim/stack/logs/recordings/policy-run
+./recording_to_video.sh output/marvin/mujoco/stack/logs/recordings/policy-run
 ```
 
 ---
 
-## 4. 使用 marvin_sim/handover
+## 4. 使用 marvin/mujoco/handover
 
-`marvin_sim/handover` 与 `marvin_sim/stack` 使用完全相同的入口，训练默认同样为 50 条正式数据（45 训练 / 5 验证）与 full 5000 步，共享同一份 ResNet18 权重；只需替换 `--robot/--task`：
+`marvin/mujoco/handover` 与 `marvin/mujoco/stack` 使用完全相同的入口，只需替换 `--task`：
 
 ```bash
-# simulation：示教后端（--run-id 为前缀，自动追加 _YYYYMMDD_HHMMSS 时间戳）
-scripts/teacher_backend.sh --robot marvin_sim --task handover --seed 0 --run-id teacher-backend
+# mujoco：示教后端
+scripts/teacher_backend.sh --robot marvin --backend mujoco --task handover --seed 0 --run-id teacher-backend
 
-# 宿主机（可选）：启动 MuJoCo 实时可视化（若报 X11 权限错误先执行 xhost +SI:localuser:$(id -un)）
-./env.sh viewer --robot marvin_sim --task handover
+# 宿主机（可选）：MuJoCo 实时可视化
+./env.sh viewer --robot marvin --backend mujoco --task handover
 
 # runtime：试采
-scripts/record.sh --robot marvin_sim --task handover \
+scripts/record.sh --robot marvin --backend mujoco --task handover \
   --purpose pilot --count 1 --max-consecutive-failures 1
 
 # 宿主机项目根目录：并行补足 50 条正式数据
-./record_parallel.sh --robot marvin_sim --task handover \
+./record_parallel.sh --robot marvin --backend mujoco --task handover \
   --purpose formal --target-total 50 --workers auto
 
-# learning：正式转换与 full 训练
-scripts/convert.sh --robot marvin_sim --task handover
-scripts/train.sh --robot marvin_sim --task handover --mode full
+# lerobot：正式转换与 full 训练
+scripts/convert.sh --robot marvin --backend mujoco --task handover
+scripts/train.sh --robot marvin --backend mujoco --task handover --mode full
 
-# 推理：learning 策略服务、simulation 后端、runtime 交互闭环（可选用 ./env.sh viewer --robot marvin_sim --task handover 查看可视化）
-scripts/server_policy.sh --robot marvin_sim --task handover
-scripts/inference_backend.sh --robot marvin_sim --task handover \
-  --seed 5100
-scripts/client_interactive.sh --robot marvin_sim --task handover \
-  --seed 5100
+# 推理：lerobot 策略服务、mujoco 后端、runtime 交互闭环
+scripts/server_policy.sh --robot marvin --backend mujoco --task handover
+scripts/inference_backend.sh --robot marvin --backend mujoco --task handover --seed 5100
+scripts/client_interactive.sh --robot marvin --backend mujoco --task handover --seed 5100
 
-# 本机项目根目录：并行批量推理（需保持上方 server_policy.sh 在线）
-./inference_parallel.sh --robot marvin_sim --task handover \
+# 本机项目根目录：并行批量推理
+./inference_parallel.sh --robot marvin --backend mujoco --task handover \
   --count 10 --seed-start 5100 --workers auto
 ```
 
-`scripts/server_policy.sh` 省略 `--model` 时自动加载 `/data/marvin_sim/handover/models/` 下最新的 `act_*` 模型，也可用 `--model` 显式指定；方案说明见 [`shared/scenarios/marvin_sim/handover/README.md`](shared/scenarios/marvin_sim/handover/README.md)。
+方案详细说明见 [`shared/scenarios/marvin/mujoco/handover/README.md`](shared/scenarios/marvin/mujoco/handover/README.md)。
 
 ---
 
-目录导航：[文档索引](docs/README.md) · [脚本入口与使用指南](docs/features/脚本入口与使用指南.md) · [跨端架构分工与解耦审查](docs/features/跨端架构分工与解耦审查.md) · [重要实践与经验](docs/experiments/README.md) · [公共层与方案绑定](shared/README.md) · [Agent 指导与规范](AGENTS.md)
+目录导航：[文档索引](docs/README.md) · [脚本入口与使用指南](docs/features/脚本入口与使用指南.md) · [跨端架构分工与解耦审查](docs/features/跨端架构分工与解耦审查.md) · [架构扩展与演进指南](docs/features/架构扩展与演进指南.md) · [重要实践与经验](docs/experiments/README.md) · [公共层与方案绑定](shared/README.md) · [Agent 指导与规范](AGENTS.md)
