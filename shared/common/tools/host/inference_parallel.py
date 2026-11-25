@@ -158,6 +158,13 @@ class DockerWorkers(BaseDockerWorkers):
             timeout_message="parallel inference backends did not become ready within 60 seconds",
         )
 
+    def runtime_command(
+        self, arguments: list[str], *, pid_file: str | None = None
+    ) -> list[str]:
+        command = super().runtime_command(arguments, pid_file=pid_file)
+        # Insert INFERENCE_HOST_MANAGED=1 right after "docker exec"
+        return [*command[:2], "-e", "INFERENCE_HOST_MANAGED=1", *command[2:]]
+
     def run(self) -> int:
         relative = Path(host_path_to_container(self.directory, self.args.project_root))
         command = self.runtime_command(
@@ -227,12 +234,13 @@ def _print_startup_info(args: argparse.Namespace, plan: dict, directory: Path) -
         print(f"Runtime 配方: {args.runtime_config}", flush=True)
         print(f"Backend 配方: {args.backend_template}", flush=True)
     print(
-        f"局数: {args.count} | 起始 seed: {args.seed_start} | worker: {args.workers} | "
+        f"局数: {args.count} | 起始 seed: {args.seed_start} | "
+        f"并行 worker: {args.workers}（无可视化） | "
         f"最大连败: {args.max_consecutive_failures or '不限'} | "
         f"实时倍速: {args.realtime_speed if args.realtime_speed is not None else '配方默认'}",
         flush=True,
     )
-    print(f"批次目录: {directory}", flush=True)
+    print(f"批次目录: {directory.parent}", flush=True)
     if args.policy_endpoint is not None:
         print(f"策略服务: {args.policy_endpoint}", flush=True)
 
@@ -308,25 +316,24 @@ def main(argv: list[str] | None = None) -> int:
     previous = signal.signal(signal.SIGTERM, interrupted)
     try:
         plan = docker.preflight()
-        _print_startup_info(args, plan, directory)
         args.workers = min(args.workers, args.count)
+        _print_startup_info(args, plan, directory)
         directory.parent.mkdir(parents=True, exist_ok=True)
         workers = docker.prepare(plan)
-        print(
-            f"并行 worker: {args.workers}（无可视化） | 批次目录: {directory.parent}",
-            flush=True,
-        )
+        print(f"正在启动 {args.workers} 个无头仿真 worker 并等待就绪...", flush=True)
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as executor:
             list(executor.map(docker.start_backend, workers))
         docker.wait_ready(workers)
+        print(f"全部 {args.workers} 个 worker 已就绪，开始并行推理。", flush=True)
         code = docker.run()
         if report_path.is_file():
             print(f"报告: {report_path}", flush=True)
         return code
     except KeyboardInterrupt:
+        print("\n收到中断信号，正在停止并行推理并清理 worker 容器...", file=sys.stderr, flush=True)
         return 130
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
-        print(f"parallel inference: {error}", file=sys.stderr)
+        print(f"错误: 并行推理失败: {error}", file=sys.stderr, flush=True)
         return 2
     finally:
         signal.signal(signal.SIGTERM, previous)

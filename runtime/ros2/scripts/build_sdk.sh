@@ -47,9 +47,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ "$build_ros" == "true" ]]; then
+  echo "=== 构建 ROS 2 接口工作空间 ==="
   bash "$SHARED_ROOT/common/tools/scripts/build_ros_sdk.sh" --shared-root "$SHARED_ROOT"
 fi
 
 if [[ "$build_policy" == "true" ]]; then
+  echo "=== 生成 Policy Protobuf/gRPC SDK ==="
   bash "$SHARED_ROOT/common/tools/scripts/build_policy_sdk.sh"
 fi
+
+echo "=== SDK 构建完成 ==="

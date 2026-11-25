@@ -15,7 +15,7 @@ if [[ " $* " != *" -h "* && " $* " != *" --help "* ]]; then
     --build-root "$ROS_SDK" 1>/dev/null
   python3 "${SHARED_ROOT:-$ROOT/shared}/common/tools/scripts/policy_sdk.py" check \
     --project-root "$ROOT" \
-    --sdk-root "$POLICY_SDK" >/dev/null 2>&1
+    --sdk-root "$POLICY_SDK" >/dev/null
 fi
 
 exec python3 -m dual_arm_runtime.runtime_node \

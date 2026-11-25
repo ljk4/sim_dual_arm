@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import signal
+import sys
 import threading
 import time
 import uuid
@@ -204,7 +205,9 @@ class PolicyServer:
         policy_pb2_grpc.add_PolicyServiceServicer_to_server(self.servicer, self._server)
         self.port = self._server.add_insecure_port(f"{config.bind_address}:{config.port}")
         if not self.port:
-            raise RuntimeError("cannot bind Policy service")
+            raise RuntimeError(
+                f"无法绑定策略服务地址 {config.bind_address}:{config.port}（端口可能已被占用）"
+            )
 
     def start(self) -> int:
         self._server.start()
@@ -281,10 +284,18 @@ def serve_forever(
             stopping.set()
 
         previous = {s: signal.signal(s, request_stop) for s in (signal.SIGINT, signal.SIGTERM)}
-        print(f"policy service listening on {config.bind_address}:{port}", flush=True)
+        print(
+            f"策略推理服务已就绪 (listening on {config.bind_address}:{port}) — 按 Ctrl-C 停止",
+            flush=True,
+        )
         server.wait(stopping)
     except Exception as error:
         code = 1
+        print(
+            f"错误: 策略推理服务运行失败 ({type(error).__name__}): {error}",
+            file=sys.stderr,
+            flush=True,
+        )
         try:
             log.emit(
                 "policy.failed",

@@ -314,9 +314,23 @@ def _prepare_run(parsed: argparse.Namespace):
     config = config.model_copy(update={"source": snapshot})
     if target is not None:
         print(
+            "=== 仿真后端启动 ===\n"
             f"方案: {robot}/{task} | 角色: {parsed.role} | run_id: {run_id} | seed: {config.seed}\n"
             f"Binding: {selection['binding']['path']}\n"
             f"后端配方: {selection['recipe']['path']}\n"
+            f"命名空间: {config.namespace} | 倍速: {config.realtime_speed}x | "
+            f"可视化: {'开启' if config.visualization_enabled else '关闭'}\n"
+            f"运行日志: {run_dir / 'log'}\n"
+            "================================",
+            flush=True,
+        )
+    else:
+        print(
+            "=== 仿真后端启动 (direct) ===\n"
+            f"配置文件: {parsed.config} | run_id: {run_id} | seed: {config.seed}\n"
+            f"配置快照: {snapshot}\n"
+            f"命名空间: {config.namespace} | 倍速: {config.realtime_speed}x | "
+            f"可视化: {'开启' if config.visualization_enabled else '关闭'}\n"
             f"运行日志: {run_dir / 'log'}\n"
             "================================",
             flush=True,
@@ -512,6 +526,13 @@ def run(argv: list[str] | None = None) -> int:
         "summary": _summary_document(summary),
     }
     write_json_atomic(run_dir / "status.json", status)
+    if exit_code != _EXIT_OK or failure is not None:
+        print(
+            f"错误: 仿真后端异常退出: {failure or f'exit_code={exit_code}'} "
+            f"（详情见 {run_dir / 'status.json'} 与 {run_dir / 'log'}）",
+            file=sys.stderr,
+            flush=True,
+        )
     print(f"仿真后端已停止 (run_id={run_id}, exit_code={exit_code})", flush=True)
     return exit_code
 

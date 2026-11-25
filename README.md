@@ -150,7 +150,7 @@ scripts/record.sh \
   --robot marvin_sim --task stack --purpose pilot --count 1 --max-consecutive-failures 1
 ```
 
-确认试采命令退出码为 0，末尾 `recording.finished` 的 `reason` 为 `target_reached`、`qualified` 为 1；本局应同时满足任务成功、录制完整、导出质量合格。若失败，先检查日志并修复，再重新执行本节的试采命令。
+确认试采命令退出码为 0，末尾 `采集结束：目标达成 | 合格 1/1`；本局应同时满足任务成功、录制完整、导出质量合格。若失败，先检查日志并修复，再重新执行本节的试采命令。
 
 `--count` 统计本次新增合格条数；`--max-consecutive-failures 1` 让试采最多尝试一次。每次试采继续记录在原台账并占用 pilot 预算，种子自动递增。正式清单只收录合格的 formal 采集局。
 
@@ -271,6 +271,12 @@ scripts/client_interactive.sh \
 ```
 
 `--workers auto` 按 CPU、内存与显存选择至多 4 路；也可固定并发（`--workers 4`）。`--max-consecutive-failures` 可选；任一 worker 连续失败达到上限即停止并清理在途任务。验收要求每个方案至少一次真实任务成功。
+
+如需将录制的单局或批量推理 MCAP 合成为多视角可视化 MP4（默认保存到同目录下的 `<目录名>.mp4`），可在宿主机项目根目录运行：
+
+```bash
+./recording_to_video.sh var/marvin_sim/stack/logs/recordings/policy-run
+```
 
 ---
 

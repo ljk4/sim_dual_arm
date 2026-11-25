@@ -18,7 +18,7 @@ done
 if [[ "$has_help" != "true" ]]; then
   python3 "${SHARED_ROOT:-$ROOT/shared}/common/tools/scripts/dev_workspace.py" check \
     --project-root "$ROOT" \
-    --build-root "$ROS_SDK" 1>&2
+    --build-root "$ROS_SDK" >/dev/null
 fi
 
 exec bash "${SHARED_ROOT:-$ROOT/shared}/common/tools/scripts/test.sh" "$@"

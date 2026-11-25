@@ -401,7 +401,7 @@ def _status_command(argv: list[str]) -> int:
         _print_status(args, config, ledger)
         return 0
     except (CampaignError, OSError, ValueError) as error:
-        print(f"status error: {error}", file=sys.stderr)
+        print(f"错误: 查询采集状态失败: {error}", file=sys.stderr)
         return 2
 
 
@@ -437,7 +437,14 @@ def main(argv: list[str] | None = None) -> int:
         _print_startup_info(args, config, ledger)
         return record(args, config, ledger)
     except (CampaignError, OSError) as error:
-        print(json.dumps({"error": str(error)}), file=sys.stderr)
+        message = str(error)
+        hint = (
+            "（请先在 simulation 容器启动 scripts/teacher_backend.sh，"
+            "或通过 --backend-log 指定后端 log 目录）"
+            if "teacher backend log is missing" in message
+            else ""
+        )
+        print(f"错误: 采集失败: {message}{hint}", file=sys.stderr)
         return 2
 
 

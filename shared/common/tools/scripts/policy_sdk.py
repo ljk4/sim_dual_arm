@@ -108,7 +108,8 @@ def build_sdk(project_root: Path, sdk_root: Path) -> None:
         prepare_output(project_root, root)
         checked = subprocess.run(check_command(project_root, root), capture_output=True, text=True)
         if checked.returncode == 0:
-            print(checked.stdout, end="")
+            info = json.loads(checked.stdout)
+            print(f"Policy SDK 就绪 (已最新): {root} (sha256={info['source_sha256'][:12]})")
             return
         subprocess.run(
             [
@@ -119,7 +120,11 @@ def build_sdk(project_root: Path, sdk_root: Path) -> None:
             ],
             check=True,
         )
-        subprocess.run(check_command(project_root, root), check=True)
+        verified = subprocess.run(
+            check_command(project_root, root), capture_output=True, text=True, check=True
+        )
+        info = json.loads(verified.stdout)
+        print(f"Policy SDK 构建完成: {root} (sha256={info['source_sha256'][:12]})")
     except BlockingIOError as error:
         raise SDKError(f"BUILD_BUSY: another builder owns {root}") from error
     finally:

@@ -263,14 +263,35 @@ def command_run(args: argparse.Namespace) -> int:
         )
         runtime_reason = classification.get("runtime_reason") or ""
         reason_text = f"（{runtime_reason}）" if runtime_reason else ""
+        event_zh = {
+            "FINISHED": "已完成",
+            "FAILED": "失败",
+            "INTERRUPTED": "已中断",
+        }.get(event, event)
+        task_zh = {
+            "succeeded": "成功",
+            "failed": "失败",
+        }.get(str(classification.get("task_outcome") or ""), classification.get("task_outcome") or "-")
         verdict = "合格" if classification["qualified"] else "不合格"
         print(
-            f"本次尝试：{attempt.attempt_id} | {event} | 退出码 {code} | "
-            f"用时 {wall_s:.1f}s | 任务 "
-            f"{classification.get('task_outcome') or '-'}{reason_text} | "
+            f"本次尝试：{attempt.attempt_id} | {event_zh} | 退出码 {code} | "
+            f"用时 {wall_s:.1f}s | 任务 {task_zh}{reason_text} | "
             f"{verdict} | 日志 {log_directory / 'console.log'}",
             flush=True,
         )
+        if not classification["qualified"]:
+            diag = classification.get("diagnostics") or {}
+            reasons: list[str] = []
+            if failure:
+                reasons.append(failure)
+            if diag.get("recording_failure_reason"):
+                reasons.append(f"录制: {diag['recording_failure_reason']}")
+            if diag.get("task_reason"):
+                reasons.append(f"任务: {diag['task_reason']}")
+            for item in diag.get("quality_failure_reasons") or ():
+                reasons.append(f"质量: {item}")
+            if reasons:
+                print(f"  不合格原因: {'; '.join(reasons)}", flush=True)
         if code in {124, 125, 130}:
             return code
         return 1 if code else 0

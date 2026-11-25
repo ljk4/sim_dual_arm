@@ -166,3 +166,55 @@ def test_prepare_workers_isolates_namespaces_and_domains(tmp_path):
         assert worker["backend_ready"].endswith("backend-runs/backend/ready.json")
         assert worker["overrides"]["realtime_speed"] == 0.5
         assert not (directory / worker["id"] / "backend.yaml").exists()
+
+
+def test_inference_pool_tty_progress_stays_on_single_line(tmp_path, monkeypatch, capsys):
+    from dual_arm_runtime.offline import progress as offline_progress
+    from dual_arm_runtime.offline.evaluation.inference_worker import (
+        GENERIC_CLASSIFICATION,
+        InferencePool,
+    )
+
+    monkeypatch.setenv("RECORD_PROGRESS_TTY", "1")
+    monkeypatch.setenv("COLUMNS", "80")
+    monkeypatch.setattr(
+        offline_progress.os,
+        "get_terminal_size",
+        lambda *_a: (_ for _ in ()).throw(OSError()),
+    )
+    args = type(
+        "Args",
+        (),
+        {
+            "recordings": tmp_path / "recordings",
+            "runs_root": tmp_path / "runs",
+            "console_root": tmp_path / "console",
+            "count": 10,
+            "seed_start": 100,
+            "batch_id": "batch-1",
+            "policy_endpoint": None,
+            "max_consecutive_failures": 3,
+        },
+    )()
+    pool = InferencePool(args, [{"id": "worker-01", "domain_id": 100}], GENERIC_CLASSIFICATION)
+    pool.active = 2
+    pool._render_progress()
+    pool.episodes.append({"succeeded": False, "seed": 100})
+    pool.worker_failures["worker-01"] = 1
+    pool._render_progress()
+    pool.episodes.append({"succeeded": True, "seed": 101})
+    pool.worker_failures["worker-01"] = 0
+    pool._render_progress()
+
+    out = capsys.readouterr().out
+    assert "\n" not in out
+    assert "█" not in out and "░" not in out
+    frames = [seg for seg in out.split("\r\x1b[2K") if seg]
+    assert len(frames) == 3
+    for frame in frames:
+        assert offline_progress.display_width(frame) < 80
+
+    monkeypatch.setenv("COLUMNS", "50")
+    pool._render_progress()
+    narrow = capsys.readouterr().out.split("\r\x1b[2K")[-1]
+    assert offline_progress.display_width(narrow) < 50

@@ -79,7 +79,7 @@ done
 
 python3 "${SHARED_ROOT:-/shared}/common/tools/scripts/dev_workspace.py" check \
   --project-root / \
-  --build-root "$ROS_SDK" 1>&2
+  --build-root "$ROS_SDK" >/dev/null
 
 if [[ -n "$direct_config" ]]; then
   if [[ -n "$robot" || -n "$task" ]]; then

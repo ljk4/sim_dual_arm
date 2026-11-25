@@ -236,7 +236,7 @@ def _print_startup_info(
         else f"本次 {args.count} 条"
     )
     print(
-        f"用途: {args.purpose} | {target} | worker: {args.workers} | "
+        f"用途: {args.purpose} | {target} | 并行 worker: {args.workers}（无可视化） | "
         f"最大连败: {args.max_consecutive_failures} | 实时倍速: {args.realtime_speed}",
         flush=True,
     )
@@ -317,21 +317,31 @@ def main(argv: list[str] | None = None) -> int:
     previous = signal.signal(signal.SIGTERM, interrupted)
     try:
         plan = docker.preflight()
-        _print_startup_info(args, plan, directory)
-        if args.target_total is not None and docker.resolve_target(plan):
-            return 0
+        if args.target_total is not None:
+            reached = docker.resolve_target(plan)
+            if reached:
+                if args.count is None:
+                    args.count = 0
+                _print_startup_info(args, plan, directory)
+                return 0
+            args.workers = min(args.workers, args.count)
+            _print_startup_info(args, plan, directory)
+        else:
+            args.workers = min(args.workers, args.count)
+            _print_startup_info(args, plan, directory)
         directory.parent.mkdir(parents=True, exist_ok=True)
-        args.workers = min(args.workers, args.count)
         workers = docker.prepare(plan)
-        print(f"并行 worker: {args.workers}（无可视化） | 批次日志: {directory}", flush=True)
+        print(f"正在启动 {args.workers} 个无头仿真 worker 并等待就绪...", flush=True)
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as executor:
             list(executor.map(docker.start_backend, workers))
         docker.wait_ready(workers)
+        print(f"全部 {args.workers} 个 worker 已就绪，开始并行采集。", flush=True)
         return docker.run(plan)
     except KeyboardInterrupt:
+        print("\n收到中断信号，正在停止并行采集并清理 worker 容器...", file=sys.stderr, flush=True)
         return 130
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
-        print(f"parallel recording: {error}", file=sys.stderr)
+        print(f"错误: 并行采集失败: {error}", file=sys.stderr, flush=True)
         return 2
     finally:
         signal.signal(signal.SIGTERM, previous)

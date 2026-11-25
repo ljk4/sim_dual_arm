@@ -22,6 +22,7 @@ from dual_arm_runtime.offline.collection.campaign_execution import (
     _environment,
     acquire_run_lock,
     attempt_log_directory,
+    attempt_logs_root,
     handle_sigterm,
     shutil_disk_free,
     stop_process,
@@ -35,6 +36,14 @@ from dual_arm_runtime.offline.collection.campaign_ledger import (
     finished,
 )
 from dual_arm_runtime.offline.collection.collect_attempt import check_ros_sdk
+from dual_arm_runtime.offline.progress import (
+    ascii_bar,
+    finish_progress_line,
+    format_duration,
+    is_progress_tty,
+    terminal_columns,
+    write_progress_line,
+)
 
 
 @dataclass
@@ -231,15 +240,10 @@ class RecordingPool:
         self._render_progress()
 
     def _is_tty(self) -> bool:
-        return sys.stdout.isatty() or os.environ.get("RECORD_PROGRESS_TTY") == "1"
+        return is_progress_tty()
 
     def _format_duration(self, seconds: float | None) -> str:
-        if seconds is None:
-            return "--:--:--"
-        total = max(0, round(seconds))
-        minutes, secs = divmod(total, 60)
-        hours, minutes = divmod(minutes, 60)
-        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+        return format_duration(seconds)
 
     def _estimated_remaining(self, elapsed: float) -> float | None:
         if self.qualified >= self.args.count:
@@ -252,26 +256,19 @@ class RecordingPool:
         is_tty = self._is_tty()
         if not is_tty and not force:
             return
-        total = max(1, self.args.count)
-        ratio = min(1.0, self.qualified / total)
-        width = 20
-        filled = int(width * ratio)
-        bar = "█" * filled + "░" * (width - filled)
+        bar_width = 10 if (not is_tty or terminal_columns() >= 78) else 6
+        bar = ascii_bar(self.qualified, self.args.count, width=bar_width)
         elapsed = time.monotonic() - self.started
         eta = self._estimated_remaining(elapsed)
         line = (
             f"并行采集 [{bar}] {self.qualified}/{self.args.count} "
             f"| 在途 {len(self.active)} "
-            f"| 最大连败 {self.consecutive_failures}/{self.args.max_consecutive_failures} "
+            f"| 连败 {self.consecutive_failures}/{self.args.max_consecutive_failures} "
             f"| 用时 {self._format_duration(elapsed)} "
             f"| 剩余 {self._format_duration(eta)}"
         )
         self._last_progress_render = time.monotonic()
-        if is_tty:
-            sys.stdout.write(f"\r\033[K{line}")
-            sys.stdout.flush()
-        else:
-            print(line, flush=True)
+        write_progress_line(line, tty=is_tty)
 
     def completed(self, result: dict[str, Any], worker_id: str) -> None:
         if result["qualified"]:
@@ -359,10 +356,8 @@ class RecordingPool:
             self.reason, self.exit_code = "interrupted", 130
         finally:
             self.cancel_active()
-        self._render_progress(force=not self._is_tty())
-        if self._is_tty():
-            sys.stdout.write("\n")
-            sys.stdout.flush()
+        self._render_progress(force=True)
+        finish_progress_line(tty=self._is_tty())
         elapsed = time.monotonic() - self.started
         summary = {
             "event": "recording.finished",
@@ -406,6 +401,13 @@ class RecordingPool:
             f"合格速率 {summary['qualified_per_hour']}/小时",
             flush=True,
         )
+        if self.allocation_error:
+            print(f"失败原因: {self.allocation_error}", file=sys.stderr, flush=True)
+        if self.reason in {"consecutive_failures", "disk_full", "campaign_stopped"}:
+            print(
+                f"排查日志: {attempt_logs_root(self.config, self.args.project_root)}",
+                flush=True,
+            )
         if "formal_select" in summary:
             print(f"合格录制清单: {summary['formal_select']}", flush=True)
         print(f"运行摘要: {self.args.worker_manifest.with_name('summary.json')}", flush=True)

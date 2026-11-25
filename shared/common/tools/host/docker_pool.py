@@ -11,10 +11,13 @@ import concurrent.futures
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
+import unicodedata
 from pathlib import Path
+from typing import TextIO
 
 ROOT = Path(os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[4])
 DIRECT_SEGMENT = "_direct"
@@ -146,6 +149,74 @@ def automatic_workers() -> int:
     return min(limits)
 
 
+def host_terminal_columns() -> int:
+    """Return host stdout terminal width (minimum 20)."""
+    try:
+        cols = os.get_terminal_size(sys.stdout.fileno()).columns
+        if cols > 0:
+            return max(20, cols)
+    except (OSError, ValueError, AttributeError):
+        pass
+    return max(20, shutil.get_terminal_size((80, 24)).columns)
+
+
+def fit_terminal_line(text: str, max_width: int) -> str:
+    """Truncate text so its terminal display width never exceeds max_width."""
+    if max_width <= 0:
+        return ""
+    result: list[str] = []
+    used = 0
+    for ch in text:
+        size = 2 if unicodedata.east_asian_width(ch) in {"W", "F"} else 1
+        if used + size > max_width:
+            break
+        result.append(ch)
+        used += size
+    return "".join(result)
+
+
+def format_duration(seconds: float | None) -> str:
+    """Format seconds as HH:MM:SS or --:--:-- when unknown."""
+    if seconds is None:
+        return "--:--:--"
+    total = max(0, round(seconds))
+    minutes, secs = divmod(total, 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+def ascii_bar(done: int, total: int, width: int = 10) -> str:
+    """Render an ASCII progress bar free of ambiguous-width Unicode blocks."""
+    safe_total = max(1, total)
+    ratio = min(1.0, max(0.0, done / safe_total))
+    filled = int(width * ratio)
+    return "#" * filled + "-" * (width - filled)
+
+
+def write_progress_line(
+    line: str, *, tty: bool, stream: TextIO | None = None
+) -> None:
+    """Write a single progress update in-place on TTY or as a plain line otherwise."""
+    target = sys.stdout if stream is None else stream
+    if tty:
+        max_width = max(1, host_terminal_columns() - 1)
+        fitted = fit_terminal_line(line, max_width)
+        target.write(f"\r\x1b[2K{fitted}")
+        target.flush()
+    else:
+        target.write(f"{line}\n")
+        target.flush()
+
+
+def finish_progress_line(*, tty: bool, stream: TextIO | None = None) -> None:
+    """Terminate an active in-place TTY progress line with a newline."""
+    if not tty:
+        return
+    target = sys.stdout if stream is None else stream
+    target.write("\n")
+    target.flush()
+
+
 class BaseDockerWorkers:
     """Common Docker orchestration for parallel recording and inference pools."""
 
@@ -179,7 +250,16 @@ class BaseDockerWorkers:
         return [
             "docker",
             "exec",
-            *(["-e", "RECORD_PROGRESS_TTY=1"] if sys.stdout.isatty() else []),
+            *(
+                [
+                    "-e",
+                    "RECORD_PROGRESS_TTY=1",
+                    "-e",
+                    f"COLUMNS={host_terminal_columns()}",
+                ]
+                if sys.stdout.isatty()
+                else []
+            ),
             self.runtime,
             "bash",
             "-c",
@@ -342,8 +422,27 @@ class BaseDockerWorkers:
                 if not is_ready:
                     name = f"sim-dual-arm-{self.batch_name}-{worker['id']}"
                     if self._container_exited(name):
+                        tail = ""
+                        try:
+                            logs = subprocess.run(
+                                ["docker", "logs", "--tail", "20", name],
+                                check=False,
+                                capture_output=True,
+                                text=True,
+                                timeout=5,
+                            )
+                            lines = [
+                                line
+                                for line in ((logs.stdout or "") + (logs.stderr or "")).splitlines()
+                                if line.strip()
+                            ]
+                            if lines:
+                                tail = "\n最近容器输出:\n  " + "\n  ".join(lines[-8:])
+                        except (OSError, subprocess.SubprocessError):
+                            pass
+                        log_file = self.directory / f"{name}.log"
                         raise RuntimeError(
-                            f"parallel backend container {name} exited before becoming ready"
+                            f"仿真 worker 容器 {name} 在就绪前意外退出（日志将保存至 {log_file}）{tail}"
                         )
                 ready.append(is_ready)
             if all(ready):
@@ -407,13 +506,19 @@ __all__ = [
     "CONTAINER_MOUNTS",
     "DIRECT_SEGMENT",
     "ROOT",
+    "ascii_bar",
     "automatic_workers",
     "container_data_root",
     "container_path_to_host",
     "debug_root",
+    "finish_progress_line",
+    "fit_terminal_line",
+    "format_duration",
     "host_path_to_container",
+    "host_terminal_columns",
     "positive_int",
     "scenario_root",
     "scenario_segment",
     "shared_root_to_container",
+    "write_progress_line",
 ]

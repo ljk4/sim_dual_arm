@@ -11,6 +11,7 @@ ROS 2 运行端负责连接仿真/真机后端（Robot API）与策略服务端�
   - `scripts/client_policy.sh`：单局非交互式策略推理（gRPC 客户端）。
   - `scripts/client_interactive.sh`：交互式单局策略推理客户端。
 - **宿主机并行推理**：仓库根目录 [`./inference_parallel.sh`](../../inference_parallel.sh)（自动管理多个无界面仿真 worker 与批量统计报告）。
+- **宿主机录制转视频**：仓库根目录 [`./recording_to_video.sh`](../../recording_to_video.sh)（将单局或批量 MCAP 录制合成为多视角可视化 MP4，默认保存在同目录下）。
   - `scripts/test.sh`：运行容器内 `pytest` 测试。
 
 使用 `--robot <robot> --task <task>` 从 `<shared>/scenarios/<robot>/<task>/binding.yaml` 在内存中选择配方。直接配置模式的路径参数见各命令帮助。策略客户端使用 `--policy-endpoint HOST:PORT` 连接指定的 gRPC 服务，其他业务参数在 Runtime 配方中修改。

@@ -205,14 +205,22 @@ def _print_effective_config(
     selection: object,
     config: object,
 ) -> None:
+    del config
     print(f"=== {title} ===", flush=True)
     if selection is not None:
         print(f"机器人/任务:     {selection.robot}/{selection.task}", flush=True)
         print(f"Binding 文件:    {selection.resolved.path}", flush=True)
     print(f"配置文件路径:    {config_path}", flush=True)
-    print("--- 详细参数 ---", flush=True)
-    print(json.dumps(config.model_dump(mode="json"), indent=2, ensure_ascii=False), flush=True)
     print("=" * (len(title) + 8), flush=True)
+
+
+def _write_effective_config_log(log_path: Path, config: object) -> None:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(config.model_dump(mode="json"), indent=2, ensure_ascii=False)
+    with log_path.open("a", encoding="utf-8") as stream:
+        stream.write("--- 展开后有效配置快照 ---\n")
+        stream.write(payload + "\n")
+        stream.write("--------------------------\n")
 
 
 def _logs_root(args: argparse.Namespace, root: Path) -> Path:
@@ -262,9 +270,10 @@ def _command_convert(args: argparse.Namespace, root: Path) -> int:
             f"{len(config.camera_names)} 路 {config.camera_width}×{config.camera_height} RGB"
         ),
     ]
+    default_log = _timestamped_log(_logs_root(args, root) / "convert", "convert")
     if args.progress:
         _print_effective_config("数据转换配置与详细参数", config_path, selection, config)
-    default_log = _timestamped_log(_logs_root(args, root) / "convert", "convert")
+        _write_effective_config_log(_resolve(args.log_file or default_log, root), config)
     with _operator_console(args, "数据转换配置", settings, default_log) as console:
         manifest = convert(
             select_path=config.select_path,
@@ -327,9 +336,10 @@ def _command_train(args: argparse.Namespace, root: Path) -> int:
         f"模型目录：{config.checkpoint.root}",
         f"验证：每 {config.val_every_steps} step",
     ]
+    default_log = _timestamped_log(config.logging.root / "_console", "train")
     if args.progress:
         _print_effective_config("ACT 训练配置与详细参数", config_path, selection, config)
-    default_log = _timestamped_log(config.logging.root / "_console", "train")
+        _write_effective_config_log(_resolve(args.log_file or default_log, root), config)
     with _operator_console(args, "ACT 训练配置", settings, default_log) as console:
         if console is not None:
             console.progress.phase("校验训练数据")
@@ -342,9 +352,11 @@ def _command_train(args: argparse.Namespace, root: Path) -> int:
             overrides=_training_overrides(args, root) or None,
         )
     if args.progress:
+        val_l1 = report.get("best_val_l1")
+        val_text = f"{val_l1:.6f}" if isinstance(val_l1, (int, float)) else "-"
         print(
             f"训练结束：{report['reason']}；{report['steps']}/{steps} step；"
-            f"best_val_l1={report['best_val_l1']}；用时 {report['duration_seconds']:.1f}s"
+            f"best_val_l1={val_text}；用时 {report['duration_seconds']:.1f}s"
         )
         print(f"model_dir: {report['model_dir']}")
         return 0
@@ -393,12 +405,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     ) as error:
         if args.debug:
             raise
-        print(f"learning: {type(error).__name__}: {error}", file=sys.stderr)
+        print(f"错误: 学习端执行失败 ({type(error).__name__}): {error}", file=sys.stderr)
         return 1
     except Exception as error:
         if args.debug or not getattr(args, "progress", False):
             raise
-        print(f"learning: {type(error).__name__}: {error}", file=sys.stderr)
+        print(
+            f"错误: 学习端执行异常 ({type(error).__name__}): {error}（可加 --debug 查看完整堆栈）",
+            file=sys.stderr,
+        )
         return 1
 
 

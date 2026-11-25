@@ -16,6 +16,15 @@ from typing import Any
 
 import yaml
 
+from dual_arm_runtime.offline.progress import (
+    ascii_bar,
+    finish_progress_line,
+    format_duration,
+    is_progress_tty,
+    terminal_columns,
+    write_progress_line,
+)
+
 ROOT = Path(os.environ.get("PROJECT_ROOT") or Path(__file__).resolve().parents[7])
 
 
@@ -183,6 +192,7 @@ class InferencePool:
         self.recordings = args.recordings
         self.runs_root = args.runs_root
         self.lock = threading.Lock()
+        self._io_lock = threading.Lock()
         self.worker_failures = {worker["id"]: 0 for worker in workers}
         self.episodes: list[dict[str, Any]] = []
         self.stopped = threading.Event()
@@ -203,20 +213,19 @@ class InferencePool:
         return max(self.worker_failures.values(), default=0)
 
     def _is_tty(self) -> bool:
-        return sys.stdout.isatty() or os.environ.get("RECORD_PROGRESS_TTY") == "1"
+        return is_progress_tty()
 
     def _render_progress(self, *, force: bool = False) -> None:
-        if not self._is_tty() and not force:
+        is_tty = self._is_tty()
+        if not is_tty and not force:
             return
         with self.lock:
             done = len(self.episodes)
             active = self.active
             succeeded = self.succeeded
             failures = self.max_failures
-        total = max(1, self.args.count)
-        fraction = min(1.0, done / total)
-        filled = int(20 * fraction)
-        bar = "█" * filled + "░" * (20 - filled)
+        bar_width = 8 if (is_tty and terminal_columns() < 86) else 10
+        bar = ascii_bar(done, self.args.count, width=bar_width)
         elapsed_s = time.monotonic() - self.started
         if done >= self.args.count:
             eta_s: float | None = 0.0
@@ -226,15 +235,12 @@ class InferencePool:
             eta_s = None
         limit = self.args.max_consecutive_failures or "-"
         line = (
-            f"并行推理 [{bar}] {done}/{self.args.count} | 在途 {active} "
-            f"| 成功 {succeeded} | 最大连败 {failures}/{limit} "
-            f"| 用时 {_format_duration(elapsed_s)} | 剩余 {_format_duration(eta_s)}"
+            f"并行推理 [{bar}] {done}/{self.args.count} | 在途{active} "
+            f"成功{succeeded} 连败{failures}/{limit} "
+            f"| 用时 {format_duration(elapsed_s)} | 剩余 {format_duration(eta_s)}"
         )
-        if self._is_tty():
-            sys.stdout.write(f"\r\033[K{line}")
-            sys.stdout.flush()
-        else:
-            print(line, flush=True)
+        with self._io_lock:
+            write_progress_line(line, tty=is_tty)
 
     def _take_index(self) -> int | None:
         with self.lock:
@@ -325,22 +331,20 @@ class InferencePool:
             ):
                 self.stopped.set()
             completed = len(self.episodes)
-        verdict = (
-            "成功"
-            if record["succeeded"]
-            else f"失败 · {record['failure_stage']} · {record['failure_reason']}"
-        )
-        line = (
-            f"[{completed}/{self.args.count}] {worker['id']} seed {seed} "
-            f"{verdict} | {_format_duration(wall_s)} | {run_id}"
-        )
         if self._is_tty():
-            if not record["succeeded"]:
-                sys.stdout.write(f"\r\033[2K{line}\n")
-                sys.stdout.flush()
             self._render_progress()
         else:
-            print(line, flush=True)
+            verdict = (
+                "成功"
+                if record["succeeded"]
+                else f"失败 · {record['failure_stage']} · {record['failure_reason']}"
+            )
+            line = (
+                f"[{completed}/{self.args.count}] {worker['id']} seed {seed} "
+                f"{verdict} | {_format_duration(wall_s)} | {run_id}"
+            )
+            with self._io_lock:
+                print(line, flush=True)
 
     def _worker_loop(self, worker: dict[str, Any]) -> None:
         while True:
@@ -371,11 +375,13 @@ class InferencePool:
                         >= self.args.max_consecutive_failures
                     ):
                         self.stopped.set()
-                print(
-                    f"{worker['id']} 执行异常：{type(error).__name__}: {error}",
-                    file=sys.stderr,
-                    flush=True,
-                )
+                if not self._is_tty():
+                    with self._io_lock:
+                        print(
+                            f"{worker['id']} 执行异常：{type(error).__name__}: {error}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
             finally:
                 with self.lock:
                     self.active -= 1
@@ -401,6 +407,10 @@ class InferencePool:
             for thread in threads:
                 thread.join(timeout=5)
             raise
+        finally:
+            self._render_progress(force=True)
+            with self._io_lock:
+                finish_progress_line(tty=self._is_tty())
         return 0 if self.failed == 0 else 1
 
     def summary(self) -> dict[str, Any]:
@@ -473,11 +483,12 @@ def main(argv: list[str] | None = None) -> int:
     args.runs_root.mkdir(parents=True, exist_ok=True)
     args.console_root.mkdir(parents=True, exist_ok=True)
     pool = InferencePool(args, workers, classification)
-    print(
-        f"并行推理开始：{len(workers)} 个 worker | 共 {args.count} 局 | "
-        f"起始 seed {args.seed_start}",
-        flush=True,
-    )
+    if os.environ.get("INFERENCE_HOST_MANAGED") != "1":
+        print(
+            f"并行推理开始：{len(workers)} 个 worker | 共 {args.count} 局 | "
+            f"起始 seed {args.seed_start}",
+            flush=True,
+        )
     code = pool.run()
     summary = pool.summary()
     args.report.parent.mkdir(parents=True, exist_ok=True)
@@ -485,11 +496,12 @@ def main(argv: list[str] | None = None) -> int:
         json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
     print("=== 并行推理结果 ===", flush=True)
+    early_stop = "（已达连续失败上限提前停止）" if summary["stopped_early"] else ""
     print(
         f"完成 {summary['attempted']}/{summary['requested']} 局 | "
         f"成功 {summary['succeeded']} | 失败 {summary['failed']} | "
         f"成功率 {summary['success_rate_percent']:.2f}% | "
-        f"用时 {_format_duration(summary['elapsed_s'])}",
+        f"用时 {_format_duration(summary['elapsed_s'])}{early_stop}",
         flush=True,
     )
     for name in classification.stage_names:
@@ -507,7 +519,10 @@ def main(argv: list[str] | None = None) -> int:
                 f"{reason} ×{count}" for reason, count in group["reasons"].items()
             )
             print(f"  {stage}: {group['count']} 次（{reasons}）", flush=True)
-    print(f"报告: {args.report}", flush=True)
+        print(f"逐局日志: {args.console_root}", flush=True)
+        print(f"录制目录: {args.recordings}", flush=True)
+    if os.environ.get("INFERENCE_HOST_MANAGED") != "1":
+        print(f"报告: {args.report}", flush=True)
     return code
 
 

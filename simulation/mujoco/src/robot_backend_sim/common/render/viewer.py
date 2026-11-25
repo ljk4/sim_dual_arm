@@ -90,10 +90,10 @@ def main() -> int:
     try:
         backend = _load_backend(args.robot, args.task)
     except (ScenarioError, OSError, ValueError) as error:
-        print(f"viewer: {error}", file=sys.stderr)
+        print(f"错误: 无法加载可视化配置: {error}", file=sys.stderr)
         return 2
     if not backend.visualization_enabled:
-        print("viewer: visualization is disabled for this backend", file=sys.stderr)
+        print("错误: 该方案的后端配方未开启可视化 (visualization_enabled=false)", file=sys.stderr)
         return 2
     scene_config = load_scene_config_for(backend.scene_path)  # type: ignore[arg-type]
     scene = build_scene_for(scene_config)
@@ -110,17 +110,32 @@ def main() -> int:
         nonlocal latest, first_state
         latest = list(message.data)
         if first_state:
-            print("viewer: received first physics snapshot", flush=True)
+            print("viewer: 已收到首帧物理快照，画面实时同步中", flush=True)
             first_state = False
 
     subscription = node.create_subscription(Float64MultiArray, topic, on_state, _VIEWER_QOS)
     del subscription
-    print(f"viewer: listening on {topic}", flush=True)
+    print(
+        "=== MuJoCo 实时可视化 ===\n"
+        f"方案: {args.robot}/{args.task} | 场景: {backend.scene_path}\n"
+        f"订阅话题: {topic} | 刷新率: {int(_POLL_HZ)} Hz\n"
+        "正在等待后端物理快照（关闭窗口或按 Ctrl-C 退出）...",
+        flush=True,
+    )
 
     viewer = None
     exit_ok = False
     try:
-        viewer = mujoco.viewer.launch_passive(model, data)
+        try:
+            viewer = mujoco.viewer.launch_passive(model, data)
+        except Exception as error:  # noqa: BLE001 - X11 / GLFW launch errors need clear hint
+            print(
+                f"错误: 启动 MuJoCo 窗口失败 ({type(error).__name__}): {error}\n"
+                "提示: 若为 X11 权限问题，请在宿主机执行: xhost +SI:localuser:$(id -un)",
+                file=sys.stderr,
+                flush=True,
+            )
+            return 1
         viewer.cam.lookat[:] = model.stat.center
         viewer.cam.distance = max(1.0, float(model.stat.extent) * 1.5)
         viewer.cam.azimuth = 135.0

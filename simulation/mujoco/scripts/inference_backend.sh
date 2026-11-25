@@ -21,7 +21,7 @@ fi
 
 python3 "${SHARED_ROOT:-/shared}/common/tools/scripts/dev_workspace.py" check \
   --project-root / \
-  --build-root "$ROS_SDK" 1>&2
+  --build-root "$ROS_SDK" >/dev/null
 
 exec python3 -m robot_backend_sim.common.ros.node \
   --inference-entry \

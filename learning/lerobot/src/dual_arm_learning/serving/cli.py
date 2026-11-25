@@ -200,7 +200,11 @@ def _fail(
     )
     if args.debug:
         raise error
-    print(f"act_policy: {type(error).__name__}: {error}", file=sys.stderr)
+    print(
+        f"错误: 策略推理服务启动失败 ({stage}, {type(error).__name__}): {error}",
+        file=sys.stderr,
+    )
+    print(f"故障记录: {args.log_directory / 'startup_failure.json'}", file=sys.stderr)
     return 1
 
 
@@ -318,12 +322,14 @@ def main(argv: list[str] | None = None) -> int:
         if config.model_path is None and not config.test_only:
             raise ModelError("--model is required for a non-test policy service")
         stage = "load_warm"
+        print("=== 策略推理服务启动 ===", flush=True)
         if selection is not None:
             print(
                 f"机器人/任务: {selection.robot}/{selection.task} | "
                 f"Binding: {selection.resolved.path}",
                 flush=True,
             )
+        print(f"配置文件: {config_path}", flush=True)
         print(f"模型: {config.model_path}", flush=True)
         print(
             f"服务: {config.bind_address}:{config.port} | "

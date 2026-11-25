@@ -333,6 +333,53 @@ def test_pool_and_inference_progress_include_eta_and_timestamp(tmp_path, capsys)
     assert "用时 00:00:12 | 剩余 00:00:00" in out
 
 
+def test_record_pool_tty_progress_is_single_line_and_fits_terminal_width(
+    tmp_path, monkeypatch, capsys
+):
+    from dual_arm_runtime.offline import progress as offline_progress
+    from dual_arm_runtime.offline.collection import record_pool
+
+    monkeypatch.setenv("RECORD_PROGRESS_TTY", "1")
+    monkeypatch.setenv("COLUMNS", "80")
+    monkeypatch.setattr(offline_progress.os, "get_terminal_size", lambda *_a: (_ for _ in ()).throw(OSError()))
+    args = SimpleNamespace(
+        project_root=tmp_path,
+        count=10,
+        max_consecutive_failures=3,
+    )
+    pool = record_pool.RecordingPool(
+        args,
+        {"paths": {"attempts_root": "var/x/y/datasets/raw"}, "launch": {}},
+        None,  # type: ignore[arg-type]
+        [{"id": "worker-01"}],
+    )
+    for qualified in (0, 3, 10):
+        pool.qualified = qualified
+        pool._render_progress()
+    out = capsys.readouterr().out
+    assert "\n" not in out
+    assert "█" not in out and "░" not in out
+    frames = [seg for seg in out.split("\r\x1b[2K") if seg]
+    assert len(frames) == 3
+    for frame in frames:
+        assert offline_progress.display_width(frame) < 80
+
+    monkeypatch.setenv("COLUMNS", "50")
+    pool._render_progress()
+    narrow = capsys.readouterr().out.split("\r\x1b[2K")[-1]
+    assert offline_progress.display_width(narrow) < 50
+
+
+def test_runtime_command_forwards_tty_and_columns(tmp_path, monkeypatch):
+    docker = record_parallel.DockerWorkers(SimpleNamespace(project_root=tmp_path), tmp_path)
+    docker.runtime = "runtime-cid"
+    monkeypatch.setattr(docker_pool.sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(docker_pool, "host_terminal_columns", lambda: 92)
+    cmd = docker.runtime_command(["echo", "ok"])
+    assert "RECORD_PROGRESS_TTY=1" in cmd
+    assert "COLUMNS=92" in cmd
+
+
 def test_inference_parallel_defaults_to_random_seed_start(tmp_path, monkeypatch):
     from host import inference_parallel
 

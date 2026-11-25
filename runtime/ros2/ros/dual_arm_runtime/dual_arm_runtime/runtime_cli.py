@@ -149,7 +149,7 @@ def _parse_arguments(argv: list[str] | None = None) -> tuple[argparse.Namespace,
 
 def _initialization_error(error: BaseException) -> None:
     print(
-        json.dumps({"runtime_initialization_error": f"{type(error).__name__}: {error}"}),
+        f"错误: 运行端初始化失败 ({type(error).__name__}): {error}",
         file=sys.stderr,
         flush=True,
     )
@@ -309,7 +309,8 @@ class _RuntimeProcess:
         except BaseException as error:
             self.set_fatal(error)
             print(
-                json.dumps({"runtime_error": f"INITIALIZATION: {type(error).__name__}: {error}"}),
+                f"错误: ROS 运行端初始化失败 ({type(error).__name__}): {error}",
+                file=sys.stderr,
                 flush=True,
             )
             return False
@@ -381,7 +382,7 @@ class _RuntimeProcess:
         self.executor_usable = False
         reason = f"RUNTIME_ERROR: {type(error).__name__}: {error}"
         self.request_stop(reason, "RUNTIME_ERROR", detail=reason)
-        print(json.dumps({"runtime_error": reason}), flush=True)
+        print(f"错误: 运行时异常: {type(error).__name__}: {error}", file=sys.stderr, flush=True)
 
     def _shutdown_step(self) -> bool:
         node = self.node
@@ -473,7 +474,11 @@ class _RuntimeProcess:
                 self.emit_stopping(self.current_failure_code(), "process leaving main")
         except BaseException as error:
             self.set_fatal(error)
-            print(json.dumps({"runtime_error": f"{type(error).__name__}: {error}"}), flush=True)
+            print(
+                f"错误: 运行时异常 ({type(error).__name__}): {error}",
+                file=sys.stderr,
+                flush=True,
+            )
             if self.node is not None:
                 self.request_stop(
                     f"RUNTIME_ERROR: {type(error).__name__}: {error}",
@@ -503,7 +508,8 @@ class _RuntimeProcess:
                 teardown_error = error
                 self.set_fatal(error)
                 print(
-                    json.dumps({"runtime_error": f"TEARDOWN: {type(error).__name__}: {error}"}),
+                    f"错误: 运行端清理异常 ({type(error).__name__}): {error}",
+                    file=sys.stderr,
                     flush=True,
                 )
         finally:
@@ -666,19 +672,39 @@ def _confirm_start(args: argparse.Namespace, configuration: Any, run_id: str) ->
         if args.robot is not None
         else str(args.config)
     )
+    print("=== 交互式单局闭环 ===", flush=True)
     print(f"配置: {display}", flush=True)
     if args.policy_endpoint:
         print(f"策略服务: {args.policy_endpoint}", flush=True)
-    print(f"run_id: {run_id}", flush=True)
-    print(f"seed: {configuration.recipe.reset.seed}", flush=True)
+    print(f"run_id: {run_id} | seed: {configuration.recipe.reset.seed}", flush=True)
     print("输入 y 复原环境并开始本次任务，其他键取消: ", end="", flush=True)
     try:
         answer = input().strip()
     except EOFError as error:
-        raise SystemExit("interactive: no answer; canceled") from error
+        raise SystemExit("错误: 未收到确认输入，已取消执行") from error
     if answer not in {"y", "Y", "yes", "YES"}:
-        print("interactive: canceled", flush=True)
+        print("已取消本次执行", flush=True)
         raise SystemExit(0)
+
+
+def _format_task_outcome(record_directory: str) -> str:
+    if not record_directory:
+        return "-"
+    path = Path(record_directory) / "task_result.json"
+    if not path.is_file():
+        return "-"
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return "-"
+    task = doc.get("task") if isinstance(doc.get("task"), dict) else {}
+    state = str(task.get("state") or doc.get("result", {}).get("outcome") or "")
+    reason = str(task.get("failure_reason") or task.get("reason") or "")
+    if state in {"SUCCEEDED", "succeeded"}:
+        return "成功"
+    if state in {"FAILED", "failed"}:
+        return f"失败 ({reason})" if reason else "失败"
+    return state or "-"
 
 
 def main() -> None:
@@ -750,11 +776,19 @@ def main() -> None:
     summary_path.write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
+    outcome_zh = {
+        "succeeded": "正常结束",
+        "failed": "执行失败",
+        "interrupted": "已中断",
+    }.get(process_outcome, process_outcome)
+    task_text = _format_task_outcome(process.record_directory)
     print(
-        f"运行结束：{process_outcome} | 退出码 {process.exit_code} | "
-        f"日志 {session.run_directory}",
+        f"运行结束：{outcome_zh} | 任务: {task_text} | 退出码 {process.exit_code}",
         flush=True,
     )
+    if process.record_directory:
+        print(f"录制目录: {process.record_directory}", flush=True)
+    print(f"运行日志: {session.run_directory}", flush=True)
     if process.exit_code:
         raise SystemExit(process.exit_code)
 
