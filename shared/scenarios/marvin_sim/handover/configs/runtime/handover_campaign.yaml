@@ -7,7 +7,7 @@ diagnostic: false
 budget:
   pilot_seed_first: 3100
   pilot_seed_last: 3109
-  pilot_max_attempts: 3
+  pilot_max_attempts: 10
 
   # Fifty qualified demonstrations, at most one hundred attempts.
   formal_seed_first: 4100

@@ -13,7 +13,7 @@ import hashlib
 import json
 import math
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from robot_contracts.models import ContractError, RobotProfile
@@ -27,6 +27,7 @@ from robot_backend_sim.marvin_sim.handover.gate import HandoverFeedback, Handove
 from robot_backend_sim.marvin_sim.handover.plan import (
     HandoverLayout,
     layout_from_config,
+    perturb_handover_plan_config,
     plan_handover,
 )
 from robot_backend_sim.marvin_sim.handover.task_config import BEHAVIOUR_PHASES, HandoverTaskConfig
@@ -81,18 +82,10 @@ class HandoverStep:
     duration_s: float
     gate: str
     holders: tuple[str, ...]
-    allow_box_support: bool = False
     final: bool = False
-
-    @property
-    def kind(self) -> str:
-        if self.start_positions[:7] != self.end_positions[:7]:
-            return "left"
-        if self.start_positions[8:15] != self.end_positions[8:15]:
-            return "right"
-        if self.start_positions != self.end_positions:
-            return "gripper"
-        return "hold"
+    waypoints: tuple[tuple[float, ...], ...] = ()
+    segment_durations_s: tuple[float, ...] = ()
+    segment_phases: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,7 +102,6 @@ class HandoverPlan:
     ik_max_position_error_m: float
     ik_max_orientation_error_rad: float
     layout: HandoverLayout
-    source_plan: Any = field(default=None, repr=False)
 
     @property
     def duration_s(self) -> float:
@@ -127,6 +119,7 @@ def _plan_digest(
 ) -> str:
     payload = {
         "task_config_digest": config.config_digest,
+        "seed": snapshot.seed,
         "context": {
             "robot_id": snapshot.context.robot_id,
             "backend_instance_id": snapshot.context.backend_instance_id,
@@ -148,8 +141,10 @@ def _plan_digest(
                 "duration_s": step.duration_s,
                 "gate": step.gate,
                 "holders": list(step.holders),
-                "allow_box_support": step.allow_box_support,
                 "final": step.final,
+                "waypoints": [list(point) for point in step.waypoints],
+                "segment_durations_s": list(step.segment_durations_s),
+                "segment_phases": list(step.segment_phases),
             }
             for step in steps
         ],
@@ -168,8 +163,10 @@ def _step(
     gate: str,
     holders: tuple[str, ...],
     *,
-    allow_box_support: bool = False,
     final: bool = False,
+    waypoints: tuple[tuple[float, ...], ...] = (),
+    segment_durations_s: tuple[float, ...] = (),
+    segment_phases: tuple[str, ...] = (),
 ) -> HandoverStep:
     return HandoverStep(
         index=index,
@@ -180,8 +177,10 @@ def _step(
         duration_s=float(duration),
         gate=gate,
         holders=holders,
-        allow_box_support=allow_box_support,
         final=final,
+        waypoints=tuple(tuple(float(value) for value in point) for point in waypoints),
+        segment_durations_s=tuple(float(value) for value in segment_durations_s),
+        segment_phases=segment_phases,
     )
 
 
@@ -226,16 +225,31 @@ def build_handover_plan(
         )
         for side in ("left", "right")
     }
-    source_plan = plan_handover(
-        frozen,  # type: ignore[arg-type]
-        planning,
-        max_velocities=velocities,
-        deadline=budget_deadline,
-    )
+    attempts = planning.diversity.max_attempts if planning.diversity.enabled else 1
+    source_plan = None
+    speed_scale = 1.0
+    for attempt in range(attempts):
+        if time.monotonic() > budget_deadline:
+            break
+        candidate_planning, speed_scale = perturb_handover_plan_config(
+            planning, int(snapshot.seed), attempt
+        )
+        source_plan = plan_handover(
+            frozen,  # type: ignore[arg-type]
+            candidate_planning,
+            max_velocities=velocities,
+            deadline=budget_deadline,
+            teacher_only=True,
+        )
+        if source_plan.passed:
+            break
+    if source_plan is None:
+        raise _error("TEACHER_PLAN_TIMEOUT", "planning exceeded its wall budget")
     if not source_plan.passed:
         raise _error(
             "TEACHER_PLAN_INVALID",
-            "; ".join(source_plan.failures) or "the P02B candidate chain no longer passes",
+            "; ".join(source_plan.failures)
+            or "the P02B candidate chain no longer passes",
         )
     if time.monotonic() > budget_deadline:
         raise _error("TEACHER_PLAN_TIMEOUT", "planning exceeded its wall budget")
@@ -247,16 +261,26 @@ def build_handover_plan(
     left_close = float(teacher.left_close_opening_m)
     right_close = float(teacher.right_close_opening_m)
     velocity_limits, acceleration_limits = teacher_joint_limits(profile, control_config, teacher)
+    scaled_velocities = list(velocity_limits)
+    for index in (*range(7), *range(8, 15)):
+        scaled_velocities[index] = min(
+            float(velocity_limits[index]) * speed_scale,
+            float(profile.joints[index].max_velocity) * 0.95,
+        )
+    velocity_limits = tuple(scaled_velocities)
     minimum_s = float(teacher.phase_min_duration_s)
 
     start = public_dual_arm_positions(
         snapshot.qpos, robot.arm_joint_qpos["left"], robot.arm_joint_qpos["right"], open_total, open_total
     )
     steps: list[HandoverStep] = []
+    waypoint_source = source_plan.teacher_waypoints
 
-    def public(name: str, left_open: float, right_open: float) -> tuple[float, ...]:
+    def public_qpos(
+        qpos: tuple[float, ...], left_open: float, right_open: float
+    ) -> tuple[float, ...]:
         return public_dual_arm_positions(
-            targets[name].qpos,
+            qpos,
             robot.arm_joint_qpos["left"],
             robot.arm_joint_qpos["right"],
             left_open,
@@ -271,7 +295,6 @@ def build_handover_plan(
         gate: str,
         holders: tuple[str, ...],
         *,
-        allow_box_support: bool = False,
         final: bool = False,
     ) -> None:
         nonlocal start
@@ -293,59 +316,134 @@ def build_handover_plan(
                 duration,
                 gate,
                 holders,
-                allow_box_support=allow_box_support,
                 final=final,
             )
         )
         start = end
 
-    add("left_ready", "left_approach", public("left_ready", open_total, open_total),
-        0.0, "position", ())
-    add("left_pregrasp", "left_approach",
-        public("left_pregrasp", open_total, open_total),
-        0.0, "position", ())
-    add("left_grasp_pose", "left_approach",
-        public("left_grasp", open_total, open_total),
-        0.0, "position", ())
-    add("left_close", "left_grasp", public("left_grasp", left_close, open_total),
-        0.0, "left_grasp", ("left",))
-    add("left_lift", "left_lift", public("left_lift", left_close, open_total),
-        0.0, "left_lift", ("left",))
-    add("left_handover", "handover_approach",
-        public("left_handover", left_close, open_total),
-        0.0, "handover", ("left",))
-    add("right_handover_wait", "handover_approach",
-        public("right_handover_wait", left_close, open_total),
-        0.0, "handover", ("left",))
-    add("right_handover_pregrasp", "handover_approach",
-        public("right_handover_pregrasp", left_close, open_total),
-        0.0, "handover", ("left",))
-    add("right_handover_grasp", "handover_approach",
-        public("right_handover_grasp", left_close, open_total),
-        0.0, "handover", ("left",))
-    add("right_close", "dual_hold",
-        public("right_handover_grasp", left_close, right_close),
-        0.0, "dual_hold", ("left", "right"))
-    add("left_open", "left_release",
-        public("right_handover_grasp", open_total, right_close),
-        0.0, "left_release", ("right",))
-    add("left_retreat", "left_retreat",
-        public("left_retreat", open_total, right_close),
-        0.0, "left_retreat", ("right",))
-    add("right_preplace", "right_transport",
-        public("right_preplace", open_total, right_close),
-        0.0, "right_carry", ("right",))
-    add("right_place", "right_place",
-        public("right_place", open_total, right_close),
-        0.0, "right_place", ("right",),
-        allow_box_support=True)
-    add("right_open", "right_release",
-        public("right_place", open_total, open_total),
-        0.0, "released", (), allow_box_support=True)
-    add("stable_hold", "stable",
-        public("right_place", open_total, open_total),
-        float(task_config.success.stable_duration_s), "stable", (),
-        allow_box_support=True, final=True)
+    def add_waypointed(
+        name: str,
+        phase: str,
+        points: tuple[tuple[float, ...], ...],
+        phases: tuple[str, ...],
+        gate: str,
+        holders: tuple[str, ...],
+    ) -> None:
+        nonlocal start
+        durations = tuple(
+            duration_from_limits(
+                first,
+                last,
+                velocity_limits,
+                acceleration_limits,
+                minimum_s=minimum_s,
+            )
+            for first, last in zip(points, points[1:], strict=False)
+        )
+        steps.append(
+            _step(
+                len(steps),
+                name,
+                phase,
+                points[0],
+                points[-1],
+                sum(durations),
+                gate,
+                holders,
+                waypoints=points,
+                segment_durations_s=durations,
+                segment_phases=phases,
+            )
+        )
+        start = points[-1]
+
+    add_waypointed(
+        "left_approach",
+        "left_approach",
+        (
+            start,
+            public_qpos(waypoint_source["ready_wait70"], open_total, open_total),
+            public_qpos(waypoint_source["pregrasp_wait100"], open_total, open_total),
+            public_qpos(waypoint_source["grasp_wait100"], open_total, open_total),
+        ),
+        ("left_approach", "left_approach", "left_approach"),
+        "position",
+        (),
+    )
+    add(
+        "left_close",
+        "left_grasp",
+        public_qpos(waypoint_source["grasp_wait100"], left_close, open_total),
+        0.0,
+        "left_grasp",
+        ("left",),
+    )
+    add(
+        "left_lift",
+        "left_lift",
+        public_qpos(waypoint_source["handover_wait100"], left_close, open_total),
+        0.0,
+        "left_lift",
+        ("left",),
+    )
+    add_waypointed(
+        "right_handover_grasp",
+        "handover_approach",
+        (
+            start,
+            public_qpos(waypoint_source["right_pregrasp"], left_close, open_total),
+            public_qpos(waypoint_source["right_grasp"], left_close, open_total),
+        ),
+        ("handover_approach", "handover_approach"),
+        "handover",
+        ("left",),
+    )
+    add(
+        "right_close",
+        "dual_hold",
+        public_qpos(waypoint_source["right_grasp"], left_close, right_close),
+        0.0,
+        "dual_hold",
+        ("left", "right"),
+    )
+    add(
+        "left_open",
+        "left_release",
+        public_qpos(waypoint_source["right_grasp"], open_total, right_close),
+        0.0,
+        "left_release",
+        ("right",),
+    )
+    add_waypointed(
+        "right_place",
+        "right_place",
+        (
+            start,
+            public_qpos(waypoint_source["retreat35"], open_total, right_close),
+            public_qpos(waypoint_source["retreat100_preplace"], open_total, right_close),
+            public_qpos(waypoint_source["retreat100_place"], open_total, right_close),
+        ),
+        ("left_retreat", "right_transport", "right_place"),
+        "right_place",
+        ("right",),
+    )
+    add(
+        "right_open",
+        "right_release",
+        public_qpos(waypoint_source["retreat100_place"], open_total, open_total),
+        0.0,
+        "released",
+        (),
+    )
+    add(
+        "stable_hold",
+        "stable",
+        public_qpos(waypoint_source["retreat100_place"], open_total, open_total),
+        float(task_config.success.stable_duration_s),
+        "stable",
+        (),
+        final=True,
+    )
 
     total_s = sum(step.duration_s for step in steps)
     if total_s > teacher.max_plan_duration_s + 1e-9:
@@ -375,7 +473,6 @@ def build_handover_plan(
         ik_max_position_error_m=ik_position,
         ik_max_orientation_error_rad=ik_orientation,
         layout=layout,
-        source_plan=source_plan,
     )
 
 
@@ -394,21 +491,138 @@ def sample_handover_chunk(
     control_config: ControlConfig,
     start_sim_time_ns: int,
 ) -> TaskChunk:
-    """Sample only the currently gated step and hold its end pose."""
-    return sample_step_chunk(
-        plan,
-        steps=plan.steps,
-        behaviour_phases=BEHAVIOUR_PHASES,
-        gate=gate,
-        feedback=feedback,
+    """Sample the currently gated step, including its multi-segment waypoints."""
+    step = plan.step_at(gate.step_index)
+    if not step.segment_durations_s:
+        return sample_step_chunk(
+            plan,
+            steps=plan.steps,
+            behaviour_phases=BEHAVIOUR_PHASES,
+            gate=gate,
+            feedback=feedback,
+            request_id=request_id,
+            task_epoch=task_epoch,
+            capture_seq=capture_seq,
+            observation_time_ns=observation_time_ns,
+            chunk_size=chunk_size,
+            period_ns=period_ns,
+            profile=profile,
+            control_config=control_config,
+            start_sim_time_ns=int(start_sim_time_ns),
+            error_cls=TeacherError,
+        )
+
+    from robot_contracts.models import Target
+    from robot_trajectory.spline_math import validate_reference_inputs
+
+    from robot_backend_sim.common.tasks.math import scalar_acceleration, trapezoid_progress
+
+    if chunk_size != 60 or period_ns != 50_000_000:
+        raise _error(
+            "INVALID_TEACHER_CLOCK", "teacher chunks are exactly 60 points at 50 ms"
+        )
+    if feedback.capture_seq != capture_seq or feedback.sim_time_ns != observation_time_ns:
+        raise _error(
+            "TEACHER_FEEDBACK_MISMATCH",
+            "feedback does not belong to the retained capture/observation",
+        )
+    if gate.failure or gate.status == "FAILED":
+        raise _error("TEACHER_GATE_FAILED", gate.failure or "task gate failed")
+    if gate.step_index >= len(plan.steps):
+        raise _error("TEACHER_PLAN_COMPLETE", "all gated steps have passed")
+    if gate.active_start_sim_time_ns < 0:
+        raise _error("TEACHER_NOT_STARTED", "no measured step start exists")
+
+    duration_ns = round(step.duration_s * 1e9)
+    points = step.waypoints
+    durations = step.segment_durations_s
+    segment_phases = step.segment_phases
+    cumulative: list[float] = []
+    total_duration_s = 0.0
+    for duration in durations:
+        cumulative.append(total_duration_s)
+        total_duration_s += duration
+    accelerations = tuple(
+        scalar_acceleration(points[index], points[index + 1], plan.accelerations)
+        for index in range(len(points) - 1)
+    )
+
+    positions: list[tuple[float, ...]] = []
+    point_phases: list[str] = []
+    times: list[int] = []
+    for index in range(chunk_size):
+        target_time_ns = observation_time_ns + (index + 1) * period_ns
+        elapsed_s = (target_time_ns - start_sim_time_ns) / 1e9
+        if elapsed_s >= step.duration_s:
+            position = step.end_positions
+            point_phase = segment_phases[-1]
+        elif elapsed_s <= 0.0:
+            position = step.start_positions
+            point_phase = segment_phases[0]
+        else:
+            segment_index = len(durations) - 1
+            for candidate, segment_start in enumerate(cumulative):
+                if segment_start <= elapsed_s < segment_start + durations[candidate]:
+                    segment_index = candidate
+                    break
+            local_s = elapsed_s - cumulative[segment_index]
+            progress = trapezoid_progress(
+                local_s, durations[segment_index], accelerations[segment_index]
+            )
+            first = points[segment_index]
+            last = points[segment_index + 1]
+            position = tuple(
+                start + (end - start) * progress
+                for start, end in zip(first, last, strict=True)
+            )
+            point_phase = segment_phases[segment_index]
+        positions.append(position)
+        point_phases.append(point_phase)
+        times.append((index + 1) * period_ns)
+
+    if not all(math.isfinite(value) for pos in positions for value in pos):
+        raise _error("INVALID_TEACHER_TARGET", "teacher produced a non-finite target")
+
+    targets = tuple(
+        Target(time_ns, pos) for time_ns, pos in zip(times, positions, strict=True)
+    )
+    validate_reference_inputs(
+        positions[0], targets, profile.joints, control_config.max_accelerations
+    )
+
+    digest_payload = {
+        "plan_digest": plan.plan_digest,
+        "step": step.name,
+        "capture_seq": capture_seq,
+        "observation_time_ns": observation_time_ns,
+        "positions": positions,
+        "phase": point_phases[0],
+        "gate": gate.status,
+    }
+    chunk_digest = hashlib.sha256(
+        json.dumps(
+            digest_payload, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode()
+    ).hexdigest()
+    wait_s = max(0.0, (observation_time_ns - start_sim_time_ns - duration_ns) / 1e9)
+    return TaskChunk(
         request_id=request_id,
         task_epoch=task_epoch,
         capture_seq=capture_seq,
         observation_time_ns=observation_time_ns,
-        chunk_size=chunk_size,
-        period_ns=period_ns,
-        profile=profile,
-        control_config=control_config,
-        start_sim_time_ns=int(start_sim_time_ns),
-        error_cls=TeacherError,
+        source_time_ns=feedback.sim_time_ns,
+        robot_profile_hash=plan.context.robot_profile_hash,
+        plan_digest=plan.plan_digest,
+        chunk_digest=chunk_digest,
+        phase=point_phases[0],
+        phases=tuple(point_phases),
+        phase_codes=tuple(BEHAVIOUR_PHASES.index(phase) for phase in point_phases),
+        time_from_observation_ns=tuple(times),
+        positions=tuple(positions),
+        ik_max_position_error_m=plan.ik_max_position_error_m,
+        ik_max_orientation_error_rad=plan.ik_max_orientation_error_rad,
+        gate_state=gate.status,
+        gate_failure=gate.failure,
+        phase_start_sim_time_ns=start_sim_time_ns,
+        phase_wait_s=wait_s,
     )

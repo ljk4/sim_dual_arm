@@ -180,25 +180,25 @@ def _observation(
 
 def _steps() -> tuple[HandoverStep, ...]:
     sequence = [
-        ("left_ready", "left_approach", "position", (), OPEN, OPEN, False, False),
-        ("left_pregrasp", "left_approach", "position", (), OPEN, OPEN, False, False),
-        ("left_grasp_pose", "left_approach", "position", (), OPEN, OPEN, False, False),
-        ("left_close", "left_grasp", "left_grasp", ("left",), CLOSE, OPEN, False, False),
-        ("left_lift", "left_lift", "left_lift", ("left",), CLOSE, OPEN, False, False),
-        ("left_handover", "handover_approach", "handover", ("left",), CLOSE, OPEN, False, False),
-        ("right_wait", "handover_approach", "handover", ("left",), CLOSE, OPEN, False, False),
-        ("right_pregrasp", "handover_approach", "handover", ("left",), CLOSE, OPEN, False, False),
-        ("right_grasp", "handover_approach", "handover", ("left",), CLOSE, OPEN, False, False),
-        ("right_close", "dual_hold", "dual_hold", ("left", "right"), CLOSE, CLOSE, False, False),
-        ("left_open", "left_release", "left_release", ("right",), OPEN, CLOSE, False, False),
-        ("left_retreat", "left_retreat", "left_retreat", ("right",), OPEN, CLOSE, False, False),
-        ("right_preplace", "right_transport", "right_carry", ("right",), OPEN, CLOSE, False, False),
-        ("right_place", "right_place", "right_place", ("right",), OPEN, CLOSE, True, False),
-        ("right_open", "right_release", "released", (), OPEN, OPEN, True, False),
-        ("stable", "stable", "stable", (), OPEN, OPEN, True, True),
+        ("left_ready", "left_approach", "position", (), OPEN, OPEN, False),
+        ("left_pregrasp", "left_approach", "position", (), OPEN, OPEN, False),
+        ("left_grasp_pose", "left_approach", "position", (), OPEN, OPEN, False),
+        ("left_close", "left_grasp", "left_grasp", ("left",), CLOSE, OPEN, False),
+        ("left_lift", "left_lift", "left_lift", ("left",), CLOSE, OPEN, False),
+        ("left_handover", "handover_approach", "handover", ("left",), CLOSE, OPEN, False),
+        ("right_wait", "handover_approach", "handover", ("left",), CLOSE, OPEN, False),
+        ("right_pregrasp", "handover_approach", "handover", ("left",), CLOSE, OPEN, False),
+        ("right_grasp", "handover_approach", "handover", ("left",), CLOSE, OPEN, False),
+        ("right_close", "dual_hold", "dual_hold", ("left", "right"), CLOSE, CLOSE, False),
+        ("left_open", "left_release", "left_release", ("right",), OPEN, CLOSE, False),
+        ("left_retreat", "left_retreat", "left_retreat", ("right",), OPEN, CLOSE, False),
+        ("right_preplace", "right_transport", "right_carry", ("right",), OPEN, CLOSE, False),
+        ("right_place", "right_place", "right_place", ("right",), OPEN, CLOSE, False),
+        ("right_open", "right_release", "released", (), OPEN, OPEN, False),
+        ("stable", "stable", "stable", (), OPEN, OPEN, True),
     ]
     steps = []
-    for index, (name, phase, gate, holders, left, right, box, final) in enumerate(sequence):
+    for index, (name, phase, gate, holders, left, right, final) in enumerate(sequence):
         positions = _positions(left, right)
         steps.append(
             HandoverStep(
@@ -210,7 +210,6 @@ def _steps() -> tuple[HandoverStep, ...]:
                 duration_s=0.2 if gate not in ("position",) else 0.0,
                 gate=gate,
                 holders=holders,
-                allow_box_support=box,
                 final=final,
             )
         )
@@ -331,7 +330,7 @@ def _advance_to_dual_hold(runtime: HandoverTaskRuntime) -> int:
         0.4,
         time_ns,
     )
-    assert runtime.behavior_phase == "left_grasp", runtime.state.metrics
+    assert runtime.behavior_phase == "left_lift", runtime.state.metrics
     # Lift and handover steps.
     for _ in range(5):
         state, time_ns = _run(runtime, _left_airborne, 0.7, time_ns)
@@ -436,10 +435,25 @@ def test_real_plan_is_a_gated_handover_sequence():
         support_body_names=tuple(scene.support_body_names),
     )
     names = [step.name for step in plan.steps]
+    assert names == [
+        "left_approach",
+        "left_close",
+        "left_lift",
+        "right_handover_grasp",
+        "right_close",
+        "left_open",
+        "right_place",
+        "right_open",
+        "stable_hold",
+    ]
     assert names.index("left_close") < names.index("left_lift")
     assert names.index("right_close") < names.index("left_open")
-    assert names.index("left_open") < names.index("right_preplace")
+    assert names.index("left_open") < names.index("right_place")
     assert names.index("right_place") < names.index("right_open")
+    for waypoint_step_name in ("left_approach", "right_handover_grasp", "right_place"):
+        waypoint_step = plan.steps[names.index(waypoint_step_name)]
+        assert len(waypoint_step.waypoints) >= 3
+        assert len(waypoint_step.segment_durations_s) == len(waypoint_step.waypoints) - 1
     assert plan.steps[-1].final and plan.steps[-1].phase == "stable"
     assert plan.steps[names.index("left_open")].holders == ("right",)
     assert plan.duration_s < TASK.success.max_task_sim_duration_s
@@ -456,6 +470,49 @@ def test_real_plan_is_a_gated_handover_sequence():
         TASK.teacher.right_close_opening_m
     )
     assert plan.layout.block_initial_center == layout.block_initial_center
+
+    snap_3100_a = replace(snapshot, seed=3100)
+    snap_3100_b = replace(snapshot, seed=3100)
+    snap_3101 = replace(snapshot, seed=3101)
+    plan_3100_a = build_handover_plan(
+        scene.model,
+        snap_3100_a,
+        PROFILE,
+        CONTROL,
+        TASK,
+        scene_config=scene_config,
+        robot=scene.indices.robot,
+        robot_geometry=scene.robot_geometry,
+        object_free_joint_qpos=dict(scene.object_free_joint_qpos),
+        support_body_names=tuple(scene.support_body_names),
+    )
+    plan_3100_b = build_handover_plan(
+        scene.model,
+        snap_3100_b,
+        PROFILE,
+        CONTROL,
+        TASK,
+        scene_config=scene_config,
+        robot=scene.indices.robot,
+        robot_geometry=scene.robot_geometry,
+        object_free_joint_qpos=dict(scene.object_free_joint_qpos),
+        support_body_names=tuple(scene.support_body_names),
+    )
+    plan_3101 = build_handover_plan(
+        scene.model,
+        snap_3101,
+        PROFILE,
+        CONTROL,
+        TASK,
+        scene_config=scene_config,
+        robot=scene.indices.robot,
+        robot_geometry=scene.robot_geometry,
+        object_free_joint_qpos=dict(scene.object_free_joint_qpos),
+        support_body_names=tuple(scene.support_body_names),
+    )
+    assert plan_3100_a.plan_digest == plan_3100_b.plan_digest
+    assert plan_3100_a.plan_digest != plan_3101.plan_digest
+    assert plan_3100_a.steps[2].end_positions != plan_3101.steps[2].end_positions
 
 
 def test_right_loss_after_left_release_fails_hold():
@@ -664,13 +721,18 @@ def test_right_hold_loss_after_dual_hold_fails():
 def test_policy_left_release_can_take_longer_than_hold_loss_tolerance():
     runtime = _runtime(())
     time_ns = _complete_policy_dual_phase(runtime)
-    # A real opening ramp first loses one finger, then both, well before the
-    # opening and low-speed release proof can pass. The right hand owns the
-    # block after the already completed airborne dual-hold proof.
+    # During a slow opening ramp one left finger still grazes the block before
+    # full physical separation. The right hand already owns the block after dual-hold.
     state, time_ns = _run(
         runtime,
         lambda now: replace(
-            _airborne(now, left_open=0.066, right_open=CLOSE, right_holding=True),
+            _airborne(
+                now,
+                left_open=0.066,
+                left_single=True,
+                right_open=CLOSE,
+                right_holding=True,
+            ),
             left_finger_speed_m_s=0.014,
         ),
         0.8,
@@ -704,14 +766,14 @@ def test_right_grip_micro_adjustment_while_left_holds_does_not_fail():
 
 def test_sequence_timer_does_not_accumulate_across_an_interruption():
     runtime = _runtime(())
-    state, time_ns = _run(runtime, _left_airborne, 0.4, 0)
+    state = runtime.tick(_left_airborne(50_000_000), 50_000_000)
+    assert state.phase == "RUNNING"
     state = runtime.tick(
-        _observation(time_ns + 100_000_000, block_center=AIRBORNE_CENTER),
-        time_ns + 100_000_000,
+        _observation(100_000_000, block_center=AIRBORNE_CENTER),
+        100_000_000,
     )
     assert state.phase == "RUNNING"
-    time_ns += 100_000_000
-    state, time_ns = _run(runtime, _left_airborne, 0.4, time_ns)
+    state = runtime.tick(_left_airborne(150_000_000), 150_000_000)
     sequence = state.metrics["handover_sequence"]
     assert sequence["left_airborne_stable"] is False
     assert sequence["left_hold_elapsed_s"] < TASK.gates.stable_duration_s
@@ -800,57 +862,23 @@ def test_short_hold_loss_within_the_original_tolerance_is_allowed():
 
 
 @pytest.mark.parametrize("teacher", [False, True], ids=["policy", "teacher"])
-def test_right_candidate_regrasp_uses_a_fresh_reference(teacher):
+def test_dual_proof_uses_the_short_debounce(teacher):
     runtime = _runtime(_steps() if teacher else ())
     time_ns = (
         _advance_to_dual_hold(runtime) if teacher else _advance_policy_left_phase(runtime)
     )
     left_proof = runtime.state.metrics["handover_sequence"]["left_stable_sim_time_ns"]
-    runtime.tick(_dual_airborne(time_ns + 100_000_000), time_ns + 100_000_000)
-    runtime.tick(_left_airborne(time_ns + 200_000_000), time_ns + 200_000_000)
-
-    def regrasp(time_ns: int) -> HandoverObservation:
-        return _airborne(
-            time_ns, left_open=CLOSE, left_holding=True,
-            right_open=CLOSE, right_holding=True,
-            right_tcp_offset=(0.0, -0.05, 0.035),
-        )
-
-    resumed_ns = time_ns + 300_000_000
-    state = runtime.tick(regrasp(resumed_ns), resumed_ns)
-    state = runtime.tick(regrasp(resumed_ns + 499_000_000), resumed_ns + 499_000_000)
-    assert state.phase == "RUNNING", state.metrics
+    resumed_ns = time_ns + 100_000_000
+    state = runtime.tick(_dual_airborne(resumed_ns), resumed_ns)
     assert state.metrics["handover_sequence"]["dual_airborne_stable"] is False
-    state = runtime.tick(regrasp(resumed_ns + 500_000_000), resumed_ns + 500_000_000)
+    state = runtime.tick(
+        _dual_airborne(resumed_ns + 80_000_000), resumed_ns + 80_000_000
+    )
     sequence = state.metrics["handover_sequence"]
     assert state.phase == "RUNNING", state.metrics
     assert sequence["dual_airborne_stable"] is True
     assert sequence["left_stable_sim_time_ns"] == left_proof
     assert sequence["dual_hold_elapsed_s"] == pytest.approx(TASK.gates.stable_duration_s)
-    if teacher:
-        assert runtime.step_name == "left_open", state.metrics
-
-
-def test_left_candidate_regrasp_restarts_its_stable_window():
-    runtime = _runtime(())
-    _run(runtime, _left_airborne, 0.3, 0)
-    runtime.tick(_observation(400_000_000, block_center=AIRBORNE_CENTER), 400_000_000)
-
-    def regrasp(time_ns: int) -> HandoverObservation:
-        return _airborne(
-            time_ns, left_open=CLOSE, left_holding=True,
-            left_tcp_offset=(0.0, 0.05, 0.035),
-        )
-
-    runtime.tick(regrasp(500_000_000), 500_000_000)
-    state = runtime.tick(regrasp(999_000_000), 999_000_000)
-    assert state.metrics["handover_sequence"]["left_airborne_stable"] is False
-    state = runtime.tick(regrasp(1_000_000_000), 1_000_000_000)
-    assert state.phase == "RUNNING", state.metrics
-    assert state.metrics["handover_sequence"]["left_airborne_stable"] is True
-    assert state.metrics["handover_sequence"]["left_hold_elapsed_s"] == pytest.approx(
-        TASK.gates.stable_duration_s
-    )
 
 
 def test_teacher_grasp_candidate_restarts_after_regrasp():
@@ -860,107 +888,40 @@ def test_teacher_grasp_candidate_restarts_after_regrasp():
         _state, time_ns = _run(runtime, _observation, 0.7, time_ns)
     assert runtime.behavior_phase == "left_grasp", runtime.state.metrics
     runtime.tick(
-        _observation(time_ns + 100_000_000, left_open=CLOSE, left_holding=True,
-                     supports=(TABLE_SUPPORT,)),
-        time_ns + 100_000_000,
+        _observation(
+            time_ns + 50_000_000,
+            left_open=CLOSE,
+            left_holding=True,
+            supports=(TABLE_SUPPORT,),
+        ),
+        time_ns + 50_000_000,
     )
-    runtime.tick(_observation(time_ns + 200_000_000), time_ns + 200_000_000)
+    runtime.tick(_observation(time_ns + 100_000_000), time_ns + 100_000_000)
 
     def regrasp(time_ns: int) -> HandoverObservation:
         return _observation(
-            time_ns, left_open=CLOSE, left_holding=True, supports=(TABLE_SUPPORT,),
+            time_ns,
+            left_open=CLOSE,
+            left_holding=True,
+            supports=(TABLE_SUPPORT,),
             left_tcp_offset=(0.0, 0.05, 0.035),
         )
 
-    state, _time_ns = _run(runtime, regrasp, 0.6, time_ns + 200_000_000)
+    state, _time_ns = _run(runtime, regrasp, 0.3, time_ns + 100_000_000)
     assert state.phase == "RUNNING", state.metrics
     assert runtime.step_name == "left_lift", state.metrics
     assert state.metrics["handover_sequence"]["left_airborne_stable"] is False
 
 
-@pytest.mark.parametrize("side", ["left", "right"])
-def test_candidate_reference_does_not_follow_continuous_slip(side):
-    runtime = _runtime(())
-    time_ns = _advance_policy_left_phase(runtime) if side == "right" else 0
-    for index in range(1, 16):
-        now_ns = time_ns + index * 100_000_000
-        offsets = {
-            f"{side}_tcp_offset": (
-                0.0, (0.06 if side == "left" else -0.06) + index * 0.002, 0.035
-            )
-        }
-        observation = _airborne(
-            now_ns, left_open=CLOSE, left_holding=True,
-            right_open=CLOSE if side == "right" else OPEN,
-            right_holding=side == "right", **offsets,
-        )
-        state = runtime.tick(observation, now_ns)
-        assert state.phase == "RUNNING", state.metrics
-        assert state.metrics["handover_sequence"][
-            "dual_airborne_stable" if side == "right" else "left_airborne_stable"
-        ] is False
-
-
-def test_repeated_candidate_regrasps_do_not_accumulate_hold_time():
+def test_airborne_sequence_succeeds_with_in_hand_pose_shift_and_without_opening_threshold():
     runtime = _runtime(())
     time_ns = 0
-    for attempt in range(4):
-        def candidate(
-            time_ns: int, offset_m: float = 0.06 + attempt * 0.01
-        ) -> HandoverObservation:
-            return _airborne(
-                time_ns, left_open=CLOSE, left_holding=True,
-                left_tcp_offset=(0.0, offset_m, 0.035),
-            )
-
-        state, time_ns = _run(runtime, candidate, 0.3, time_ns)
-        assert state.phase == "RUNNING", state.metrics
-        assert state.metrics["handover_sequence"]["left_airborne_stable"] is False
-        time_ns += 100_000_000
-        state = runtime.tick(_observation(time_ns, block_center=AIRBORNE_CENTER), time_ns)
-        assert state.metrics["handover_sequence"]["left_hold_elapsed_s"] == 0.0
-
-
-def test_established_left_reference_is_preserved_after_a_short_loss():
-    runtime = _runtime(())
-    time_ns = _advance_policy_left_phase(runtime)
-    left_proof = runtime.state.metrics["handover_sequence"]["left_stable_sim_time_ns"]
-    _state, time_ns = _run(
-        runtime, lambda t: _observation(t, block_center=AIRBORNE_CENTER), 0.2, time_ns
-    )
-
-    def slipped_grasp(time_ns: int) -> HandoverObservation:
-        return _airborne(
-            time_ns, left_open=CLOSE, left_holding=True,
-            right_open=CLOSE, right_holding=True,
-            left_tcp_offset=(0.0, 0.05, 0.035),
-        )
-
-    state, _time_ns = _run(runtime, slipped_grasp, 0.6, time_ns)
-    assert state.phase == "RUNNING", state.metrics
-    sequence = state.metrics["handover_sequence"]
-    assert sequence["left_stable_sim_time_ns"] == left_proof
-    assert sequence["dual_airborne_stable"] is False
-
-
-def test_continuous_left_hold_refreshes_dual_reference_after_alignment():
-    runtime = _runtime(())
-    time_ns = 0
-    state, time_ns = _run(runtime, _left_airborne, 0.6, time_ns)
+    state, time_ns = _run(runtime, _left_airborne, 0.2, time_ns)
     assert state.phase == "RUNNING", state.metrics
     assert state.metrics["handover_sequence"]["left_airborne_stable"] is True
-    assert state.metrics["handover_sequence"]["phase"] == "dual"
 
-    # Left shifts slightly relative to the block mid-carry without ever dropping it
-    # (> 5 mm relative drift vs left-phase entry) before right closes to co-hold.
-    def _shifted_left(ts: int) -> HandoverObservation:
-        return _airborne(
-            ts,
-            left_open=CLOSE,
-            left_holding=True,
-            left_tcp_offset=(0.0, 0.052, 0.035),
-        )
-
+    # In-hand TCP offset shifts >10 mm during carry and dual hold; sequence proof
+    # relies purely on physical two-finger contact and zero external support.
     def _dual_shifted(ts: int) -> HandoverObservation:
         return _airborne(
             ts,
@@ -968,22 +929,43 @@ def test_continuous_left_hold_refreshes_dual_reference_after_alignment():
             left_holding=True,
             right_open=CLOSE,
             right_holding=True,
-            left_tcp_offset=(0.0, 0.052, 0.035),
-            right_tcp_offset=(0.0, -0.052, 0.035),
+            left_tcp_offset=(0.0, 0.045, 0.035),
+            right_tcp_offset=(0.0, -0.045, 0.035),
         )
 
-    state, time_ns = _run(runtime, _shifted_left, 0.3, time_ns)
+    state, time_ns = _run(runtime, _dual_shifted, 0.2, time_ns)
     assert state.phase == "RUNNING", state.metrics
+    assert state.metrics["handover_sequence"]["dual_airborne_stable"] is True
 
-    state, time_ns = _run(runtime, _dual_shifted, 0.6, time_ns)
-    assert state.phase == "RUNNING", state.metrics
-    sequence = state.metrics["handover_sequence"]
-    assert sequence["dual_airborne_stable"] is True
-    assert sequence["dual_hold_elapsed_s"] >= 0.5
+    # Left releases physical contact at opening 0.062 m (< 0.075 m command threshold)
+    # while fingers are still moving; physical release is immediately recognized.
+    def _right_only_partial_open(ts: int) -> HandoverObservation:
+        return replace(
+            _airborne(
+                ts,
+                left_open=0.062,
+                left_holding=False,
+                right_open=CLOSE,
+                right_holding=True,
+                right_tcp_offset=(0.0, -0.040, 0.035),
+            ),
+            left_finger_speed_m_s=0.02,
+        )
 
-    state, time_ns = _run(runtime, _right_airborne, 0.6, time_ns)
+    state, time_ns = _run(runtime, _right_only_partial_open, 0.2, time_ns)
     assert state.phase == "RUNNING", state.metrics
-    state, time_ns = _run(runtime, _placed, 1.4, time_ns)
+    assert state.metrics["handover_sequence"]["complete"] is True
+
+    state, time_ns = _run(runtime, _placed, 1.2, time_ns)
+    assert state.phase == "SUCCEEDED", state.metrics
+    assert state.succeeded is True
+
+
+def test_success_is_decoupled_from_teacher_final_step_index():
+    runtime = _runtime(_steps())
+    assert runtime.step_index == 0
+    time_ns = _complete_airborne_sequence(runtime, 0)
+    state, _time_ns = _run(runtime, _placed, 1.2, time_ns)
     assert state.phase == "SUCCEEDED", state.metrics
     assert state.succeeded is True
 

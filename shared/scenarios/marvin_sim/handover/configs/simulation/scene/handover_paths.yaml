@@ -88,8 +88,9 @@ approach:
 
 handover:
   # The handover area is the lifted block pose; no lateral block move is made
-  # while both hands are closed.
-  block_center_offset_m: [0.0, 0.0, 0.12]
+  # while both hands are closed.  Direct lift to 13 cm keeps a 3 cm margin
+  # above the 10 cm lift gate.
+  block_center_offset_m: [0.0, 0.0, 0.13]
 
 retreat:
   # The previous [0.40, 0.42, 1.06] pose sat exactly on the left joint7 hard
@@ -119,3 +120,20 @@ diagnostics:
   relative_position_tolerance_m: 0.005
   relative_orientation_tolerance_rad: 0.05
   stop_gripper_tolerance_m: 0.002
+
+diversity:
+  # Seed-driven target jitter.  Each attempt decays the spatial offsets so a
+  # retry re-solves near the nominal plan; speed scale stays seed-specific.
+  enabled: true
+  max_attempts: 12
+  handover_offset_range_m: [0.016, 0.016, 0.012]
+  left_ready_offset_range_m: [0.018, 0.018, 0.018]
+  right_wait_offset_range_m: [0.018, 0.018, 0.018]
+  pregrasp_height_range_m: 0.010
+  grasp_along_y_range_m: 0.010
+  wrist_tilt_range_deg: 2.0
+  wrist_yaw_range_deg: 4.0
+  place_xy_range_m: [0.025, 0.025]
+  place_yaw_range_deg: 12.0
+  preplace_height_range_m: 0.015
+  speed_scale_range: [0.88, 1.05]

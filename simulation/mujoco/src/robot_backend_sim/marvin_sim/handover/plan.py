@@ -9,6 +9,7 @@ teacher.
 
 from __future__ import annotations
 
+import hashlib
 import math
 import time
 from dataclasses import dataclass, field
@@ -52,6 +53,7 @@ __all__ = [
     "build_handover_targets",
     "layout_from_config",
     "layout_from_scene",
+    "perturb_handover_plan_config",
     "plan_handover",
 ]
 
@@ -128,6 +130,7 @@ class HandoverPlan:
     coordinated_waypoints: tuple[tuple[float, ...], ...] = field(default_factory=tuple)
     coordination_summary: dict[str, object] = field(default_factory=dict)
     failures: tuple[str, ...] = field(default_factory=tuple)
+    teacher_waypoints: dict[str, tuple[float, ...]] = field(default_factory=dict)
 
     @property
     def passed(self) -> bool:
@@ -273,10 +276,18 @@ def build_handover_targets(
         _rotation_z(math.radians(config.transport.place_yaw_deg)) @ right_cohold_rotation
     )
     place_world_offset = place_rotation @ right_local_offset
+    place_xy_delta = _rotation_z(math.radians(layout.base_yaw_deg)) @ np.array(
+        [
+            config.transport.place_xy_offset_m[0],
+            config.transport.place_xy_offset_m[1],
+            0.0,
+        ],
+        dtype=np.float64,
+    )
     place_center = np.array(
         [
-            layout.box_center[0],
-            layout.box_center[1],
+            layout.box_center[0] + place_xy_delta[0],
+            layout.box_center[1] + place_xy_delta[1],
             layout.box_inner_bottom_z + layout.block_half_extents[2],
         ],
         dtype=np.float64,
@@ -404,6 +415,137 @@ def build_handover_targets(
         "place_world_offset": tuple(float(value) for value in place_world_offset),
     }
     return targets, context
+
+
+def _signed_uniform(seed: int, attempt: int, index: int) -> float:
+    """Deterministic uniform sample in [-1, 1] for one seed/attempt slot."""
+    digest = hashlib.sha256(
+        f"handover_diversity:{seed}:{attempt}:{index}".encode()
+    ).digest()
+    return int.from_bytes(digest[:8], "big") / ((1 << 64) - 1) * 2.0 - 1.0
+
+
+def perturb_handover_plan_config(
+    config: HandoverPlanConfig, seed: int, attempt: int = 0
+) -> tuple[HandoverPlanConfig, float]:
+    """Return a seed-deterministic recipe variant and its speed scale.
+
+    Spatial jitter decays with each retry so a failed attempt re-solves near the
+    nominal recipe; the speed scale stays seed-specific even when the offsets
+    have fully decayed, so every seed has distinct timing.
+    """
+    diversity = config.diversity
+    if not diversity.enabled:
+        return config, 1.0
+    u = [_signed_uniform(int(seed), int(attempt), index) for index in range(20)]
+    alpha = 0.0 if attempt >= diversity.max_attempts - 1 else 0.7 ** attempt
+
+    handover_base = config.handover.block_center_offset_m
+    handover_range = diversity.handover_offset_range_m
+    dz = alpha * u[2] * handover_range[2]
+    handover = config.handover.model_copy(
+        update={
+            "block_center_offset_m": (
+                float(handover_base[0]) + alpha * u[0] * handover_range[0],
+                float(handover_base[1])
+                + alpha * (u[1] * 0.65 - 0.35 * abs(u[1])) * handover_range[1],
+                float(handover_base[2]) + dz,
+            )
+        }
+    )
+
+    left_base = config.approach.left_ready_tcp_m
+    right_base = config.approach.right_wait_tcp_m
+    left_range = diversity.left_ready_offset_range_m
+    right_range = diversity.right_wait_offset_range_m
+    approach = config.approach.model_copy(
+        update={
+            "left_ready_tcp_m": (
+                float(left_base[0]) + alpha * u[3] * left_range[0],
+                float(left_base[1]) + alpha * u[4] * left_range[1],
+                float(left_base[2]) + alpha * u[5] * left_range[2],
+            ),
+            "right_wait_tcp_m": (
+                float(right_base[0]) + alpha * u[6] * right_range[0],
+                float(right_base[1]) + alpha * u[7] * right_range[1],
+                float(right_base[2]) + alpha * u[8] * right_range[2],
+            ),
+        }
+    )
+
+    grasp = config.grasp
+    pregrasp = max(
+        0.028,
+        float(grasp.pregrasp_height_m)
+        + alpha * u[9] * diversity.pregrasp_height_range_m,
+    )
+    left_grasp = grasp.left.model_copy(
+        update={
+            "along_block_y_m": min(
+                0.072,
+                max(
+                    0.048,
+                    float(grasp.left.along_block_y_m)
+                    + alpha * u[10] * diversity.grasp_along_y_range_m,
+                ),
+            ),
+            "approach_yaw_deg": float(grasp.left.approach_yaw_deg)
+            + alpha * u[12] * diversity.wrist_yaw_range_deg,
+        }
+    )
+    right_cohold = grasp.right_cohold.model_copy(
+        update={
+            "along_block_y_m": max(
+                -0.072,
+                min(
+                    -0.048,
+                    float(grasp.right_cohold.along_block_y_m)
+                    + alpha * u[11] * diversity.grasp_along_y_range_m,
+                ),
+            ),
+            "approach_tilt_deg": float(grasp.right_cohold.approach_tilt_deg)
+            + alpha * u[13] * diversity.wrist_tilt_range_deg,
+            "approach_yaw_deg": float(grasp.right_cohold.approach_yaw_deg)
+            + alpha * u[14] * diversity.wrist_yaw_range_deg,
+        }
+    )
+    grasp = grasp.model_copy(
+        update={
+            "pregrasp_height_m": pregrasp,
+            "left": left_grasp,
+            "right_cohold": right_cohold,
+        }
+    )
+
+    transport = config.transport
+    place_xy_range = diversity.place_xy_range_m
+    transport = transport.model_copy(
+        update={
+            "place_xy_offset_m": (
+                alpha * u[15] * place_xy_range[0],
+                alpha * u[16] * place_xy_range[1],
+            ),
+            "place_yaw_deg": float(transport.place_yaw_deg)
+            + alpha * u[17] * diversity.place_yaw_range_deg,
+            "preplace_block_center_above_rim_m": max(
+                0.055,
+                float(transport.preplace_block_center_above_rim_m)
+                + alpha * u[18] * diversity.preplace_height_range_m,
+            ),
+        }
+    )
+
+    low, high = diversity.speed_scale_range
+    speed_scale = float(low) + (u[19] + 1.0) / 2.0 * (float(high) - float(low))
+    perturbed = config.model_copy(
+        update={
+            "handover": handover,
+            "approach": approach,
+            "grasp": grasp,
+            "transport": transport,
+        }
+    )
+    return perturbed, speed_scale
 
 
 def _plan_targets(results: tuple[IKSolution, ...]) -> dict[str, PlanTarget]:
@@ -640,6 +782,7 @@ def plan_handover(
     *,
     max_velocities: dict[str, tuple[float, ...]] | None = None,
     deadline: float | None = None,
+    teacher_only: bool = False,
 ) -> HandoverPlan:
     """Build and check every candidate target and connecting path."""
     started = time.perf_counter()
@@ -677,11 +820,11 @@ def plan_handover(
         by_name[name]
         for name in (
             "left_ready",
+            "right_handover_wait",
             "left_pregrasp",
             "left_grasp",
             "left_lift",
             "left_handover",
-            "right_handover_wait",
             "right_handover_pregrasp",
             "right_handover_grasp",
             "left_retreat",
@@ -718,21 +861,23 @@ def plan_handover(
             model, initial_qpos, sequence_a, chains, ik, clearance, None, deadline=deadline
         )
     )
-    solved_b = _plan_targets(
-        solve_targets(
-            model, initial_qpos, sequence_b, chains, ik, clearance, None, deadline=deadline
+    solved_b: dict[str, PlanTarget] = {}
+    solved_c: dict[str, PlanTarget] = {}
+    if not teacher_only:
+        solved_b = _plan_targets(
+            solve_targets(
+                model, initial_qpos, sequence_b, chains, ik, clearance, None, deadline=deadline
+            )
         )
-    )
-    solved_c = _plan_targets(
-        solve_targets(
-            model, initial_qpos, sequence_c, chains, ik, clearance, None, deadline=deadline
+        solved_c = _plan_targets(
+            solve_targets(
+                model, initial_qpos, sequence_c, chains, ik, clearance, None, deadline=deadline
+            )
         )
-    )
-    all_names = (
-        *[target.name for target in sequence_a],
-        *[target.name for target in sequence_b],
-        *[target.name for target in sequence_c],
-    )
+    all_names = [target.name for target in sequence_a]
+    if not teacher_only:
+        all_names.extend(target.name for target in sequence_b)
+        all_names.extend(target.name for target in sequence_c)
     all_plans = {**solved_b, **solved_c, **solved}
     all_targets = tuple(
         all_plans[name] for name in dict.fromkeys(all_names) if name in all_plans
@@ -761,7 +906,6 @@ def plan_handover(
     object_names = (layout.block_name,)
     left_grasp = solved["left_grasp"]
     right_handover_grasp = solved["right_handover_grasp"]
-    right_center_initial = solved_b["right_center_initial"]
     body_id = int(model.body(layout.block_name).id)
     geom_id = int(model.geom(f"{layout.block_name}_geom").id)
     qpos_address = int(scene.object_free_joint_qpos[layout.block_name])
@@ -792,44 +936,49 @@ def plan_handover(
             block_rotation,
         ),
     )
-    right_center_envelope = BlockEnvelope(
-        object_name=layout.block_name,
-        body_id=body_id,
-        geom_id=geom_id,
-        qpos_address=qpos_address,
-        holder_tcp_site=right_site,
-        relative_pose=relative_block_pose(
-            right_center_initial.position, right_center_initial.rotation,
-            context["initial_block_center"],
-            block_rotation,
-        ),
-    )
-    left_cohold_envelope = BlockEnvelope(
-        object_name=layout.block_name,
-        body_id=body_id,
-        geom_id=geom_id,
-        qpos_address=qpos_address,
-        holder_tcp_site=left_site,
-        relative_pose=relative_block_pose(
-            solved_c["left_cohold_grasp"].position,
-            solved_c["left_cohold_grasp"].rotation,
-            context["initial_block_center"],
-            block_rotation,
-        ),
-    )
-    right_cohold_envelope = BlockEnvelope(
-        object_name=layout.block_name,
-        body_id=body_id,
-        geom_id=geom_id,
-        qpos_address=qpos_address,
-        holder_tcp_site=right_site,
-        relative_pose=relative_block_pose(
-            solved_c["right_cohold_grasp"].position,
-            solved_c["right_cohold_grasp"].rotation,
-            context["initial_block_center"],
-            block_rotation,
-        ),
-    )
+    right_center_envelope: BlockEnvelope | None = None
+    left_cohold_envelope: BlockEnvelope | None = None
+    right_cohold_envelope: BlockEnvelope | None = None
+    if not teacher_only:
+        right_center_initial = solved_b["right_center_initial"]
+        right_center_envelope = BlockEnvelope(
+            object_name=layout.block_name,
+            body_id=body_id,
+            geom_id=geom_id,
+            qpos_address=qpos_address,
+            holder_tcp_site=right_site,
+            relative_pose=relative_block_pose(
+                right_center_initial.position, right_center_initial.rotation,
+                context["initial_block_center"],
+                block_rotation,
+            ),
+        )
+        left_cohold_envelope = BlockEnvelope(
+            object_name=layout.block_name,
+            body_id=body_id,
+            geom_id=geom_id,
+            qpos_address=qpos_address,
+            holder_tcp_site=left_site,
+            relative_pose=relative_block_pose(
+                solved_c["left_cohold_grasp"].position,
+                solved_c["left_cohold_grasp"].rotation,
+                context["initial_block_center"],
+                block_rotation,
+            ),
+        )
+        right_cohold_envelope = BlockEnvelope(
+            object_name=layout.block_name,
+            body_id=body_id,
+            geom_id=geom_id,
+            qpos_address=qpos_address,
+            holder_tcp_site=right_site,
+            relative_pose=relative_block_pose(
+                solved_c["right_cohold_grasp"].position,
+                solved_c["right_cohold_grasp"].rotation,
+                context["initial_block_center"],
+                block_rotation,
+            ),
+        )
 
     def pairs(excluded: tuple[str, ...]) -> object:
         return robot_pair_set(
@@ -908,15 +1057,77 @@ def plan_handover(
     left_carry = CarriedBlock(left_envelope, left_grasp.qpos, True)
     left_static = CarriedBlock(left_envelope, solved["left_handover"].qpos, False)
     right_handover_carry = CarriedBlock(right_handover_envelope, right_handover_grasp.qpos, True)
-    right_initial_carry = CarriedBlock(right_center_envelope, right_center_initial.qpos, True)
-    segments = (
+    left_chain = next(chain for chain in chains if chain.side == _LEFT)
+    right_chain = next(chain for chain in chains if chain.side == _RIGHT)
+
+    def _arm_addresses(chain: ArmChain) -> tuple[int, ...]:
+        return tuple(
+            int(model.jnt_qposadr[int(model.joint(name).id)])
+            for name in chain.joint_names
+        )
+
+    left_addresses = _arm_addresses(left_chain)
+    right_addresses = _arm_addresses(right_chain)
+
+    def _mix_arms(
+        base: tuple[float, ...],
+        *,
+        left_source: tuple[float, ...] | None = None,
+        left_fraction: float = 1.0,
+        right_source: tuple[float, ...] | None = None,
+        right_fraction: float = 1.0,
+    ) -> tuple[float, ...]:
+        values = [float(value) for value in base]
+        if left_source is not None:
+            for address in left_addresses:
+                values[address] = float(base[address]) + left_fraction * (
+                    float(left_source[address]) - float(base[address])
+                )
+        if right_source is not None:
+            for address in right_addresses:
+                values[address] = float(base[address]) + right_fraction * (
+                    float(right_source[address]) - float(base[address])
+                )
+        return tuple(values)
+
+    q_ready_wait70 = _mix_arms(
+        initial_qpos,
+        left_source=solved["left_ready"].qpos,
+        right_source=solved["right_handover_wait"].qpos,
+        right_fraction=0.70,
+    )
+    q_pregrasp_wait100 = solved["left_pregrasp"].qpos
+    q_grasp_wait100 = solved["left_grasp"].qpos
+    q_handover_wait100 = solved["left_handover"].qpos
+    q_right_pregrasp = solved["right_handover_pregrasp"].qpos
+    q_right_grasp = solved["right_handover_grasp"].qpos
+    q_retreat35 = _mix_arms(
+        q_right_grasp,
+        left_source=solved["left_retreat"].qpos,
+        left_fraction=0.35,
+    )
+    q_retreat100_preplace = solved["right_preplace"].qpos
+    q_retreat100_place = solved["right_place"].qpos
+    teacher_waypoints = {
+        "ready_wait70": q_ready_wait70,
+        "pregrasp_wait100": q_pregrasp_wait100,
+        "grasp_wait100": q_grasp_wait100,
+        "handover_wait100": q_handover_wait100,
+        "right_pregrasp": q_right_pregrasp,
+        "right_grasp": q_right_grasp,
+        "retreat35": q_retreat35,
+        "retreat100_preplace": q_retreat100_preplace,
+        "retreat100_place": q_retreat100_place,
+    }
+
+    segments: list[PlanSegment] = [
         check(
             "left_approach",
             "initial",
             "left_ready",
             initial_qpos,
-            solved["left_ready"].qpos,
-            active_side=_LEFT,
+            q_ready_wait70,
+            active_side="both",
             excluded=(),
             carried=None,
         ),
@@ -924,9 +1135,9 @@ def plan_handover(
             "left_pregrasp_path",
             "left_ready",
             "left_pregrasp",
-            solved["left_ready"].qpos,
-            solved["left_pregrasp"].qpos,
-            active_side=_LEFT,
+            q_ready_wait70,
+            q_pregrasp_wait100,
+            active_side="both",
             excluded=(),
             carried=None,
         ),
@@ -934,49 +1145,29 @@ def plan_handover(
             "left_grasp_path",
             "left_pregrasp",
             "left_grasp",
-            solved["left_pregrasp"].qpos,
-            solved["left_grasp"].qpos,
+            q_pregrasp_wait100,
+            q_grasp_wait100,
             active_side=_LEFT,
             excluded=(),
             carried=None,
         ),
         check(
-            "left_lift",
+            "left_handover",
             "left_grasp",
-            "left_lift",
-            solved["left_grasp"].qpos,
-            solved["left_lift"].qpos,
+            "left_handover",
+            q_grasp_wait100,
+            q_handover_wait100,
             active_side=_LEFT,
             excluded=left_fingers,
             carried=left_carry,
             allowed_start=("table",),
         ),
         check(
-            "left_handover",
-            "left_lift",
-            "left_handover",
-            solved["left_lift"].qpos,
-            solved["left_handover"].qpos,
-            active_side=_LEFT,
-            excluded=left_fingers,
-            carried=left_carry,
-        ),
-        check(
-            "right_handover_wait_path",
-            "left_handover",
-            "right_handover_wait",
-            solved["left_handover"].qpos,
-            solved["right_handover_wait"].qpos,
-            active_side=_RIGHT,
-            excluded=left_fingers,
-            carried=left_static,
-        ),
-        check(
             "right_handover_pregrasp_path",
-            "right_handover_wait",
+            "left_handover",
             "right_handover_pregrasp",
-            solved["right_handover_wait"].qpos,
-            solved["right_handover_pregrasp"].qpos,
+            q_handover_wait100,
+            q_right_pregrasp,
             active_side=_RIGHT,
             excluded=left_fingers,
             carried=left_static,
@@ -985,8 +1176,8 @@ def plan_handover(
             "right_handover_grasp_path",
             "right_handover_pregrasp",
             "right_handover_grasp",
-            solved["right_handover_pregrasp"].qpos,
-            right_handover_grasp.qpos,
+            q_right_pregrasp,
+            q_right_grasp,
             active_side=_RIGHT,
             excluded=left_fingers,
             carried=left_static,
@@ -995,19 +1186,19 @@ def plan_handover(
             "left_retreat",
             "right_handover_grasp",
             "left_retreat",
-            right_handover_grasp.qpos,
-            solved["left_retreat"].qpos,
+            q_right_grasp,
+            q_retreat35,
             active_side=_LEFT,
             excluded=right_fingers,
-            carried=CarriedBlock(right_handover_envelope, right_handover_grasp.qpos, False),
+            carried=CarriedBlock(right_handover_envelope, q_right_grasp, False),
         ),
         check(
             "right_transport",
             "left_retreat",
             "right_preplace",
-            solved["left_retreat"].qpos,
-            solved["right_preplace"].qpos,
-            active_side=_RIGHT,
+            q_retreat35,
+            q_retreat100_preplace,
+            active_side="both",
             excluded=right_fingers,
             carried=right_handover_carry,
         ),
@@ -1015,170 +1206,210 @@ def plan_handover(
             "right_place",
             "right_preplace",
             "right_place",
-            solved["right_preplace"].qpos,
-            solved["right_place"].qpos,
+            q_retreat100_preplace,
+            q_retreat100_place,
             active_side=_RIGHT,
             excluded=right_fingers,
             carried=right_handover_carry,
             allowed_end=(layout.box_name,),
         ),
-        check(
-            "right_initial_wait",
-            "initial",
-            "right_wait_initial",
-            initial_qpos,
-            solved_b["right_wait_initial"].qpos,
-            active_side=_RIGHT,
-            excluded=(),
-            carried=None,
-        ),
-        check(
-            "right_initial_pregrasp_path",
-            "right_wait_initial",
-            "right_initial_pregrasp",
-            solved_b["right_wait_initial"].qpos,
-            solved_b["right_initial_pregrasp"].qpos,
-            active_side=_RIGHT,
-            excluded=(),
-            carried=None,
-        ),
-        check(
-            "right_initial_grasp_path",
-            "right_initial_pregrasp",
-            "right_center_initial",
-            solved_b["right_initial_pregrasp"].qpos,
-            solved_b["right_center_initial"].qpos,
-            active_side=_RIGHT,
-            excluded=(),
-            carried=None,
-        ),
-        check(
-            "right_initial_lift",
-            "right_center_initial",
-            "right_center_lift",
-            solved_b["right_center_initial"].qpos,
-            solved_b["right_center_lift"].qpos,
-            active_side=_RIGHT,
-            excluded=right_fingers,
-            carried=right_initial_carry,
-            allowed_start=("table",),
-        ),
-        check(
-            "left_cohold_approach",
-            "initial",
-            "left_ready",
-            initial_qpos,
-            solved_c["left_ready"].qpos,
-            active_side=_LEFT,
-            excluded=(),
-            carried=None,
-        ),
-        check(
-            "left_cohold_pregrasp_path",
-            "left_ready",
-            "left_cohold_pregrasp",
-            solved_c["left_ready"].qpos,
-            solved_c["left_cohold_pregrasp"].qpos,
-            active_side=_LEFT,
-            excluded=(),
-            carried=None,
-        ),
-        check(
-            "left_cohold_grasp_path",
-            "left_cohold_pregrasp",
-            "left_cohold_grasp",
-            solved_c["left_cohold_pregrasp"].qpos,
-            solved_c["left_cohold_grasp"].qpos,
-            active_side=_LEFT,
-            excluded=(),
-            carried=None,
-        ),
-        check(
-            "right_cohold_wait_path",
-            "left_cohold_grasp",
-            "right_cohold_wait",
-            solved_c["left_cohold_grasp"].qpos,
-            solved_c["right_cohold_wait"].qpos,
-            active_side=_RIGHT,
-            excluded=left_fingers,
-            carried=CarriedBlock(
-                left_cohold_envelope, solved_c["left_cohold_grasp"].qpos, False
-            ),
-        ),
-        check(
-            "right_cohold_pregrasp_path",
-            "right_cohold_wait",
-            "right_cohold_pregrasp",
-            solved_c["right_cohold_wait"].qpos,
-            solved_c["right_cohold_pregrasp"].qpos,
-            active_side=_RIGHT,
-            excluded=left_fingers,
-            carried=CarriedBlock(
-                left_cohold_envelope, solved_c["left_cohold_grasp"].qpos, False
-            ),
-        ),
-        check(
-            "right_cohold_grasp_path",
-            "right_cohold_pregrasp",
-            "right_cohold_grasp",
-            solved_c["right_cohold_pregrasp"].qpos,
-            solved_c["right_cohold_grasp"].qpos,
-            active_side=_RIGHT,
-            excluded=left_fingers,
-            carried=CarriedBlock(
-                left_cohold_envelope, solved_c["left_cohold_grasp"].qpos, False
-            ),
-        ),
-        check(
-            "left_cohold_retreat",
-            "right_cohold_grasp",
-            "left_cohold_retreat",
-            solved_c["right_cohold_grasp"].qpos,
-            solved_c["left_cohold_retreat"].qpos,
-            active_side=_LEFT,
-            excluded=right_fingers,
-            carried=CarriedBlock(
-                BlockEnvelope(
-                    object_name=layout.block_name,
-                    body_id=body_id,
-                    geom_id=geom_id,
-                    qpos_address=qpos_address,
-                    holder_tcp_site=right_site,
-                    relative_pose=relative_block_pose(
-                        solved_c["right_cohold_grasp"].position,
-                        solved_c["right_cohold_grasp"].rotation,
-                        context["initial_block_center"],
-                        block_rotation,
+    ]
+    if not teacher_only:
+        right_initial_carry = CarriedBlock(
+            right_center_envelope, right_center_initial.qpos, True
+        )
+        segments.extend(
+            [
+                check(
+                    "right_initial_wait",
+                    "initial",
+                    "right_wait_initial",
+                    initial_qpos,
+                    solved_b["right_wait_initial"].qpos,
+                    active_side=_RIGHT,
+                    excluded=(),
+                    carried=None,
+                ),
+                check(
+                    "right_initial_pregrasp_path",
+                    "right_wait_initial",
+                    "right_initial_pregrasp",
+                    solved_b["right_wait_initial"].qpos,
+                    solved_b["right_initial_pregrasp"].qpos,
+                    active_side=_RIGHT,
+                    excluded=(),
+                    carried=None,
+                ),
+                check(
+                    "right_initial_grasp_path",
+                    "right_initial_pregrasp",
+                    "right_center_initial",
+                    solved_b["right_initial_pregrasp"].qpos,
+                    solved_b["right_center_initial"].qpos,
+                    active_side=_RIGHT,
+                    excluded=(),
+                    carried=None,
+                ),
+                check(
+                    "right_initial_lift",
+                    "right_center_initial",
+                    "right_center_lift",
+                    solved_b["right_center_initial"].qpos,
+                    solved_b["right_center_lift"].qpos,
+                    active_side=_RIGHT,
+                    excluded=right_fingers,
+                    carried=right_initial_carry,
+                    allowed_start=("table",),
+                ),
+                check(
+                    "left_cohold_approach",
+                    "initial",
+                    "left_ready",
+                    initial_qpos,
+                    solved_c["left_ready"].qpos,
+                    active_side=_LEFT,
+                    excluded=(),
+                    carried=None,
+                ),
+                check(
+                    "left_cohold_pregrasp_path",
+                    "left_ready",
+                    "left_cohold_pregrasp",
+                    solved_c["left_ready"].qpos,
+                    solved_c["left_cohold_pregrasp"].qpos,
+                    active_side=_LEFT,
+                    excluded=(),
+                    carried=None,
+                ),
+                check(
+                    "left_cohold_grasp_path",
+                    "left_cohold_pregrasp",
+                    "left_cohold_grasp",
+                    solved_c["left_cohold_pregrasp"].qpos,
+                    solved_c["left_cohold_grasp"].qpos,
+                    active_side=_LEFT,
+                    excluded=(),
+                    carried=None,
+                ),
+                check(
+                    "right_cohold_wait_path",
+                    "left_cohold_grasp",
+                    "right_cohold_wait",
+                    solved_c["left_cohold_grasp"].qpos,
+                    solved_c["right_cohold_wait"].qpos,
+                    active_side=_RIGHT,
+                    excluded=left_fingers,
+                    carried=CarriedBlock(
+                        left_cohold_envelope, solved_c["left_cohold_grasp"].qpos, False
                     ),
                 ),
-                solved_c["right_cohold_grasp"].qpos,
-                False,
-            ),
-        ),
-        check(
-            "dual_hold_lift",
-            "right_cohold_grasp",
-            "right_cohold_lift",
-            solved_c["right_cohold_grasp"].qpos,
-            solved_c["right_cohold_lift"].qpos,
-            active_side="both",
-            excluded=left_fingers + right_fingers,
-            carried=CarriedBlock(
-                left_cohold_envelope, solved_c["right_cohold_grasp"].qpos, True
-            ),
-        ),        check(
-            "left_air_retreat",
-            "right_cohold_lift",
-            "left_air_retreat",
-            solved_c["right_cohold_lift"].qpos,
-            solved_c["left_air_retreat"].qpos,
-            active_side=_LEFT,
-            excluded=right_fingers,
-            carried=CarriedBlock(
-                right_cohold_envelope, solved_c["right_cohold_lift"].qpos, False
-            ),
-        ),
+                check(
+                    "right_cohold_pregrasp_path",
+                    "right_cohold_wait",
+                    "right_cohold_pregrasp",
+                    solved_c["right_cohold_wait"].qpos,
+                    solved_c["right_cohold_pregrasp"].qpos,
+                    active_side=_RIGHT,
+                    excluded=left_fingers,
+                    carried=CarriedBlock(
+                        left_cohold_envelope, solved_c["left_cohold_grasp"].qpos, False
+                    ),
+                ),
+                check(
+                    "right_cohold_grasp_path",
+                    "right_cohold_pregrasp",
+                    "right_cohold_grasp",
+                    solved_c["right_cohold_pregrasp"].qpos,
+                    solved_c["right_cohold_grasp"].qpos,
+                    active_side=_RIGHT,
+                    excluded=left_fingers,
+                    carried=CarriedBlock(
+                        left_cohold_envelope, solved_c["left_cohold_grasp"].qpos, False
+                    ),
+                ),
+                check(
+                    "left_cohold_retreat",
+                    "right_cohold_grasp",
+                    "left_cohold_retreat",
+                    solved_c["right_cohold_grasp"].qpos,
+                    solved_c["left_cohold_retreat"].qpos,
+                    active_side=_LEFT,
+                    excluded=right_fingers,
+                    carried=CarriedBlock(
+                        BlockEnvelope(
+                            object_name=layout.block_name,
+                            body_id=body_id,
+                            geom_id=geom_id,
+                            qpos_address=qpos_address,
+                            holder_tcp_site=right_site,
+                            relative_pose=relative_block_pose(
+                                solved_c["right_cohold_grasp"].position,
+                                solved_c["right_cohold_grasp"].rotation,
+                                context["initial_block_center"],
+                                block_rotation,
+                            ),
+                        ),
+                        solved_c["right_cohold_grasp"].qpos,
+                        False,
+                    ),
+                ),
+                check(
+                    "dual_hold_lift",
+                    "right_cohold_grasp",
+                    "right_cohold_lift",
+                    solved_c["right_cohold_grasp"].qpos,
+                    solved_c["right_cohold_lift"].qpos,
+                    active_side="both",
+                    excluded=left_fingers + right_fingers,
+                    carried=CarriedBlock(
+                        left_cohold_envelope, solved_c["right_cohold_grasp"].qpos, True
+                    ),
+                ),
+                check(
+                    "left_air_retreat",
+                    "right_cohold_lift",
+                    "left_air_retreat",
+                    solved_c["right_cohold_lift"].qpos,
+                    solved_c["left_air_retreat"].qpos,
+                    active_side=_LEFT,
+                    excluded=right_fingers,
+                    carried=CarriedBlock(
+                        right_cohold_envelope, solved_c["right_cohold_lift"].qpos, False
+                    ),
+                ),
+            ]
+        )
+
+    place_tcp = tcp_matrix(model, solved["right_place"].qpos, right_site)
+    place_block_matrix = np.asarray(place_tcp, dtype=np.float64) @ np.asarray(
+        right_handover_envelope.relative_pose, dtype=np.float64
     )
+    contained, containment_message = _placement_containment(
+        layout,
+        place_block_matrix[:3, 3],
+        place_block_matrix[:3, :3],
+        layout.block_half_extents,
+    )
+    if teacher_only:
+        for segment in segments:
+            if not segment.passed:
+                failures.append(
+                    f"path {segment.name}: {segment.failure_reason}: {segment.failure_message}"
+                )
+        if not contained:
+            failures.append(f"placement containment: {containment_message}")
+        return HandoverPlan(
+            layout=layout,
+            targets=all_targets,
+            segments=tuple(segments),
+            placement_contained=contained,
+            placement_message=containment_message,
+            planned_duration_s=sum(segment.duration_s for segment in segments),
+            planning_elapsed_s=time.perf_counter() - started,
+            failures=tuple(failures),
+            teacher_waypoints=teacher_waypoints,
+        )
+
     # Dual-hold coordination: both TCPs are compared with the same nominal
     # block pose along the coordinated lift.  The single joint-linear segment
     # is reported for contrast; the waypoint path is the path the execution
@@ -1345,7 +1576,7 @@ def plan_handover(
                 else worst_robot.failure_message
             ),
         )
-        segments = tuple(segments) + (waypoint_segment,)
+        segments.append(waypoint_segment)
     else:
         waypoint_segment = None
     if waypoint_segment is not None and not waypoint_segment.passed:
@@ -1376,17 +1607,6 @@ def plan_handover(
         > config.diagnostics.relative_orientation_tolerance_rad
     ):
         failures.append("dual-hold right orientation coordination exceeds the tolerance")
-
-    place_tcp = tcp_matrix(model, solved["right_place"].qpos, right_site)
-    place_block_matrix = np.asarray(place_tcp, dtype=np.float64) @ np.asarray(
-        right_handover_envelope.relative_pose, dtype=np.float64
-    )
-    contained, containment_message = _placement_containment(
-        layout,
-        place_block_matrix[:3, 3],
-        place_block_matrix[:3, :3],
-        layout.block_half_extents,
-    )
     for segment in segments:
         if not segment.passed:
             failures.append(
@@ -1397,7 +1617,7 @@ def plan_handover(
     return HandoverPlan(
         layout=layout,
         targets=all_targets,
-        segments=segments,
+        segments=tuple(segments),
         placement_contained=contained,
         placement_message=containment_message,
         planned_duration_s=sum(segment.duration_s for segment in segments),
@@ -1406,4 +1626,5 @@ def plan_handover(
         coordinated_waypoints=waypoints,
         coordination_summary=coordination_summary,
         failures=tuple(failures),
+        teacher_waypoints=teacher_waypoints,
     )

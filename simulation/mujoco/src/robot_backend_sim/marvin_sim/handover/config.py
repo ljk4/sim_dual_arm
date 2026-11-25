@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import Field, model_validator
+from pydantic import BeforeValidator, Field, model_validator
 from robot_contracts.validation import (
     PositiveFloat,
     PositiveInt,
@@ -18,6 +18,7 @@ from robot_contracts.validation import (
     StrictMappingError,
     StrictMappingModel,
     UniqueKeyError,
+    as_tuple,
     read_unique_yaml,
     validate_config_model,
 )
@@ -32,6 +33,7 @@ __all__ = [
     "ApproachSettings",
     "ClearanceSettings",
     "DiagnosticsSettings",
+    "DiversitySettings",
     "ExecutionSettings",
     "GraspSettings",
     "GraspSide",
@@ -94,6 +96,41 @@ class RetreatSettings(StrictMappingModel):
 class TransportSettings(StrictMappingModel):
     place_yaw_deg: Annotated[StrictFloat, Field(ge=-180.0, le=180.0)]
     preplace_block_center_above_rim_m: Annotated[PositiveFloat, Field(gt=0.0, le=0.3)]
+    place_xy_offset_m: Annotated[
+        tuple[
+            Annotated[StrictFloat, Field(ge=-0.08, le=0.08)],
+            Annotated[StrictFloat, Field(ge=-0.08, le=0.08)],
+        ],
+        BeforeValidator(as_tuple),
+    ] = (0.0, 0.0)
+
+
+class DiversitySettings(StrictMappingModel):
+    enabled: bool = True
+    max_attempts: Annotated[PositiveInt, Field(ge=1, le=32)] = 12
+    handover_offset_range_m: Vec3 = (0.016, 0.016, 0.012)
+    left_ready_offset_range_m: Vec3 = (0.018, 0.018, 0.018)
+    right_wait_offset_range_m: Vec3 = (0.018, 0.018, 0.018)
+    pregrasp_height_range_m: Annotated[StrictFloat, Field(ge=0.0, le=0.05)] = 0.010
+    grasp_along_y_range_m: Annotated[StrictFloat, Field(ge=0.0, le=0.03)] = 0.010
+    wrist_tilt_range_deg: Annotated[StrictFloat, Field(ge=0.0, le=10.0)] = 2.0
+    wrist_yaw_range_deg: Annotated[StrictFloat, Field(ge=0.0, le=15.0)] = 4.0
+    place_xy_range_m: Annotated[
+        tuple[
+            Annotated[StrictFloat, Field(ge=0.0, le=0.06)],
+            Annotated[StrictFloat, Field(ge=0.0, le=0.06)],
+        ],
+        BeforeValidator(as_tuple),
+    ] = (0.025, 0.025)
+    place_yaw_range_deg: Annotated[StrictFloat, Field(ge=0.0, le=30.0)] = 12.0
+    preplace_height_range_m: Annotated[StrictFloat, Field(ge=0.0, le=0.05)] = 0.015
+    speed_scale_range: Annotated[
+        tuple[
+            Annotated[PositiveFloat, Field(ge=0.5, le=1.5)],
+            Annotated[PositiveFloat, Field(ge=0.5, le=1.5)],
+        ],
+        BeforeValidator(as_tuple),
+    ] = (0.88, 1.05)
 
 
 class ExecutionSettings(StrictMappingModel):
@@ -125,6 +162,7 @@ class HandoverPlanConfig(StrictMappingModel):
     transport: TransportSettings
     execution: ExecutionSettings
     diagnostics: DiagnosticsSettings
+    diversity: DiversitySettings = Field(default_factory=DiversitySettings)
 
 
 def load_handover_plan_config(path: Path | str) -> HandoverPlanConfig:
