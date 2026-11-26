@@ -307,4 +307,24 @@ scripts/client_interactive.sh --robot marvin --backend mujoco --task handover --
 
 ---
 
-目录导航：[文档索引](docs/README.md) · [脚本入口与使用指南](docs/features/脚本入口与使用指南.md) · [跨端架构分工与解耦审查](docs/features/跨端架构分工与解耦审查.md) · [架构扩展与演进指南](docs/features/架构扩展与演进指南.md) · [重要实践与经验](docs/experiments/README.md) · [公共层与方案绑定](shared/README.md) · [Agent 指导与规范](AGENTS.md)
+## 5. 路线图与待办事项（Real2Sim & RL）
+
+系统后续按“**先完成天机硬件 Real2Sim 仿真对齐，再落地独立强化学习端 `learning/rl/`**”推进，完整方案与共识详见 [天机 Real2Sim 标定与实施方案](docs/features/天机Real2Sim标定与实施方案.md)、[强化学习架构与 Real2Sim 协同设计](docs/features/强化学习架构与Real2Sim协同设计.md) 与 [架构扩展与演进指南](docs/features/架构扩展与演进指南.md)。
+
+### 阶段一：天机真机 Real2Sim 仿真重构与 RL 接口预留
+- [ ] 核对实验室末端/台架 CAD 与指垫实测尺寸，按零历史包袱原则原地升级 `shared/robots/marvin/` 与 MuJoCo 装配（碰撞解析几何与可选 STL 视觉网格解耦，参见 [天机 Real2Sim 标定与实施方案](docs/features/天机Real2Sim标定与实施方案.md)）
+- [ ] 执行天机真机标定与 Sys-ID：控制器 `forward_kinematics` 对账 + 桌面 ChArUco/AprilTag 多相机手眼联合标定 + TCP 四角点触校验 + 悬空小幅激励动态辨识
+- [ ] 全仓统一 3 路相机契约为 `cam_high` / `cam_left_wrist` / `cam_right_wrist`（真机 `cv2.remap` 去畸变居中下采样至 `320×240` 对齐 MuJoCo `fovy`），统一 90C `[0.0, 0.090] m` 导轨行程契约、软指垫接触物理与语义末端句柄（`tcp_site_ids`、`finger_pad_body_ids`、`pad_aperture_m`）
+- [ ] 在 100% 零 `rclpy` 依赖的纯 Python 物理与伺服步进层复刻天机动态约束（延迟缓冲、APEX `1.0°` 限幅、90C `0.3 mm` 死区），迁移适配 `stack` 与 `handover` 双基准任务并内建三层可开关域随机化
+- [ ] 上提共享纯 Python 轨迹制动核，打通 `hardware/tianji` ROS 2 后端（`robot_api_msgs`）、跨仿真/真机通用的单手柄微分 IK 遥操（预留工作站“边拖边录 + 脚踏板”程序导入位）与四项 Real2Sim 定量验收门禁
+
+### 阶段二：强化学习（`learning/rl`）三位一体接入与无损数据集升级
+- [ ] 抽离公共 `shared/common/python/policy_serving/` gRPC 服务层，升级 `binding.yaml` 支持多学习范式槽位（`learning.act`、`learning.rl` 等）与 `models/<范式前缀>_<时间戳>/` 产物约定
+- [ ] 升级 LeRobot Parquet 数据集写出器：支持内嵌无损 PNG 字节列，并补齐双臂 EE 6D 位姿、`task` 文本与 `reward` / `done` 列（兼顾 ACT、RL 与外部自定义 VLA 无损转换）
+- [ ] 搭建基于 `TorchRL` + `TensorDict` 的 `learning/rl/` 与 Colab 50+ GB 全内存并发环境（`docs/colab/scripts/setup_colab_rl.sh`），率先落地特权状态 **RL-as-Teacher** 自动化示教与无损采数
+- [ ] 落地与 ACT 平级的**非对称动作块视觉 RL 策略**，实现 Colab 真实物理成功率在线选模并通过统一 `PolicyService` 完成本机三端闭环验收
+- [ ] 落地 **ACT 宏步残差后训练器（Chunk-Residual SAC）** 与 Colab 一键训练/同步工作流（`train_rl_colab.ipynb`）
+
+---
+
+目录导航：[文档索引](docs/README.md) · [脚本入口与使用指南](docs/features/脚本入口与使用指南.md) · [跨端架构分工与解耦审查](docs/features/跨端架构分工与解耦审查.md) · [架构扩展与演进指南](docs/features/架构扩展与演进指南.md) · [天机 Real2Sim 标定与实施方案](docs/features/天机Real2Sim标定与实施方案.md) · [强化学习架构与 Real2Sim 协同设计](docs/features/强化学习架构与Real2Sim协同设计.md) · [重要实践与经验](docs/experiments/README.md) · [公共层与方案绑定](shared/README.md) · [Agent 指导与规范](AGENTS.md)
