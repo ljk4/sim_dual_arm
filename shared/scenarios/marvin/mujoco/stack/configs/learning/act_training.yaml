@@ -26,7 +26,7 @@ model:
   weights:
     path: third_party/weights/resnet18-f37072fd.pth
 training:
-  batch_size: 40
+  batch_size: 32
   num_workers: 4
   pin_memory: true
   prefetch_factor: 2
@@ -61,7 +61,7 @@ modes:
     episodes: [0]
     validation: false
   full:
-    steps: 5000
+    steps: 20000
     split: train
     episodes: all
     validation: true

@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | [features/](features/README.md) | 核心功能设计、跨模块协作流程与扩展演进说明 | 一个主题一篇，与当前代码实现保持同步 |
 | [experiments/](experiments/README.md) | 关键实验对比、问题定位与可复用的工程经验 | 经确认后收录，保留实验条件、证据路径与适用边界 |
-| [colab/](colab/train_act_colab.ipynb) | Google Colab 无 Docker 学习端环境配置脚本与训练 Notebook | 与 [learning/lerobot/README.md](../learning/lerobot/README.md) 环境约定保持同步 |
+| [colab/](colab/train_act_colab.ipynb) | Google Colab 无 Docker 学习端环境配置脚本、大内存数据转换与 ACT 训练 Notebook | 与 [learning/lerobot/README.md](../learning/lerobot/README.md) 环境约定保持同步 |
 
 ## 阅读建议
 

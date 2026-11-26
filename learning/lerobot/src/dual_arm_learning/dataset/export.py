@@ -66,6 +66,16 @@ def _profile_document(
     return doc, tuple(joint_names), camera_names
 
 
+def _resolve_attempt_dir(attempt_dir: str, project_root: Path) -> Path:
+    raw_path = Path(attempt_dir)
+    resolved = project_path(raw_path, project_root)
+    if not resolved.exists() and raw_path.is_relative_to("/data"):
+        remapped = project_path(Path("output") / raw_path.relative_to("/data"), project_root)
+        if remapped.exists():
+            return remapped
+    return resolved
+
+
 def _select_entries(select: dict[str, Any], config: DatasetConfig) -> list[dict[str, Any]]:
     if select.get("status") != "SELECTED":
         raise ExportError(f"select: expected status SELECTED, got {select.get('status')!r}")
@@ -101,7 +111,7 @@ def _select_entries(select: dict[str, Any], config: DatasetConfig) -> list[dict[
             {
                 "attempt_id": attempt_id,
                 "seed": seed,
-                "attempt_dir": project_path(attempt_dir, config.project_root),
+                "attempt_dir": _resolve_attempt_dir(attempt_dir, config.project_root),
                 "global_index": index,
             }
         )

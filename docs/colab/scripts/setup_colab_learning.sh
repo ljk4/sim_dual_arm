@@ -22,7 +22,7 @@ Policy SDK, and .env.learning inside the repository root without Docker.
 Options:
   --repo-root <dir>        Repository root directory (default: auto-detected from script path)
   --cache-dir <dir>        Persistent cache directory for LeRobot archive and ResNet18 weights
-                           (e.g. /content/drive/MyDrive/sim_dual_arm/_cache)
+                           (e.g. /tmp/sda_rclone_cache)
   --torch-index-url <url>  Explicit PyTorch wheel index URL
                            (default: auto-detect cu128 / cu126 / cpu from nvidia-smi)
   -h, --help               Show this help message and exit

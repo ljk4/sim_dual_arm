@@ -92,13 +92,37 @@ def verify_and_prepare_remote(
 def _print_gpu_status() -> None:
     nvidia_smi = shutil.which("nvidia-smi")
     if not nvidia_smi:
-        print("[提示] 当前环境未检测到 nvidia-smi（若在 Colab 请确认已开启 GPU 运行时）。")
+        print("[提示] 当前为 CPU 运行时（可用于大内存数据转换；执行训练前请切换至 GPU 运行时）。")
         return
     proc = subprocess.run([nvidia_smi, "--query-gpu=name,memory.total,driver_version", "--format=csv,noheader"], capture_output=True, text=True)
     if proc.returncode == 0 and proc.stdout.strip():
         print(f"[GPU] {proc.stdout.strip()}")
     else:
         subprocess.run([nvidia_smi], check=False)
+
+
+def _print_memory_status() -> None:
+    cpu_count = os.cpu_count() or 1
+    mem_total_bytes = 0
+    mem_avail_bytes = 0
+    try:
+        for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
+            if line.startswith("MemTotal:"):
+                mem_total_bytes = int(line.split(":", 1)[1].strip().split()[0]) * 1024
+            elif line.startswith("MemAvailable:"):
+                mem_avail_bytes = int(line.split(":", 1)[1].strip().split()[0]) * 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    shm_usage = shutil.disk_usage("/dev/shm") if Path("/dev/shm").exists() else None
+    shm_part = (
+        f" | /dev/shm: {shm_usage.free / (1024**3):.1f}/{shm_usage.total / (1024**3):.1f} GiB"
+        if shm_usage is not None
+        else ""
+    )
+    print(
+        f"[资源] CPU: {cpu_count} 核 | RAM: {mem_avail_bytes / (1024**3):.1f}/"
+        f"{mem_total_bytes / (1024**3):.1f} GiB{shm_part}"
+    )
 
 
 def _try_load_existing_conf(remote_name: str, use_colab_secrets: bool) -> Path | None:
@@ -194,8 +218,9 @@ def setup_colab_rclone(
     task: str,
     use_colab_secrets: bool = False,
 ) -> None:
-    """Inspect GPU, install rclone if needed, configure auth, and verify remote access."""
+    """Inspect GPU/RAM, install rclone if needed, configure auth, and verify remote access."""
     _print_gpu_status()
+    _print_memory_status()
     ensure_rclone_installed()
     remote_name = _remote_name_from_spec(rclone_remote)
 

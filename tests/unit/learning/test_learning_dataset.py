@@ -208,3 +208,29 @@ def test_convert_fails_fast_when_output_root_already_exists(config, tmp_path, mo
     monkeypatch.setattr(dataset_mod, "_resolve_episodes", _unexpected_resolve)
     with pytest.raises(ExportError, match="output root already exists"):
         dataset_mod.convert(select_path=tmp_path / "missing-select.json", config=config)
+
+
+def test_select_entries_remaps_container_data_mount_when_unmounted(config, tmp_path):
+    attempt_dir = tmp_path / "output/marvin/mujoco/stack/datasets/raw/formal-00001"
+    (attempt_dir / "export").mkdir(parents=True)
+    remapped_config = replace(config, project_root=tmp_path)
+    selection = {
+        "status": "SELECTED",
+        "qualified": 2,
+        "selected": [
+            {
+                "attempt_id": "formal:0",
+                "seed": 0,
+                "attempt_dir": "/data/marvin/mujoco/stack/datasets/raw/formal-00001",
+            },
+            {
+                "attempt_id": "formal:1",
+                "seed": 1,
+                "attempt_dir": str(attempt_dir),
+            },
+        ],
+    }
+
+    entries = dataset_mod._select_entries(selection, remapped_config)
+    assert entries[0]["attempt_dir"] == attempt_dir.resolve()
+    assert entries[1]["attempt_dir"] == attempt_dir.resolve()

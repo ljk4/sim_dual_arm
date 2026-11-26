@@ -17,9 +17,10 @@ def test_real_learning_configs_load():
     assert dataset.validation_percent == 10
     assert dataset.split_counts(50) == (45, 5)
     assert training.mode == "smoke"
+    assert training.batch_size == 32
     assert training.modes["smoke"].steps == 128
     assert training.modes["overfit"].steps == 500
-    assert training.modes["full"].steps == 5000
+    assert training.modes["full"].steps == 20000
     assert training.model.pretrained_backbone_weights is None
     assert training.lr == pytest.approx(1e-4)
     assert training.lr_backbone == pytest.approx(1e-4)
@@ -32,6 +33,8 @@ def test_real_learning_configs_load():
         ROOT / "shared/scenarios/marvin/mujoco/handover/configs/learning/act_training.yaml",
         ROOT,
     )
+    assert handover.batch_size == 32
+    assert handover.modes["full"].steps == 20000
     assert handover.visual_augmentation.enabled is True
     assert handover.visual_augmentation.camera_dropout_prob == pytest.approx(0.10)
 

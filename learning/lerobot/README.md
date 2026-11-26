@@ -141,12 +141,12 @@ bash learning/lerobot/scripts/server_policy.sh --robot marvin --backend mujoco -
 
 ---
 
-## Google Colab 云端训练
+## Google Colab 云端数据转换与训练
 
-如使用 Google Colab GPU 与 Google Drive 进行数据集与模型中转，可配合仓库提供的两个 Notebook：
+如使用 Google Colab 高 RAM 运行时与 Google Drive 进行数据集转换、缓存与模型中转，可配合仓库提供的两个 Notebook：
 
-- [`docs/colab/sync_drive_rclone.ipynb`](../../docs/colab/sync_drive_rclone.ipynb)：在本机 Python 环境中通过 `rclone` 打包上传 `datasets/lerobot/`、查看云端清单以及拉回训练好的模型与日志。
-- [`docs/colab/train_act_colab.ipynb`](../../docs/colab/train_act_colab.ipynb)：在 Colab GPU 运行时中调用 [`setup_colab_learning.sh`](../../docs/colab/scripts/setup_colab_learning.sh) 自动配置环境，执行资源探测、按 batch 比例自适应缩放训练步数、周期绘制损失曲线并将模型回传至 Google Drive。
+- [`docs/colab/sync_drive_rclone.ipynb`](../../docs/colab/sync_drive_rclone.ipynb)：在本机 Python 环境中通过 `rclone` 上传仅含合格 `export/`（不含 MCAP）的 `raw_exports.tar` 或已转换的 `lerobot.tar`，查看云端清单以及拉回转换数据集、训练模型与日志。
+- [`docs/colab/train_act_colab.ipynb`](../../docs/colab/train_act_colab.ipynb)：在 Colab 运行时中调用 [`setup_colab_learning.sh`](../../docs/colab/scripts/setup_colab_learning.sh) 自动配置环境，支持利用 `/dev/shm` 内存盘执行大内存数据转换并自动回传 `lerobot.tar`，随后在 GPU 运行时完成资源探测、按 batch 比例自适应缩放训练步数、周期绘制损失曲线并将模型回传至 Google Drive。
 
 ---
 

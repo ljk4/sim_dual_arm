@@ -1,4 +1,4 @@
-"""Colab training orchestration: repo sync, setup, probe, batch-step scaling, loss plots, and backup."""
+"""Colab dataset conversion and training orchestration: setup, conversion, probe, training, plots, and backup."""
 
 from __future__ import annotations
 
@@ -6,12 +6,14 @@ import json
 import math
 import os
 import shlex
+import shutil
 import subprocess
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
-from .drive_sync import SyncContext, download_dataset
+from .drive_sync import SyncContext, download_dataset, remote_file_modtimes, upload_dataset
 from .loss_plot import display_loss_plot, load_metrics, render_loss_plot
 
 
@@ -67,30 +69,6 @@ def _stream_cmd(cmd: list[str], *, cwd: Path | None = None, shell_prefix: str | 
         raise subprocess.CalledProcessError(ret, cmd)
 
 
-def sync_repo(*, work_dir: Path | str, repo_url: str, repo_branch: str) -> Path:
-    """Clone or fast-forward update the public repository into `work_dir`."""
-    work = Path(work_dir)
-    if (work / ".git").is_dir():
-        print(f"仓库已存在，更新分支 {repo_branch}...")
-        subprocess.run(["git", "-C", str(work), "fetch", "origin", repo_branch], check=True)
-        subprocess.run(["git", "-C", str(work), "checkout", repo_branch], check=True)
-        subprocess.run(["git", "-C", str(work), "pull", "--ff-only", "origin", repo_branch], check=True)
-    else:
-        print(f"克隆公开仓库 {repo_url} ({repo_branch}) 到 {work}...")
-        subprocess.run(
-            ["git", "clone", "--branch", repo_branch, "--single-branch", repo_url, str(work)],
-            check=True,
-        )
-    commit = subprocess.run(
-        ["git", "-C", str(work), "log", "-1", "--oneline"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-    print(f"当前提交: {commit}")
-    return work
-
-
 def setup_learning_env(
     *,
     work_dir: Path | str,
@@ -122,6 +100,58 @@ def setup_learning_env(
         subprocess.run(["rclone", "copy", str(cache_local), remote_cache, "--transfers", "4"], check=False)
 
 
+def _read_ram_and_shm() -> dict[str, int]:
+    mem_total = 0
+    mem_avail = 0
+    try:
+        for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
+            if line.startswith("MemTotal:"):
+                mem_total = int(line.split(":", 1)[1].strip().split()[0]) * 1024
+            elif line.startswith("MemAvailable:"):
+                mem_avail = int(line.split(":", 1)[1].strip().split()[0]) * 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    shm_free = shutil.disk_usage("/dev/shm").free if Path("/dev/shm").exists() else 0
+    shm_total = shutil.disk_usage("/dev/shm").total if Path("/dev/shm").exists() else 0
+    return {
+        "mem_total": mem_total,
+        "mem_avail": mem_avail,
+        "shm_total": shm_total,
+        "shm_free": shm_free,
+    }
+
+
+def _remove_path(path: Path) -> None:
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.exists():
+        shutil.rmtree(path)
+
+
+def _read_partial_episode_counts(datasets_dir: Path) -> tuple[int, int]:
+    candidates = sorted(
+        (p for p in datasets_dir.glob(".lerobot.partial-*") if p.is_dir()),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    target = candidates[0] if candidates else (datasets_dir / "lerobot")
+    if not target.is_dir():
+        return 0, 0
+
+    def _split_count(split_name: str) -> int:
+        info = target / split_name / "meta" / "info.json"
+        if not info.is_file():
+            return 0
+        try:
+            doc = json.loads(info.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return 0
+        val = doc.get("total_episodes", 0)
+        return int(val) if isinstance(val, int) and not isinstance(val, bool) else 0
+
+    return _split_count("train"), _split_count("validation")
+
+
 def fetch_dataset(
     *,
     work_dir: Path | str,
@@ -145,6 +175,303 @@ def fetch_dataset(
         remote_task_dir=f"{remote_root}/{robot}/{backend}/{task}",
     )
     return download_dataset(ctx, overwrite_local=True)
+
+
+def convert_dataset(
+    *,
+    work_dir: Path | str,
+    rclone_remote: str,
+    robot: str,
+    backend: str,
+    task: str,
+    raw_archive: str = "raw_exports.tar",
+    dataset_archive: str = "lerobot.tar",
+    use_shm: bool = True,
+    cleanup_raw: bool = True,
+    sync_to_drive: bool = True,
+) -> Path:
+    """Download `raw_exports.tar`, run `convert.sh` (preferring `/dev/shm`), and sync `lerobot.tar` back."""
+    work = Path(work_dir).resolve()
+    remote_root = rclone_remote.rstrip("/")
+    local_out = work / "output" / robot / backend / task
+    datasets_dir = local_out / "datasets"
+    raw_dir = datasets_dir / "raw"
+    lerobot_dir = datasets_dir / "lerobot"
+    ctx = SyncContext(
+        repo_root=work,
+        robot=robot,
+        backend=backend,
+        task=task,
+        rclone_remote=remote_root,
+        dataset_archive=dataset_archive,
+        local_task_dir=local_out,
+        remote_task_dir=f"{remote_root}/{robot}/{backend}/{task}",
+        raw_archive=raw_archive,
+    )
+
+    mem_info = _read_ram_and_shm()
+    cpu_count = os.cpu_count() or 1
+    print(
+        f"[转换环境] CPU: {cpu_count} 核 | RAM: {mem_info['mem_avail'] / (1024**3):.1f}/"
+        f"{mem_info['mem_total'] / (1024**3):.1f} GiB | "
+        f"/dev/shm: {mem_info['shm_free'] / (1024**3):.1f}/{mem_info['shm_total'] / (1024**3):.1f} GiB"
+    )
+    if 0 < mem_info["mem_total"] < 20 * (1024**3):
+        print("[提示] 当前总内存低于 20 GiB，若数据量较大建议在 Colab 切换为高 RAM 运行时。")
+
+    remote_datasets = f"{ctx.remote_task_dir}/datasets"
+    if raw_archive not in remote_file_modtimes(remote_datasets):
+        raise FileNotFoundError(
+            f"云端未找到 {remote_datasets}/{raw_archive}，"
+            "请先在本机运行 docs/colab/sync_drive_rclone.ipynb 第 3 节上传原始导出数据。"
+        )
+
+    tmp_tar = Path("/tmp") / f"{robot}_{backend}_{task}_{raw_archive}"
+    shm_dir: Path | None = None
+
+    try:
+        remote_raw_archive = f"{remote_datasets}/{raw_archive}"
+        print(f"正在通过 rclone 下载原始导出压缩包: {remote_raw_archive} -> {tmp_tar}")
+        subprocess.run(["rclone", "copyto", remote_raw_archive, str(tmp_tar), "--progress"], check=True)
+
+        tar_bytes = tmp_tar.stat().st_size
+        mem_now = _read_ram_and_shm()
+        needed_bytes = int(tar_bytes * 1.3)
+        can_use_shm = (
+            use_shm
+            and mem_now["shm_free"] >= needed_bytes + 8 * (1024**3)
+            and mem_now["mem_avail"] >= needed_bytes + 10 * (1024**3)
+        )
+
+        _remove_path(raw_dir)
+        datasets_dir.mkdir(parents=True, exist_ok=True)
+        if can_use_shm:
+            shm_dir = Path("/dev/shm") / f"sda_raw_{robot}_{backend}_{task}"
+            _remove_path(shm_dir)
+            shm_dir.mkdir(parents=True, exist_ok=True)
+            print(f"[大内存加速] 正在解压原始导出到内存盘 /dev/shm: {shm_dir}")
+            subprocess.run(["tar", "-xf", str(tmp_tar), "-C", str(shm_dir)], check=True)
+            raw_dir.symlink_to(shm_dir)
+        else:
+            raw_dir.mkdir(parents=True, exist_ok=True)
+            print(f"[本地盘模式] 正在解压原始导出到本地磁盘: {raw_dir}")
+            subprocess.run(["tar", "-xf", str(tmp_tar), "-C", str(raw_dir)], check=True)
+
+        tmp_tar.unlink(missing_ok=True)
+
+        select_file = raw_dir / "formal-select.json"
+        if not select_file.is_file():
+            raise FileNotFoundError(f"原始导出解压后缺少 formal-select.json: {select_file}")
+        select_doc = json.loads(select_file.read_text(encoding="utf-8"))
+        total_qualified = int(select_doc.get("qualified") or 0)
+        print(f"原始导出就绪: qualified={total_qualified} 条")
+
+        _remove_path(lerobot_dir)
+
+        convert_args = [
+            "bash",
+            "learning/lerobot/scripts/convert.sh",
+            "--robot",
+            robot,
+            "--backend",
+            backend,
+            "--task",
+            task,
+        ]
+        cmd_str = f"cd {shlex.quote(str(work))} && source .env.learning && exec {shlex.join(convert_args)}"
+        stop_event = threading.Event()
+        io_lock = threading.Lock()
+        started_t = time.monotonic()
+
+        def _watch_convert() -> None:
+            last_done = -1
+            last_report_t = started_t
+            while not stop_event.wait(15.0):
+                tr_ep, va_ep = _read_partial_episode_counts(datasets_dir)
+                done_ep = tr_ep + va_ep
+                now_t = time.monotonic()
+                if done_ep == last_done and (now_t - last_report_t) < 30.0:
+                    continue
+                last_done = done_ep
+                last_report_t = now_t
+                mem_cur = _read_ram_and_shm()
+                used_gb = max(0, mem_cur["mem_total"] - mem_cur["mem_avail"]) / (1024**3)
+                total_gb = mem_cur["mem_total"] / (1024**3)
+                elapsed = now_t - started_t
+                if total_qualified > 0 and done_ep > 0:
+                    pct = min(100.0, done_ep / total_qualified * 100.0)
+                    eta = elapsed * max(0, total_qualified - done_ep) / done_ep
+                    prog_text = f"{done_ep}/{total_qualified} 条 ({pct:5.1f}%)"
+                else:
+                    eta = None
+                    prog_text = f"{done_ep}/{total_qualified or '?'} 条"
+                with io_lock:
+                    print(
+                        f"[转换进度] {prog_text} | train={tr_ep}, val={va_ep} | "
+                        f"内存 {used_gb:.1f}/{total_gb:.1f} GiB | "
+                        f"用时 {_fmt_hms(elapsed)} | 预计剩余 {_fmt_hms(eta)}",
+                        flush=True,
+                    )
+
+        with io_lock:
+            print("执行命令:", shlex.join(convert_args), flush=True)
+
+        watcher = threading.Thread(target=_watch_convert, name="colab-convert-progress", daemon=True)
+        watcher.start()
+        proc = subprocess.Popen(
+            ["bash", "-lc", cmd_str],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        try:
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                with io_lock:
+                    print(line, end="", flush=True)
+            ret = proc.wait()
+        finally:
+            stop_event.set()
+            watcher.join(timeout=2.0)
+
+        if ret != 0:
+            raise subprocess.CalledProcessError(ret, convert_args)
+    finally:
+        if tmp_tar.exists():
+            tmp_tar.unlink()
+        if cleanup_raw:
+            _remove_path(raw_dir)
+            if shm_dir is not None:
+                _remove_path(shm_dir)
+            print("[清理] 已释放原始导出临时目录与内存盘空间。")
+
+    if sync_to_drive:
+        upload_dataset(ctx)
+        convert_logs = local_out / "logs" / "convert"
+        if convert_logs.is_dir():
+            remote_convert_logs = f"{ctx.remote_task_dir}/logs/convert"
+            subprocess.run(["rclone", "mkdir", remote_convert_logs], check=True)
+            subprocess.run(
+                ["rclone", "copy", str(convert_logs), remote_convert_logs, "--transfers", "4"],
+                check=True,
+            )
+            print(f"转换日志已同步至 Google Drive: {remote_convert_logs}")
+
+    return lerobot_dir
+
+
+def prepare_dataset(
+    *,
+    work_dir: Path | str,
+    rclone_remote: str,
+    robot: str,
+    backend: str,
+    task: str,
+    convert_mode: str = "auto",
+    raw_archive: str = "raw_exports.tar",
+    dataset_archive: str = "lerobot.tar",
+    use_shm_for_convert: bool = True,
+    cleanup_raw_after_convert: bool = True,
+    sync_converted_to_drive: bool = True,
+) -> Path:
+    """Prepare `datasets/lerobot` in Colab by auto-comparing Drive timestamps or forcing convert/fetch."""
+    if convert_mode not in {"auto", "convert", "fetch"}:
+        raise ValueError(f"不支持的 convert_mode: {convert_mode!r}（可选 auto / convert / fetch）")
+
+    work = Path(work_dir).resolve()
+    local_lerobot = work / "output" / robot / backend / task / "datasets" / "lerobot"
+    remote_datasets = f"{rclone_remote.rstrip('/')}/{robot}/{backend}/{task}/datasets"
+
+    if convert_mode == "convert":
+        return convert_dataset(
+            work_dir=work,
+            rclone_remote=rclone_remote,
+            robot=robot,
+            backend=backend,
+            task=task,
+            raw_archive=raw_archive,
+            dataset_archive=dataset_archive,
+            use_shm=use_shm_for_convert,
+            cleanup_raw=cleanup_raw_after_convert,
+            sync_to_drive=sync_converted_to_drive,
+        )
+
+    if convert_mode == "fetch":
+        return fetch_dataset(
+            work_dir=work,
+            rclone_remote=rclone_remote,
+            robot=robot,
+            backend=backend,
+            task=task,
+            dataset_archive=dataset_archive,
+        )
+
+    modtimes = remote_file_modtimes(remote_datasets)
+    has_raw = raw_archive in modtimes
+    has_lerobot = dataset_archive in modtimes
+
+    if has_raw and has_lerobot:
+        if modtimes[raw_archive] > modtimes[dataset_archive]:
+            print(
+                f"[自动选择] 云端 {raw_archive} ({modtimes[raw_archive].isoformat()}) "
+                f"更新于 {dataset_archive} ({modtimes[dataset_archive].isoformat()})，执行云端大内存转换..."
+            )
+            return convert_dataset(
+                work_dir=work,
+                rclone_remote=rclone_remote,
+                robot=robot,
+                backend=backend,
+                task=task,
+                raw_archive=raw_archive,
+                dataset_archive=dataset_archive,
+                use_shm=use_shm_for_convert,
+                cleanup_raw=cleanup_raw_after_convert,
+                sync_to_drive=sync_converted_to_drive,
+            )
+
+        manifest_file = local_lerobot / "manifest.json"
+        if manifest_file.is_file():
+            try:
+                manifest_doc = json.loads(manifest_file.read_text(encoding="utf-8"))
+                if manifest_doc.get("status") == "complete":
+                    print(f"[自动选择] 本地已存在完成的数据集且云端无更新的原始数据，直接复用: {local_lerobot}")
+                    return local_lerobot
+            except (OSError, json.JSONDecodeError):
+                pass
+        print(f"[自动选择] 云端 {dataset_archive} 已是最新，直接拉取转换后数据集...")
+        return fetch_dataset(
+            work_dir=work,
+            rclone_remote=rclone_remote,
+            robot=robot,
+            backend=backend,
+            task=task,
+            dataset_archive=dataset_archive,
+        )
+
+    if has_raw:
+        print(f"[自动选择] 云端仅存在 {raw_archive}，执行云端大内存转换...")
+        return convert_dataset(
+            work_dir=work,
+            rclone_remote=rclone_remote,
+            robot=robot,
+            backend=backend,
+            task=task,
+            raw_archive=raw_archive,
+            dataset_archive=dataset_archive,
+            use_shm=use_shm_for_convert,
+            cleanup_raw=cleanup_raw_after_convert,
+            sync_to_drive=sync_converted_to_drive,
+        )
+
+    return fetch_dataset(
+        work_dir=work,
+        rclone_remote=rclone_remote,
+        robot=robot,
+        backend=backend,
+        task=task,
+        dataset_archive=dataset_archive,
+    )
 
 
 def probe_hardware(
@@ -607,6 +934,6 @@ def sync_results_to_drive(
             size_mb = item.stat().st_size / (1024 * 1024)
             print(f"  - {item.name}: {size_mb:.2f} MiB")
     print(f"训练日志与探测记录已同步至 Google Drive: {remote_log}")
-    print("\n在本机运行 docs/colab/sync_drive_rclone.ipynb 第 5 节即可一键下载模型至:")
+    print("\n在本机运行 docs/colab/sync_drive_rclone.ipynb 第 6 节即可一键下载模型至:")
     print(f"  output/{robot}/{backend}/{task}/models/{latest_model.name}/")
     return latest_model

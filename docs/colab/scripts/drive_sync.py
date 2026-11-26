@@ -6,6 +6,7 @@ import json
 import shutil
 import subprocess
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -21,6 +22,7 @@ class SyncContext:
     dataset_archive: str
     local_task_dir: Path
     remote_task_dir: str
+    raw_archive: str = "raw_exports.tar"
 
 
 def find_repo_root(start: Path | None = None) -> Path:
@@ -39,6 +41,7 @@ def create_context(
     task: str,
     rclone_remote: str = "gdrive:sim_dual_arm",
     dataset_archive: str = "lerobot.tar",
+    raw_archive: str = "raw_exports.tar",
     repo_root: Path | str | None = None,
 ) -> SyncContext:
     """Validate scenario binding, check local rclone connectivity, and build a SyncContext."""
@@ -64,6 +67,7 @@ def create_context(
         dataset_archive=dataset_archive,
         local_task_dir=root / "output" / robot / backend / task,
         remote_task_dir=f"{remote_root}/{robot}/{backend}/{task}",
+        raw_archive=raw_archive,
     )
     print(f"仓库根目录: {ctx.repo_root}")
     print(f"本地任务目录: {ctx.local_task_dir}")
@@ -85,6 +89,40 @@ def _remote_files(remote_dir: str) -> set[str]:
     if res.returncode != 0:
         return set()
     return {line.strip() for line in res.stdout.splitlines() if line.strip()}
+
+
+def remote_file_modtimes(remote_dir: str) -> dict[str, datetime]:
+    """Return `{filename: utc_modtime}` for files in `remote_dir` via `rclone lsjson`."""
+    res = subprocess.run(
+        ["rclone", "lsjson", remote_dir, "--files-only"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if res.returncode != 0 or not res.stdout.strip():
+        return {}
+    try:
+        items = json.loads(res.stdout)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(items, list):
+        return {}
+    modtimes: dict[str, datetime] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("Name")
+        raw_time = item.get("ModTime")
+        if not isinstance(name, str) or not isinstance(raw_time, str) or not name or not raw_time:
+            continue
+        try:
+            dt = datetime.fromisoformat(raw_time.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        modtimes[name] = dt.astimezone(timezone.utc)
+    return modtimes
 
 
 def list_remote_dirs(remote_dir: str) -> list[str]:
@@ -109,20 +147,30 @@ def resolve_model_name(requested: str, candidates: list[str]) -> str:
 
 def show_status(ctx: SyncContext) -> None:
     """Print read-only local and Google Drive inventory for datasets and ACT models."""
+    local_raw = ctx.local_task_dir / "datasets" / "raw"
+    local_select = local_raw / "formal-select.json"
     local_ds = ctx.local_task_dir / "datasets" / "lerobot"
     local_manifest = local_ds / "manifest.json"
     print("=== 本地数据集 ===")
+    if local_select.is_file():
+        sel = json.loads(local_select.read_text(encoding="utf-8"))
+        print(
+            f"  [raw]     {local_raw} | status={sel.get('status')} | qualified={sel.get('qualified')}"
+        )
+    else:
+        print(f"  [raw]     (无) {local_select}")
+
     if local_manifest.is_file():
         m = json.loads(local_manifest.read_text(encoding="utf-8"))
         splits = m.get("splits", {})
         tr, va = splits.get("training", {}), splits.get("validation", {})
         print(
-            f"  {local_ds} | status={m.get('status')} | "
+            f"  [lerobot] {local_ds} | status={m.get('status')} | "
             f"train={tr.get('episode_count')}({tr.get('frame_count')}f) | "
             f"val={va.get('episode_count')}({va.get('frame_count')}f)"
         )
     else:
-        print(f"  (无) {local_ds}")
+        print(f"  [lerobot] (无) {local_ds}")
 
     print("\n=== 云端数据集 ===")
     res = subprocess.run(["rclone", "lsl", f"{ctx.remote_task_dir}/datasets"], check=False, capture_output=True, text=True)
@@ -150,6 +198,127 @@ def show_status(ctx: SyncContext) -> None:
             print(f"  - {name}")
     else:
         print("  (无)")
+
+
+def _resolve_local_attempt_dir(attempt_dir_str: str, repo_root: Path, raw_root: Path) -> Path:
+    raw_path = Path(attempt_dir_str)
+    candidates: list[Path] = []
+    if raw_path.is_absolute():
+        candidates.append(raw_path)
+        if raw_path.is_relative_to("/data"):
+            candidates.append(repo_root / "output" / raw_path.relative_to("/data"))
+    else:
+        candidates.append(repo_root / raw_path)
+
+    raw_root_resolved = raw_root.resolve()
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved.is_dir() and resolved.is_relative_to(raw_root_resolved):
+            if not (resolved / "export" / "labels.json").is_file():
+                raise FileNotFoundError(f"合格目录缺少 export/labels.json: {resolved}")
+            return resolved
+    raise FileNotFoundError(f"未在 {raw_root_resolved} 下找到原始导出目录: {attempt_dir_str}")
+
+
+def upload_raw_dataset(ctx: SyncContext) -> None:
+    """Pack `formal-select.json` and each qualified `<attempt>/export` (skipping MCAP) and upload."""
+    raw_root = (ctx.local_task_dir / "datasets" / "raw").resolve()
+    select_file = raw_root / "formal-select.json"
+    if not select_file.is_file():
+        raise FileNotFoundError(f"未找到正式合格清单: {select_file}")
+
+    select = json.loads(select_file.read_text(encoding="utf-8"))
+    if select.get("status") != "SELECTED":
+        raise ValueError(f"清单状态非 SELECTED: {select.get('status')!r} ({select_file})")
+    qualified = select.get("qualified")
+    selected = select.get("selected")
+    if (
+        isinstance(qualified, bool)
+        or not isinstance(qualified, int)
+        or qualified < 2
+        or not isinstance(selected, list)
+        or len(selected) != qualified
+    ):
+        raise ValueError(f"formal-select.json 格式或条数无效: {select_file}")
+
+    rel_entries = ["formal-select.json"]
+    seen_exports: set[str] = set()
+    for idx, entry in enumerate(selected):
+        if not isinstance(entry, dict) or not isinstance(entry.get("attempt_dir"), str):
+            raise ValueError(f"formal-select.json selected[{idx}] 缺少 attempt_dir")
+        attempt_dir = _resolve_local_attempt_dir(entry["attempt_dir"], ctx.repo_root, raw_root)
+        rel_export = str((attempt_dir / "export").relative_to(raw_root))
+        if rel_export not in seen_exports:
+            seen_exports.add(rel_export)
+            rel_entries.append(rel_export)
+
+    list_file = Path("/tmp") / f"{ctx.robot}_{ctx.backend}_{ctx.task}_raw_files.txt"
+    tmp_tar = Path("/tmp") / f"{ctx.robot}_{ctx.backend}_{ctx.task}_{ctx.raw_archive}"
+    remote_archive = f"{ctx.remote_task_dir}/datasets/{ctx.raw_archive}"
+
+    try:
+        list_file.write_text("\n".join(rel_entries) + "\n", encoding="utf-8")
+        print(f"正在打包 {qualified} 条合格原始导出（不含 MCAP）: {raw_root} -> {tmp_tar}")
+        subprocess.run(
+            ["tar", "-C", str(raw_root), "-cf", str(tmp_tar), "-T", str(list_file)],
+            check=True,
+        )
+        size_mb = tmp_tar.stat().st_size / (1024 * 1024)
+        print(f"打包完成 ({size_mb:.2f} MiB)，开始上传至 {remote_archive}...")
+        _run_rclone(["mkdir", f"{ctx.remote_task_dir}/datasets"])
+        _run_rclone(["copyto", str(tmp_tar), remote_archive, "--progress"])
+    finally:
+        if list_file.exists():
+            list_file.unlink()
+        if tmp_tar.exists():
+            tmp_tar.unlink()
+
+    print("原始导出上传完成，云端文件信息:")
+    print(_run_rclone(["lsl", remote_archive], capture=True).stdout.strip())
+
+
+def download_raw_dataset(
+    ctx: SyncContext,
+    *,
+    target_dir: Path | None = None,
+    overwrite_local: bool = False,
+) -> Path:
+    """Download `raw_exports.tar` from Google Drive and extract it to `target_dir`."""
+    dest = Path(target_dir) if target_dir is not None else (ctx.local_task_dir / "datasets" / "raw")
+    if dest.exists() and any(dest.iterdir()) and not overwrite_local:
+        raise FileExistsError(f"目标原始目录非空: {dest}；若需覆盖请设 overwrite_local=True")
+
+    remote_datasets = f"{ctx.remote_task_dir}/datasets"
+    if ctx.raw_archive not in _remote_files(remote_datasets):
+        raise FileNotFoundError(
+            f"在 {remote_datasets} 未找到 {ctx.raw_archive}，"
+            "请先在本机运行 docs/colab/sync_drive_rclone.ipynb 第 3 节上传原始导出数据"
+        )
+
+    tmp_tar = Path("/tmp") / f"{ctx.robot}_{ctx.backend}_{ctx.task}_{ctx.raw_archive}"
+    remote_archive = f"{remote_datasets}/{ctx.raw_archive}"
+
+    try:
+        print(f"正在通过 rclone 下载原始导出压缩包: {remote_archive} -> {tmp_tar}")
+        _run_rclone(["copyto", remote_archive, str(tmp_tar), "--progress"])
+        if dest.is_symlink() or dest.is_file():
+            dest.unlink()
+        elif dest.exists():
+            shutil.rmtree(dest)
+        dest.mkdir(parents=True, exist_ok=True)
+        print(f"正在解压原始导出到: {dest}")
+        subprocess.run(["tar", "-xf", str(tmp_tar), "-C", str(dest)], check=True)
+    finally:
+        if tmp_tar.exists():
+            tmp_tar.unlink()
+
+    select_file = dest / "formal-select.json"
+    if not select_file.is_file():
+        raise FileNotFoundError(f"{remote_archive} 解压后未找到 formal-select.json: {select_file}")
+
+    select = json.loads(select_file.read_text(encoding="utf-8"))
+    print(f"原始导出就绪: {dest} | qualified={select.get('qualified')} 条")
+    return dest
 
 
 def upload_dataset(ctx: SyncContext) -> None:
