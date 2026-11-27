@@ -192,6 +192,8 @@ cmd_exec() {
   shift || true
   if [[ $# -eq 0 ]]; then
     docker compose -f "$COMPOSE_FILE" exec "$SERVICE" bash
+  elif [[ ! -t 0 || ! -t 1 ]]; then
+    docker compose -f "$COMPOSE_FILE" exec -T "$SERVICE" "$@"
   else
     docker compose -f "$COMPOSE_FILE" exec "$SERVICE" "$@"
   fi

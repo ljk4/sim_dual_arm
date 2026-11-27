@@ -5,7 +5,7 @@ chunk_size: 60
 # 动作标签对齐观测后一个采样周期（50 ms）。
 action_lead_ns: 50000000
 state_dim: 16
-camera_names: [global, left_wrist, right_wrist]
+camera_names: [cam_high, cam_left_wrist, cam_right_wrist]
 camera_width: 320
 camera_height: 240
 task_text: >-

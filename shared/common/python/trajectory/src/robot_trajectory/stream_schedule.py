@@ -1,9 +1,9 @@
 """Pure bounded scheduling helpers for continuous follower streams.
 
-No MuJoCo, clock, thread, IO or SciPy call lives here.  ``StreamSchedule`` only
-composes the single active plan and the single optional successor plus the
-monotonic per-stream event sequence; :class:`~robot_backend_sim.common.motion.MotionController`
-owns the physical state and performs the one real step.
+No simulator, clock, thread, IO or SciPy call lives here. ``StreamSchedule``
+only composes the single active plan and the single optional successor plus the
+monotonic per-stream event sequence; callers own the physical state and
+execution loop.
 """
 
 from __future__ import annotations

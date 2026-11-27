@@ -27,7 +27,7 @@ PROFILE = (
 )
 OBSERVATION = MARVIN_SHARED_PROFILES / "observations/marvin_rgb_joint.json"
 ACTION = MARVIN_SHARED_PROFILES / "actions/marvin_joint_position.json"
-CAMERAS = ("global", "left_wrist", "right_wrist")
+CAMERAS = ("cam_high", "cam_left_wrist", "cam_right_wrist")
 
 
 def _stats() -> dict[str, Any]:

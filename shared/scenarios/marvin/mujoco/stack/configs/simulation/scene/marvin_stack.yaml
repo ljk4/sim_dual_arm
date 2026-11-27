@@ -17,8 +17,8 @@ robot:
     left: [0.5, -0.8, 0.6, -1.45, 0.45, -0.25, -0.15]
     right: [-0.5, -0.8, -0.6, -1.45, 0.45, 0.25, 0.15]
   gravity_compensation: true
-  gripper_open_total: 0.0814
-  gripper_closed_total: 0.0014
+  gripper_open_total: 0.090
+  gripper_closed_total: 0.0
   arm_kp: [2500.0, 2500.0, 1500.0, 1500.0, 400.0, 400.0, 400.0]
   arm_kv: [150.0, 150.0, 90.0, 90.0, 30.0, 30.0, 30.0]
   joint_damping: 1.0
@@ -55,23 +55,23 @@ task:
     position: [1.05, -0.19, 1.50]
 
 cameras:
-  global:
+  cam_high:
     parent: camera_mount
     position: [0.0, 0.0, 0.0]
     quaternion_wxyz: [0.6733746117887752, 0.2157930309308349, 0.2157930309308349, 0.6733746117887752]
     fovy: 55.0
     width: 320
     height: 240
-  left_wrist:
-    parent: Arm_L9_Link
-    position: [0.06, -0.05, 0.0]
+  cam_left_wrist:
+    parent: Arm_L_gripper_base
+    position: [0.068, -0.055, 0.0]
     quaternion_wxyz: [0.6876957732968962, 0.0007350408261092464, 0.022208131547247864, 0.7256588606209857]
     fovy: 95.0
     width: 320
     height: 240
-  right_wrist:
-    parent: Arm_R9_Link
-    position: [-0.06, -0.05, 0.0]
+  cam_right_wrist:
+    parent: Arm_R_gripper_base
+    position: [-0.068, -0.055, 0.0]
     quaternion_wxyz: [-0.13371921058204453, -0.13371921058204453, 0.6943480198872284, 0.6943480198872284]
     fovy: 95.0
     width: 320

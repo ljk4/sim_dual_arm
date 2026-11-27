@@ -33,6 +33,7 @@ from robot_backend_sim.marvin.robot_config import (
 from robot_backend_sim.marvin.scene_base import (
     CAMERA_PARENTS,
     CameraMountConfig,
+    DomainRandomizationConfig,
     PhysicsConfig,
     Rgba,
     TableConfig,
@@ -122,6 +123,9 @@ class MarvinStackSceneConfig(StrictMappingModel):
         BeforeValidator(as_tuple),
         Field(min_length=3, max_length=3),
     ]
+    domain_randomization: DomainRandomizationConfig = Field(
+        default_factory=DomainRandomizationConfig
+    )
     urdf_path: Path | None = Field(default=None, exclude=True)
 
     @model_validator(mode="before")

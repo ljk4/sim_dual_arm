@@ -6,12 +6,12 @@
 
 | 目录 | 职责 |
 | --- | --- |
-| `src/robot_backend_hardware/common/` | 设备生命周期接口、夹爪服务循环、相机采集和配置基础 |
-| `src/robot_backend_hardware/tianji/` | APEX 双臂、90C 夹爪、设备配置与装配 |
+| `src/robot_backend_hardware/common/` | 设备生命周期接口、夹爪服务循环、相机采集与针孔重映射、配置基础 |
+| `src/robot_backend_hardware/tianji/` | APEX 双臂、90C 夹爪、Real2Sim 标定与系统辨识、设备配置与装配 |
 | `src/robot_backend_hardware/tianji/apex_sdk/` | 随包提供的 APEX 通信实现 |
 | `configs/` | 已填入设备参数的 `devices.yaml` 与容器环境变量 |
 | `docker/` | Dockerfile、Compose 与固定依赖 |
-| `scripts/` | 配置检查与离线测试入口 |
+| `scripts/` | 配置检查、Real2Sim 标定/辨识与离线测试入口 |
 | `tests/` | 使用测试替身的驱动、协议与配置回归测试 |
 | `docs/` | SDK 协议与源码归属 |
 
@@ -42,7 +42,7 @@
 | 夹爪协议 | Modbus RTU，115200 baud，ID 1，90 mm 行程，`invert_stroke=true` |
 | RGB 相机 | `cam_high` / `cam_left_wrist` / `cam_right_wrist`，按配置中的 RealSense 序列号识别 |
 | 视触觉 | 四路 V4L2 物理路径，自动曝光，每路独立 FFmpeg 进程 |
-| 图像 | 默认 640×480、30 FPS |
+| 图像 | 原始采集 640×480@30 FPS；`cam_high`（`fovy=55°`）与腕部 RealSense 相机支持在 `remap` 中配置去畸变与 `320×240` 仿真针孔重映射 |
 
 夹爪识别优先匹配 USB 物理端口，再使用现有设备链接，最后尝试序列号。更换接线或设备时修改同一份 `devices.yaml`。
 
@@ -69,12 +69,23 @@ devices = build_devices(settings)
 
 APEX 在线目标由控制器 OnlinePlanner 平滑。配置中的 `poll_hz` 用于状态流恢复请求，读取调度由调用者提供；实际控制周期、左右臂命令时间差和轨迹生效语义需要在执行后端接入时确定。
 
+## Real2Sim 标定与系统辨识
+
+四项标定与辨识工具均支持离线测试数据（JSON）与真机只读/低速交互模式，结果默认保存至 `/data/_system/debug/tianji_calibration/`：
+
+| 脚本 | 职责 | 默认输出 |
+| --- | --- | --- |
+| `scripts/reconcile_fk.sh` | URDF 链与 APEX 控制器正运动学（`forward_kinematics`）核对 | `fk_reconcile.json` |
+| `scripts/probe_gripper_caliper.sh` | 90C 软垫空闭合零位 `pad_inward_offset_m` 与夹爪卡尺测宽 | `gripper_caliper.json` |
+| `scripts/calibrate_handeye.sh` | ChArUco 标定板生成、TCP 枢轴标定、`table.top_z` 拟合及 Eye-to-Hand / Eye-in-Hand 解算 | `handeye_result.json` |
+| `scripts/run_sysid.sh` | 时延（`arm_delay_steps`、`gripper_delay_steps`）、步幅与夹爪死区辨识 | `sysid_result.json` |
+
 ## 离线测试
 
-测试使用 Fake SDK、Modbus 寄存器和图像管道，并禁止网络连接。在仓库根目录将源码送入已有的 Python 项目容器后执行：
+测试使用 Fake SDK、Modbus 寄存器和合成标定数据，并禁止网络连接。在仓库根目录将源码送入容器后执行：
 
 ```bash
-tar -cf - hardware shared/common/tools |
+tar -cf - hardware shared/common/tools shared/robots/marvin |
   ./env.sh exec tianji bash -ec '
     test_root=$(mktemp -d /tmp/tianji-device-tests.XXXXXXXX)
     trap '\''rm -rf -- "$test_root"'\'' EXIT

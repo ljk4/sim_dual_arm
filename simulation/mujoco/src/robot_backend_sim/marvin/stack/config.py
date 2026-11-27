@@ -56,8 +56,8 @@ BEHAVIOUR_PHASES = (
     "stable",
 )
 StackTaskConfigError = StrictMappingError
-_MIN_GRIPPER_OPEN_M = 0.0814
-_MIN_GRIPPER_CLOSED_M = 0.0014
+_MIN_GRIPPER_OPEN_M = 0.090
+_MIN_GRIPPER_CLOSED_M = 0.0
 
 
 class ObjectsConfig(StrictMappingModel):

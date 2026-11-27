@@ -48,7 +48,7 @@ teacher:
   gripper_velocity_m_s: 0.04
   gripper_acceleration_m_s2: 0.5
   close_gripper_opening_m: 0.030
-  lift_height_m: 0.14
+  lift_height_m: 0.11
   phase_min_duration_s:
     pregrasp: 0.5
     grasp: 0.5

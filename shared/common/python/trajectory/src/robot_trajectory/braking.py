@@ -14,6 +14,7 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from numbers import Integral, Real
+from typing import Protocol
 
 from robot_contracts.models import ContractError, JointSpec
 from robot_contracts.trajectory.spline import (
@@ -30,12 +31,23 @@ from robot_trajectory.spline_math import (
     evaluate_cubic_segment,
 )
 
-from robot_backend_sim.common.config.motion_config import ControlConfig
-
-__all__ = ["BrakingController", "BrakingPlan", "plan_braking"]
+__all__ = ["BrakingControlSpec", "BrakingController", "BrakingPlan", "plan_braking"]
 
 _MAX_NS = 2**63 - 1
 _CONTINUITY_ATOL = 1e-9
+
+
+class BrakingControlSpec(Protocol):
+    """Structural configuration required by :class:`BrakingController`."""
+
+    @property
+    def max_accelerations(self) -> Sequence[float]: ...
+
+    @property
+    def velocity_tolerances(self) -> Sequence[float]: ...
+
+    @property
+    def stable_duration_ns(self) -> int: ...
 
 
 def _invalid(message: str) -> ContractError:
@@ -420,7 +432,7 @@ class BrakingController:
     and every measured velocity is within its configured tolerance.
     """
 
-    def __init__(self, config: ControlConfig) -> None:
+    def __init__(self, config: BrakingControlSpec) -> None:
         self._config = config
         self._plan: BrakingPlan | None = None
         self._stop_sim_start_ns: int | None = None

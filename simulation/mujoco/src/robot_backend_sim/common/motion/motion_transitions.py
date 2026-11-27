@@ -10,6 +10,7 @@ from dataclasses import dataclass, replace
 
 from robot_contracts.action_chunks import ChunkAnchor
 from robot_trajectory.sampling import sample_reference_interval
+from robot_trajectory.stream_schedule import StreamSchedule
 
 from robot_backend_sim.common.config.stream_config import StreamConfig
 from robot_backend_sim.common.motion.motion_math import (
@@ -27,7 +28,6 @@ from robot_backend_sim.common.motion.motion_types import (
     MotionSnapshot,
     Phase,
 )
-from robot_backend_sim.common.motion.stream_schedule import StreamSchedule
 from robot_backend_sim.common.physics.robot_io import Measurement
 
 __all__ = [

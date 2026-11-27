@@ -35,6 +35,11 @@ cameras:
   height: 480
   fps: 30
   enable_depth: false
+  remap:
+    enabled: true
+    target_width: 320
+    target_height: 240
+    target_fovy_deg: 55.0
 - name: cam_left_wrist
   backend: realsense
   serial_number: '260322278061'
@@ -42,6 +47,11 @@ cameras:
   height: 480
   fps: 30
   enable_depth: false
+  remap:
+    enabled: true
+    target_width: 320
+    target_height: 240
+    target_fovy_deg: 60.0
 - name: cam_right_wrist
   backend: realsense
   serial_number: '260522272531'
@@ -49,6 +59,11 @@ cameras:
   height: 480
   fps: 30
   enable_depth: false
+  remap:
+    enabled: true
+    target_width: 320
+    target_height: 240
+    target_fovy_deg: 60.0
 - name: tactile_right_right
   backend: ffmpeg_v4l2
   device: /dev/v4l/by-path/pci-0000:09:00.0-usb-0:3.2:1.0-video-index0

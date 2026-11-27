@@ -9,12 +9,18 @@ from dataclasses import replace
 from robot_contracts.action_chunks import ChunkAnchor
 from robot_contracts.models import ContractError
 from robot_contracts.trajectory.spline import ReferenceSample
+from robot_trajectory.braking import BrakingController
 from robot_trajectory.follower import PreparedFollowerPlan
 from robot_trajectory.sampling import sample_reference_interval
+from robot_trajectory.stream_schedule import (
+    ChunkEvent,
+    ChunkSubmission,
+    StreamSchedule,
+    boundary_rejection,
+)
 
 from robot_backend_sim.common.config.motion_config import ControlConfig
 from robot_backend_sim.common.config.stream_config import StreamConfig
-from robot_backend_sim.common.control.braking import BrakingController
 from robot_backend_sim.common.motion.motion_math import (
     deadline_decision,
     normalize_reference,
@@ -43,12 +49,6 @@ from robot_backend_sim.common.motion.motion_types import (
     MotionSnapshot,
     Phase,
     StopReason,
-)
-from robot_backend_sim.common.motion.stream_schedule import (
-    ChunkEvent,
-    ChunkSubmission,
-    StreamSchedule,
-    boundary_rejection,
 )
 from robot_backend_sim.common.physics.contacts import (
     GripperCompletion,

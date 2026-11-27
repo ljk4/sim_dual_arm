@@ -33,22 +33,14 @@ clearance:
   max_samples_per_segment: 1000
 
 grasp:
-  # TCP sits 25 mm above the block centre; the pads straddle the 60 mm width.
-  tcp_above_block_center_m: 0.035
-  # Left and co-hold pre-grasps use 40 mm.  The right centre approach needs a
-  # higher, separately measured pre-grasp (see right_initial_pregrasp_height_m).
-  pregrasp_height_m: 0.04
-  # The right approach to the block centre needs a higher pre-grasp; at 40 mm
-  # the open fingertips graze the block's top corner (measured 1.16 mm).
-  right_initial_pregrasp_height_m: 0.115
-  # The left centre lift needs enough margin for the block's measured tilt.
-  lift_height_m: 0.15
-  # The independent right hold reaches 0.99 m TCP at the block centre with the
-  # 33 degree wrist tilt below.
-  right_initial_lift_height_m: 0.150
-  # Short coordinated lift used while both hands hold the block.
-  cohold_lift_height_m: 0.08
-  # Total finger opening target: the 60 mm block stops the fingers before this.
+  # TCP sits at block centre/top region; compliant pads straddle the 60 mm width.
+  tcp_above_block_center_m: 0.015
+  pregrasp_height_m: 0.038
+  right_initial_pregrasp_height_m: 0.090
+  lift_height_m: 0.108
+  right_initial_lift_height_m: 0.108
+  cohold_lift_height_m: 0.06
+  # Total stroke target: the 60 mm block stops the compliant pads before this.
   closed_opening_m: 0.05
   left:
     # Opposite-end grasps keep the hands 120 mm apart during the airborne
@@ -77,26 +69,15 @@ grasp:
     approach_yaw_deg: 0.0
 
 approach:
-  # Safe intermediate poses measured in P02B.  The left pose is the P01A
-  # diagnostic ready point used only as an approach waypoint; the right waits
-  # on its own side before entering the shared workspace.
-  left_ready_tcp_m: [0.55, 0.18, 0.98]
-  right_wait_tcp_m: [0.50, -0.20, 1.04]
-  # The waiting pose is reachable with the 20 degree tilt; grasp poses that
-  # need a steeper tilt are reached after the hand leaves this pose.
+  left_ready_tcp_m: [0.48, 0.28, 0.92]
+  right_wait_tcp_m: [0.50, -0.20, 0.93]
   right_wait_tilt_deg: 20.0
 
 handover:
-  # The handover area is the lifted block pose; no lateral block move is made
-  # while both hands are closed.  Direct lift to 13 cm keeps a 3 cm margin
-  # above the 10 cm lift gate.
-  block_center_offset_m: [0.0, 0.0, 0.13]
+  block_center_offset_m: [0.0, 0.0, 0.105]
 
 retreat:
-  # The previous [0.40, 0.42, 1.06] pose sat exactly on the left joint7 hard
-  # limit.  This point is moved 20 mm outward along the same retreat direction
-  # so it is reachable with the 0.05 rad IK joint-limit margin.
-  left_tcp_position_m: [0.42, 0.427, 1.066]
+  left_tcp_position_m: [0.42, 0.40, 0.95]
 
 transport:
   # The right hand rotates the block -60 degrees about the vertical while
@@ -122,14 +103,12 @@ diagnostics:
   stop_gripper_tolerance_m: 0.002
 
 diversity:
-  # Seed-driven target jitter.  Each attempt decays the spatial offsets so a
-  # retry re-solves near the nominal plan; speed scale stays seed-specific.
   enabled: true
   max_attempts: 12
-  handover_offset_range_m: [0.016, 0.016, 0.012]
+  handover_offset_range_m: [0.014, 0.014, 0.006]
   left_ready_offset_range_m: [0.018, 0.018, 0.018]
   right_wait_offset_range_m: [0.018, 0.018, 0.018]
-  pregrasp_height_range_m: 0.010
+  pregrasp_height_range_m: 0.006
   grasp_along_y_range_m: 0.010
   wrist_tilt_range_deg: 2.0
   wrist_yaw_range_deg: 4.0

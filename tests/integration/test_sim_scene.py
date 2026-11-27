@@ -46,9 +46,9 @@ def object_qpos(scene, name: str):
 
 def test_model_has_dual_marvin_names_dof_and_cameras(scene):
     model = scene.model
-    assert (model.nq, model.nv, model.nu, model.ncam, model.nkey) == (32, 30, 16, 3, 0)
+    assert (model.nq, model.nv, model.nu, model.ncam, model.nkey) == (36, 34, 16, 3, 0)
     assert model.ntendon == 2
-    assert model.neq == 2
+    assert model.neq == 6
 
     for side, prefix in (("left", "L"), ("right", "R")):
         for joint in range(1, 8):
@@ -56,31 +56,34 @@ def test_model_has_dual_marvin_names_dof_and_cameras(scene):
             assert model.joint(name).name == name
             actuator = f"Arm_{prefix}{joint}_Actuator"
             assert model.actuator(actuator).name == actuator
-        for finger in (10, 11):
-            name = f"Arm_{prefix}{finger}_Joint"
+        for idx in (1, 2):
+            name = f"Arm_{prefix}_finger{idx}_Joint"
             assert model.joint(name).name == name
-            link = f"Arm_{prefix}{finger}_Link"
+            link = f"Arm_{prefix}_finger{idx}"
             assert model.body(link).name == link
+            axial = f"Arm_{prefix}_axial{idx}_Joint"
+            assert model.joint(axial).name == axial
         gripper_actuator = f"Arm_{prefix}_gripper_actuator"
         assert model.actuator(gripper_actuator).name == gripper_actuator
-        assert model.body(f"Arm_{prefix}9_Link").name == f"Arm_{prefix}9_Link"
+        assert model.body(f"Arm_{prefix}_gripper_base").name == f"Arm_{prefix}_gripper_base"
         assert model.site(f"Arm_{prefix}_tcp").name == f"Arm_{prefix}_tcp"
         assert len(scene.indices.robot.arm_joint_qpos[side]) == 7
         assert len(scene.indices.robot.finger_joint_qpos[side]) == 2
+        assert len(scene.indices.robot.axial_joint_qpos[side]) == 2
 
     assert np.all(model.cam_targetbodyid == -1)
     assert np.all(model.cam_mode == mujoco.mjtCamLight.mjCAMLIGHT_FIXED)
-    assert model.cam_bodyid[scene.indices.camera_ids["global"]] == model.body("camera_mount").id
-    assert model.cam_bodyid[scene.indices.camera_ids["left_wrist"]] == model.body("Arm_L9_Link").id
-    assert model.cam_bodyid[scene.indices.camera_ids["right_wrist"]] == model.body("Arm_R9_Link").id
+    assert model.cam_bodyid[scene.indices.camera_ids["cam_high"]] == model.body("camera_mount").id
+    assert model.cam_bodyid[scene.indices.camera_ids["cam_left_wrist"]] == model.body("Arm_L_gripper_base").id
+    assert model.cam_bodyid[scene.indices.camera_ids["cam_right_wrist"]] == model.body("Arm_R_gripper_base").id
     assert np.all(model.eq_type != mujoco.mjtEq.mjEQ_WELD)
     np.testing.assert_allclose(
         model.body("ZJ_Robot_link").pos, list(scene.config.robot.base_position)
     )
     assert [camera.name for camera in scene.config.cameras] == [
-        "global",
-        "left_wrist",
-        "right_wrist",
+        "cam_high",
+        "cam_left_wrist",
+        "cam_right_wrist",
     ]
     assert all(camera.width == 320 and camera.height == 240 for camera in scene.config.cameras)
 
@@ -216,11 +219,11 @@ def test_default_objects_rest_on_table_for_short_run(scene):
 
 def test_gripper_initialization_uses_tendon_closure_command(scene):
     scene.reset(0)
-    assert scene.gripper_open_total == pytest.approx(0.0814)
-    assert scene.gripper_closed_total == pytest.approx(0.0014)
+    assert scene.gripper_open_total == pytest.approx(0.090)
+    assert scene.gripper_closed_total == pytest.approx(0.0)
     assert scene.gripper_ctrl(scene.gripper_open_total) == pytest.approx(0.0)
-    assert scene.gripper_ctrl(scene.gripper_closed_total) == pytest.approx(0.08)
-    assert scene.gripper_ctrl(0.0414) == pytest.approx(0.04)
+    assert scene.gripper_ctrl(scene.gripper_closed_total) == pytest.approx(0.090)
+    assert scene.gripper_ctrl(0.045) == pytest.approx(0.045)
     for side in ("left", "right"):
         gripper = scene.indices.robot.gripper_actuator_ids[side]
         assert scene.data.ctrl[gripper] == pytest.approx(0.0)

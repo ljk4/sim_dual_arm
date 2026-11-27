@@ -203,7 +203,7 @@ class FakeProvider(PolicyModelAdapter):
                     else:
                         break
                 rows.append(self.replay_labels[chosen])
-            return np.asarray(rows, dtype=np.float32)
+            return np.asarray(rows, dtype=np.float64)
 
         result = np.empty((chunk, self.action_dim), dtype=np.float64)
         for index in range(chunk):
@@ -223,8 +223,8 @@ class FakeProvider(PolicyModelAdapter):
                     number = math.nan
                 result[index, axis] = number
         if self.settings.fault == "short_chunk":
-            return result[:-1].astype(np.float32)
-        return result.astype(np.float32)
+            return result[:-1].astype(np.float64)
+        return result.astype(np.float64)
 
     def transform_prediction(
         self,

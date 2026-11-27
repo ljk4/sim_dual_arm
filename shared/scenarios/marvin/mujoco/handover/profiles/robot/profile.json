@@ -62,10 +62,10 @@
     {
       "name": "left_gripper_width",
       "unit": "m",
-      "min": 0.0014,
-      "max": 0.0814,
+      "min": 0.0,
+      "max": 0.09,
       "max_velocity": 0.04,
-      "initial": 0.0814
+      "initial": 0.09
     },
     {
       "name": "right_joint1",
@@ -126,33 +126,33 @@
     {
       "name": "right_gripper_width",
       "unit": "m",
-      "min": 0.0014,
-      "max": 0.0814,
+      "min": 0.0,
+      "max": 0.09,
       "max_velocity": 0.04,
-      "initial": 0.0814
+      "initial": 0.09
     }
   ],
   "cameras": [
     {
-      "name": "global",
+      "name": "cam_high",
       "width": 320,
       "height": 240,
-      "frame_id": "global_optical_frame",
-      "calibration_digest": "c7af8f72bbf2c86640804f13a8e037328d299f847496b2ca9cc3d83c2ef5872e"
+      "frame_id": "cam_high_optical_frame",
+      "calibration_digest": "f22ebb65ec62dd6aed86e593a5185fa0556a4a715b786350392611590fb44e47"
     },
     {
-      "name": "left_wrist",
+      "name": "cam_left_wrist",
       "width": 320,
       "height": 240,
-      "frame_id": "left_wrist_optical_frame",
-      "calibration_digest": "afa2783a0e9e894d7e1197da3955403516bdc4da4225c9241813841164fc7176"
+      "frame_id": "cam_left_wrist_optical_frame",
+      "calibration_digest": "1fbfca62d73ab05ff58201e746bfccf39f668366322ee515852adb86a31b443a"
     },
     {
-      "name": "right_wrist",
+      "name": "cam_right_wrist",
       "width": 320,
       "height": 240,
-      "frame_id": "right_wrist_optical_frame",
-      "calibration_digest": "8e2fda4100a3e778530bb8544fa8d893d10bb33d11be6f9bee2b475455320ee2"
+      "frame_id": "cam_right_wrist_optical_frame",
+      "calibration_digest": "845e5c0c88f1080f8f4af493026fc4d48e6da7befa39aec2140095598a9b447b"
     }
   ]
 }

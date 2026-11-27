@@ -6,8 +6,8 @@
 
 - 控制轴顺序（16 维）：`left_joint1..left_joint7`、`left_gripper_width`、`right_joint1..right_joint7`、`right_gripper_width`。
 - Teacher 动作块网格：`60 点 × 16 维`（50 ms 步长），能力标识 `marvin_teacher_api_msgs.teacher_chunk`。
-- 相机名称：`global`、`left_wrist`、`right_wrist`（均为 `320×240` RGB，摘要随 `configs/simulation/scene/marvin_stack.yaml` 同步哈希）。
-- 臂关节限位来自源 URDF；夹爪总开度范围为 `0.0014 .. 0.0814 m`。
+- 相机名称：`cam_high`、`cam_left_wrist`、`cam_right_wrist`（均为 `320×240` RGB，摘要随 `configs/simulation/scene/marvin_stack.yaml` 同步哈希）。
+- 臂关节限位来自源 URDF；夹爪总开度范围为 `0.0 .. 0.090 m`。
 
 ## 主要文件
 

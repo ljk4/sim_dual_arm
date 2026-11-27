@@ -15,16 +15,16 @@ from robot_contracts.action_chunks import ChunkAnchor
 from robot_contracts.models import ContractError
 from robot_contracts.trajectory.spline import ReferenceSample
 from robot_trajectory.follower import PreparedFollowerPlan
-
-from robot_backend_sim.common.config.motion_config import ControlConfig
-from robot_backend_sim.common.config.stream_config import StreamConfig
-from robot_backend_sim.common.motion.motion_types import BoundarySelection, Phase
-from robot_backend_sim.common.motion.stream_schedule import (
+from robot_trajectory.stream_schedule import (
     StreamSchedule,
     grid_aligned,
     next_grid_time,
     observation_rejection,
 )
+
+from robot_backend_sim.common.config.motion_config import ControlConfig
+from robot_backend_sim.common.config.stream_config import StreamConfig
+from robot_backend_sim.common.motion.motion_types import BoundarySelection, Phase
 from robot_backend_sim.common.physics.robot_io import RobotIO
 from robot_backend_sim.common.physics.scene_container import CompiledScene
 

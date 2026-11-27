@@ -104,12 +104,12 @@ def _two_finger_model(block_x: float) -> tuple[mujoco.MjModel, mujoco.MjData]:
     <freejoint name="block_free"/>
     <geom name="block_geom" type="box" size=".03 .03 .03" mass="1"/>
   </body>
-  <body name="Arm_R10_Link" pos=".033 0 0">
-    <joint name="Arm_R10_Joint" type="slide" axis="1 0 0"/>
+  <body name="Arm_R_finger1" pos=".033 0 0">
+    <joint name="Arm_R_finger1_Joint" type="slide" axis="1 0 0"/>
     <geom name="fl" type="sphere" size=".01" margin=".02" gap=".02"/>
   </body>
-  <body name="Arm_R11_Link" pos="-.033 0 0">
-    <joint name="Arm_R11_Joint" type="slide" axis="1 0 0"/>
+  <body name="Arm_R_finger2" pos="-.033 0 0">
+    <joint name="Arm_R_finger2_Joint" type="slide" axis="1 0 0"/>
     <geom name="fr" type="sphere" size=".01" margin=".02" gap=".02"/>
   </body>
 </worldbody></mujoco>"""
@@ -127,12 +127,12 @@ def test_right_finger_source_evidence_ignores_the_inactive_finger():
     binding = SimpleNamespace(
         source_body_id=int(model.body("block").id),
         right_finger_body_ids=(
-            int(model.body("Arm_R10_Link").id),
-            int(model.body("Arm_R11_Link").id),
+            int(model.body("Arm_R_finger1").id),
+            int(model.body("Arm_R_finger2").id),
         ),
         right_finger_dof_addresses=(
-            int(model.jnt_dofadr[model.joint("Arm_R10_Joint").id]),
-            int(model.jnt_dofadr[model.joint("Arm_R11_Joint").id]),
+            int(model.jnt_dofadr[model.joint("Arm_R_finger1_Joint").id]),
+            int(model.jnt_dofadr[model.joint("Arm_R_finger2_Joint").id]),
         ),
     )
     contacts, minimum, speed = _right_finger_source_evidence(scene, data, binding)
@@ -154,19 +154,19 @@ def _stack_xml(finger_offset: float) -> str:
     <freejoint name="source_free"/>
     <geom name="source_geom" type="box" size=".02 .02 .02" mass="1"/>
   </body>
-  <body name="Arm_L10_Link" pos="0 0 5"/>
-  <body name="Arm_L11_Link" pos="0 0 5"/>
-  <body name="Arm_R9_Link" pos=".2 0 .2">
+  <body name="Arm_L_finger1" pos="0 0 5"/>
+  <body name="Arm_L_finger2" pos="0 0 5"/>
+  <body name="Arm_R_gripper_base" pos=".2 0 .2">
     <site name="Arm_R_tcp" pos="0 0 0"/>
-    <site name="Arm_R_pad10_inner" pos="0 0 -0.0407"/>
-    <site name="Arm_R_pad11_inner" pos="0 0 0.0407"/>
+    <site name="Arm_R_pad1_inner" pos="0 0 -0.045"/>
+    <site name="Arm_R_pad2_inner" pos="0 0 0.045"/>
   </body>
-  <body name="Arm_R10_Link" pos="{-finger_offset} 0 .09">
-    <joint name="Arm_R10_Joint" type="slide" axis="1 0 0"/>
+  <body name="Arm_R_finger1" pos="{-finger_offset} 0 .09">
+    <joint name="Arm_R_finger1_Joint" type="slide" axis="1 0 0"/>
     <geom name="fl" type="sphere" size=".01" margin=".02" gap=".02"/>
   </body>
-  <body name="Arm_R11_Link" pos="{finger_offset} 0 .09">
-    <joint name="Arm_R11_Joint" type="slide" axis="1 0 0"/>
+  <body name="Arm_R_finger2" pos="{finger_offset} 0 .09">
+    <joint name="Arm_R_finger2_Joint" type="slide" axis="1 0 0"/>
     <geom name="fr" type="sphere" size=".01" margin=".02" gap=".02"/>
   </body>
 </worldbody></mujoco>"""
@@ -177,12 +177,12 @@ def _stack_scene(finger_offset: float):
     data = mujoco.MjData(model)
     mujoco.mj_forward(model, data)
     left_fingers = (
-        int(model.body("Arm_L10_Link").id),
-        int(model.body("Arm_L11_Link").id),
+        int(model.body("Arm_L_finger1").id),
+        int(model.body("Arm_L_finger2").id),
     )
     right_fingers = (
-        int(model.body("Arm_R10_Link").id),
-        int(model.body("Arm_R11_Link").id),
+        int(model.body("Arm_R_finger1").id),
+        int(model.body("Arm_R_finger2").id),
     )
     scene = SimpleNamespace(
         model=model,
@@ -192,15 +192,15 @@ def _stack_scene(finger_offset: float):
             robot=SimpleNamespace(
                 pad_site_ids={
                     "right": {
-                        "finger10": int(model.site("Arm_R_pad10_inner").id),
-                        "finger11": int(model.site("Arm_R_pad11_inner").id),
+                        "finger1": int(model.site("Arm_R_pad1_inner").id),
+                        "finger2": int(model.site("Arm_R_pad2_inner").id),
                     }
                 },
-                hand_body_ids={"right": int(model.body("Arm_R9_Link").id)},
+                hand_body_ids={"right": int(model.body("Arm_R_gripper_base").id)},
                 finger_joint_qpos={
                     "right": tuple(
-                        int(model.jnt_qposadr[model.joint(f"Arm_R{i}_Joint").id])
-                        for i in (10, 11)
+                        int(model.jnt_qposadr[model.joint(f"Arm_R_finger{i}_Joint").id])
+                        for i in (1, 2)
                     )
                 },
             )
@@ -222,8 +222,8 @@ def _stack_scene(finger_offset: float):
         target_half_extents_m=(0.03, 0.03, 0.03),
         table_top_z_m=0.0,
         right_finger_dof_addresses=(
-            int(model.jnt_dofadr[model.joint("Arm_R10_Joint").id]),
-            int(model.jnt_dofadr[model.joint("Arm_R11_Joint").id]),
+            int(model.jnt_dofadr[model.joint("Arm_R_finger1_Joint").id]),
+            int(model.jnt_dofadr[model.joint("Arm_R_finger2_Joint").id]),
         ),
     )
     return scene, binding

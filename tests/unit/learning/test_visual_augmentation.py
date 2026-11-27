@@ -24,7 +24,7 @@ def _synthetic_batch(batch_size: int = 4, height: int = 32, width: int = 32) -> 
         "observation.state": torch.linspace(-1.0, 1.0, batch_size * 16).reshape(batch_size, 16),
         "action": torch.zeros((batch_size, 60, 16), dtype=torch.float32),
     }
-    for idx, cam in enumerate(("global", "left_wrist", "right_wrist")):
+    for idx, cam in enumerate(("cam_high", "cam_left_wrist", "cam_right_wrist")):
         img = torch.full((batch_size, 3, height, width), 0.25 + 0.05 * idx, dtype=torch.float32)
         img[:, 0, y0 - 1 : y0 + 2, x0 - 1 : x0 + 2] = 0.85
         img[:, 1, y0 - 1 : y0 + 2, x0 - 1 : x0 + 2] = 0.20
@@ -44,7 +44,7 @@ def test_visual_augmentation_disabled_is_noop():
 def test_photometric_augmentation_preserves_spatial_geometry_and_bounds():
     torch.manual_seed(1234)
     batch = _synthetic_batch(batch_size=4)
-    orig_global = batch["observation.images.global"].clone()
+    orig_global = batch["observation.images.cam_high"].clone()
     orig_state = batch["observation.state"].clone()
     spec = VisualAugmentationSpec(
         enabled=True,
@@ -59,11 +59,11 @@ def test_photometric_augmentation_preserves_spatial_geometry_and_bounds():
 
     out = augment_visual_batch(batch, spec)
 
-    assert torch.equal(batch["observation.images.global"], orig_global)
+    assert torch.equal(batch["observation.images.cam_high"], orig_global)
     assert torch.equal(out["observation.state"], orig_state)
     assert torch.equal(out["action"], batch["action"])
 
-    for cam in ("global", "left_wrist", "right_wrist"):
+    for cam in ("cam_high", "cam_left_wrist", "cam_right_wrist"):
         img = out[f"observation.images.{cam}"]
         assert img.shape == (4, 3, 32, 32)
         assert float(img.min()) >= 0.0
@@ -89,7 +89,7 @@ def test_camera_dropout_zeros_at_most_one_camera_per_sample():
     )
 
     out = augment_visual_batch(batch, spec)
-    cams = ("observation.images.global", "observation.images.left_wrist", "observation.images.right_wrist")
+    cams = ("observation.images.cam_high", "observation.images.cam_left_wrist", "observation.images.cam_right_wrist")
     for b in range(16):
         zero_count = sum(bool((out[k][b] == 0.0).all().item()) for k in cams)
         assert zero_count == 1

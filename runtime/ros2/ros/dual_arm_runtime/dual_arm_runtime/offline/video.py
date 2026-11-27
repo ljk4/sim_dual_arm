@@ -129,9 +129,6 @@ def _select_cameras(
         if name_str in available and name_str not in ordered:
             ordered.append(name_str)
     remaining = sorted(name for name in available if name not in ordered)
-    if "global" in remaining:
-        ordered.append("global")
-        remaining.remove("global")
     ordered.extend(remaining)
     return tuple(ordered)
 

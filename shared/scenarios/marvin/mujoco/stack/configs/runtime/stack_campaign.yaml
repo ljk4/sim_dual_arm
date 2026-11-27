@@ -40,37 +40,37 @@ quality:
     [pregrasp, grasp, close, lift, transport, lower, open, retreat, stable]
   required_phases: [close, lift, lower, open]
   rules:
-    - camera: global
+    - camera: cam_high
       object: source
       phases: *stack_phases
       mode: required
       min_pixels: 32
-    - camera: global
+    - camera: cam_high
       object: target
       phases: *stack_phases
       mode: required
       min_pixels: 64
-    - camera: right_wrist
+    - camera: cam_right_wrist
       object: source
       phases: [grasp, close, lift, transport, lower, open]
       mode: required
       min_pixels: 64
-    - camera: right_wrist
+    - camera: cam_right_wrist
       object: source
       phases: [pregrasp, retreat, stable]
       mode: record_only
       min_pixels: 16
-    - camera: right_wrist
+    - camera: cam_right_wrist
       object: target
       phases: [transport, lower]
       mode: required
       min_pixels: 32
-    - camera: right_wrist
+    - camera: cam_right_wrist
       object: target
       phases: [pregrasp, grasp, close, lift, open, retreat, stable]
       mode: record_only
       min_pixels: 16
-    - camera: global
+    - camera: cam_high
       object: table
       phases: *stack_phases
       mode: record_only

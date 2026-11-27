@@ -112,7 +112,7 @@ class RecordingModel:
     action_dim = 16
 
     def __init__(self, bundle: Path, mode="ok"):
-        self.base = initial_positions(bundle).astype(np.float32)
+        self.base = initial_positions(bundle).astype(np.float64)
         self.mode = mode
         self.calls = 0
         self.resets = 0
@@ -127,8 +127,8 @@ class RecordingModel:
         self.last_images = images
         self.last_state = state
         if self.mode == "shape":
-            return np.zeros((59, 16), dtype=np.float32)
-        result = np.tile(self.base, (60, 1)).astype(np.float32)
+            return np.zeros((59, 16), dtype=np.float64)
+        result = np.tile(self.base, (60, 1)).astype(np.float64)
         result[:, 0] += 0.001 * self.calls
         if self.mode == "nan":
             result[0, 0] = np.nan
@@ -160,7 +160,7 @@ class BadWarmModel(ActModelAdapter):
             device="cpu",
             chunk_size=60,
             action_dim=16,
-            camera_names=("global", "left_wrist", "right_wrist"),
+            camera_names=("cam_high", "cam_left_wrist", "cam_right_wrist"),
             camera_width=320,
             camera_height=240,
             initial_positions=(0.0,) * 16,
@@ -337,8 +337,8 @@ def test_rgb_decode_is_chw_float_and_image_order(bundle):
         joint_positions=tuple(initial_positions(bundle)),
     )
     images = model.last_images
-    assert tuple(images) == ("global", "left_wrist", "right_wrist")
-    image = images["global"]
+    assert tuple(images) == ("cam_high", "cam_left_wrist", "cam_right_wrist")
+    image = images["cam_high"]
     assert image.shape == (3, 240, 320)
     assert image.dtype == np.float32
     assert image[0].min() == 1.0 and image[0].max() == 1.0
@@ -788,7 +788,7 @@ class AxisChunkModel(RecordingModel):
         axis, value = self.overrides.get(self.calls, (None, None))
         if axis is not None:
             result[:, axis] = value
-        return result.astype(np.float32)
+        return result.astype(np.float64)
 
 
 def marvin_like_corrections() -> dict[str, float]:

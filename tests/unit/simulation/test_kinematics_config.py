@@ -67,12 +67,12 @@ def test_config_records_all_mandated_initial_values(config):
     assert config.clearance.collision_detection_distance_m == 0.03
     assert config.clearance.sample_step_rad == 0.02
     assert config.clearance.max_samples_per_segment == 1000
-    assert config.targets.pregrasp_height_m == 0.09
-    assert config.targets.grasp_height_m == 0.032
-    assert config.targets.lift_height_m == 0.14
-    assert config.targets.place_hover_height_m == 0.11
+    assert config.targets.pregrasp_height_m == 0.08
+    assert config.targets.grasp_height_m == 0.015
+    assert config.targets.lift_height_m == 0.11
+    assert config.targets.place_hover_height_m == 0.075
     assert config.targets.place_clearance_m == 0.006
-    assert config.targets.retreat_height_m == 0.15
+    assert config.targets.retreat_height_m == 0.095
     assert config.targets.approach_tilt_deg == 20.0
     assert config.targets.approach_yaw_deg == -90.0
     assert config.targets.place_yaw_deg == -90.0
@@ -138,9 +138,9 @@ def test_targets_use_snapshot_centres_and_configured_heights(config):
     )
     assert tuple(item.phase for item in targets) == STACK_KEY_POSES
     positions = {item.phase: item.position for item in targets}
-    assert positions["grasp"] == pytest.approx((0.55, -0.08, 0.832))
-    assert positions["pregrasp"] == pytest.approx((0.55, -0.08, 0.922))
-    assert positions["lift"] == pytest.approx((0.55, -0.08, 0.972))
+    assert positions["grasp"] == pytest.approx((0.55, -0.08, 0.815))
+    assert positions["pregrasp"] == pytest.approx((0.55, -0.08, 0.895))
+    assert positions["lift"] == pytest.approx((0.55, -0.08, 0.925))
     assert positions["place_hover"][:2] == pytest.approx(positions["place"][:2])
     assert positions["place_hover"][2] - positions["place"][2] == pytest.approx(
         config.targets.place_hover_height_m

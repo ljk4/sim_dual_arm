@@ -66,6 +66,7 @@ class MarvinStackScene(MarvinSceneBase):
         # The free joints' compiled rest poses are the configured nominal poses.
         self.reset_run_state()
         self._reset_robot_joints()
+        self._apply_domain_randomization(seed)
         mujoco.mj_forward(self.model, self.data)
 
 

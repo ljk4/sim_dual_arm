@@ -45,7 +45,7 @@ from robot_backend_sim.marvin.handover.teacher import (  # noqa: E402
 )
 
 SCENARIO = ROOT / "shared/scenarios/marvin/mujoco/handover"
-OPEN = 0.0814
+OPEN = 0.090
 CLOSE = 0.05
 AIRBORNE_CENTER = (0.55, 0.12, 0.93)
 PLACED_CENTER = (0.64, -0.27, 0.822)

@@ -13,9 +13,27 @@ from typing import Literal, Optional
 import numpy as np
 from pydantic import Field
 
+from robot_backend_hardware.common.camera.remap import PinholeRemapConfig, PinholeRemapper
 from robot_backend_hardware.common.config import DeviceSettings
 
 log = logging.getLogger(__name__)
+
+
+def _build_configured_remapper(config: "CameraConfig") -> Optional[PinholeRemapper]:
+    """Build a remapper from static YAML intrinsics when configured."""
+    if config.remap is None or not config.remap.enabled:
+        return None
+    supplied = config.intrinsics or {}
+    camera_matrix = supplied.get("camera_matrix")
+    if camera_matrix is None:
+        return None
+    return PinholeRemapper(
+        camera_matrix,
+        supplied.get("distortion_coefficients"),
+        target_width=config.remap.target_width,
+        target_height=config.remap.target_height,
+        target_fovy_deg=config.remap.target_fovy_deg,
+    )
 
 
 class CameraConfig(DeviceSettings):
@@ -30,6 +48,7 @@ class CameraConfig(DeviceSettings):
     intrinsics: Optional[dict] = None
     auto_exposure: Optional[bool] = None
     exposure_time_absolute: Optional[int] = None
+    remap: Optional[PinholeRemapConfig] = None
 
 
 class RealSenseStream:
@@ -44,7 +63,9 @@ class RealSenseStream:
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._frame_count = 0
+        self._remapper: Optional[PinholeRemapper] = _build_configured_remapper(config)
         self._intrinsics: dict = {}
+        self._remapper: Optional[PinholeRemapper] = None
 
     @property
     def name(self) -> str:
@@ -98,6 +119,17 @@ class RealSenseStream:
                 "distortion_model": str(intr.model),
                 "distortion_coefficients": [float(v) for v in intr.coeffs],
             }
+            if self._config.remap is not None and self._config.remap.enabled:
+                self._remapper = PinholeRemapper(
+                    self._intrinsics["camera_matrix"],
+                    self._intrinsics["distortion_coefficients"],
+                    target_width=self._config.remap.target_width,
+                    target_height=self._config.remap.target_height,
+                    target_fovy_deg=self._config.remap.target_fovy_deg,
+                )
+                self._intrinsics = self._remapper.describe_intrinsics(self._intrinsics)
+            else:
+                self._remapper = None
             log.info(
                 "RealSense '%s' (SN:%s) started at %dx%d@%dfps",
                 self._config.name,
@@ -152,6 +184,8 @@ class RealSenseStream:
                 color = frames.get_color_frame()
                 if color:
                     img = np.asanyarray(color.get_data())
+                    if self._remapper is not None:
+                        img = self._remapper.remap(img)
                     with self._lock:
                         self._frame = img
                     self._frame_count += 1
@@ -178,6 +212,7 @@ class V4L2Stream:
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._frame_count = 0
+        self._remapper: Optional[PinholeRemapper] = _build_configured_remapper(config)
 
     @property
     def name(self) -> str:
@@ -261,7 +296,7 @@ class V4L2Stream:
 
     def get_intrinsics(self) -> dict:
         supplied = self._config.intrinsics or {}
-        return {
+        base = {
             "backend": "v4l2",
             "device": self._config.device,
             "resolved_device": os.path.realpath(self._config.device),
@@ -275,6 +310,7 @@ class V4L2Stream:
             "distortion_model": supplied.get("distortion_model"),
             "distortion_coefficients": supplied.get("distortion_coefficients"),
         }
+        return self._remapper.describe_intrinsics(base) if self._remapper is not None else base
 
     def _capture_loop(self):
         import cv2
@@ -285,6 +321,8 @@ class V4L2Stream:
                 time.sleep(0.02)
                 continue
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            if self._remapper is not None:
+                frame = self._remapper.remap(frame)
             with self._lock:
                 self._frame = frame
             self._frame_count += 1
@@ -313,9 +351,11 @@ class FFmpegV4L2Stream:
         self._first_frame = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._frame_count = 0
+        self._remapper: Optional[PinholeRemapper] = _build_configured_remapper(config)
         self._last_ffmpeg_error = ""
         self._ffmpeg = ""
         self._v4l2_ctl = ""
+        self._remapper: Optional[PinholeRemapper] = _build_configured_remapper(config)
 
     @property
     def name(self) -> str:
@@ -414,7 +454,7 @@ class FFmpegV4L2Stream:
 
     def get_intrinsics(self) -> dict:
         supplied = self._config.intrinsics or {}
-        return {
+        base = {
             "backend": "ffmpeg_v4l2",
             "device": self._config.device,
             "resolved_device": os.path.realpath(self._config.device),
@@ -428,6 +468,7 @@ class FFmpegV4L2Stream:
             "distortion_model": supplied.get("distortion_model"),
             "distortion_coefficients": supplied.get("distortion_coefficients"),
         }
+        return self._remapper.describe_intrinsics(base) if self._remapper is not None else base
 
     def _has_configured_controls(self) -> bool:
         return (
@@ -624,6 +665,8 @@ class FFmpegV4L2Stream:
                 self._config.width,
                 3,
             ).copy()
+            if self._remapper is not None:
+                frame = self._remapper.remap(frame)
             with self._lock:
                 self._frame = frame
             self._frame_count += 1

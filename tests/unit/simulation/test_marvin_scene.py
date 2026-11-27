@@ -18,7 +18,13 @@ if str(SIM_SRC) not in sys.path:
 from robot_backend_sim.common.config.camera_config import camera_declared_description  # noqa: E402
 from robot_backend_sim.marvin.handover.scene_config import load_marvin_scene_config  # noqa: E402
 from robot_backend_sim.marvin.handover.scene import build_marvin_scene  # noqa: E402
-from robot_backend_sim.marvin.assembly import gripper_opening  # noqa: E402
+from robot_backend_sim.marvin.assembly import fourbar_axial_extension_m, gripper_opening  # noqa: E402
+from robot_backend_sim.marvin.scene_base import (  # noqa: E402
+    DomainDynamicsConfig,
+    DomainGeometryConfig,
+    DomainRandomizationConfig,
+    DomainVisualConfig,
+)
 from robot_contracts.models import ContractError  # noqa: E402
 from robot_contracts.profiles import (  # noqa: E402
     load_document,
@@ -68,11 +74,11 @@ def test_profile_order_cameras_and_calibrations_match_the_scene(config):
 def test_scene_has_a_fixed_root_and_named_bindings(scene):
     model = scene.model
     assert (model.nq, model.nv, model.nu, model.ncam, model.neq, model.ntendon) == (
-        25,
-        24,
+        29,
+        28,
         16,
         3,
-        2,
+        6,
         2,
     )
     robot = scene.indices.robot
@@ -80,10 +86,11 @@ def test_scene_has_a_fixed_root_and_named_bindings(scene):
     for side in ("left", "right"):
         assert len(robot.arm_joint_qpos[side]) == 7
         assert len(robot.finger_joint_qpos[side]) == 2
+        assert len(robot.axial_joint_qpos[side]) == 2
         assert len(robot.arm_actuator_ids[side]) == 7
         assert robot.tcp_site_ids[side] >= 0
-    assert model.body("Arm_L9_Link").name == "Arm_L9_Link"
-    assert model.body("Arm_R9_Link").name == "Arm_R9_Link"
+    assert model.body("Arm_L_gripper_base").name == "Arm_L_gripper_base"
+    assert model.body("Arm_R_gripper_base").name == "Arm_R_gripper_base"
 
 
 def test_robot_weight_compensation_does_not_compensate_the_free_object(config):
@@ -106,7 +113,7 @@ def test_robot_weight_compensation_does_not_compensate_the_free_object(config):
 
 def test_only_the_structurally_overlapping_self_pair_is_excluded(scene):
     model = scene.model
-    assert model.nexclude == 2
+    assert model.nexclude == 4
     pairs = set()
     for index in range(model.nexclude):
         signature = int(model.exclude_signature[index])
@@ -121,21 +128,26 @@ def test_only_the_structurally_overlapping_self_pair_is_excluded(scene):
     assert pairs == {
         frozenset(("Arm_L5_Link", "Arm_L7_Link")),
         frozenset(("Arm_R5_Link", "Arm_R7_Link")),
+        frozenset(("Arm_L_finger1", "Arm_L_finger2")),
+        frozenset(("Arm_R_finger1", "Arm_R_finger2")),
     }
 
 
-def test_finger_coupling_comes_from_the_source_mimic_once(scene):
+def test_finger_coupling_and_4bar_arc_match_calibrated_90c_geometry(scene):
     model = scene.model
-    assert model.neq == 2
+    assert model.neq == 6
     for prefix in ("L", "R"):
         equality = model.equality(f"Arm_{prefix}_finger_coupling")
         assert int(model.eq_type[equality.id]) == int(mujoco.mjtEq.mjEQ_JOINT)
         assert {
             model.joint(int(model.eq_obj1id[equality.id])).name,
             model.joint(int(model.eq_obj2id[equality.id])).name,
-        } == {f"Arm_{prefix}10_Joint", f"Arm_{prefix}11_Joint"}
+        } == {f"Arm_{prefix}_finger1_Joint", f"Arm_{prefix}_finger2_Joint"}
         assert float(model.eq_data[equality.id, 0]) == pytest.approx(0.0)
         assert float(model.eq_data[equality.id, 1]) == pytest.approx(1.0)
+        for idx in (1, 2):
+            arc = model.equality(f"Arm_{prefix}_axial{idx}_arc")
+            assert int(model.eq_type[arc.id]) == int(mujoco.mjtEq.mjEQ_JOINT)
 
 
 def test_reset_is_deterministic_and_gripper_opening_is_measured(scene):
@@ -155,6 +167,9 @@ def test_reset_is_deterministic_and_gripper_opening_is_measured(scene):
     assert gripper_opening(scene.model, scene.data, scene.indices.robot, "left") == (
         pytest.approx(scene.gripper_closed_total, abs=5e-4)
     )
+    u = float(scene.data.qpos[scene.indices.robot.finger_joint_qpos["left"][0]])
+    axial = float(scene.data.qpos[scene.indices.robot.axial_joint_qpos["left"][0]])
+    assert axial == pytest.approx(fourbar_axial_extension_m(u), abs=5e-4)
 
 
 def test_box_is_open_at_the_centre_and_contains_the_block(scene, config):
@@ -203,19 +218,57 @@ def test_marvin_visual_geoms_have_white_body_and_black_grippers(scene):
         "ZJ_Robot_link",
         *(f"Arm_{side}{idx}_Link" for side in ("L", "R") for idx in range(1, 8)),
     }
-    gripper_bodies = {
-        f"Arm_{side}{idx}_Link" for side in ("L", "R") for idx in range(8, 12)
+    gripper_base_bodies = {f"Arm_{side}_gripper_base" for side in ("L", "R")}
+    finger_bodies = {
+        f"Arm_{side}_finger{idx}" for side in ("L", "R") for idx in (1, 2)
     }
     seen_arm = 0
-    seen_gripper = 0
+    seen_base = 0
+    seen_fingers = 0
     for geom_id in range(model.ngeom):
         body_name = model.body(int(model.geom_bodyid[geom_id])).name
         rgba = tuple(float(v) for v in model.geom_rgba[geom_id])
         if body_name in arm_bodies:
             assert rgba == pytest.approx(white, abs=1e-5)
             seen_arm += 1
-        elif body_name in gripper_bodies:
+        elif body_name in gripper_base_bodies:
             assert rgba == pytest.approx(black, abs=1e-5)
-            seen_gripper += 1
+            seen_base += 1
+        elif body_name in finger_bodies:
+            seen_fingers += 1
     assert seen_arm > 0
-    assert seen_gripper > 0
+    assert seen_base == 6
+    assert seen_fingers >= 16
+
+
+def test_domain_randomization_is_deterministic_per_seed_and_non_cumulative(config):
+    dr_cfg = config.model_copy(
+        update={
+            "domain_randomization": DomainRandomizationConfig(
+                enabled=True,
+                geometry=DomainGeometryConfig(
+                    camera_pos_jitter_m=0.004,
+                    camera_rot_jitter_deg=1.0,
+                    table_top_z_jitter_m=0.003,
+                ),
+                dynamics=DomainDynamicsConfig(
+                    friction_scale_range=(0.8, 1.2),
+                    object_mass_scale_range=(0.9, 1.1),
+                    joint_damping_scale_range=(0.85, 1.15),
+                ),
+                visual=DomainVisualConfig(
+                    light_diffuse_jitter=0.1,
+                    object_rgba_jitter=0.05,
+                ),
+            )
+        }
+    )
+    dr_scene = build_marvin_scene(dr_cfg)
+    dr_scene.reset(42)
+    cam_pos_42 = dr_scene.model.cam_pos.copy()
+    fric_42 = dr_scene.model.geom_friction.copy()
+    dr_scene.reset(43)
+    assert not np.allclose(dr_scene.model.cam_pos, cam_pos_42)
+    dr_scene.reset(42)
+    np.testing.assert_allclose(dr_scene.model.cam_pos, cam_pos_42)
+    np.testing.assert_allclose(dr_scene.model.geom_friction, fric_42)

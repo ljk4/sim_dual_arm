@@ -84,28 +84,28 @@ def _xml(
     <geom name="block_geom" type="box" size=".03 .03 .03" mass="1"/>
   </body>"""
     hands = f"""<body name="Arm_L_hand" pos="{left_hand[0]} {left_hand[1]} {left_hand[2]}">
-    <body name="Arm_L10_Link" pos="{left_pad_offset} 0 0">
+    <body name="Arm_L_finger1" pos="{left_pad_offset} 0 0">
       <geom name="Arm_L10_geom" type="sphere" size=".01"
             margin="{pad_margin}" gap="{pad_margin}"/>
-      <site name="Arm_L10_pad"/>
+      <site name="Arm_L_pad1_inner"/>
     </body>
-    <body name="Arm_L11_Link" pos="{-left_pad_offset} 0 0">
+    <body name="Arm_L_finger2" pos="{-left_pad_offset} 0 0">
       <geom name="Arm_L11_geom" type="sphere" size=".01"
             margin="{pad_margin}" gap="{pad_margin}"/>
-      <site name="Arm_L11_pad"/>
+      <site name="Arm_L_pad2_inner"/>
     </body>
     <site name="Arm_L_tcp"/>
   </body>
   <body name="Arm_R_hand" pos="{right_hand[0]} {right_hand[1]} {right_hand[2]}">
-    <body name="Arm_R10_Link" pos="0 {right_pad_offset} 0">
+    <body name="Arm_R_finger1" pos="0 {right_pad_offset} 0">
       <geom name="Arm_R10_geom" type="sphere" size=".01"
             margin="{pad_margin}" gap="{pad_margin}"/>
-      <site name="Arm_R10_pad"/>
+      <site name="Arm_R_pad1_inner"/>
     </body>
-    <body name="Arm_R11_Link" pos="0 {-right_pad_offset} 0">
+    <body name="Arm_R_finger2" pos="0 {-right_pad_offset} 0">
       <geom name="Arm_R11_geom" type="sphere" size=".01"
             margin="{pad_margin}" gap="{pad_margin}"/>
-      <site name="Arm_R11_pad"/>
+      <site name="Arm_R_pad2_inner"/>
     </body>
     <site name="Arm_R_tcp"/>
   </body>"""
@@ -133,12 +133,12 @@ class _Scene:
         self.robot = SimpleNamespace(
             pad_site_ids={
                 "left": {
-                    "finger10": int(model.site("Arm_L10_pad").id),
-                    "finger11": int(model.site("Arm_L11_pad").id),
+                    "finger1": int(model.site("Arm_L_pad1_inner").id),
+                    "finger2": int(model.site("Arm_L_pad2_inner").id),
                 },
                 "right": {
-                    "finger10": int(model.site("Arm_R10_pad").id),
-                    "finger11": int(model.site("Arm_R11_pad").id),
+                    "finger1": int(model.site("Arm_R_pad1_inner").id),
+                    "finger2": int(model.site("Arm_R_pad2_inner").id),
                 },
             },
             hand_body_ids={
@@ -151,12 +151,12 @@ class _Scene:
         self.robot_geometry = SimpleNamespace(
             finger_bodies={
                 "left": (
-                    ("Arm_L10_Link", "Arm_L10_Joint"),
-                    ("Arm_L11_Link", "Arm_L11_Joint"),
+                    ("Arm_L_finger1", "Arm_L_finger1_Joint"),
+                    ("Arm_L_finger2", "Arm_L_finger2_Joint"),
                 ),
                 "right": (
-                    ("Arm_R10_Link", "Arm_R10_Joint"),
-                    ("Arm_R11_Link", "Arm_R11_Joint"),
+                    ("Arm_R_finger1", "Arm_R_finger1_Joint"),
+                    ("Arm_R_finger2", "Arm_R_finger2_Joint"),
                 ),
             },
             chains=(
@@ -192,11 +192,11 @@ class _Scene:
             right_finger_dof_addresses=(2, 3),
             left_body_ids=frozenset(
                 int(model.body(name).id)
-                for name in ("Arm_L_hand", "Arm_L10_Link", "Arm_L11_Link")
+                for name in ("Arm_L_hand", "Arm_L_finger1", "Arm_L_finger2")
             ),
             right_body_ids=frozenset(
                 int(model.body(name).id)
-                for name in ("Arm_R_hand", "Arm_R10_Link", "Arm_R11_Link")
+                for name in ("Arm_R_hand", "Arm_R_finger1", "Arm_R_finger2")
             ),
             robot_body_ids=robot_bodies,
             table_top_z_m=0.0,
@@ -324,7 +324,7 @@ def test_captured_contacts_drive_the_policy_sequence_gate():
             steps=(),
             plan_digest="0" * 64,
             duration_ns=1_000_000_000,
-            open_total_m=0.0814,
+            open_total_m=0.090,
         ),
         plan_digest="0" * 64,
         plan_duration_ns=1_000_000_000,

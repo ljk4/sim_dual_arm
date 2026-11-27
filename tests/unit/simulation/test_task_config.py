@@ -59,7 +59,7 @@ def test_repository_task_config_has_all_thresholds_and_capacity():
         ("max_task_sim_duration_s", 301.0, "max_task_sim_duration_s"),
         ("support_xy_margin_m", -0.001, "support_xy_margin_m"),
         ("min_support_normal_force_n", 0.0, "min_support_normal_force_n"),
-        ("min_gripper_opening_m", 0.082, "min_gripper_opening_m"),
+        ("min_gripper_opening_m", 0.091, "min_gripper_opening_m"),
         ("min_vertical_normal_component", 0.0, "min_vertical_normal_component"),
     ],
 )

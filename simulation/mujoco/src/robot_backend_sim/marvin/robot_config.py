@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BeforeValidator, Field, StrictBool, model_validator
+from pydantic import BeforeValidator, Field, StrictBool, StrictInt, model_validator
 from robot_contracts.validation import (
     PositiveFloat,
     StrictFloat,
@@ -22,6 +22,7 @@ __all__ = [
     "MARVIN_CONTROL_JOINT_NAMES",
     "MARVIN_TEACHER_CAPABILITY",
     "MarvinRobotConfig",
+    "ServoDynamicsConfig",
     "Seven",
     "public_dual_arm_positions",
 ]
@@ -60,7 +61,7 @@ MARVIN_CONTROL_JOINT_NAMES = (
     "right_gripper_width",
 )
 
-MARVIN_CAMERA_NAMES = ("global", "left_wrist", "right_wrist")
+MARVIN_CAMERA_NAMES = ("cam_high", "cam_left_wrist", "cam_right_wrist")
 
 MARVIN_ARM_JOINT_RANGES = (
     (-3.106686, 3.106686),
@@ -88,6 +89,15 @@ class HomeJointPositions(StrictMappingModel):
         return self.left if side == "left" else self.right
 
 
+class ServoDynamicsConfig(StrictMappingModel):
+    """Step-level servo command filtering parameters matching real hardware."""
+
+    arm_delay_steps: Annotated[StrictInt, Field(ge=0, le=50)] = 0
+    max_joint_step_rad: Annotated[PositiveFloat, Field(le=1.0)] | None = None
+    gripper_delay_steps: Annotated[StrictInt, Field(ge=0, le=50)] = 0
+    gripper_deadband_m: Annotated[StrictFloat, Field(ge=0.0, le=0.01)] = 0.0
+
+
 class MarvinRobotConfig(StrictMappingModel):
     assembly: Literal["marvin"]
     base_position: Vec3
@@ -96,6 +106,8 @@ class MarvinRobotConfig(StrictMappingModel):
     gravity_compensation: StrictBool
     gripper_open_total: Annotated[PositiveFloat, Field(gt=0.0, le=0.2)]
     gripper_closed_total: Annotated[StrictFloat, Field(ge=0.0, le=0.2)]
+    pad_inward_offset_m: Annotated[StrictFloat, Field(ge=0.0, le=0.03)] = 0.0
+    servo_dynamics: ServoDynamicsConfig = Field(default_factory=ServoDynamicsConfig)
     arm_kp: Seven
     arm_kv: Seven
     joint_damping: Annotated[StrictFloat, Field(ge=0.0, le=100.0)]

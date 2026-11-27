@@ -12,7 +12,7 @@ SCENARIO = ROOT / "shared/scenarios/marvin/mujoco/stack"
 def test_real_learning_configs_load():
     dataset = load_dataset_config(SCENARIO / "configs/learning/act_dataset.yaml", ROOT)
     training = load_training_config(SCENARIO / "configs/learning/act_training.yaml", ROOT)
-    assert dataset.camera_names == ("global", "left_wrist", "right_wrist")
+    assert dataset.camera_names == ("cam_high", "cam_left_wrist", "cam_right_wrist")
     assert dataset.chunk_size == 60
     assert dataset.validation_percent == 10
     assert dataset.split_counts(50) == (45, 5)

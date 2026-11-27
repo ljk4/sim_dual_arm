@@ -71,7 +71,8 @@ class MarvinScene(MarvinSceneBase):
     def reset(self, seed: int) -> None:
         if isinstance(seed, bool) or not isinstance(seed, int):
             raise TypeError("seed must be an integer")
-        del seed  # the first handover layout is fixed; the seed identifies a run
+        if seed < 0:
+            raise ValueError("seed must be a non-negative integer")
         model = self.model
         data = self.data
         self.reset_run_state()
@@ -91,6 +92,7 @@ class MarvinScene(MarvinSceneBase):
         )
         quaternion = combined_yaw_quaternion(base.base_yaw_deg, block.initial_yaw_deg)
         data.qpos[address : address + 7] = (*world, *quaternion)
+        self._apply_domain_randomization(seed)
         mujoco.mj_forward(model, data)
 
 

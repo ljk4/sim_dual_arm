@@ -451,237 +451,103 @@
       velocity="3.1416" />
   </joint>
   <link
-    name="Arm_R8_Link">
+    name="Arm_R_gripper_base">
     <inertial>
       <origin
-        xyz="-0.0048205 -0.025664 -0.00018709"
+        xyz="0 -0.075 0"
         rpy="0 0 0" />
       <mass
-        value="0.45066" />
+        value="0.85" />
       <inertia
-        ixx="0.00016874"
-        ixy="-3.8719E-05"
-        ixz="8.8884E-07"
-        iyy="0.00035052"
-        iyz="1.0326E-07"
-        izz="0.00024334" />
+        ixx="0.0016"
+        ixy="0"
+        ixz="0"
+        iyy="0.0009"
+        iyz="0"
+        izz="0.0016" />
     </inertial>
-    <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://Marvin_Stand_M6_2026.4.8/meshes/Arm_R8_Link.STL" />
-      </geometry>
-      <material
-        name="">
-        <color
-          rgba="0.12 0.12 0.12 1" />
-      </material>
-    </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://Marvin_Stand_M6_2026.4.8/meshes/Arm_R8_Link.STL" />
-      </geometry>
-    </collision>
   </link>
   <joint
-    name="Arm_R8_Joint"
+    name="Arm_R_gripper_base_Joint"
     type="fixed">
     <origin
       xyz="0 -0.095 0"
-      rpy="0 1.5708 0" />
+      rpy="0 1.5707963267948966 0" />
     <parent
       link="Arm_R7_Link" />
     <child
-      link="Arm_R8_Link" />
-    <axis
-      xyz="0 0 0" />
-    <limit
-      lower="1.5708"
-      upper="-1.5708"
-      effort="18"
-      velocity="0" />
+      link="Arm_R_gripper_base" />
   </joint>
   <link
-    name="Arm_R9_Link">
+    name="Arm_R_finger1">
     <inertial>
       <origin
-        xyz="-0.0015934 -0.085718 1.7559E-06"
+        xyz="0 -0.195 0.035"
         rpy="0 0 0" />
       <mass
-        value="0.21436" />
+        value="0.065" />
       <inertia
-        ixx="0.00017299"
-        ixy="4.2904E-07"
-        ixz="4.2578E-07"
-        iyy="0.00021771"
-        iyz="1.5375E-09"
-        izz="9.8853E-05" />
+        ixx="2.5e-05"
+        ixy="0"
+        ixz="0"
+        iyy="1.5e-05"
+        iyz="0"
+        izz="2.5e-05" />
     </inertial>
-    <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://Marvin_Stand_M6_2026.4.8/meshes/Arm_R9_Link.STL" />
-      </geometry>
-      <material
-        name="">
-        <color
-          rgba="0.12 0.12 0.12 1" />
-      </material>
-    </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://Marvin_Stand_M6_2026.4.8/meshes/Arm_R9_Link.STL" />
-      </geometry>
-    </collision>
   </link>
   <joint
-    name="Arm_R9_Joint"
-    type="fixed">
-    <origin
-      xyz="0 0 0"
-      rpy="0 0 0" />
-    <parent
-      link="Arm_R8_Link" />
-    <child
-      link="Arm_R9_Link" />
-    <axis
-      xyz="0 0 0" />
-    <limit
-      lower="0"
-      upper="0"
-      effort="0"
-      velocity="0" />
-  </joint>
-  <link
-    name="Arm_R10_Link">
-    <inertial>
-      <origin
-        xyz="-0.00090072 -0.14322 0.057244"
-        rpy="0 0 0" />
-      <mass
-        value="0.027748" />
-      <inertia
-        ixx="9.6216E-06"
-        ixy="-9.9808E-08"
-        ixz="1.7315E-08"
-        iyy="3.5256E-06"
-        iyz="-1.3005E-06"
-        izz="1.0224E-05" />
-    </inertial>
-    <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://Marvin_Stand_M6_2026.4.8/meshes/Arm_R10_Link.STL" />
-      </geometry>
-      <material
-        name="">
-        <color
-          rgba="0.12 0.12 0.12 1" />
-      </material>
-    </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://Marvin_Stand_M6_2026.4.8/meshes/Arm_R10_Link.STL" />
-      </geometry>
-    </collision>
-  </link>
-  <joint
-    name="Arm_R10_Joint"
+    name="Arm_R_finger1_Joint"
     type="prismatic">
     <origin
       xyz="0 0 0"
       rpy="0 0 0" />
     <parent
-      link="Arm_R9_Link" />
+      link="Arm_R_gripper_base" />
     <child
-      link="Arm_R10_Link" />
+      link="Arm_R_finger1" />
     <axis
       xyz="0 0 -1" />
     <limit
       lower="0"
-      upper="0.04"
-      effort="30"
-      velocity="0" />
+      upper="0.045"
+      effort="60"
+      velocity="0.2" />
   </joint>
   <link
-    name="Arm_R11_Link">
+    name="Arm_R_finger2">
     <inertial>
       <origin
-        xyz="-0.00044761 1.9362 0.057244"
+        xyz="0 -0.195 -0.035"
         rpy="0 0 0" />
       <mass
-        value="0.027748" />
+        value="0.065" />
       <inertia
-        ixx="9.6216E-06"
-        ixy="-9.9808E-08"
-        ixz="-1.7315E-08"
-        iyy="3.5256E-06"
-        iyz="1.3005E-06"
-        izz="1.0224E-05" />
+        ixx="2.5e-05"
+        ixy="0"
+        ixz="0"
+        iyy="1.5e-05"
+        iyz="0"
+        izz="2.5e-05" />
     </inertial>
-    <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://Marvin_Stand_M6_2026.4.8/meshes/Arm_R11_Link.STL" />
-      </geometry>
-      <material
-        name="">
-        <color
-          rgba="0.12 0.12 0.12 1" />
-      </material>
-    </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://Marvin_Stand_M6_2026.4.8/meshes/Arm_R11_Link.STL" />
-      </geometry>
-    </collision>
   </link>
   <joint
-    name="Arm_R11_Joint"
+    name="Arm_R_finger2_Joint"
     type="prismatic">
     <origin
-      xyz="0.0013483 1.793 0"
-      rpy="-3.1416 0 0" />
+      xyz="0 0 0"
+      rpy="0 0 0" />
     <parent
-      link="Arm_R9_Link" />
+      link="Arm_R_gripper_base" />
     <child
-      link="Arm_R11_Link" />
+      link="Arm_R_finger2" />
     <axis
-      xyz="0 0 -1" />
+      xyz="0 0 1" />
     <limit
       lower="0"
-      upper="0.04"
-      effort="30"
-      velocity="0" />
-   <mimic joint="Arm_R10_Joint" multiplier="1" offset="0" />
+      upper="0.045"
+      effort="60"
+      velocity="0.2" />
+    <mimic joint="Arm_R_finger1_Joint" multiplier="1" offset="0" />
   </joint>
   <link
     name="Arm_L1_Link">
@@ -1090,231 +956,102 @@
       velocity="3.1416" />
   </joint>
   <link
-    name="Arm_L8_Link">
+    name="Arm_L_gripper_base">
     <inertial>
       <origin
-        xyz="-0.0047683 -0.025664 0.00023932"
+        xyz="0 -0.075 0"
         rpy="0 0 0" />
       <mass
-        value="0.45066" />
+        value="0.85" />
       <inertia
-        ixx="0.00016914"
-        ixy="-3.8707E-05"
-        ixz="-8.8832E-07"
-        iyy="0.00035052"
-        iyz="-8.9472E-08"
-        izz="0.00024294" />
+        ixx="0.0016"
+        ixy="0"
+        ixz="0"
+        iyy="0.0009"
+        iyz="0"
+        izz="0.0016" />
     </inertial>
-    <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://Marvin_Stand_M6_2026.4.8/meshes/Arm_L8_Link.STL" />
-      </geometry>
-      <material
-        name="">
-        <color
-          rgba="0.12 0.12 0.12 1" />
-      </material>
-    </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://Marvin_Stand_M6_2026.4.8/meshes/Arm_L8_Link.STL" />
-      </geometry>
-    </collision>
   </link>
   <joint
-    name="Arm_L8_Joint"
+    name="Arm_L_gripper_base_Joint"
     type="fixed">
     <origin
       xyz="0 -0.095 0"
-      rpy="0 1.5708 0" />
+      rpy="0 1.5707963267948966 0" />
     <parent
       link="Arm_L7_Link" />
     <child
-      link="Arm_L8_Link" />
-    <axis
-      xyz="0 0 0" />
+      link="Arm_L_gripper_base" />
   </joint>
   <link
-    name="Arm_L9_Link">
+    name="Arm_L_finger1">
     <inertial>
       <origin
-        xyz="-0.0015934 -0.085718 1.7355E-06"
+        xyz="0 -0.195 0.035"
         rpy="0 0 0" />
       <mass
-        value="0.21436" />
+        value="0.065" />
       <inertia
-        ixx="0.00017299"
-        ixy="4.2902E-07"
-        ixz="4.2581E-07"
-        iyy="0.00021771"
-        iyz="1.6026E-09"
-        izz="9.8853E-05" />
+        ixx="2.5e-05"
+        ixy="0"
+        ixz="0"
+        iyy="1.5e-05"
+        iyz="0"
+        izz="2.5e-05" />
     </inertial>
-    <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://Marvin_Stand_M6_2026.4.8/meshes/Arm_L9_Link.STL" />
-      </geometry>
-      <material
-        name="">
-        <color
-          rgba="0.12 0.12 0.12 1" />
-      </material>
-    </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://Marvin_Stand_M6_2026.4.8/meshes/Arm_L9_Link.STL" />
-      </geometry>
-    </collision>
   </link>
   <joint
-    name="Arm_L9_Joint"
-    type="fixed">
-    <origin
-      xyz="0 0 0"
-      rpy="0 0 0" />
-    <parent
-      link="Arm_L8_Link" />
-    <child
-      link="Arm_L9_Link" />
-    <axis
-      xyz="0 0 0" />
-    <limit
-      lower="0"
-      upper="0"
-      effort="0"
-      velocity="0" />
-  </joint>
-  <link
-    name="Arm_L10_Link">
-    <inertial>
-      <origin
-        xyz="-0.00090072 -0.14322 0.057244"
-        rpy="0 0 0" />
-      <mass
-        value="0.027748" />
-      <inertia
-        ixx="9.6216E-06"
-        ixy="-9.9808E-08"
-        ixz="1.7315E-08"
-        iyy="3.5256E-06"
-        iyz="-1.3005E-06"
-        izz="1.0224E-05" />
-    </inertial>
-    <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://Marvin_Stand_M6_2026.4.8/meshes/Arm_L10_Link.STL" />
-      </geometry>
-      <material
-        name="">
-        <color
-          rgba="0.12 0.12 0.12 1" />
-      </material>
-    </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://Marvin_Stand_M6_2026.4.8/meshes/Arm_L10_Link.STL" />
-      </geometry>
-    </collision>
-  </link>
-  <joint
-    name="Arm_L10_Joint"
+    name="Arm_L_finger1_Joint"
     type="prismatic">
     <origin
       xyz="0 0 0"
       rpy="0 0 0" />
     <parent
-      link="Arm_L9_Link" />
+      link="Arm_L_gripper_base" />
     <child
-      link="Arm_L10_Link" />
+      link="Arm_L_finger1" />
     <axis
-       xyz="0 0 -1" />
+      xyz="0 0 -1" />
     <limit
       lower="0"
-      upper="0.04"
-      effort="30"
-      velocity="0" />
+      upper="0.045"
+      effort="60"
+      velocity="0.2" />
   </joint>
   <link
-    name="Arm_L11_Link">
+    name="Arm_L_finger2">
     <inertial>
       <origin
-        xyz="0.00090072 -0.14322 -0.057244"
+        xyz="0 -0.195 -0.035"
         rpy="0 0 0" />
       <mass
-        value="0.027748" />
+        value="0.065" />
       <inertia
-        ixx="9.6216E-06"
-        ixy="9.9808E-08"
-        ixz="1.7315E-08"
-        iyy="3.5256E-06"
-        iyz="1.3005E-06"
-        izz="1.0224E-05" />
+        ixx="2.5e-05"
+        ixy="0"
+        ixz="0"
+        iyy="1.5e-05"
+        iyz="0"
+        izz="2.5e-05" />
     </inertial>
-    <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://Marvin_Stand_M6_2026.4.8/meshes/Arm_L11_Link.STL" />
-      </geometry>
-      <material
-        name="">
-        <color
-          rgba="0.12 0.12 0.12 1" />
-      </material>
-    </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://Marvin_Stand_M6_2026.4.8/meshes/Arm_L11_Link.STL" />
-      </geometry>
-    </collision>
   </link>
   <joint
-    name="Arm_L11_Joint"
+    name="Arm_L_finger2_Joint"
     type="prismatic">
     <origin
       xyz="0 0 0"
       rpy="0 0 0" />
     <parent
-      link="Arm_L9_Link" />
+      link="Arm_L_gripper_base" />
     <child
-      link="Arm_L11_Link" />
+      link="Arm_L_finger2" />
     <axis
       xyz="0 0 1" />
     <limit
       lower="0"
-      upper="0.04"
-      effort="30"
-      velocity="0" />
-     <mimic joint="Arm_L10_Joint" multiplier="1" offset="0" />
+      upper="0.045"
+      effort="60"
+      velocity="0.2" />
+    <mimic joint="Arm_L_finger1_Joint" multiplier="1" offset="0" />
   </joint>
 </robot>

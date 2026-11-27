@@ -109,7 +109,7 @@ def test_plan_is_bounded_private_and_uses_all_phase_gates(fixture):
     assert all(result.converged for result in plan.ik_results)
     assert plan.collision_results
     assert all(result.passed for result in plan.collision_results)
-    assert plan.allowed_contact_pairs == ("Arm_R10_Link:source", "Arm_R11_Link:source")
+    assert plan.allowed_contact_pairs == ("Arm_R_finger1:source", "Arm_R_finger2:source")
     assert (
         plan.plan_digest
         == build_teacher_plan(
@@ -142,7 +142,7 @@ def test_chunk_is_60x16_at_50ms_and_keeps_left_arm_fixed(fixture):
         sim_time_ns=0,
         right_positions=plan.start_positions[8:15],
         right_velocities=(0.0,) * 7,
-        right_gripper_opening_m=0.0814,
+        right_gripper_opening_m=0.090,
         right_gripper_velocity_m_s=0.0,
         right_finger_source_contacts=0,
         right_finger_source_min_force_n=0.0,
@@ -228,7 +228,7 @@ def test_chunk_rejects_stale_or_future_observation(fixture):
         sim_time_ns=0,
         right_positions=plan.start_positions[8:15],
         right_velocities=(0.0,) * 7,
-        right_gripper_opening_m=0.0814,
+        right_gripper_opening_m=0.090,
         right_gripper_velocity_m_s=0.0,
         right_finger_source_contacts=0,
         right_finger_source_min_force_n=0.0,
@@ -295,7 +295,7 @@ def _feedback_for(
     contacts=0,
     force=0.0,
     finger_speed=0.0,
-    gripper=0.0814,
+    gripper=0.090,
     source_z=None,
     tcp_distance=0.5,
 ):

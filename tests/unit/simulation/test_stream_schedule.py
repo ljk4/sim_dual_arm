@@ -8,13 +8,13 @@ from types import SimpleNamespace
 import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
-SIM_SRC = ROOT / "simulation/mujoco/src"
+TRAJ_SRC = ROOT / "shared/common/python/trajectory/src"
 CONTRACT_SRC = ROOT / "shared/common/python/contracts/src"
-for source in (SIM_SRC, CONTRACT_SRC):
+for source in (TRAJ_SRC, CONTRACT_SRC):
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
 
-from robot_backend_sim.common.motion.stream_schedule import (  # noqa: E402
+from robot_trajectory.stream_schedule import (  # noqa: E402
     ChunkEvent,
     StreamSchedule,
     boundary_rejection,

@@ -22,7 +22,7 @@ from robot_contracts.models import ContractError  # noqa: E402
 
 def _finger_body_name(side: str, index: int) -> str:
     prefix = "L" if side == "left" else "R"
-    return f"Arm_{prefix}{9 + index}_Link"
+    return f"Arm_{prefix}_finger{index}"
 
 
 def _finger(
@@ -49,9 +49,9 @@ def _contact(
 def _completion(contact: GripperContactEvidence, **changes):
     values = {
         "side": "right",
-        "initial_reference_m": 0.0814,
-        "final_reference_m": 0.0014,
-        "target_position_m": 0.0014,
+        "initial_reference_m": 0.090,
+        "final_reference_m": 0.0,
+        "target_position_m": 0.0,
         "measured_position_m": 0.03985,
         "measured_velocity_m_s": 0.0,
         "position_tolerance_m": 0.002,
@@ -121,8 +121,8 @@ def test_marvin_completion_evidence_keeps_two_sides_and_two_fingers():
                     initial_reference_m=0.0,
                     final_reference_m=0.0,
                     fingers=(
-                        FingerContactEvidence("left", 1, "Arm_L10_Link", (), 0.0),
-                        FingerContactEvidence("right", 2, "Arm_R11_Link", (), 0.0),
+                        FingerContactEvidence("left", 1, "Arm_L_finger1", (), 0.0),
+                        FingerContactEvidence("right", 2, "Arm_R_finger2", (), 0.0),
                     ),
                 ),
             )
@@ -139,15 +139,15 @@ def test_contact_completion_accepts_two_named_fingers_on_one_object():
     assert completion.mode == "CONTACT"
     assert completion.contact_ok is True
     assert completion.contact_object == "source"
-    assert completion.target_error_m == pytest.approx(0.0014 - 0.03985)
-    assert completion.final_reference_m == 0.0014
+    assert completion.target_error_m == pytest.approx(0.0 - 0.03985)
+    assert completion.final_reference_m == 0.0
 
 
 def test_position_completion_takes_precedence_and_uses_total_speed_only_there():
     contact = _contact(_finger(1, ()), _finger(2, ()), None)
     completion = _completion(
         contact,
-        measured_position_m=0.0024,
+        measured_position_m=0.001,
         measured_velocity_m_s=0.0039,
     )
     assert completion.mode == "POSITION"
@@ -221,8 +221,8 @@ def test_opening_reference_cannot_use_contact_completion_even_with_contact():
     completion = _completion(
         contact,
         initial_reference_m=0.04,
-        final_reference_m=0.0814,
-        target_position_m=0.0814,
+        final_reference_m=0.090,
+        target_position_m=0.090,
         measured_position_m=0.05,
     )
     assert completion.mode == "NONE"
@@ -252,6 +252,6 @@ def test_contact_is_not_used_when_the_position_threshold_is_already_met():
         _finger(2, (("source", 1.0, 1),)),
         "source",
     )
-    completion = _completion(contact, measured_position_m=0.0024)
+    completion = _completion(contact, measured_position_m=0.001)
     assert completion.mode == "POSITION"
     assert completion.contact_ok is False

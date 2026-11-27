@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from robot_contracts.trajectory.spline import ReferenceSample
+from robot_trajectory.stream_schedule import ChunkEvent
 
-from robot_backend_sim.common.motion.stream_schedule import ChunkEvent
 from robot_backend_sim.common.physics.contacts import GripperCompletion, GripperContactEvidence
 from robot_backend_sim.common.physics.robot_io import Measurement
 

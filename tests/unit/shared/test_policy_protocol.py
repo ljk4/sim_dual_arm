@@ -34,7 +34,7 @@ def test_source_proto_has_fixed_observation_time_and_policy_metadata():
     ):
         assert name in scenario
     assert "60 点 × 16 维" in scenario
-    for name in ("global", "left_wrist", "right_wrist"):
+    for name in ("cam_high", "cam_left_wrist", "cam_right_wrist"):
         assert f"`{name}`" in scenario
 
 

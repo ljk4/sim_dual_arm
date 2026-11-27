@@ -39,7 +39,7 @@ def test_profile_supports_one_camera_and_preserves_the_source_hash(tmp_path):
     profile = load_profile(path, SCHEMAS)
 
     assert profile.digest == semantic_hash(document)
-    assert profile.camera_names == ("global",)
+    assert profile.camera_names == ("cam_high",)
 
 
 def test_profile_is_an_immutable_multi_camera_view():
@@ -49,13 +49,13 @@ def test_profile_is_an_immutable_multi_camera_view():
 
     assert profile.test_only is False
     assert profile.cameras == cameras
-    assert profile.camera_names == ("global", "left_wrist", "right_wrist")
+    assert profile.camera_names == ("cam_high", "cam_left_wrist", "cam_right_wrist")
     assert len({camera.frame_id for camera in cameras}) == 3
     assert all(len(camera.calibration_digest) == 64 for camera in cameras)
 
     raw["cameras"][0]["name"] = "mutated"
     raw["joints"][0]["initial"] = 9.0
-    assert profile.cameras[0].name == "global"
+    assert profile.cameras[0].name == "cam_high"
     assert profile.joints[0].initial == 0.5
 
     with pytest.raises(ValidationError):
@@ -76,11 +76,11 @@ def test_stack_bindings_have_si_units_and_exact_orders():
         "right_gripper_width",
     )
     assert profile.joint_names == expected
-    assert tuple(observation["camera_names"]) == ("global", "left_wrist", "right_wrist")
+    assert tuple(observation["camera_names"]) == ("cam_high", "cam_left_wrist", "cam_right_wrist")
     assert [joint.unit for joint in profile.joints] == ["rad"] * 7 + ["m"] + ["rad"] * 7 + ["m"]
-    assert profile.joints[7].minimum == 0.0014
-    assert profile.joints[7].maximum == 0.0814
-    assert profile.joints[7].initial == 0.0814
+    assert profile.joints[7].minimum == 0.0
+    assert profile.joints[7].maximum == 0.09
+    assert profile.joints[7].initial == 0.09
     assert profile.joints[0].minimum == -3.1067
     assert profile.joints[3].maximum == 1.0472
     assert profile.joints[0].max_velocity == 0.8

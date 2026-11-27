@@ -58,17 +58,17 @@ def test_default_config_loads_frozen_typed_values():
     assert config.physics.gravity == (0.0, 0.0, -9.81)
     assert config.robot.assembly == "marvin"
     assert config.robot.base_position == (0.0, 0.0, 0.0)
-    assert config.robot.gripper_open_total == pytest.approx(0.0814)
-    assert config.robot.gripper_closed_total == pytest.approx(0.0014)
+    assert config.robot.gripper_open_total == pytest.approx(0.090)
+    assert config.robot.gripper_closed_total == pytest.approx(0.0)
     assert config.task.environment == "stack"
     assert config.task.frame == "robot_base"
     assert config.task.camera_mount.position == (1.05, -0.19, 1.50)
     assert config.table.top_z == pytest.approx(0.78)
     assert [obj.name for obj in config.objects] == ["source", "target"]
     assert [camera.name for camera in config.cameras] == [
-        "global",
-        "left_wrist",
-        "right_wrist",
+        "cam_high",
+        "cam_left_wrist",
+        "cam_right_wrist",
     ]
     assert all(camera.width == 320 and camera.height == 240 for camera in config.cameras)
     assert config.reset.home_joint_positions.left == (
@@ -132,7 +132,7 @@ def test_camera_declared_description_returns_fresh_mutable_values():
 
 def test_camera_declaration_preserves_integer_and_float_source_values(tmp_path):
     def mutate(document):
-        camera = document["cameras"]["global"]
+        camera = document["cameras"]["cam_high"]
         camera["position"] = [0, 0.03, 1]
         camera["quaternion_wxyz"] = [1, 0, 0, 0]
         camera["fovy"] = 60
@@ -160,7 +160,7 @@ def test_replaced_typed_camera_geometry_with_old_declaration_is_rejected():
 
     with pytest.raises(StackSceneConfigError) as caught:
         camera_declared_description(changed)
-    assert caught.value.field == "cameras.global.position"
+    assert caught.value.field == "cameras.cam_high.position"
 
 
 def test_error_reports_file_and_field_source(tmp_path):
@@ -194,7 +194,7 @@ def test_error_reports_file_and_field_source(tmp_path):
             "task.source.half_extents[0]",
         ),
         (
-            set_value("cameras", "global", "fovy", value=200.0),
+            set_value("cameras", "cam_high", "fovy", value=200.0),
             "cameras[0].fovy",
         ),
         (
@@ -264,7 +264,7 @@ def test_duplicate_yaml_key_is_rejected(tmp_path):
 )
 def test_invalid_camera_quaternion_is_rejected(tmp_path, quaternion):
     def mutate(document):
-        document["cameras"]["left_wrist"]["quaternion_wxyz"] = quaternion
+        document["cameras"]["cam_left_wrist"]["quaternion_wxyz"] = quaternion
 
     path = config_with(tmp_path, mutate)
     with pytest.raises(StackSceneConfigError) as caught:
@@ -274,7 +274,7 @@ def test_invalid_camera_quaternion_is_rejected(tmp_path, quaternion):
 
 def test_camera_parent_and_shared_resolution_are_enforced(tmp_path):
     parent_path = config_with(
-        tmp_path, lambda document: document["cameras"]["global"].__setitem__("parent", "world")
+        tmp_path, lambda document: document["cameras"]["cam_high"].__setitem__("parent", "world")
     )
     with pytest.raises(StackSceneConfigError) as caught:
         load_marvin_stack_scene_config(parent_path)
@@ -282,7 +282,7 @@ def test_camera_parent_and_shared_resolution_are_enforced(tmp_path):
 
     resolution_path = config_with(
         tmp_path,
-        lambda document: document["cameras"]["right_wrist"].__setitem__("width", 640),
+        lambda document: document["cameras"]["cam_right_wrist"].__setitem__("width", 640),
     )
     with pytest.raises(StackSceneConfigError) as caught:
         load_marvin_stack_scene_config(resolution_path)

@@ -57,47 +57,47 @@ quality:
   # during left_approach and the right wrist only during the second half of
   # handover_approach, so those intervals are recorded, not gated.
   rules:
-    # Left grasp: global context plus the left wrist view of the block.
-    - camera: global
+    # Left grasp: cam_high context plus the cam_left_wrist view of the block.
+    - camera: cam_high
       object: block
       phases: *all_handover_phases
       mode: required
       min_pixels: 128
-    - camera: left_wrist
+    - camera: cam_left_wrist
       object: block
       phases: [left_grasp, left_lift, handover_approach, dual_hold, left_release, left_retreat]
       mode: required
       min_pixels: 256
-    - camera: left_wrist
+    - camera: cam_left_wrist
       object: block
       phases: [left_approach, right_transport, right_place, right_release, stable]
       mode: record_only
       min_pixels: 16
     # Airborne handover: both wrist views hold the block once the right wrist
     # has reached the grasp region.
-    - camera: right_wrist
+    - camera: cam_right_wrist
       object: block
       phases: [dual_hold, left_release, left_retreat, right_transport, right_place, right_release, stable]
       mode: required
       min_pixels: 256
-    - camera: right_wrist
+    - camera: cam_right_wrist
       object: block
       phases: [handover_approach]
       mode: record_only
       min_pixels: 64
     # Right transport and place: the box opening stays visible.
-    - camera: global
+    - camera: cam_high
       object: box
       phases: [right_transport, right_place, right_release, stable]
       mode: required
       min_pixels: 128
-    - camera: right_wrist
+    - camera: cam_right_wrist
       object: box
       phases: [right_place, right_release, stable]
       mode: record_only
       min_pixels: 256
     # The table is context, not a per-phase requirement for the left wrist.
-    - camera: global
+    - camera: cam_high
       object: table
       phases: *all_handover_phases
       mode: record_only

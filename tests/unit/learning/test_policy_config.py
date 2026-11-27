@@ -22,7 +22,7 @@ def test_fake_service_config_is_complete_and_ros_free():
     assert config.action_period_ns == 50_000_000
     assert len(config.joint_names) == 16
     assert config.action_joint_names == config.joint_names
-    assert config.camera_names == ("global", "left_wrist", "right_wrist")
+    assert config.camera_names == ("cam_high", "cam_left_wrist", "cam_right_wrist")
     assert config.test_only is True
     assert config.chunk_duration_ns == 3_000_000_000
 

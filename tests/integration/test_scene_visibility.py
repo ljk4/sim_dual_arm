@@ -61,7 +61,7 @@ def test_rgb_and_segmentation_come_from_one_immutable_snapshot(scene, renderer):
     rgb_after = renderer.render_rgb(snapshot)
 
     assert snapshot.state.flags.writeable is False
-    assert set(rgb_before) == {"global", "left_wrist", "right_wrist"}
+    assert set(rgb_before) == {"cam_high", "cam_left_wrist", "cam_right_wrist"}
     assert set(segmentation) == set(rgb_before)
     for camera, image in rgb_before.items():
         assert image.dtype == np.uint8
@@ -92,8 +92,8 @@ def test_rgb_and_segmentation_come_from_one_immutable_snapshot(scene, renderer):
         }
         for camera in segmentation
     }
-    assert counts["global"]["source"] >= 32
-    assert counts["global"]["target"] >= 64
+    assert counts["cam_high"]["source"] >= 32
+    assert counts["cam_high"]["target"] >= 64
 
 
 def test_snapshot_time_matches_reported_state_and_mismatch_is_rejected(scene, renderer):

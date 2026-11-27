@@ -33,8 +33,15 @@ from robot_backend_sim.common.physics.robot_io import (
     validate_profile_contract,
     validate_targets,
 )
+from robot_backend_sim.common.physics.servo_stepping import (
+    ServoDynamicsFilter,
+    ServoDynamicsParams,
+)
 from robot_backend_sim.marvin.assembly import MarvinBinding, gripper_opening
-from robot_backend_sim.marvin.robot_config import MARVIN_CONTROL_JOINT_NAMES
+from robot_backend_sim.marvin.robot_config import (
+    MARVIN_CONTROL_JOINT_NAMES,
+    public_dual_arm_positions,
+)
 from robot_backend_sim.marvin.scene_base import MarvinSceneBase
 
 __all__ = ["MarvinIO", "JOINT_NAMES"]
@@ -65,6 +72,23 @@ class MarvinIO(RobotIO):
         self._gripper_axes = frozenset(gripper_indices(JOINT_NAMES).values())
         self.velocity_feedforward = velocity_feedforward
         self._velocity_gains = self._servo_velocity_gains() if velocity_feedforward else ()
+        servo_cfg = scene.config.robot.servo_dynamics
+        self._servo_filter = ServoDynamicsFilter(
+            ServoDynamicsParams(
+                arm_delay_steps=servo_cfg.arm_delay_steps,
+                max_joint_step_rad=servo_cfg.max_joint_step_rad,
+                gripper_delay_steps=servo_cfg.gripper_delay_steps,
+                gripper_deadband_m=servo_cfg.gripper_deadband_m,
+            ),
+            len(JOINT_NAMES),
+            self._gripper_axes,
+            gripper_bounds=(
+                float(scene.config.robot.gripper_closed_total),
+                float(scene.config.robot.gripper_open_total),
+            ),
+        )
+        self._seen_reset_epoch = -1
+        self._sync_servo_filter()
 
     @property
     def joint_names(self) -> tuple[str, ...]:
@@ -131,6 +155,20 @@ class MarvinIO(RobotIO):
             velocities=tuple(velocities),
         )
 
+    def _sync_servo_filter(self) -> None:
+        epoch = int(getattr(self._scene, "reset_epoch", 0))
+        if epoch != self._seen_reset_epoch:
+            robot_cfg = self._scene.config.robot
+            initial = public_dual_arm_positions(
+                self._scene.data.qpos,
+                self._binding.arm_joint_qpos["left"],
+                self._binding.arm_joint_qpos["right"],
+                robot_cfg.gripper_open_total,
+                robot_cfg.gripper_open_total,
+            )
+            self._servo_filter.reset(initial)
+            self._seen_reset_epoch = epoch
+
     def apply_targets(self, positions: Sequence[float]) -> None:
         """Validate all sixteen SI targets, then write the named ctrl entries.
 
@@ -140,7 +178,9 @@ class MarvinIO(RobotIO):
         """
         self._check_thread()
         values = validate_targets(positions, self._joint_specs)
-        raw = self._raw_commands(values)
+        self._sync_servo_filter()
+        stepped = self._servo_filter.step(values)
+        raw = self._raw_commands(stepped)
         ctrl = self._scene.data.ctrl
         for actuator_id, value in zip(self._actuator_ids, raw, strict=True):
             ctrl[actuator_id] = value
@@ -192,9 +232,11 @@ class MarvinIO(RobotIO):
         values = validate_targets(positions, self._joint_specs)
         if len(velocities) != len(values):
             raise ContractError("INVALID_TARGET", "reference velocity dimension differs")
+        self._sync_servo_filter()
+        stepped = self._servo_filter.step(values)
         raw = []
         for axis, (value, velocity, spec, gain) in enumerate(
-            zip(values, velocities, self._joint_specs, self._velocity_gains, strict=True)
+            zip(stepped, velocities, self._joint_specs, self._velocity_gains, strict=True)
         ):
             require_finite(spec.name, "reference_velocity", velocity)
             if abs(velocity) > spec.max_velocity + 1e-9:
@@ -239,7 +281,10 @@ def _validate_scene_contract(scene: MarvinSceneBase, joints: tuple[JointSpec, ..
         )
     if len(data.qpos) != model.nq or len(data.qvel) != model.nv or len(data.ctrl) != model.nu:
         raise ContractError("MODEL_MISMATCH", "scene data dimensions do not match the model")
-    if not close(config.gripper_open_total - config.gripper_closed_total, 0.08):
+    if not close(
+        config.gripper_open_total - config.gripper_closed_total,
+        2.0 * binding.finger_travel,
+    ):
         raise ContractError(
             "MODEL_MISMATCH", "gripper opening range does not equal the tendon closure range"
         )

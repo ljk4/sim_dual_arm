@@ -19,9 +19,9 @@
     "right_gripper_width"
   ],
   "camera_names": [
-    "global",
-    "left_wrist",
-    "right_wrist"
+    "cam_high",
+    "cam_left_wrist",
+    "cam_right_wrist"
   ],
   "max_skew_ns": 100000000,
   "max_age_ns": 500000000

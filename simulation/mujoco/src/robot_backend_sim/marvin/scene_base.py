@@ -1,4 +1,4 @@
-"""Shared robot-level scene assembly, geometry, camera and reset helpers for Marvin."""
+"""Shared robot-level scene assembly, geometry, camera, DR and reset helpers for Marvin."""
 
 from __future__ import annotations
 
@@ -7,7 +7,8 @@ import warnings
 from typing import Annotated, Any, Literal
 
 import mujoco
-from pydantic import BeforeValidator, Field, StrictInt, model_validator
+import numpy as np
+from pydantic import BeforeValidator, Field, StrictBool, StrictInt, model_validator
 from robot_contracts.validation import (
     PositiveFloat,
     StrictFloat,
@@ -29,10 +30,15 @@ from robot_backend_sim.marvin.robot_config import MarvinRobotConfig
 __all__ = [
     "CAMERA_PARENTS",
     "CameraMountConfig",
+    "DomainDynamicsConfig",
+    "DomainGeometryConfig",
+    "DomainRandomizationConfig",
+    "DomainVisualConfig",
     "MARVIN_INTEGRATORS",
     "MarvinSceneBase",
     "PhysicsConfig",
     "Rgba",
+    "ScaleRange",
     "TableConfig",
     "Vec2",
     "add_marvin_camera_mount",
@@ -49,9 +55,9 @@ __all__ = [
 ]
 
 CAMERA_PARENTS = {
-    "global": "camera_mount",
-    "left_wrist": "Arm_L9_Link",
-    "right_wrist": "Arm_R9_Link",
+    "cam_high": "camera_mount",
+    "cam_left_wrist": "Arm_L_gripper_base",
+    "cam_right_wrist": "Arm_R_gripper_base",
 }
 
 MARVIN_INTEGRATORS = {
@@ -63,6 +69,45 @@ MARVIN_INTEGRATORS = {
 
 Vec2 = Annotated[tuple[StrictFloat, StrictFloat], BeforeValidator(as_tuple)]
 Rgba = Annotated[tuple[Unit, Unit, Unit, Unit], BeforeValidator(as_tuple)]
+ScaleRange = Annotated[tuple[PositiveFloat, PositiveFloat], BeforeValidator(as_tuple)]
+
+
+class DomainGeometryConfig(StrictMappingModel):
+    camera_pos_jitter_m: Annotated[StrictFloat, Field(ge=0.0, le=0.02)] = 0.0
+    camera_rot_jitter_deg: Annotated[StrictFloat, Field(ge=0.0, le=5.0)] = 0.0
+    table_top_z_jitter_m: Annotated[StrictFloat, Field(ge=0.0, le=0.02)] = 0.0
+
+
+class DomainDynamicsConfig(StrictMappingModel):
+    friction_scale_range: ScaleRange = (1.0, 1.0)
+    object_mass_scale_range: ScaleRange = (1.0, 1.0)
+    joint_damping_scale_range: ScaleRange = (1.0, 1.0)
+
+    @model_validator(mode="after")
+    def _ranges(self) -> DomainDynamicsConfig:
+        for name in (
+            "friction_scale_range",
+            "object_mass_scale_range",
+            "joint_damping_scale_range",
+        ):
+            low, high = getattr(self, name)
+            if low > high:
+                raise contract_error(name, "lower bound must not exceed upper bound")
+        return self
+
+
+class DomainVisualConfig(StrictMappingModel):
+    light_diffuse_jitter: Annotated[StrictFloat, Field(ge=0.0, le=0.5)] = 0.0
+    object_rgba_jitter: Annotated[StrictFloat, Field(ge=0.0, le=0.3)] = 0.0
+
+
+class DomainRandomizationConfig(StrictMappingModel):
+    """Three-layer (geometry/dynamics/visual) seed-deterministic DR configuration."""
+
+    enabled: StrictBool = False
+    geometry: DomainGeometryConfig = Field(default_factory=DomainGeometryConfig)
+    dynamics: DomainDynamicsConfig = Field(default_factory=DomainDynamicsConfig)
+    visual: DomainVisualConfig = Field(default_factory=DomainVisualConfig)
 
 
 class PhysicsConfig(StrictMappingModel):
@@ -111,6 +156,22 @@ class CameraMountConfig(StrictMappingModel):
 def yaw_quaternion(yaw_deg: float) -> tuple[float, float, float, float]:
     half = math.radians(yaw_deg) / 2.0
     return (math.cos(half), 0.0, 0.0, math.sin(half))
+
+
+def _quat_mul(
+    q1: np.ndarray, q2: np.ndarray
+) -> np.ndarray:
+    w1, x1, y1, z1 = q1
+    w2, x2, y2, z2 = q2
+    return np.array(
+        [
+            w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+            w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+            w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+            w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+        ],
+        dtype=np.float64,
+    )
 
 
 def base_world_point(
@@ -273,8 +334,8 @@ def marvin_robot_geometry() -> RobotGeometry:
         side_prefixes={"left": ("Arm_L",), "right": ("Arm_R",)},
         finger_bodies={
             side: (
-                (f"Arm_{prefix}10_Link", f"Arm_{prefix}10_Joint"),
-                (f"Arm_{prefix}11_Link", f"Arm_{prefix}11_Joint"),
+                (f"Arm_{prefix}_finger1", f"Arm_{prefix}_finger1_Joint"),
+                (f"Arm_{prefix}_finger2", f"Arm_{prefix}_finger2_Joint"),
             )
             for side, prefix in SIDES
         },
@@ -302,8 +363,6 @@ def create_marvin_spec(
 def compile_marvin_spec(
     spec: mujoco.MjSpec, cameras: tuple[Any, ...], *, modelname: str
 ) -> tuple[mujoco.MjModel, mujoco.MjData]:
-    # The source names must stay unprefixed; the model is compiled in memory
-    # and never saved, so MuJoCo's empty-prefix save warning does not apply.
     with warnings.catch_warnings():
         warnings.filterwarnings(
             "ignore",
@@ -326,6 +385,19 @@ class MarvinSceneBase(CompiledScene):
         super().__init__(model, data)
         self.config = config
         self.indices = indices
+        self._reset_epoch = 0
+        self._nominal_cam_pos = model.cam_pos.copy()
+        self._nominal_cam_quat = model.cam_quat.copy()
+        self._nominal_body_pos = model.body_pos.copy()
+        self._nominal_body_mass = model.body_mass.copy()
+        self._nominal_geom_friction = model.geom_friction.copy()
+        self._nominal_geom_rgba = model.geom_rgba.copy()
+        self._nominal_dof_damping = model.dof_damping.copy()
+        self._nominal_light_diffuse = model.light_diffuse.copy()
+
+    @property
+    def reset_epoch(self) -> int:
+        return self._reset_epoch
 
     @property
     def gripper_open_total(self) -> float:
@@ -340,7 +412,7 @@ class MarvinSceneBase(CompiledScene):
         return marvin_robot_geometry()
 
     def gripper_ctrl(self, total_opening: float) -> float:
-        """Map measured finger-face distance (m) to the tendon closure command."""
+        """Map public stroke opening (m) to tendon closure command."""
         opening = float(total_opening)
         if not math.isfinite(opening):
             raise ValueError("gripper opening must be finite")
@@ -362,8 +434,105 @@ class MarvinSceneBase(CompiledScene):
                 data.qpos[address] = value
             for address in robot.finger_joint_qpos[public_side]:
                 data.qpos[address] = 0.0
+            for address in robot.axial_joint_qpos[public_side]:
+                data.qpos[address] = 0.0
             for actuator, value in zip(
                 robot.arm_actuator_ids[public_side], home, strict=True
             ):
                 data.ctrl[actuator] = value
             data.ctrl[robot.gripper_actuator_ids[public_side]] = 0.0
+        self._reset_epoch += 1
+
+    def _restore_nominal_model(self) -> None:
+        model = self.model
+        model.cam_pos[:] = self._nominal_cam_pos
+        model.cam_quat[:] = self._nominal_cam_quat
+        model.body_pos[:] = self._nominal_body_pos
+        model.body_mass[:] = self._nominal_body_mass
+        model.geom_friction[:] = self._nominal_geom_friction
+        model.geom_rgba[:] = self._nominal_geom_rgba
+        model.dof_damping[:] = self._nominal_dof_damping
+        model.light_diffuse[:] = self._nominal_light_diffuse
+
+    def _apply_domain_randomization(self, seed: int) -> None:
+        """Restore nominal model arrays and apply deterministic 3-layer DR when enabled."""
+        self._restore_nominal_model()
+        dr: DomainRandomizationConfig | None = getattr(self.config, "domain_randomization", None)
+        if dr is None or not dr.enabled:
+            return
+
+        rng = np.random.Generator(np.random.PCG64(int(seed)))
+        model = self.model
+        data = self.data
+
+        # 1. Geometry layer: camera extrinsics & table height (shift free objects by same dz).
+        pos_j = float(dr.geometry.camera_pos_jitter_m)
+        rot_j = math.radians(float(dr.geometry.camera_rot_jitter_deg))
+        for cam_id in range(int(model.ncam)):
+            if pos_j > 0.0:
+                model.cam_pos[cam_id] += rng.uniform(-pos_j, pos_j, size=3)
+            if rot_j > 0.0:
+                axis = rng.normal(size=3)
+                norm = float(np.linalg.norm(axis))
+                if norm > 1e-9:
+                    axis /= norm
+                    angle = float(rng.uniform(-rot_j, rot_j))
+                    delta_q = np.array(
+                        [math.cos(angle / 2.0), *(math.sin(angle / 2.0) * axis)],
+                        dtype=np.float64,
+                    )
+                    updated = _quat_mul(model.cam_quat[cam_id], delta_q)
+                    model.cam_quat[cam_id] = updated / float(np.linalg.norm(updated))
+
+        table_j = float(dr.geometry.table_top_z_jitter_m)
+        if table_j > 0.0:
+            dz = float(rng.uniform(-table_j, table_j))
+            try:
+                table_id = int(model.body("table").id)
+                model.body_pos[table_id, 2] += dz
+                for qpos_addr in self.object_free_joint_qpos.values():
+                    data.qpos[int(qpos_addr) + 2] += dz
+            except KeyError:
+                pass
+
+        # 2. Dynamics layer: friction, object masses, and arm joint damping.
+        fric_lo, fric_hi = dr.dynamics.friction_scale_range
+        if fric_lo != 1.0 or fric_hi != 1.0:
+            scale = float(rng.uniform(fric_lo, fric_hi))
+            model.geom_friction[:, 0] *= scale
+
+        mass_lo, mass_hi = dr.dynamics.object_mass_scale_range
+        if mass_lo != 1.0 or mass_hi != 1.0:
+            for obj_name in self.contact_object_names:
+                try:
+                    bid = int(model.body(obj_name).id)
+                    model.body_mass[bid] *= float(rng.uniform(mass_lo, mass_hi))
+                except KeyError:
+                    pass
+            mujoco.mj_setConst(model, data)
+
+        damp_lo, damp_hi = dr.dynamics.joint_damping_scale_range
+        if damp_lo != 1.0 or damp_hi != 1.0:
+            robot = self.indices.robot
+            for side, _ in SIDES:
+                for dof_addr in robot.arm_joint_dof[side]:
+                    model.dof_damping[dof_addr] *= float(rng.uniform(damp_lo, damp_hi))
+
+        # 3. Visual layer: directional light intensity and free object albedo.
+        light_j = float(dr.visual.light_diffuse_jitter)
+        if light_j > 0.0:
+            for lid in range(int(model.nlight)):
+                delta = rng.uniform(-light_j, light_j, size=3)
+                model.light_diffuse[lid] = np.clip(
+                    model.light_diffuse[lid] + delta, 0.05, 1.0
+                )
+
+        rgba_j = float(dr.visual.object_rgba_jitter)
+        if rgba_j > 0.0:
+            obj_bids = {int(model.body(name).id) for name in self.contact_object_names}
+            for gid in range(int(model.ngeom)):
+                if int(model.geom_bodyid[gid]) in obj_bids:
+                    delta = rng.uniform(-rgba_j, rgba_j, size=3)
+                    model.geom_rgba[gid, :3] = np.clip(
+                        model.geom_rgba[gid, :3] + delta, 0.02, 0.98
+                    )

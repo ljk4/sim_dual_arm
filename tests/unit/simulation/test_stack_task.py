@@ -66,7 +66,7 @@ def observation(**changes) -> TaskObservation:
         target_table_normal_force_n=0.6,
         source_table_normal_force_n=0.0,
         finger_contact_count=0,
-        right_gripper_opening_m=0.0814,
+        right_gripper_opening_m=0.090,
         right_tcp_position=(0.55, -0.30, 1.05),
         right_tcp_to_source_m=0.22,
         table_top_z_m=TABLE_TOP,

@@ -119,7 +119,7 @@ def test_wrong_label_clock_png_hash_and_raw_times_are_rejected(config, tmp_path)
 
     labels["labels"][1]["label_backend_time_ns"] -= 1
     (export / "labels.json").write_text(json.dumps(labels))
-    png = export / labels["labels"][1]["rgb"]["global"]["path"]
+    png = export / labels["labels"][1]["rgb"]["cam_high"]["path"]
     png.write_bytes(png.read_bytes() + b"x")
     with pytest.raises(ExportError, match="PNG SHA"):
         _validate_export(export, config, profile_hash(config))

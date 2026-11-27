@@ -83,13 +83,13 @@ def test_video_layout_and_frame_composition_handles_even_dimensions_and_missing_
         assert layout.height >= layout.hud_height + layout.rows * (layout.label_height + 241)
 
     layout = video.compute_layout(
-        ("global", "left_wrist", "right_wrist"),
-        {"global": (320, 240), "left_wrist": (320, 240), "right_wrist": (320, 240)},
+        ("cam_high", "cam_left_wrist", "cam_right_wrist"),
+        {"cam_high": (320, 240), "cam_left_wrist": (320, 240), "cam_right_wrist": (320, 240)},
         overlay=True,
     )
     frame_bytes = video.compose_frame(
         layout,
-        {"global": (320, 240, b"\x10\x20\x30" * (320 * 240))},
+        {"cam_high": (320, 240, b"\x10\x20\x30" * (320 * 240))},
         frame_index=1,
         total_frames=10,
         rel_time_s=0.05,

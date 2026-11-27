@@ -47,7 +47,7 @@ def _frame(sequence, time_ns):
 
 
 def test_rebuilds_20hz_frames_with_4hz_raw_predictions():
-    cameras = ("global", "left_wrist", "right_wrist")
+    cameras = ("cam_high", "cam_left_wrist", "cam_right_wrist")
     states = {}
     frames = {}
     for index in range(52):
@@ -121,7 +121,7 @@ def test_write_documents_emits_three_json_files_and_folds_source_facts(tmp_path)
         {"action_source": "teacher"},
         [{"label_backend_time_ns": 50_000_000, "rgb": {}}],
         [],
-        ("global", "left_wrist", "right_wrist"),
+        ("cam_high", "cam_left_wrist", "cam_right_wrist"),
         {"labels": 1},
         {"qualified": True},
     )
@@ -131,7 +131,7 @@ def test_write_documents_emits_three_json_files_and_folds_source_facts(tmp_path)
         "raw_predictions.json",
     ]
     labels = json.loads((out / "labels.json").read_text())
-    assert labels["camera_order"] == ["global", "left_wrist", "right_wrist"]
+    assert labels["camera_order"] == ["cam_high", "cam_left_wrist", "cam_right_wrist"]
     assert labels["action_source"] == "teacher"
     assert labels["task"] == manifest["task"]
     assert labels["runtime"] == manifest["runtime"]

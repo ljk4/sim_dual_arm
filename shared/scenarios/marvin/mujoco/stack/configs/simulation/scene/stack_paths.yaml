@@ -20,12 +20,12 @@ clearance:
   max_samples_per_segment: 1000
 
 targets:
-  pregrasp_height_m: 0.09
-  grasp_height_m: 0.032
-  lift_height_m: 0.14
-  place_hover_height_m: 0.11
+  pregrasp_height_m: 0.08
+  grasp_height_m: 0.015
+  lift_height_m: 0.11
+  place_hover_height_m: 0.075
   place_clearance_m: 0.006
-  retreat_height_m: 0.15
+  retreat_height_m: 0.095
   approach_tilt_deg: 20.0
   approach_yaw_deg: -90.0
   place_yaw_deg: -90.0

@@ -36,14 +36,14 @@ service:
   test_only: true
   model_bundle_digest: 9f2c67c0c4b0a4f6f5a0d9b6c1f8f0c5c4f3e2d1a0b9c8d7e6f5a4b3c2d1e0f9
   processor_digest: 1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809
-  observation_schema_hash: 2e6a0da228b94e75eaf3bd9206589402abdd677ef3ce30bfe9d0572f24b5b678
+  observation_schema_hash: 89b860c4dcd2d7afa610493d0d4edd78cc5dc15810f5cd9d404dfc2acf15d830
   action_schema_hash: d2509712bf248f859b8298d622bb1a9e7e9e28f42180ae22425f120faf41fe54
-  robot_profile_hash: 38c00b01d12b1d425c076df9e4c89ca1433dfa875e489d3f2e504e8f208e0dfb
+  robot_profile_hash: 47dbeff7971899ecadcc83fdb87ed98156261cc7e57eb3636eb5e50cee0dcb59
   joint_names: [left_joint1, left_joint2, left_joint3, left_joint4, left_joint5, left_joint6, left_joint7, left_gripper_width, right_joint1, right_joint2, right_joint3, right_joint4, right_joint5, right_joint6, right_joint7, right_gripper_width]
-  joint_lower_bounds: [-3.1067, -2.0944, -3.1067, -2.5307, -3.1067, -1.0472, -1.5708, 0.0014, -3.1067, -2.0944, -3.1067, -2.5307, -3.1067, -1.0472, -1.5708, 0.0014]
-  joint_upper_bounds: [3.1067, 2.0944, 3.1067, 1.0472, 3.1067, 1.0472, 1.5708, 0.0814, 3.1067, 2.0944, 3.1067, 1.0472, 3.1067, 1.0472, 1.5708, 0.0814]
+  joint_lower_bounds: [-3.1067, -2.0944, -3.1067, -2.5307, -3.1067, -1.0472, -1.5708, 0.0, -3.1067, -2.0944, -3.1067, -2.5307, -3.1067, -1.0472, -1.5708, 0.0]
+  joint_upper_bounds: [3.1067, 2.0944, 3.1067, 1.0472, 3.1067, 1.0472, 1.5708, 0.090, 3.1067, 2.0944, 3.1067, 1.0472, 3.1067, 1.0472, 1.5708, 0.090]
   action_joint_names: [left_joint1, left_joint2, left_joint3, left_joint4, left_joint5, left_joint6, left_joint7, left_gripper_width, right_joint1, right_joint2, right_joint3, right_joint4, right_joint5, right_joint6, right_joint7, right_gripper_width]
-  camera_names: [global, left_wrist, right_wrist]
+  camera_names: [cam_high, cam_left_wrist, cam_right_wrist]
   camera_width: 320
   camera_height: 240
   action_period_ns: 50000000

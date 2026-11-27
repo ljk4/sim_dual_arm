@@ -8,13 +8,15 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
-SIM_SRC = ROOT / "simulation/mujoco/src"
-if str(SIM_SRC) not in sys.path:
-    sys.path.insert(0, str(SIM_SRC))
+TRAJ_SRC = ROOT / "shared/common/python/trajectory/src"
+CONTRACT_SRC = ROOT / "shared/common/python/contracts/src"
+for source in (TRAJ_SRC, CONTRACT_SRC):
+    if str(source) not in sys.path:
+        sys.path.insert(0, str(source))
 
-from robot_backend_sim.common.control.braking import BrakingPlan, plan_braking  # noqa: E402
 from robot_contracts.models import ContractError, JointSpec  # noqa: E402
 from robot_contracts.trajectory.spline import JointExtremes, ReferenceExtremes  # noqa: E402
+from robot_trajectory.braking import BrakingPlan, plan_braking  # noqa: E402
 from robot_trajectory.spline_math import check_continuous_limits  # noqa: E402
 
 

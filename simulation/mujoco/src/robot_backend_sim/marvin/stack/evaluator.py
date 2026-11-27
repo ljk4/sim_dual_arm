@@ -138,12 +138,12 @@ def make_task_binding(
         target_joint = model.joint("target_free")
         right_tcp_site_id = int(model.site("Arm_R_tcp").id)
         left_fingers = (
-            int(model.body("Arm_L10_Link").id),
-            int(model.body("Arm_L11_Link").id),
+            int(model.body("Arm_L_finger1").id),
+            int(model.body("Arm_L_finger2").id),
         )
         right_fingers = (
-            int(model.body("Arm_R10_Link").id),
-            int(model.body("Arm_R11_Link").id),
+            int(model.body("Arm_R_finger1").id),
+            int(model.body("Arm_R_finger2").id),
         )
         right_arm_qpos = tuple(
             int(model.jnt_qposadr[int(model.joint(f"Arm_R{index}_Joint").id)])
@@ -154,8 +154,8 @@ def make_task_binding(
             for index in range(1, 8)
         )
         right_finger_dof = (
-            int(model.jnt_dofadr[int(model.joint("Arm_R10_Joint").id)]),
-            int(model.jnt_dofadr[int(model.joint("Arm_R11_Joint").id)]),
+            int(model.jnt_dofadr[int(model.joint("Arm_R_finger1_Joint").id)]),
+            int(model.jnt_dofadr[int(model.joint("Arm_R_finger2_Joint").id)]),
         )
     except KeyError as error:
         raise ContractError("MODEL_MISMATCH", f"stack binding is missing {error}") from error

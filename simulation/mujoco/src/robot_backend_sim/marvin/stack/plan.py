@@ -20,6 +20,7 @@ from robot_backend_sim.common.tasks.math import (
     rotation_from_axes as _rotation_from_axes,
     rotation_z as _rotation_z,
 )
+from robot_backend_sim.marvin.assembly import fourbar_axial_extension_m
 from robot_backend_sim.marvin.kinematics import (
     BlockEnvelope,
     CarriedBlock,
@@ -423,11 +424,15 @@ def check_gripper_pose_clearance(
     """
     geometry = marvin_robot_geometry()
     per_finger = max(0.0, (float(gripper_open_total) - float(opening_m)) / 2.0)
+    axial = fourbar_axial_extension_m(per_finger)
     data = mujoco.MjData(model)
     data.qpos[:] = np.asarray(qpos, dtype=np.float64)
     for _body_name, joint_name in geometry.finger_bodies[_RIGHT]:
         address = int(model.jnt_qposadr[int(model.joint(joint_name).id)])
         data.qpos[address] = per_finger
+    for idx in (1, 2):
+        axial_addr = int(model.jnt_qposadr[int(model.joint(f"Arm_R_axial{idx}_Joint").id)])
+        data.qpos[axial_addr] = axial
     mujoco.mj_forward(model, data)
     point = measure_clearance(
         model,

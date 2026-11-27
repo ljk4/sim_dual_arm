@@ -9,8 +9,8 @@ def _event(sim_time_ns, pixels):
         "event": "backend.render.quality",
         "sim_time_ns": sim_time_ns,
         "fields": {
-            "right_wrist_source_pixels": pixels,
-            "left_wrist_source_pixels": 0,
+            "cam_right_wrist_source_pixels": pixels,
+            "cam_left_wrist_source_pixels": 0,
         },
     }
 
@@ -23,14 +23,14 @@ def _rules(required=64, ratio=0.85, blackout=0.2, required_phases=None):
         "required_phases": list(required_phases or []),
         "rules": [
             {
-                "camera": "right_wrist",
+                "camera": "cam_right_wrist",
                 "object": "source",
                 "phases": ["pregrasp"],
                 "mode": "required",
                 "min_pixels": required,
             },
             {
-                "camera": "left_wrist",
+                "camera": "cam_left_wrist",
                 "object": "source",
                 "phases": ["pregrasp"],
                 "mode": "record_only",
@@ -78,7 +78,7 @@ def test_missing_required_samples_or_phase_cannot_be_qualified():
         [], {"pregrasp": 1}, {1: 1_000_000_000}, _rules()
     )
     assert no_samples["qualified"] is False
-    assert any("no right_wrist.source" in reason for reason in no_samples["failure_reasons"])
+    assert any("no cam_right_wrist.source" in reason for reason in no_samples["failure_reasons"])
 
     no_phase = export_episode.quality_summary(
         [_event(1_000_000_000, 80)], {}, {1: 1_000_000_000}, _rules()
@@ -114,7 +114,7 @@ def test_export_quality_uses_only_the_recorded_episode_and_epoch(tmp_path):
     assert quality(foreign_events)["qualified"] is False
     result = quality([*foreign_events, {**_event(time_ns, 80), **context}])
     assert result["qualified"] is True
-    assert result["samples"]["right_wrist.source"] == 1
+    assert result["samples"]["cam_right_wrist.source"] == 1
 
 
 def test_missing_required_phase_fails_even_when_rules_pass():

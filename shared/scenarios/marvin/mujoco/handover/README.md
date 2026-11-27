@@ -36,7 +36,7 @@ Marvin 原始 URDF/STL 位于 [`shared/robots/marvin/`](../../../../robots/marvi
 
 `configs/simulation/scene/marvin_handover.yaml` 通过 `robot.assembly: marvin` 与 `task.environment: handover` 注册仿真后端。接口包为 `robot_api_msgs`、`sim_api_msgs` 与 `marvin_teacher_api_msgs`（能力标识 `marvin_teacher_api_msgs.teacher_chunk`），由 `runtime` 容器执行一次 `scripts/build_sdk.sh` 统一构建至 `output/build/`：
 
-- 控制轴顺序：左臂 7 关节、左夹爪总开度、右臂 7 关节、右夹爪总开度（臂关节 `rad`，夹爪总开度 `0.0014 .. 0.0814 m`）。
+- 控制轴顺序：左臂 7 关节、左夹爪总开度、右臂 7 关节、右夹爪总开度（臂关节 `rad`，夹爪总开度 `0.0 .. 0.090 m`）。
 - 关节名映射：`Arm_L{1..7}_Joint` → `left_joint{1..7}`，`Arm_R{1..7}_Joint` → `right_joint{1..7}`。
 
 ## 操作入口

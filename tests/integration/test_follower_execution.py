@@ -38,7 +38,7 @@ from robot_backend_sim.common.config.stream_config import StreamConfig  # noqa: 
 from robot_backend_sim.common.control.control import ControlSession  # noqa: E402
 from robot_backend_sim.common.control.control_state import PreparedControlCommand  # noqa: E402
 from robot_backend_sim.common.motion.motion_controller import MotionController, Phase  # noqa: E402
-from robot_backend_sim.common.motion.stream_schedule import next_grid_time  # noqa: E402
+from robot_trajectory.stream_schedule import next_grid_time  # noqa: E402
 from robot_backend_sim.marvin.io import MarvinIO  # noqa: E402
 from robot_backend_sim.marvin.stack.scene import build_marvin_stack_scene  # noqa: E402
 from robot_backend_sim.marvin.stack.scene_config import (  # noqa: E402

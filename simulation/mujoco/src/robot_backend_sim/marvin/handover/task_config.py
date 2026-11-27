@@ -94,7 +94,7 @@ class GatesConfig(StrictMappingModel):
     arm_velocity_tolerance_rad_s: Annotated[PositiveFloat, Field(gt=1e-5, le=2.0)]
     gripper_position_tolerance_m: Annotated[PositiveFloat, Field(gt=1e-5, le=0.05)]
     gripper_velocity_tolerance_m_s: Annotated[PositiveFloat, Field(gt=1e-5, le=0.5)]
-    release_opening_m: Annotated[PositiveFloat, Field(gt=0.04, le=0.0814)]
+    release_opening_m: Annotated[PositiveFloat, Field(gt=0.04, le=0.090)]
     hold_loss_tolerance_s: Annotated[PositiveFloat, Field(gt=0.0, le=2.0)]
     lift_height_m: Annotated[PositiveFloat, Field(gt=0.01, le=0.5)]
     forbidden_contact_force_n: Annotated[PositiveFloat, Field(gt=1e-4, le=100.0)]
@@ -111,8 +111,8 @@ class TeacherConfig(StrictMappingModel):
     gripper_velocity_m_s: Annotated[PositiveFloat, Field(gt=1e-4, le=0.5)]
     gripper_acceleration_m_s2: Annotated[PositiveFloat, Field(gt=1e-4, le=5.0)]
     phase_min_duration_s: Annotated[PositiveFloat, Field(ge=0.05, le=5.0)]
-    left_close_opening_m: Annotated[PositiveFloat, Field(gt=0.0, le=0.0814)]
-    right_close_opening_m: Annotated[PositiveFloat, Field(gt=0.0, le=0.0814)]
+    left_close_opening_m: Annotated[PositiveFloat, Field(gt=0.0, le=0.090)]
+    right_close_opening_m: Annotated[PositiveFloat, Field(gt=0.0, le=0.090)]
     chunk_cache_entries: Annotated[PositiveInt, Field(ge=64, le=HARD_MAX_CHUNKS)]
 
 

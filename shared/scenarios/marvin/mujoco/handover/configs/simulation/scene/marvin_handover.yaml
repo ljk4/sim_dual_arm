@@ -30,9 +30,9 @@ robot:
   # Position servos model a robot controller that compensates its own weight.
   # The free task object retains gravity and is supported only by contact.
   gravity_compensation: true
-  # Measured inner finger-face distance at zero and full tendon closure.
-  gripper_open_total: 0.0814
-  gripper_closed_total: 0.0014
+  # Measured stroke range matching CTAG2F90C 90 mm stroke.
+  gripper_open_total: 0.090
+  gripper_closed_total: 0.0
   arm_kp: [2500.0, 2500.0, 1500.0, 1500.0, 400.0, 400.0, 400.0]
   arm_kv: [150.0, 150.0, 90.0, 90.0, 30.0, 30.0, 30.0]
   joint_damping: 1.0
@@ -80,7 +80,7 @@ task:
 cameras:
   # Camera looks along its local -Z axis with local +Y up.  All poses are
   # fixed local extrinsics; nothing tracks an object or the robot.
-  global:
+  cam_high:
     parent: camera_mount
     position: [0.0, 0.0, 0.0]
     # Look-at (0.55, 0.0, 0.80) from the mount above, world +Z up.
@@ -88,17 +88,17 @@ cameras:
     fovy: 60.0
     width: 320
     height: 240
-  left_wrist:
-    parent: Arm_L9_Link
-    # Behind and above the palm, looking along the fingers; image up follows
-    # the hand X axis so the block length reads across the frame.
+  cam_left_wrist:
+    parent: Arm_L_gripper_base
+    # Behind and above the gripper L-bracket, looking along the fingers; image
+    # up follows the hand X axis so the block length reads across the frame.
     position: [0.0, 0.06, 0.09]
     quaternion_wxyz: [-0.5, 0.5, 0.5, 0.5]
     fovy: 85.0
     width: 320
     height: 240
-  right_wrist:
-    parent: Arm_R9_Link
+  cam_right_wrist:
+    parent: Arm_R_gripper_base
     position: [0.0, 0.06, 0.09]
     quaternion_wxyz: [-0.5, 0.5, 0.5, 0.5]
     fovy: 85.0
